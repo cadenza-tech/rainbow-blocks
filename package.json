@@ -9,15 +9,41 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:ruby",
+    "onLanguage:elixir",
+    "onLanguage:crystal",
+    "onLanguage:lua",
+    "onLanguage:julia",
+    "onLanguage:shellscript",
+    "onLanguage:bash"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
-    "commands": [
-      {
-        "command": "rainbow-blocks.helloWorld",
-        "title": "Hello World"
+    "configuration": {
+      "title": "Rainbow Blocks",
+      "properties": {
+        "rainbowBlocks.colors": {
+          "type": "array",
+          "default": [
+            "#E07080",
+            "#E0E070",
+            "#70B0E0"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Colors for block pairs. Cycles when nesting exceeds the number of colors."
+        },
+        "rainbowBlocks.debounceMs": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Debounce time in milliseconds for decoration updates."
+        }
       }
-    ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "yarn run package",
