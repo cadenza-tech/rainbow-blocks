@@ -1,13 +1,32 @@
 {
   "name": "rainbow-blocks",
   "displayName": "Rainbow Blocks",
-  "description": "Colorize matching block pairs",
-  "version": "0.0.1",
+  "description": "Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash",
+  "version": "0.0.0",
+  "publisher": "cadenza-tech",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cadenza-tech/rainbow-blocks"
+  },
   "engines": {
     "vscode": "^1.42.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages"
+  ],
+  "keywords": [
+    "rainbow",
+    "blocks",
+    "brackets",
+    "ruby",
+    "elixir",
+    "crystal",
+    "lua",
+    "julia",
+    "bash",
+    "syntax",
+    "highlighting"
   ],
   "activationEvents": [
     "onLanguage:ruby",
