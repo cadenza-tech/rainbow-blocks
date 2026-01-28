@@ -62,7 +62,8 @@
     "format:fix": "biome format --write",
     "check": "biome check",
     "check:fix": "biome check --write",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:coverage": "vscode-test --coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.12",
