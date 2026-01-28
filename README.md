@@ -1,71 +1,46 @@
-# rainbow-blocks README
+# Rainbow Blocks
 
-This is the README for your extension "rainbow-blocks". After writing up a brief description, we recommend including the following sections.
+[![License](https://img.shields.io/github/license/cadenza-tech/rainbow-blocks?label=License&labelColor=343B42&color=blue)](https://github.com/cadenza-tech/rainbow-blocks/blob/main/LICENSE.txt) [![Tag](https://img.shields.io/github/tag/cadenza-tech/rainbow-blocks?label=Tag&logo=github&labelColor=343B42&color=2EBC4F)](https://github.com/cadenza-tech/rainbow-blocks/blob/main/CHANGELOG.md) [![Test](https://github.com/cadenza-tech/rainbow-blocks/actions/workflows/test.yml/badge.svg)](https://github.com/cadenza-tech/rainbow-blocks/actions?query=workflow%3Atest) [![Lint](https://github.com/cadenza-tech/rainbow-blocks/actions/workflows/lint.yml/badge.svg)](https://github.com/cadenza-tech/rainbow-blocks/actions?query=workflow%3Alint)
+
+Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash.
+
+## Preview
+
+![Preview](https://github.com/cadenza-tech/rainbow-blocks/blob/main/images/preview.png)
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Colorize code structure with nesting levels
+- Customizable color palette
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+| Setting | Description | Default |
+| ------- | ----------- | ------- |
+| `rainbowBlocks.colors` | Array of colors (hex). Cycles when nesting exceeds length | `["#E07080", "#E0E070", "#70B0E0"]` |
+| `rainbowBlocks.debounceMs` | Update delay (0-1000ms) | `100` |
 
-For example:
+## Supported Languages
 
-This extension contributes the following settings:
+- Ruby (`.rb`)
+- Elixir (`.ex`, `.exs`)
+- Crystal (`.cr`)
+- Lua (`.lua`)
+- Julia (`.jl`)
+- Bash (`.sh`, `.bash`)
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Contributing
 
-## Known Issues
+Bug reports and pull requests are welcome on GitHub at https://github.com/cadenza-tech/rainbow-blocks. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/cadenza-tech/rainbow-blocks/blob/main/CODE_OF_CONDUCT.md).
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+## License
 
-## Release Notes
+The extension is available as open source under the terms of the [MIT License](https://github.com/cadenza-tech/rainbow-blocks/blob/main/LICENSE.txt).
 
-Users appreciate release notes as you update your extension.
+## Code of Conduct
 
-### 1.0.0
+Everyone interacting in the Rainbow Blocks project's codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](https://github.com/cadenza-tech/rainbow-blocks/blob/main/CODE_OF_CONDUCT.md).
 
-Initial release of ...
+## Sponsor
 
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+You can sponsor this project on [Patreon](https://patreon.com/CadenzaTech).
