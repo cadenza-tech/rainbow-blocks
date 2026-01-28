@@ -407,7 +407,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/vscode@npm:^1.108.1":
+"@types/vscode@npm:^1.42.0":
   version: 1.108.1
   resolution: "@types/vscode@npm:1.108.1"
   checksum: 10c0/f262600c996b770caf74daea9e96c2bff385cae27351f2feaf4cb50498a790bdd0ae953a62b94a99241adda94d5b07102344f8657188b73c12ff9723871306b6
@@ -2634,7 +2634,7 @@ __metadata:
     "@biomejs/biome": "npm:^2.3.12"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:22.x"
-    "@types/vscode": "npm:^1.108.1"
+    "@types/vscode": "npm:^1.42.0"
     "@vscode/test-cli": "npm:^0.0.12"
     "@vscode/test-electron": "npm:^2.5.2"
     esbuild: "npm:^0.27.2"

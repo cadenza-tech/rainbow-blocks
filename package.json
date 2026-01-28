@@ -4,7 +4,7 @@
   "description": "Colorize matching block pairs",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.108.1"
+    "vscode": "^1.42.0"
   },
   "categories": [
     "Other"
@@ -68,7 +68,7 @@
     "@biomejs/biome": "^2.3.12",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "@types/vscode": "^1.108.1",
+    "@types/vscode": "^1.42.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.2",
