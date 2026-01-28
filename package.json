@@ -30,6 +30,12 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
     "check-types": "tsc --noEmit",
+    "lint": "biome lint",
+    "lint:fix": "biome lint --write",
+    "format": "biome format",
+    "format:fix": "biome format --write",
+    "check": "biome check",
+    "check:fix": "biome check --write",
     "test": "vscode-test"
   },
   "devDependencies": {
