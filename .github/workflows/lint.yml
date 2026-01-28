@@ -1,0 +1,24 @@
+name: Lint
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: yarn
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Check types
+        run: yarn check-types
+      - name: Lint and format
+        run: yarn check

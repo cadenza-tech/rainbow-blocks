@@ -1,0 +1,24 @@
+name: Test
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: yarn
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Compile
+        run: yarn compile
+      - name: Run tests
+        run: xvfb-run -a yarn test
