@@ -5,7 +5,17 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.1] - 2026-01-31
+
+### Added
+
+- Julia: Support for `abstract type ... end` and `primitive type ... end` blocks
+
+### Fixed
+
+- Julia: Symbol literal character range now correctly matches operator characters (`:=>`, `:push!`, etc.)
+- All parsers: Standardized boundary checks for array access to improve robustness
+- Base parser: Escape regex metacharacters in keyword patterns to prevent potential issues
 
 ## [0.0.0] - 2026-01-30
 
