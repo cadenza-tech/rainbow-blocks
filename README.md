@@ -1,12 +1,24 @@
-# Rainbow Blocks
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cadenza-tech/rainbow-blocks/refs/heads/main/images/icon.png" alt="Rainbow Blocks" width="128" height="128">
+  <h1 align="center">Rainbow Blocks</h1>
+</p>
 
-[![License](https://img.shields.io/github/license/cadenza-tech/rainbow-blocks?label=License&labelColor=343B42&color=blue)](https://github.com/cadenza-tech/rainbow-blocks/blob/main/LICENSE.txt) [![Tag](https://img.shields.io/github/tag/cadenza-tech/rainbow-blocks?label=Tag&logo=github&labelColor=343B42&color=2EBC4F)](https://github.com/cadenza-tech/rainbow-blocks/blob/main/CHANGELOG.md) [![Test](https://github.com/cadenza-tech/rainbow-blocks/actions/workflows/test.yml/badge.svg)](https://github.com/cadenza-tech/rainbow-blocks/actions?query=workflow%3Atest) [![Lint](https://github.com/cadenza-tech/rainbow-blocks/actions/workflows/lint.yml/badge.svg)](https://github.com/cadenza-tech/rainbow-blocks/actions?query=workflow%3Alint)
+<p align="center">
+  Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash.
+</p>
 
-Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash.
+<p align="center">
+  <a href="https://github.com/cadenza-tech/rainbow-blocks/blob/main/LICENSE.txt"><img src="https://img.shields.io/github/license/cadenza-tech/rainbow-blocks?label=License&labelColor=343B42&color=blue" alt="License"></a>
+  <a href="https://github.com/cadenza-tech/rainbow-blocks/blob/main/CHANGELOG.md"><img src="https://img.shields.io/github/tag/cadenza-tech/rainbow-blocks?label=Tag&logo=github&labelColor=343B42&color=2EBC4F" alt="Tag"></a>
+  <a href="https://github.com/cadenza-tech/rainbow-blocks/actions?query=workflow%3Atest"><img src="https://github.com/cadenza-tech/rainbow-blocks/actions/workflows/test.yml/badge.svg" alt="Test"></a>
+  <a href="https://github.com/cadenza-tech/rainbow-blocks/actions?query=workflow%3Alint"><img src="https://github.com/cadenza-tech/rainbow-blocks/actions/workflows/lint.yml/badge.svg" alt="Lint"></a>
+</p>
+
+---
 
 ## Preview
 
-![Preview](https://github.com/cadenza-tech/rainbow-blocks/blob/main/images/preview.png)
+<img src="https://raw.githubusercontent.com/cadenza-tech/rainbow-blocks/refs/heads/main/images/preview.png" alt="Preview" width="100%">
 
 ## Features
 
@@ -15,10 +27,10 @@ Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash.
 
 ## Extension Settings
 
-| Setting | Description | Default |
-| ------- | ----------- | ------- |
-| `rainbowBlocks.colors` | Array of colors (hex). Cycles when nesting exceeds length | `["#E07080", "#E0E070", "#70B0E0"]` |
-| `rainbowBlocks.debounceMs` | Update delay (0-1000ms) | `100` |
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
+| `rainbowBlocks.colors` | `["#E07080", "#E0E070", "#70B0E0"]` | Array of colors (hex). Cycles when nesting exceeds length |
+| `rainbowBlocks.debounceMs` | `100` | Update delay (0-1000ms) |
 
 ## Supported Languages
 
