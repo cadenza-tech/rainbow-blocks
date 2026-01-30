@@ -68,6 +68,24 @@ end`;
       assertSingleBlock(pairs, 'struct', 'end');
     });
 
+    test('should parse abstract type-end block', () => {
+      const source = 'abstract type Animal end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'abstract', 'end');
+    });
+
+    test('should parse primitive type-end block', () => {
+      const source = 'primitive type MyInt 32 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'primitive', 'end');
+    });
+
+    test('should parse abstract type with subtype', () => {
+      const source = 'abstract type Pet <: Animal end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'abstract', 'end');
+    });
+
     test('should parse begin-end block', () => {
       const source = `begin
   x = 1
@@ -1211,6 +1229,16 @@ end`;
         assertBlockCount(pairs, 1);
         const regions = parser.getExcludedRegions(source);
         assert.strictEqual(source.slice(regions[0].start, regions[0].end), ':push!');
+      });
+
+      test('should handle symbol with operator characters', () => {
+        const source = `:=>
+function foo()
+end`;
+        const pairs = parser.parse(source);
+        assertBlockCount(pairs, 1);
+        const regions = parser.getExcludedRegions(source);
+        assert.strictEqual(source.slice(regions[0].start, regions[0].end), ':=>');
       });
 
       test('should not treat colon after closing bracket as symbol', () => {
