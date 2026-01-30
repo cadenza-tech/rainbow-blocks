@@ -65,7 +65,7 @@ export class LuaBlockParser extends BaseBlockParser {
     const char = source[pos];
 
     // Comment (-- single line or --[[ multi-line)
-    if (char === '-' && source[pos + 1] === '-') {
+    if (char === '-' && pos + 1 < source.length && source[pos + 1] === '-') {
       return this.matchComment(source, pos);
     }
 
@@ -91,7 +91,7 @@ export class LuaBlockParser extends BaseBlockParser {
   // Matches comment (single-line -- or multi-line --[[ ]])
   private matchComment(source: string, pos: number): ExcludedRegion {
     // Check for multi-line comment --[[ or --[=[ etc
-    if (source[pos + 2] === '[') {
+    if (pos + 2 < source.length && source[pos + 2] === '[') {
       const longStringRegion = this.matchLongString(source, pos + 2);
       if (longStringRegion) {
         return { start: pos, end: longStringRegion.end };

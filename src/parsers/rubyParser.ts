@@ -159,7 +159,7 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     // Heredoc
-    if (char === '<' && source[pos + 1] === '<') {
+    if (char === '<' && pos + 1 < source.length && source[pos + 1] === '<') {
       const result = this.matchHeredoc(source, pos);
       if (result) return { start: pos, end: result.end };
     }

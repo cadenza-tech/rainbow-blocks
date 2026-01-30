@@ -5,7 +5,24 @@ import { BaseBlockParser } from './baseParser';
 
 export class JuliaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
-    blockOpen: ['if', 'function', 'for', 'while', 'struct', 'begin', 'try', 'let', 'module', 'baremodule', 'macro', 'quote', 'do'],
+    blockOpen: [
+      'if',
+      'function',
+      'for',
+      'while',
+      'struct',
+      'begin',
+      'try',
+      'let',
+      'module',
+      'baremodule',
+      'macro',
+      'quote',
+      'do',
+      // Type definitions
+      'abstract',
+      'primitive'
+    ],
     blockClose: ['end'],
     blockMiddle: ['elseif', 'else', 'catch', 'finally']
   };
@@ -33,7 +50,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     const char = source[pos];
 
     // Multi-line comment: #= ... =# (nestable)
-    if (char === '#' && source[pos + 1] === '=') {
+    if (char === '#' && pos + 1 < source.length && source[pos + 1] === '=') {
       return this.matchMultiLineComment(source, pos);
     }
 
@@ -136,7 +153,7 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
     }
 
-    if (singlePrefixes.includes(char) && source[pos + 1] === '"') {
+    if (singlePrefixes.includes(char) && pos + 1 < source.length && source[pos + 1] === '"') {
       // Check for triple-quoted prefixed string
       if (source.slice(pos + 1, pos + 4) === '"""') {
         return this.matchPrefixedTripleQuotedString(source, pos, 1);
@@ -223,7 +240,8 @@ export class JuliaBlockParser extends BaseBlockParser {
     while (i < source.length) {
       const char = source[i];
       // Symbol can contain word characters, operators, and Unicode
-      if (/[\w!%+\-*/^&|~<>@]/.test(char) || char.charCodeAt(0) > 127) {
+      // Must match the same characters as isSymbolStart for consistency
+      if (/[\w!%&*+\-/<=>?\\^|~@]/.test(char) || char.charCodeAt(0) > 127) {
         i++;
         continue;
       }

@@ -41,27 +41,27 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     // $'...' ANSI-C quoting (must check before single quote)
-    if (char === '$' && source[pos + 1] === "'") {
+    if (char === '$' && pos + 1 < source.length && source[pos + 1] === "'") {
       return this.matchDollarSingleQuote(source, pos);
     }
 
     // Parameter expansion ${...}
-    if (char === '$' && source[pos + 1] === '{') {
+    if (char === '$' && pos + 1 < source.length && source[pos + 1] === '{') {
       return this.matchParameterExpansion(source, pos);
     }
 
     // Command substitution $(...), also handles arithmetic expansion $((...))
-    if (char === '$' && source[pos + 1] === '(') {
+    if (char === '$' && pos + 1 < source.length && source[pos + 1] === '(') {
       return this.matchCommandSubstitution(source, pos);
     }
 
     // Arithmetic expansion $[...] (deprecated but still used)
-    if (char === '$' && source[pos + 1] === '[') {
+    if (char === '$' && pos + 1 < source.length && source[pos + 1] === '[') {
       return this.matchArithmeticBracket(source, pos);
     }
 
     // Heredoc detection: <<WORD, <<-WORD, <<'WORD', <<"WORD" (not here-string <<<)
-    if (char === '<' && source[pos + 1] === '<' && source[pos + 2] !== '<' && (pos === 0 || source[pos - 1] !== '<')) {
+    if (char === '<' && pos + 2 < source.length && source[pos + 1] === '<' && source[pos + 2] !== '<' && (pos === 0 || source[pos - 1] !== '<')) {
       const result = this.matchHeredoc(source, pos);
       if (result) return result;
     }

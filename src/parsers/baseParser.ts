@@ -35,7 +35,9 @@ export abstract class BaseBlockParser {
 
     // Sort keywords by length descending to match longer keywords first
     const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    const keywordPattern = new RegExp(`\\b(${sortedKeywords.join('|')})\\b`, 'g');
+    // Escape regex metacharacters in keywords for safe pattern construction
+    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
+    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'g');
 
     // Pre-compute newline positions for O(log n) line/column lookup
     const newlinePositions = this.buildNewlinePositions(source);
@@ -231,6 +233,11 @@ export abstract class BaseBlockParser {
   // Checks if a position is at the start of a line
   protected isAtLineStart(source: string, pos: number): boolean {
     return pos === 0 || source[pos - 1] === '\n';
+  }
+
+  // Escapes regex metacharacters in a string
+  protected escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   // Returns all tokens for testing purposes
