@@ -82,9 +82,14 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const text = editor.document.getText();
-    const pairs = parser.parse(text);
-    decorator.applyDecorations(editor, pairs);
+    try {
+      const text = editor.document.getText();
+      const pairs = parser.parse(text);
+      decorator.applyDecorations(editor, pairs);
+    } catch (error) {
+      console.error('Rainbow Blocks: Failed to update decorations', error);
+      decorator.clearDecorations(editor);
+    }
   }
 
   // Listen for active editor changes
