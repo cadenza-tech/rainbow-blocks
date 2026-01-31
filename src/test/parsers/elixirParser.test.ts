@@ -1021,6 +1021,25 @@ end`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'def', 'end');
       });
+
+      test('should handle tab before do keyword', () => {
+        // Tests the branch for tab-do pattern in hasDoKeyword
+        const source = `if true\tdo
+  x
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'if', 'end');
+      });
+
+      test('should handle end at position 0 in hasDoKeyword', () => {
+        // Tests beforeEnd fallback when i === 0
+        const source = `end
+def foo do
+  x
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
     });
   });
 

@@ -473,6 +473,88 @@ EOF2
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, '{', '}');
     });
+
+    test('should handle string length parameter syntax', () => {
+      // This tests isParameterExpansion returning true (line 90-91)
+      const source = `len=\${#myvar}
+{
+  echo "$len"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle ANSI-C quoting inside parameter expansion', () => {
+      // This tests matchDollarSingleQuote inside matchParameterExpansion (lines 121-124)
+      const source = `echo "\${var:-$'default\\nvalue'}"
+{
+  echo "test"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle nested command substitution in parameter expansion', () => {
+      // This tests matchCommandSubstitution inside matchParameterExpansion (lines 142-145)
+      const source = `echo "\${var:-$(pwd)}"
+{
+  echo "test"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle deeply nested parameter expansion', () => {
+      // This tests isInsideParameterExpansion returning true (lines 441-445)
+      const source = `echo "\${outer:-\${inner:-default}}"
+{
+  echo "test"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Block close keyword before brace', () => {
+    test('should recognize } after fi', () => {
+      // This tests block close keyword detection before } (lines 401-407)
+      const source = `{
+  if true; then
+    echo "yes"
+  fi
+}`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      const braceBlock = pairs.find((p) => p.openKeyword.value === '{');
+      assert.ok(braceBlock);
+      assert.strictEqual(braceBlock?.closeKeyword?.value, '}');
+    });
+
+    test('should recognize } after done', () => {
+      const source = `{
+  for i in 1 2 3; do
+    echo "$i"
+  done
+}`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      const braceBlock = pairs.find((p) => p.openKeyword.value === '{');
+      assert.ok(braceBlock);
+      assert.strictEqual(braceBlock?.closeKeyword?.value, '}');
+    });
+
+    test('should recognize } after esac', () => {
+      const source = `{
+  case "$x" in
+    a) echo "a";;
+  esac
+}`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      const braceBlock = pairs.find((p) => p.openKeyword.value === '{');
+      assert.ok(braceBlock);
+      assert.strictEqual(braceBlock?.closeKeyword?.value, '}');
+    });
   });
 
   suite('Special Bash constructs', () => {
