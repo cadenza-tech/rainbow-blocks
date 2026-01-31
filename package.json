@@ -52,13 +52,14 @@
           "items": {
             "type": "string"
           },
+          "maxItems": 100,
           "description": "Colors for block pairs. Cycles when nesting exceeds the number of colors."
         },
         "rainbowBlocks.debounceMs": {
           "type": "number",
           "default": 100,
           "minimum": 0,
-          "maximum": 1000,
+          "maximum": 10000,
           "description": "Debounce time in milliseconds for decoration updates."
         }
       }

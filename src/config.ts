@@ -13,7 +13,7 @@ export const DEFAULT_DEBOUNCE_MS = 100;
 export const MIN_DEBOUNCE_MS = 0;
 
 // Maximum allowed debounce delay
-export const MAX_DEBOUNCE_MS = 1000;
+export const MAX_DEBOUNCE_MS = 10000;
 
 // Fallback color for invalid hex values (magenta for visibility)
 export const INVALID_COLOR_FALLBACK = '#FF00FF';
