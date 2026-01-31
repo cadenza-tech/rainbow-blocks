@@ -25,7 +25,7 @@
 - Colorize code structure with nesting levels
 - Customizable color palette
 
-## Extension Settings
+## Settings
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
