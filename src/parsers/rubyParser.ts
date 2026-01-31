@@ -300,7 +300,9 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Matches heredoc, handling multiple heredocs on same line
   private matchHeredoc(source: string, pos: number): { end: number } | null {
-    const heredocPattern = /<<([~-])?(['"`])?([A-Za-z_][A-Za-z0-9_]*)\2?/g;
+    // Pattern requires matching quotes: <<'EOF', <<"EOF", <<EOF (no quotes)
+    // The backreference \2 ensures opening and closing quotes match
+    const heredocPattern = /<<([~-])?(['"`])([A-Za-z_][A-Za-z0-9_]*)\2|<<([~-])?([A-Za-z_][A-Za-z0-9_]*)/g;
 
     // Find line end
     let lineEnd = pos;
@@ -313,9 +315,12 @@ export class RubyBlockParser extends BaseBlockParser {
     const terminators: { terminator: string; allowIndented: boolean }[] = [];
 
     for (const match of lineContent.matchAll(heredocPattern)) {
+      // Pattern has two alternatives: quoted (match[3]) or unquoted (match[5])
+      const terminator = match[3] || match[5];
+      const flag = match[1] || match[4];
       terminators.push({
-        terminator: match[3],
-        allowIndented: match[1] === '~' || match[1] === '-'
+        terminator,
+        allowIndented: flag === '~' || flag === '-'
       });
     }
 
@@ -399,7 +404,7 @@ export class RubyBlockParser extends BaseBlockParser {
     if (open in PAIRED_DELIMITERS) {
       return PAIRED_DELIMITERS[open];
     }
-    // Any non-alphanumeric character can be its own delimiter
-    return /[^a-zA-Z0-9]/.test(open) ? open : null;
+    // Any non-alphanumeric, non-whitespace character can be its own delimiter
+    return /[^\sa-zA-Z0-9]/.test(open) ? open : null;
   }
 }

@@ -388,6 +388,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         doStart = i + 1;
       } else if (slice3 === ' do') {
         doStart = i + 1;
+      } else if (slice3 === '\tdo') {
+        doStart = i + 1;
       }
 
       if (doStart !== -1) {

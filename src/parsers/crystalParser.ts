@@ -191,7 +191,7 @@ export class CrystalBlockParser extends BaseBlockParser {
     return source.length;
   }
 
-  // Checks if colon starts a symbol (not ternary or named tuple key)
+  // Checks if colon starts a symbol (not ternary, named tuple key, or type annotation)
   private isSymbolStart(source: string, pos: number): boolean {
     const nextChar = source[pos + 1];
     if (!nextChar) {
@@ -203,9 +203,15 @@ export class CrystalBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Colon after identifier/number/bracket is ternary, not symbol
-    if (pos > 0) {
-      const prevChar = source[pos - 1];
+    // Look back, skipping whitespace, to find the actual preceding character
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+
+    // Colon after identifier/number/bracket is ternary or type annotation, not symbol
+    if (i >= 0) {
+      const prevChar = source[i];
       if (/[a-zA-Z0-9_)\]}>]/.test(prevChar)) {
         return false;
       }
@@ -303,7 +309,8 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Matches heredoc (Crystal doesn't have <<~ like Ruby)
   private matchHeredoc(source: string, pos: number): { end: number } | null {
-    const heredocPattern = /<<(-)?(['"])?([A-Za-z_][A-Za-z0-9_]*)\2?/g;
+    // Pattern requires matching quotes: <<'EOF', <<"EOF", <<EOF (no quotes)
+    const heredocPattern = /<<(-)?(['"])([A-Za-z_][A-Za-z0-9_]*)\2|<<(-)?([A-Za-z_][A-Za-z0-9_]*)/g;
 
     // Find line end
     let lineEnd = pos;
@@ -316,9 +323,12 @@ export class CrystalBlockParser extends BaseBlockParser {
     const terminators: { terminator: string; allowIndented: boolean }[] = [];
 
     for (const match of lineContent.matchAll(heredocPattern)) {
+      // Pattern has two alternatives: quoted (match[3]) or unquoted (match[5])
+      const terminator = match[3] || match[5];
+      const flag = match[1] || match[4];
       terminators.push({
-        terminator: match[3],
-        allowIndented: match[1] === '-'
+        terminator,
+        allowIndented: flag === '-'
       });
     }
 
@@ -402,8 +412,8 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (open in PAIRED_DELIMITERS) {
       return PAIRED_DELIMITERS[open];
     }
-    // Any non-alphanumeric character can be its own delimiter
-    return /[^a-zA-Z0-9]/.test(open) ? open : null;
+    // Any non-alphanumeric, non-whitespace character can be its own delimiter
+    return /[^\sa-zA-Z0-9]/.test(open) ? open : null;
   }
 
   // Validates block open keywords, excluding postfix conditionals

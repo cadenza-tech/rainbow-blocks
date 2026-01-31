@@ -116,15 +116,31 @@ export class BashBlockParser extends BaseBlockParser {
     while (i < source.length && depth > 0) {
       const char = source[i];
 
-      // Skip strings inside parameter expansion
+      // Skip ANSI-C quoted strings $'...'
+      if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
+        const region = this.matchDollarSingleQuote(source, i);
+        i = region.end;
+        continue;
+      }
+
+      // Skip double-quoted strings
       if (char === '"') {
         const stringEnd = this.findStringEnd(source, i, '"');
         i = stringEnd;
         continue;
       }
+
+      // Skip single-quoted strings
       if (char === "'") {
         const stringEnd = this.findSingleQuoteEnd(source, i);
         i = stringEnd;
+        continue;
+      }
+
+      // Skip nested command substitution $(...)
+      if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
+        const nested = this.matchCommandSubstitution(source, i);
+        i = nested.end;
         continue;
       }
 
@@ -183,15 +199,29 @@ export class BashBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Matches arithmetic expansion $((...))
+  // Matches arithmetic expansion $((...)) with string skipping
   private matchArithmeticExpansion(source: string, pos: number): ExcludedRegion {
     let i = pos + 3;
     let depth = 2;
 
     while (i < source.length && depth > 0) {
-      if (source[i] === '(') {
+      const char = source[i];
+
+      // Skip strings inside arithmetic expansion
+      if (char === '"') {
+        const stringEnd = this.findStringEnd(source, i, '"');
+        i = stringEnd;
+        continue;
+      }
+      if (char === "'") {
+        const stringEnd = this.findSingleQuoteEnd(source, i);
+        i = stringEnd;
+        continue;
+      }
+
+      if (char === '(') {
         depth++;
-      } else if (source[i] === ')') {
+      } else if (char === ')') {
         depth--;
       }
       i++;
@@ -356,14 +386,29 @@ export class BashBlockParser extends BaseBlockParser {
         }
       }
 
-      // Command grouping '}' must be preceded by ';' or newline
+      // Command grouping '}' must be preceded by ';', newline, or block close keyword
       if (char === '}') {
         let j = i - 1;
         while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
           j--;
         }
         if (j >= 0 && source[j] !== ';' && source[j] !== '\n') {
-          continue;
+          // Check if preceded by block close keywords (fi, done, esac)
+          const blockCloseKeywords = ['fi', 'done', 'esac'];
+          let isAfterBlockClose = false;
+          for (const kw of blockCloseKeywords) {
+            const start = j - kw.length + 1;
+            if (start >= 0 && source.slice(start, j + 1) === kw) {
+              // Verify word boundary before keyword
+              if (start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) {
+                isAfterBlockClose = true;
+                break;
+              }
+            }
+          }
+          if (!isAfterBlockClose) {
+            continue;
+          }
         }
       }
 

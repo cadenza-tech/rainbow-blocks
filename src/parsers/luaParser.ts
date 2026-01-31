@@ -116,8 +116,8 @@ export class LuaBlockParser extends BaseBlockParser {
       i++;
     }
 
-    // Check for opening bracket
-    if (source[i] !== '[') {
+    // Check bounds and opening bracket
+    if (i >= source.length || source[i] !== '[') {
       return null;
     }
 
