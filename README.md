@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash.
+  Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, Bash, and more.
 </p>
 
 <p align="center">
@@ -40,6 +40,13 @@
 - Lua (`.lua`)
 - Julia (`.jl`)
 - Bash (`.sh`, `.bash`)
+- MATLAB (`.m`)
+- Octave (`.m`)
+- Verilog (`.v`, `.sv`)
+- VHDL (`.vhd`, `.vhdl`)
+- Ada (`.adb`, `.ads`)
+- Fortran (`.f90`, `.f95`, `.f03`, `.f08`)
+- COBOL (`.cob`, `.cbl`)
 
 ## Contributing
 

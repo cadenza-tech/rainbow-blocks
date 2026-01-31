@@ -4,13 +4,20 @@ import * as vscode from 'vscode';
 import { loadConfig } from './config';
 import { BlockDecorator } from './decorator';
 import {
+  AdaBlockParser,
   type BaseBlockParser,
   BashBlockParser,
+  CobolBlockParser,
   CrystalBlockParser,
   ElixirBlockParser,
+  FortranBlockParser,
   JuliaBlockParser,
   LuaBlockParser,
-  RubyBlockParser
+  MatlabBlockParser,
+  OctaveBlockParser,
+  RubyBlockParser,
+  VerilogBlockParser,
+  VhdlBlockParser
 } from './parsers';
 
 // Supported language IDs mapped to their parser factory functions
@@ -21,7 +28,19 @@ const SUPPORTED_LANGUAGES: Readonly<Record<string, () => BaseBlockParser>> = {
   lua: () => new LuaBlockParser(),
   julia: () => new JuliaBlockParser(),
   shellscript: () => new BashBlockParser(),
-  bash: () => new BashBlockParser()
+  bash: () => new BashBlockParser(),
+  matlab: () => new MatlabBlockParser(),
+  octave: () => new OctaveBlockParser(),
+  verilog: () => new VerilogBlockParser(),
+  systemverilog: () => new VerilogBlockParser(),
+  vhdl: () => new VhdlBlockParser(),
+  ada: () => new AdaBlockParser(),
+  fortran: () => new FortranBlockParser(),
+  'fortran-modern': () => new FortranBlockParser(),
+  FortranFreeForm: () => new FortranBlockParser(),
+  FortranFixedForm: () => new FortranBlockParser(),
+  cobol: () => new CobolBlockParser(),
+  COBOL: () => new CobolBlockParser()
 };
 
 // Configuration section name in VS Code settings

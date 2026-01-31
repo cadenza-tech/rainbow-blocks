@@ -1,7 +1,7 @@
 {
   "name": "rainbow-blocks",
   "displayName": "Rainbow Blocks",
-  "description": "Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, and Bash",
+  "description": "Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, Bash, and more",
   "version": "0.0.2",
   "publisher": "cadenza-tech",
   "icon": "images/icon.png",
@@ -25,6 +25,13 @@
     "lua",
     "julia",
     "bash",
+    "ada",
+    "cobol",
+    "fortran",
+    "matlab",
+    "octave",
+    "verilog",
+    "vhdl",
     "syntax",
     "highlighting"
   ],
@@ -35,7 +42,19 @@
     "onLanguage:lua",
     "onLanguage:julia",
     "onLanguage:shellscript",
-    "onLanguage:bash"
+    "onLanguage:bash",
+    "onLanguage:matlab",
+    "onLanguage:octave",
+    "onLanguage:verilog",
+    "onLanguage:systemverilog",
+    "onLanguage:vhdl",
+    "onLanguage:ada",
+    "onLanguage:fortran",
+    "onLanguage:fortran-modern",
+    "onLanguage:FortranFreeForm",
+    "onLanguage:FortranFixedForm",
+    "onLanguage:cobol",
+    "onLanguage:COBOL"
   ],
   "main": "./dist/extension.js",
   "contributes": {
