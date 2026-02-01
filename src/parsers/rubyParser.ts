@@ -24,11 +24,16 @@ export class RubyBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['do', 'if', 'unless', 'while', 'until', 'begin', 'def', 'class', 'module', 'case', 'for'],
     blockClose: ['end'],
-    blockMiddle: ['else', 'elsif', 'rescue', 'ensure', 'when', 'in']
+    blockMiddle: ['else', 'elsif', 'rescue', 'ensure', 'when', 'in', 'then']
   };
 
   // Validates block open keywords, excluding postfix conditionals
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Check if 'do' is a loop separator (while/until/for ... do)
+    if (keyword === 'do') {
+      return !this.isLoopDo(source, position, excludedRegions);
+    }
+
     // Only if, unless, while, until can be postfix conditionals
     if (!['if', 'unless', 'while', 'until'].includes(keyword)) {
       return true;
@@ -92,12 +97,72 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     // Operator expecting expression means not postfix
-    if (/[=&|,([{:?]$/.test(beforeKeyword)) {
+    // Includes: assignment, logical, comparison, arithmetic, range, and other operators
+    if (/[=&|,([{:?+\-*/%<>^~!.]$/.test(beforeKeyword)) {
       return false;
     }
 
     // Non-keyword content before means postfix
     return true;
+  }
+
+  // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
+  private isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Find line start
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+      lineStart--;
+    }
+
+    // Get content before 'do' on this line
+    let beforeDo = source.slice(lineStart, position);
+
+    // Find last semicolon not in excluded region
+    let lastValidSemicolon = -1;
+    for (let i = beforeDo.length - 1; i >= 0; i--) {
+      if (beforeDo[i] === ';') {
+        const absolutePos = lineStart + i;
+        if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
+          lastValidSemicolon = i;
+          break;
+        }
+      }
+    }
+
+    const searchStart = lastValidSemicolon >= 0 ? lineStart + lastValidSemicolon + 1 : lineStart;
+    beforeDo = source.slice(searchStart, position);
+
+    // Find loop keywords (while, until, for) before this 'do'
+    const loopPattern = /\b(while|until|for)\b/g;
+    const loopMatches = [...beforeDo.matchAll(loopPattern)];
+
+    for (const loopMatch of loopMatches) {
+      const loopAbsolutePos = searchStart + loopMatch.index;
+      if (this.isInExcludedRegion(loopAbsolutePos, excludedRegions)) {
+        continue;
+      }
+
+      // Find the first 'do' after this loop keyword, skipping excluded regions
+      const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
+      const searchRange = source.slice(afterLoopStart, position + 2);
+      const doMatches = [...searchRange.matchAll(/\bdo\b/g)];
+
+      for (const doMatch of doMatches) {
+        const doAbsolutePos = afterLoopStart + doMatch.index;
+        // Skip 'do' in excluded regions (strings, comments)
+        if (this.isInExcludedRegion(doAbsolutePos, excludedRegions)) {
+          continue;
+        }
+        // This is the first valid 'do' after the loop keyword
+        if (doAbsolutePos === position) {
+          return true;
+        }
+        // Found a different valid 'do' before our position
+        break;
+      }
+    }
+
+    return false;
   }
 
   // Finds excluded regions: comments, strings, regex, heredocs, percent literals, symbols

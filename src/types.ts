@@ -12,9 +12,9 @@ export interface Token {
   type: TokenType;
   // The keyword string (e.g., 'do', 'end', 'if')
   value: string;
-  // Start position in source (0-based byte offset)
+  // Start position in source (0-based UTF-16 code unit offset)
   startOffset: number;
-  // End position in source (0-based byte offset, exclusive)
+  // End position in source (0-based UTF-16 code unit offset, exclusive)
   endOffset: number;
   // Line number (0-based)
   line: number;
@@ -44,9 +44,9 @@ export interface ColorConfig {
 
 // A region in source code to exclude from keyword detection (comments, strings, etc)
 export interface ExcludedRegion {
-  // Start position (inclusive, 0-based byte offset)
+  // Start position (inclusive, 0-based UTF-16 code unit offset)
   start: number;
-  // End position (exclusive, 0-based byte offset)
+  // End position (exclusive, 0-based UTF-16 code unit offset)
   end: number;
 }
 

@@ -47,7 +47,7 @@ export class CrystalBlockParser extends BaseBlockParser {
       // as a declaration without "end"
     ],
     blockClose: ['end'],
-    blockMiddle: ['else', 'elsif', 'rescue', 'ensure', 'when', 'in']
+    blockMiddle: ['else', 'elsif', 'rescue', 'ensure', 'when', 'in', 'then']
   };
 
   // Finds excluded regions: comments, strings, regex, heredocs, macro templates
@@ -470,7 +470,8 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
 
     // Operator expecting expression means not postfix
-    if (/[=&|,([{:?]$/.test(beforeKeyword)) {
+    // Includes: assignment, logical, comparison, arithmetic, range, and other operators
+    if (/[=&|,([{:?+\-*/%<>^~!.]$/.test(beforeKeyword)) {
       return false;
     }
 

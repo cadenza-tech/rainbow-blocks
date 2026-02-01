@@ -29,13 +29,32 @@ export class LuaBlockParser extends BaseBlockParser {
 
     // Check for while or for on same line
     const beforeDo = source.slice(lineStart, position);
-    const pattern = /\b(while|for)\b/g;
-    const matches = beforeDo.matchAll(pattern);
+    const loopPattern = /\b(while|for)\b/g;
+    const loopMatches = [...beforeDo.matchAll(loopPattern)];
 
-    for (const match of matches) {
-      const absolutePos = lineStart + match.index;
-      if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
-        return true;
+    for (const loopMatch of loopMatches) {
+      const loopAbsolutePos = lineStart + loopMatch.index;
+      if (this.isInExcludedRegion(loopAbsolutePos, excludedRegions)) {
+        continue;
+      }
+
+      // Find the first 'do' after this loop keyword, skipping excluded regions
+      const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
+      const searchRange = source.slice(afterLoopStart, position + 2);
+      const doMatches = [...searchRange.matchAll(/\bdo\b/g)];
+
+      for (const doMatch of doMatches) {
+        const doAbsolutePos = afterLoopStart + doMatch.index;
+        // Skip 'do' in excluded regions (strings, comments)
+        if (this.isInExcludedRegion(doAbsolutePos, excludedRegions)) {
+          continue;
+        }
+        // This is the first valid 'do' after the loop keyword
+        if (doAbsolutePos === position) {
+          return true;
+        }
+        // Found a different valid 'do' before our position
+        break;
       }
     }
 
