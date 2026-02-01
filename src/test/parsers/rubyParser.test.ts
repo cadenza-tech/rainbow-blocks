@@ -693,6 +693,30 @@ end`;
         assertSingleBlock(pairs, 'while', 'end');
       });
 
+      test('should handle while-do-end block', () => {
+        const source = `while condition do
+  do_something
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'while', 'end');
+      });
+
+      test('should handle until-do-end block', () => {
+        const source = `until condition do
+  do_something
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'until', 'end');
+      });
+
+      test('should handle for-do-end block', () => {
+        const source = `for i in 1..10 do
+  puts i
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'for', 'end');
+      });
+
       test('should handle until-end block', () => {
         const source = `until condition
   do_something
