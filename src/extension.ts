@@ -5,16 +5,19 @@ import { loadConfig } from './config';
 import { BlockDecorator } from './decorator';
 import {
   AdaBlockParser,
+  ApplescriptBlockParser,
   type BaseBlockParser,
   BashBlockParser,
   CobolBlockParser,
   CrystalBlockParser,
   ElixirBlockParser,
+  ErlangBlockParser,
   FortranBlockParser,
   JuliaBlockParser,
   LuaBlockParser,
   MatlabBlockParser,
   OctaveBlockParser,
+  PascalBlockParser,
   RubyBlockParser,
   VerilogBlockParser,
   VhdlBlockParser
@@ -22,25 +25,29 @@ import {
 
 // Supported language IDs mapped to their parser factory functions
 const SUPPORTED_LANGUAGES: Readonly<Record<string, () => BaseBlockParser>> = {
-  ruby: () => new RubyBlockParser(),
-  elixir: () => new ElixirBlockParser(),
-  crystal: () => new CrystalBlockParser(),
-  lua: () => new LuaBlockParser(),
-  julia: () => new JuliaBlockParser(),
-  shellscript: () => new BashBlockParser(),
-  bash: () => new BashBlockParser(),
-  matlab: () => new MatlabBlockParser(),
-  octave: () => new OctaveBlockParser(),
-  verilog: () => new VerilogBlockParser(),
-  systemverilog: () => new VerilogBlockParser(),
-  vhdl: () => new VhdlBlockParser(),
   ada: () => new AdaBlockParser(),
+  applescript: () => new ApplescriptBlockParser(),
+  bash: () => new BashBlockParser(),
+  shellscript: () => new BashBlockParser(),
+  cobol: () => new CobolBlockParser(),
+  COBOL: () => new CobolBlockParser(),
+  crystal: () => new CrystalBlockParser(),
+  elixir: () => new ElixirBlockParser(),
+  erlang: () => new ErlangBlockParser(),
   fortran: () => new FortranBlockParser(),
   'fortran-modern': () => new FortranBlockParser(),
-  FortranFreeForm: () => new FortranBlockParser(),
   FortranFixedForm: () => new FortranBlockParser(),
-  cobol: () => new CobolBlockParser(),
-  COBOL: () => new CobolBlockParser()
+  FortranFreeForm: () => new FortranBlockParser(),
+  julia: () => new JuliaBlockParser(),
+  lua: () => new LuaBlockParser(),
+  matlab: () => new MatlabBlockParser(),
+  octave: () => new OctaveBlockParser(),
+  pascal: () => new PascalBlockParser(),
+  objectpascal: () => new PascalBlockParser(),
+  ruby: () => new RubyBlockParser(),
+  verilog: () => new VerilogBlockParser(),
+  systemverilog: () => new VerilogBlockParser(),
+  vhdl: () => new VhdlBlockParser()
 };
 
 // Configuration section name in VS Code settings

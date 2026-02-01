@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, Bash, and more.
+  Colorize matching block pairs for Ruby, Elixir, Bash, and more.
 </p>
 
 <p align="center">
@@ -36,17 +36,20 @@
 
 - Ruby (`.rb`)
 - Elixir (`.ex`, `.exs`)
-- Crystal (`.cr`)
-- Lua (`.lua`)
-- Julia (`.jl`)
 - Bash (`.sh`, `.bash`)
+- Ada (`.adb`, `.ads`)
+- AppleScript (`.applescript`, `.scpt`)
+- COBOL (`.cob`, `.cbl`)
+- Crystal (`.cr`)
+- Erlang (`.erl`, `.hrl`)
+- Fortran (`.f03`, `.f08`, `.f90`, `.f95`)
+- Julia (`.jl`)
+- Lua (`.lua`)
+- Pascal/Delphi (`.pas`, `.pp`, `.dpr`)
 - MATLAB (`.m`)
 - Octave (`.m`)
 - Verilog (`.v`, `.sv`)
 - VHDL (`.vhd`, `.vhdl`)
-- Ada (`.adb`, `.ads`)
-- Fortran (`.f90`, `.f95`, `.f03`, `.f08`)
-- COBOL (`.cob`, `.cbl`)
 
 ## Contributing
 
