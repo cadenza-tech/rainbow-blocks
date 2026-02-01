@@ -5,7 +5,25 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.3] - 2026-02-01
+## [1.0.1] - 2026-02-01
+
+### Added
+
+- Ruby/Crystal: Highlight `then` as intermediate keyword in `if`/`case`/`when` blocks
+
+### Fixed
+
+- Ruby/Crystal: Correctly detect `if`/`unless`/`while`/`until` after arithmetic operators (`+`, `-`, `*`, `/`, `%`), comparison operators (`<`, `>`), bitwise operators (`^`, `~`), logical NOT (`!`), and range operators (`..`, `...`)
+- Ruby: Correctly handle `while`/`until`/`for ... do` as loop separators even in expression context (e.g., `x = while cond do 1 end`)
+- Lua: Fix multiple `do` on same line incorrectly detected as loop separators
+- Lua: Skip `do` inside strings/comments when determining loop separators
+- Bash: Fix O(n²) performance in parameter expansion detection by pre-computing ranges
+
+### Changed
+
+- types.ts: Fix documentation comment ("byte offset" → "UTF-16 code unit offset")
+
+## [1.0.0] - 2026-02-01
 
 ### Added
 
@@ -57,7 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
-[0.0.3]: https://github.com/cadenza-tech/rainbow-blocks/compare/v0.0.2...v0.0.3
+[1.0.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/cadenza-tech/rainbow-blocks/compare/v0.0.2...v1.0.0
 [0.0.2]: https://github.com/cadenza-tech/rainbow-blocks/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v0.0.0...v0.0.1
 [0.0.0]: https://github.com/cadenza-tech/rainbow-blocks/releases/tag/v0.0.0
