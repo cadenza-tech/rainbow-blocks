@@ -553,22 +553,22 @@ end`;
       assertSingleBlock(pairs, 'do', 'end');
     });
 
-    test('should handle generator expressions (for inside comprehension increases nest level)', () => {
+    test('should handle generator expressions (unmatched for does not affect nest level)', () => {
       const source = `squares = [x^2 for x in 1:10]
 function foo()
 end`;
       const pairs = parser.parse(source);
-      // Note: for inside comprehension is detected as block opener, so function is nested
-      assertSingleBlock(pairs, 'function', 'end', 1);
+      // Unmatched for inside comprehension does not inflate nestLevel
+      assertSingleBlock(pairs, 'function', 'end');
     });
 
-    test('should handle comprehensions with conditions (for and if increase nest level)', () => {
+    test('should handle comprehensions with conditions (unmatched for/if do not affect nest level)', () => {
       const source = `evens = [x for x in 1:20 if x % 2 == 0]
 function foo()
 end`;
       const pairs = parser.parse(source);
-      // Note: for and if inside comprehension are detected as block openers
-      assertSingleBlock(pairs, 'function', 'end', 2);
+      // Unmatched for and if inside comprehension do not inflate nestLevel
+      assertSingleBlock(pairs, 'function', 'end');
     });
 
     test('should handle ternary operator (not a block)', () => {
@@ -1418,6 +1418,60 @@ end`;
       assert.strictEqual(tokens.length, 2);
       assert.strictEqual(tokens[0].value, 'function');
       assert.strictEqual(tokens[1].value, 'end');
+    });
+  });
+
+  suite('abstract/primitive type validation', () => {
+    test('should parse abstract type as block', () => {
+      const source = 'abstract type Number end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'abstract', 'end');
+    });
+
+    test('should parse primitive type as block', () => {
+      const source = 'primitive type Float16 <: AbstractFloat 16 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'primitive', 'end');
+    });
+
+    test('should not parse standalone abstract as block', () => {
+      const source = 'x = abstract';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not parse standalone primitive as block', () => {
+      const source = 'y = primitive';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should parse nested abstract type', () => {
+      const source = `module Foo
+  abstract type Bar end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'abstract', 1);
+      assertNestLevel(pairs, 'module', 0);
+    });
+
+    test('should not treat abstract without type as block opener', () => {
+      const source = `function foo()
+  println(abstract)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Multi-line comment edge cases', () => {
+    test('should handle non-comment at #= position gracefully', () => {
+      const source = `# regular comment
+function foo()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 });

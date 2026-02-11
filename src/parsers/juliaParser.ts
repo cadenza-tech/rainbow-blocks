@@ -45,6 +45,15 @@ export class JuliaBlockParser extends BaseBlockParser {
     return regions;
   }
 
+  // Validates that abstract/primitive are followed by 'type' keyword
+  protected isValidBlockOpen(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    if (keyword === 'abstract' || keyword === 'primitive') {
+      const afterKeyword = source.slice(position + keyword.length);
+      return /^\s+type\b/.test(afterKeyword);
+    }
+    return true;
+  }
+
   // Tries to match an excluded region at the given position
   private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];

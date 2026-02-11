@@ -9,7 +9,27 @@ export abstract class BaseBlockParser {
   parse(source: string): BlockPair[] {
     const excludedRegions = this.findExcludedRegions(source);
     const tokens = this.tokenize(source, excludedRegions);
-    return this.matchBlocks(tokens);
+    const pairs = this.matchBlocks(tokens);
+    this.recalculateNestLevels(pairs);
+    return pairs;
+  }
+
+  // Recalculate nest levels based on actual matched pairs containment
+  // Fixes incorrect levels caused by unmatched block openers on the stack
+  private recalculateNestLevels(pairs: BlockPair[]): void {
+    for (const pair of pairs) {
+      let level = 0;
+      for (const other of pairs) {
+        if (
+          other !== pair &&
+          other.openKeyword.startOffset < pair.openKeyword.startOffset &&
+          other.closeKeyword.startOffset >= pair.closeKeyword.startOffset
+        ) {
+          level++;
+        }
+      }
+      pair.nestLevel = level;
+    }
   }
 
   // Finds regions to exclude from keyword detection (comments, strings, etc)
