@@ -20,6 +20,32 @@ const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrsx]/;
 // Characters that indicate the preceding / is division, not regex
 const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`]/;
 
+// Keywords after which / starts a regex, not division
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  'if',
+  'unless',
+  'while',
+  'until',
+  'when',
+  'case',
+  'and',
+  'or',
+  'not',
+  'return',
+  'yield',
+  'puts',
+  'print',
+  'raise',
+  'in',
+  'then',
+  'else',
+  'elsif',
+  'do',
+  'begin',
+  'rescue',
+  'ensure'
+]);
+
 export class RubyBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['do', 'if', 'unless', 'while', 'until', 'begin', 'def', 'class', 'module', 'case', 'for'],
@@ -249,15 +275,26 @@ export class RubyBlockParser extends BaseBlockParser {
   }
 
   // Matches multi-line comment: =begin ... =end
+  // Both =begin and =end must be at line start and followed by whitespace/newline/EOF
   private matchMultiLineComment(source: string, pos: number): ExcludedRegion | null {
     if (source.slice(pos, pos + 6) !== '=begin') {
+      return null;
+    }
+
+    // =begin must be followed by whitespace, newline, or EOF
+    const afterBegin = source[pos + 6];
+    if (afterBegin !== undefined && afterBegin !== ' ' && afterBegin !== '\t' && afterBegin !== '\n' && afterBegin !== '\r') {
       return null;
     }
 
     let i = pos + 6;
     while (i < source.length) {
       if (source[i] === '=' && this.isAtLineStart(source, i) && source.slice(i, i + 4) === '=end') {
-        return { start: pos, end: i + 4 };
+        // =end must be followed by whitespace, newline, or EOF
+        const afterEnd = source[i + 4];
+        if (afterEnd === undefined || afterEnd === ' ' || afterEnd === '\t' || afterEnd === '\n' || afterEnd === '\r') {
+          return { start: pos, end: i + 4 };
+        }
       }
       i++;
     }
@@ -360,7 +397,23 @@ export class RubyBlockParser extends BaseBlockParser {
     if (i < 0) return true;
 
     // After these characters, / is likely division
-    return !DIVISION_PRECEDERS_PATTERN.test(source[i]);
+    if (!DIVISION_PRECEDERS_PATTERN.test(source[i])) {
+      return true;
+    }
+
+    // After keywords, / is regex start (e.g., if /pattern/)
+    if (/[a-zA-Z_]/.test(source[i])) {
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.substring(wordStart, i + 1);
+      if (REGEX_PRECEDING_KEYWORDS.has(word)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // Matches heredoc, handling multiple heredocs on same line

@@ -652,7 +652,7 @@ end
 
       test('should not treat / after identifier as regex', () => {
         const source = `def foo
-  var/if/end/
+  a/b/c
 end`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'def', 'end');
@@ -1139,6 +1139,33 @@ end`;
 {% template %}`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 3);
+    });
+  });
+
+  suite('Regex after keyword', () => {
+    test('should treat / after if keyword as regex start', () => {
+      const source = `if /pattern/
+  puts "match"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat / after unless keyword as regex start', () => {
+      const source = `unless /skip/
+  action
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+
+    test('should treat / after when keyword as regex start', () => {
+      const source = `case x
+when /pattern/
+  action
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
     });
   });
 });

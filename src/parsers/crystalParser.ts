@@ -20,6 +20,33 @@ const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrx]/;
 // Characters that indicate the preceding / is division, not regex
 const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`]/;
 
+// Keywords after which / starts a regex, not division
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  'if',
+  'unless',
+  'while',
+  'until',
+  'when',
+  'case',
+  'and',
+  'or',
+  'not',
+  'return',
+  'yield',
+  'puts',
+  'print',
+  'raise',
+  'in',
+  'then',
+  'else',
+  'elsif',
+  'do',
+  'begin',
+  'rescue',
+  'ensure',
+  'select'
+]);
+
 export class CrystalBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
@@ -304,7 +331,23 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (i < 0) return true;
 
     // After these characters, / is likely division
-    return !DIVISION_PRECEDERS_PATTERN.test(source[i]);
+    if (!DIVISION_PRECEDERS_PATTERN.test(source[i])) {
+      return true;
+    }
+
+    // After keywords, / is regex start (e.g., if /pattern/)
+    if (/[a-zA-Z_]/.test(source[i])) {
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.substring(wordStart, i + 1);
+      if (REGEX_PRECEDING_KEYWORDS.has(word)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // Matches heredoc (Crystal doesn't have <<~ like Ruby)

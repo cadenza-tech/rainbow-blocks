@@ -942,6 +942,33 @@ end`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'begin', 'end');
       });
+
+      test('should not treat =beginning as =begin', () => {
+        const source = `=beginning
+def foo
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+
+      test('should not treat =ending as =end', () => {
+        const source = `=begin
+=ending
+def foo
+end
+=end`;
+        const pairs = parser.parse(source);
+        assertNoBlocks(pairs);
+      });
+
+      test('should handle =begin followed by space and text', () => {
+        const source = `=begin some comment
+def foo
+end
+=end`;
+        const pairs = parser.parse(source);
+        assertNoBlocks(pairs);
+      });
     });
 
     suite('Heredocs', () => {
@@ -1092,6 +1119,62 @@ end`;
       assert.strictEqual(regions[0].start, 0);
       assert.strictEqual(regions[0].end, 8);
       assert.strictEqual(regions[1].start, 9);
+    });
+  });
+
+  suite('Coverage: loopDo semicolon and excluded region branches', () => {
+    test('should handle semicolon before loop do on same line', () => {
+      // Tests the semicolon search in loopDo (lines 120-128)
+      // The semicolon separates two statements, and loop do is on the second
+      const source = `x = 1; while condition do
+  x += 1
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'while');
+    });
+    test('should handle loop keyword inside string before real loop do', () => {
+      // Tests the excluded region check for loop keyword (lines 141-142)
+      // "while" inside a string is found by regex but in excluded region
+      const source = `foo("while") + while true do
+  break
+end.to_s`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'while');
+    });
+
+    test('should handle do keyword inside string between loop and real do', () => {
+      // Tests the excluded region check for do (lines 153-154)
+      // "do" inside a string after while should be skipped
+      const source = `while x = "do" do
+  puts x
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'while');
+    });
+
+    test('should handle multiple do keywords on same line after loop keyword', () => {
+      // Tests the "different valid do before our position" branch
+      // while ... do x.each do - second do has a prior valid do on same line
+      const source = `while cond do x.each do |y|
+  puts y
+end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle semicolon inside string before loop do', () => {
+      // Tests the semicolon-in-excluded-region branch (lines 124-127)
+      // The semicolon is inside a string, so it should be ignored
+      const source = `x = "a;b"; while true do
+  break
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'while');
     });
   });
 });
