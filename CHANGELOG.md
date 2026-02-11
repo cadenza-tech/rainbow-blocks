@@ -5,6 +5,23 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-02-11
+
+### Fixed
+
+- Base parser: Recalculate nest levels based on actual matched pair containment, fixing incorrect levels caused by unmatched block openers
+- Julia: Validate that `abstract`/`primitive` are followed by `type` keyword before treating as block openers
+- Ruby/Crystal: Correctly detect regex after keywords (e.g., `if /pattern/`, `when /regex/`)
+- Ruby: Require whitespace, newline, or EOF after `=begin`/`=end` delimiters for stricter multi-line comment matching
+- AppleScript: Treat `to`/`on` as block openers only at line start (handler definitions)
+- Bash: Simplify parameter expansion handling by relying on excluded regions
+- COBOL: Skip keywords inside hyphenated identifiers (e.g., `END-IF-FLAG`, `PERFORM-COUNT`)
+- COBOL: Support fixed-format column 7 comment indicators (`*` and `/`)
+- Elixir: Handle escape sequences in triple-quoted strings
+- Elixir: Skip excluded regions when checking `do:` one-liner pattern
+- Fortran: Skip single-line `if` (without `then`) as block opener
+- Fortran: Support concatenated end keywords (`endif`, `enddo`, `endprogram`, etc.)
+
 ## [1.1.0] - 2026-02-01
 
 ### Added
@@ -83,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/cadenza-tech/rainbow-blocks/compare/v0.0.2...v1.0.0
