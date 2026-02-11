@@ -1076,4 +1076,32 @@ end`;
       assert.strictEqual(regions[1].start, 9);
     });
   });
+
+  suite('Triple-quoted string escape handling', () => {
+    test('should handle backslash escape inside triple-quoted string', () => {
+      const source = `x = """hello \\"world\\" end"""
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle backslash at end of triple-quoted string content', () => {
+      const source = `x = """line1\\nline2"""
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escaped triple quote inside heredoc', () => {
+      const source = `x = """
+escaped \\"\\"\\" not end
+"""
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
 });

@@ -384,6 +384,38 @@ end do`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'do', 'end do');
     });
+
+    test('should handle concatenated end keywords (endif, enddo)', () => {
+      const source = `program test
+  do i = 1, 10
+    if (i > 5) then
+      x = i
+    endif
+  enddo
+endprogram`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(ifPair.closeKeyword.value.toLowerCase().includes('endif'));
+      const doPair = findBlock(pairs, 'do');
+      assert.ok(doPair.closeKeyword.value.toLowerCase().includes('enddo'));
+      const progPair = findBlock(pairs, 'program');
+      assert.ok(progPair.closeKeyword.value.toLowerCase().includes('endprogram'));
+    });
+
+    test('should correctly pair concatenated end with specific opener', () => {
+      const source = `if (a) then
+  do i = 1, 5
+    x = i
+  enddo
+endif`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doPair = findBlock(pairs, 'do');
+      assert.ok(doPair.closeKeyword.value.toLowerCase().includes('enddo'));
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(ifPair.closeKeyword.value.toLowerCase().includes('endif'));
+    });
   });
 
   suite('Token positions', () => {
@@ -423,6 +455,71 @@ end if`;
 'string'`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 2);
+    });
+  });
+
+  suite('Concatenated compound end keywords', () => {
+    test('should parse endif as block close', () => {
+      const source = `if (x > 0) then
+  y = 1
+endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should parse enddo as block close', () => {
+      const source = `do i = 1, 10
+  print *, i
+enddo`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'enddo');
+    });
+
+    test('should parse mixed separated and concatenated end keywords', () => {
+      const source = `program main
+  do i = 1, 10
+    if (i > 5) then
+      print *, i
+    endif
+  enddo
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assertNestLevel(pairs, 'if', 2);
+      assertNestLevel(pairs, 'do', 1);
+      assertNestLevel(pairs, 'program', 0);
+    });
+
+    test('should handle uppercase concatenated forms', () => {
+      const source = `IF (X > 0) THEN
+  Y = 1
+ENDIF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'ENDIF');
+    });
+
+    test('should handle concatenated endprogram', () => {
+      const source = `program test
+  x = 1
+endprogram`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'endprogram');
+    });
+
+    test('should handle concatenated endfunction', () => {
+      const source = `function foo(x)
+  foo = x * 2
+endfunction`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    test('should handle concatenated endsubroutine', () => {
+      const source = `subroutine bar(x)
+  x = x + 1
+endsubroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'endsubroutine');
     });
   });
 });

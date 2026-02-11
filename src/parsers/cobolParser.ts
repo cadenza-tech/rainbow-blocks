@@ -103,6 +103,17 @@ export class CobolBlockParser extends BaseBlockParser {
       }
 
       const keyword = match[1];
+      const endOffset = startOffset + keyword.length;
+
+      // Skip keywords that are part of hyphenated identifiers
+      // COBOL identifiers use hyphens (e.g., PERFORM-COUNT, END-IF-FLAG)
+      if (startOffset > 0 && source[startOffset - 1] === '-') {
+        continue;
+      }
+      if (endOffset < source.length && source[endOffset] === '-') {
+        continue;
+      }
+
       const type = this.getTokenType(keyword.toLowerCase());
 
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
@@ -111,7 +122,7 @@ export class CobolBlockParser extends BaseBlockParser {
         type,
         value: keyword,
         startOffset,
-        endOffset: startOffset + keyword.length,
+        endOffset,
         line,
         column
       });
@@ -157,6 +168,17 @@ export class CobolBlockParser extends BaseBlockParser {
     // Inline comment: *>
     if (char === '*' && pos + 1 < source.length && source[pos + 1] === '>') {
       return this.matchSingleLineComment(source, pos);
+    }
+
+    // Fixed-format column 7 comment indicator (* or /)
+    if (char === '*' || char === '/') {
+      let lineStart = pos;
+      while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+        lineStart--;
+      }
+      if (pos - lineStart === 6) {
+        return this.matchSingleLineComment(source, pos);
+      }
     }
 
     // Single-quoted string

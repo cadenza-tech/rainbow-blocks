@@ -157,6 +157,10 @@ export class ElixirBlockParser extends BaseBlockParser {
   private matchTripleQuotedString(source: string, pos: number, delimiter: string): ExcludedRegion {
     let i = pos + 3;
     while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
       if (source.slice(i, i + 3) === delimiter) {
         return { start: pos, end: i + 3 };
       }
@@ -275,7 +279,7 @@ export class ElixirBlockParser extends BaseBlockParser {
     }
 
     // Check for do: one-liner pattern
-    if (this.isDoColonOneLiner(keyword, source, position)) {
+    if (this.isDoColonOneLiner(keyword, source, position, excludedRegions)) {
       return false;
     }
 
@@ -351,7 +355,7 @@ export class ElixirBlockParser extends BaseBlockParser {
   }
 
   // Checks if this is a do: one-liner
-  private isDoColonOneLiner(keyword: string, source: string, position: number): boolean {
+  private isDoColonOneLiner(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const doColonKeywords = [
       'if',
       'unless',
@@ -378,6 +382,12 @@ export class ElixirBlockParser extends BaseBlockParser {
     let i = position + keyword.length;
 
     while (i < source.length && source[i] !== '\n') {
+      // Skip excluded regions (strings, comments, etc)
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        i++;
+        continue;
+      }
+
       const slice4 = source.slice(i, i + 4);
       const slice3 = source.slice(i, i + 3);
 

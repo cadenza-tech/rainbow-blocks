@@ -53,6 +53,38 @@ export class FortranBlockParser extends BaseBlockParser {
   };
 
   // Finds excluded regions: comments and strings
+
+  // Validates block open keywords
+  // Single-line 'if' (without 'then') is not a block opener
+  protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (keyword.toLowerCase() !== 'if') {
+      return true;
+    }
+
+    // Check if 'then' exists on the same line after the 'if'
+    let i = position + keyword.length;
+    while (i < source.length && source[i] !== '\n') {
+      // Skip excluded regions
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+
+      // Check for 'then' keyword
+      if (
+        source.slice(i, i + 4).toLowerCase() === 'then' &&
+        (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
+        (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
+      ) {
+        return true;
+      }
+      i++;
+    }
+
+    return false;
+  }
+
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
     let i = 0;
@@ -154,6 +186,11 @@ export class FortranBlockParser extends BaseBlockParser {
       const keyword = keywordMatch[1];
       const type = this.getTokenTypeCaseInsensitive(keyword);
 
+      // Validate block open keywords (e.g., skip single-line if)
+      if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
       tokens.push({
@@ -168,6 +205,7 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // Process tokens to handle compound keywords
     const result: Token[] = [];
+    const processedCompoundPositions = new Set<number>();
 
     for (const token of tokens) {
       // Check if this token is the start of a compound end
@@ -180,6 +218,7 @@ export class FortranBlockParser extends BaseBlockParser {
           endOffset: token.startOffset + compound.length,
           type: 'block_close'
         });
+        processedCompoundPositions.add(token.startOffset);
         continue;
       }
 
@@ -195,6 +234,27 @@ export class FortranBlockParser extends BaseBlockParser {
       if (!shouldSkip) {
         result.push(token);
       }
+    }
+
+    // Add concatenated compound end keywords (e.g., enddo, endif) that had no
+    // matching 'end' token because \b word boundary doesn't match inside them
+    for (const [pos, compound] of compoundEndPositions) {
+      if (!processedCompoundPositions.has(pos)) {
+        const { line, column } = this.getLineAndColumn(pos, newlinePositions);
+        result.push({
+          type: 'block_close',
+          value: compound.keyword,
+          startOffset: pos,
+          endOffset: pos + compound.length,
+          line,
+          column
+        });
+      }
+    }
+
+    // Re-sort by position after adding concatenated forms
+    if (compoundEndPositions.size > processedCompoundPositions.size) {
+      result.sort((a, b) => a.startOffset - b.startOffset);
     }
 
     return result;
@@ -233,9 +293,10 @@ export class FortranBlockParser extends BaseBlockParser {
           const closeValue = token.value.toLowerCase();
           let matchIndex = -1;
 
-          // Check if it's a compound end
-          if (closeValue.startsWith('end ')) {
-            const endType = closeValue.slice(4);
+          // Check if it's a compound end (e.g., "end program", "endprogram")
+          const compoundMatch = closeValue.match(/^end\s*(.+)/);
+          if (compoundMatch) {
+            const endType = compoundMatch[1];
             matchIndex = this.findLastOpenerByType(stack, endType);
           }
 

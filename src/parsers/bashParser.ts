@@ -358,26 +358,19 @@ export class BashBlockParser extends BaseBlockParser {
     const tokens = super.tokenize(source, excludedRegions);
     const newlinePositions = this.buildNewlinePositions(source);
 
-    // Pre-compute parameter expansion ranges for O(n) complexity
-    const paramExpansionRanges = this.findParameterExpansionRanges(source, excludedRegions);
-
     // Match { } for command grouping (not brace expansion)
     const bracePattern = /[{}]/g;
     for (const match of source.matchAll(bracePattern)) {
       const i = match.index;
       const char = match[0];
 
-      // Skip if in excluded region
+      // Skip if in excluded region (covers ${...}, strings, comments, etc)
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
       }
 
       // Skip if part of parameter expansion ${
       if (char === '{' && i > 0 && source[i - 1] === '$') {
-        continue;
-      }
-      // Skip if inside a parameter expansion
-      if (char === '}' && this.isInRanges(i, paramExpansionRanges)) {
         continue;
       }
 
@@ -428,39 +421,6 @@ export class BashBlockParser extends BaseBlockParser {
 
     // Sort by position
     return tokens.sort((a, b) => a.startOffset - b.startOffset);
-  }
-
-  // Finds all parameter expansion ranges in O(n) time
-  private findParameterExpansionRanges(source: string, excludedRegions: ExcludedRegion[]): ExcludedRegion[] {
-    const ranges: ExcludedRegion[] = [];
-    const stack: number[] = [];
-
-    for (let i = 0; i < source.length; i++) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        continue;
-      }
-
-      if (source[i] === '{' && i > 0 && source[i - 1] === '$') {
-        stack.push(i);
-      } else if (source[i] === '}' && stack.length > 0) {
-        const start = stack.pop();
-        if (start !== undefined) {
-          ranges.push({ start, end: i + 1 });
-        }
-      }
-    }
-
-    return ranges;
-  }
-
-  // Checks if position is within any of the given ranges
-  private isInRanges(pos: number, ranges: ExcludedRegion[]): boolean {
-    for (const range of ranges) {
-      if (pos >= range.start && pos < range.end) {
-        return true;
-      }
-    }
-    return false;
   }
 
   // Matches blocks with Bash-specific pairing: fi→if, esac→case, done→for/while/until/select, }→{

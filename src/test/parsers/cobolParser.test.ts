@@ -360,6 +360,27 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
     });
+
+    test('should not match hyphenated identifiers like END-IF-FLAG', () => {
+      const source = 'MOVE END-IF-FLAG TO WS-STATUS';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match PERFORM-COUNT as keyword', () => {
+      const source = 'ADD 1 TO PERFORM-COUNT';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match END-PERFORM-LOOP as END-PERFORM', () => {
+      const source = `PERFORM
+  DISPLAY "Test"
+END-PERFORM
+MOVE END-PERFORM-FLAG TO STATUS`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
   });
 
   suite('Token positions', () => {
@@ -398,6 +419,74 @@ END-IF`;
 'string'`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 2);
+    });
+  });
+
+  suite('Fixed-format column 7 comments', () => {
+    test('should exclude line with * at column 7', () => {
+      const source = `      * This is a comment line
+       PERFORM
+         DISPLAY "Hello"
+       END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should exclude line with / at column 7', () => {
+      const source = `      / Page eject comment
+       IF X = 1
+       END-IF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should ignore keywords inside column 7 comments', () => {
+      const source = `      * IF PERFORM END-IF
+       PERFORM
+         DISPLAY "Hello"
+       END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should not treat * at other columns as comment', () => {
+      const source = `       COMPUTE X = A * B
+       IF X > 0
+       END-IF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should detect column 7 comment in excluded regions', () => {
+      const source = '      * comment line';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 6);
+    });
+
+    test('should detect column 7 / in excluded regions', () => {
+      const source = '      / page eject';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 6);
+    });
+
+    test('should handle multiple column 7 comment lines', () => {
+      const source = `      * First comment
+      * Second comment
+       IF X = 1
+      * Third comment
+       END-IF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should handle * at column 7 on first line (pos 6)', () => {
+      const source = `      *COMMENT WITH NO SPACE
+       PERFORM
+       END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
   });
 });

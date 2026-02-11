@@ -527,4 +527,39 @@ end`;
       assert.strictEqual(regions.length, 3);
     });
   });
+
+  suite('Coverage: isDoPartOfLoop edge cases', () => {
+    test('should handle do keyword inside string between loop and real do', () => {
+      // Tests the excluded region check for do (lines 57-58)
+      // "do" inside a string after for should be skipped
+      const source = `for i = 1, x("do") do
+  print(i)
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'for');
+    });
+
+    test('should detect different valid do before target do on same line', () => {
+      // Tests the "different valid do before our position" break branch
+      // for ... do ... do on same line, second do is standalone
+      const source = 'for i = 1, 10 do function() do print(i) end end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+  });
+
+  suite('Coverage: matchLongString guard clause', () => {
+    test('should handle matchLongString called with non-bracket character', () => {
+      // The matchLongString guard (source[pos] !== '[') returns null
+      // This is reached when matchComment checks for --[[ but position+2
+      // is not [, causing matchLongString to early-return
+      const source = `-- regular comment, not --[[ multiline
+if true then
+  print("hello")
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });

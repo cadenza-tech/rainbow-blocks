@@ -1496,4 +1496,109 @@ fi`;
       assert.strictEqual(tokens[1].value, '}');
     });
   });
+
+  suite('Coverage: parameter expansion branches', () => {
+    test('should treat # as comment when not part of parameter expansion', () => {
+      // isParameterExpansion returns false, # is treated as comment
+      const source = `# this is a comment with if fi
+{
+  echo "test"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should recognize hash inside unquoted parameter expansion like dollar-brace-hash-var', () => {
+      // isParameterExpansion returns true (line 90)
+      // ${#myarray[@]} is unquoted, so findExcludedRegions processes it
+      const source = `len=\${#myarray[@]}
+{
+  echo test
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle ANSI-C quoting inside unquoted parameter expansion', () => {
+      // matchDollarSingleQuote called inside matchParameterExpansion (lines 121-122)
+      const source = `x=\${var:-$'hello\\nworld'}
+{
+  echo test
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle command substitution inside unquoted parameter expansion', () => {
+      // matchCommandSubstitution called inside matchParameterExpansion (lines 142-143)
+      const source = `x=\${var:-$(whoami)}
+{
+  echo test
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should skip } inside unquoted parameter expansion for brace matching', () => {
+      // findParameterExpansionRanges builds ranges (lines 444-449)
+      // isInRanges returns true (lines 459-461)
+      // The } inside ${var} should not be treated as closing brace
+      const source = `x=\${HOME}
+{
+  echo $x;
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle nested unquoted parameter expansion with closing brace', () => {
+      // Tests findParameterExpansionRanges with nested ${...${...}}
+      const source = `x=\${outer:-\${inner:-default}}
+{
+  echo $x;
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Coverage: block close keyword before brace on same line', () => {
+    test('should recognize } after fi on same line without semicolon', () => {
+      // Tests word boundary check for block close before }
+      // fi directly precedes } (after whitespace) on same line, no ; or newline
+      const source = '{ if true; then echo yes; fi }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should recognize } after done on same line without semicolon', () => {
+      const source = '{ for i in 1 2; do echo hi; done }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should recognize } after esac on same line without semicolon', () => {
+      const source = '{ case x in a) echo a;; esac }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should reject } when preceded by non-keyword on same line', () => {
+      // Tests the !isAfterBlockClose continue path
+      // "hello" is not fi/done/esac, so } is not recognized
+      const source = '{ echo hello }';
+      const pairs = parser.parse(source);
+      // Only { is matched (no valid } close)
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle fi at start of source before }', () => {
+      // Tests the start === 0 branch of word boundary check
+      // fi at position 0 means start === 0 is true
+      const source = 'fi }';
+      const pairs = parser.parse(source);
+      // fi has no matching if, so no pairs
+      assertNoBlocks(pairs);
+    });
+  });
 });

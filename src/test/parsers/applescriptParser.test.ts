@@ -436,4 +436,82 @@ end tell`;
       assertTokenPosition(pairs[0].closeKeyword, 2, 0);
     });
   });
+
+  suite('Keyword as substring of identifier', () => {
+    test('should not match repeat inside repetition', () => {
+      const source = `tell application "Finder"
+  set repetition to 5
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should not match if inside notification', () => {
+      const source = `tell application "Finder"
+  set notification to "hello"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should not match end inside blender', () => {
+      const source = `tell application "Finder"
+  set blender to 1
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Handler definitions (to/on at line start)', () => {
+    test('should parse to handler at line start', () => {
+      const source = `to showMessage(msg)
+  display dialog msg
+end showMessage`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+
+    test('should not parse to in set statement as block', () => {
+      const source = `tell application "Finder"
+  set x to 5
+  set y to 10
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should parse on handler at line start', () => {
+      const source = `on run
+  display dialog "Hello"
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not parse on in middle of line as block', () => {
+      const source = `tell application "Finder"
+  click on button 1
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Coverage: compound keyword word boundary check', () => {
+    test('should not match end tell compound when followed by word char', () => {
+      // Tests the word boundary check for compound keywords
+      // "end telling" starts with "end tell" but continues with "i"
+      const source = 'tell application "Finder"\n  end telling\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end');
+    });
+
+    test('should not match on error compound when followed by word char', () => {
+      // "on errors" starts with "on error" but continues with "s"
+      const source = 'tell application "Finder"\n  on errors\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
 });

@@ -198,6 +198,20 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           }
 
           const type = this.getTokenType(keyword);
+
+          // 'to' and 'on' are block openers only at line start (handler defs)
+          if (type === 'block_open' && (keyword === 'to' || keyword === 'on')) {
+            let lineStart = i;
+            while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+              lineStart--;
+            }
+            if (!/^\s*$/.test(source.substring(lineStart, i))) {
+              i = endPos;
+              matched = true;
+              break;
+            }
+          }
+
           const { line, column } = this.getLineAndColumn(i, newlinePositions);
 
           tokens.push({
