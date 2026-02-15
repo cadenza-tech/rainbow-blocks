@@ -7,6 +7,7 @@ import {
   assertNestLevel,
   assertNoBlocks,
   assertSingleBlock,
+  assertTokenPosition,
   assertTokens
 } from '../helpers/parserTestHelpers';
 
@@ -92,6 +93,117 @@ end`;
       const source = 'if x end';
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 0);
+    });
+  });
+
+  suite('Edge cases', () => {
+    test('should handle CRLF line endings', () => {
+      const source = 'if true\r\nelse\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should handle keyword at position 0', () => {
+      const source = 'if\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+
+    test('should handle keyword at EOF without trailing newline', () => {
+      const source = 'if\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle deeply nested blocks (50 levels)', () => {
+      const opens = Array(50).fill('if').join('\n');
+      const closes = Array(50).fill('end').join('\n');
+      const source = `${opens}\n${closes}`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 50);
+      // Innermost should have nest level 49
+      const innermost = pairs.find((p) => p.nestLevel === 49);
+      assert.ok(innermost, 'Should have block at nest level 49');
+    });
+
+    test('should handle only close keywords (no opens)', () => {
+      const source = 'end\nend\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle only open keywords (no closes)', () => {
+      const source = 'if\nif\nif';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle unicode characters before keywords', () => {
+      const source = 'x = "café"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle adjacent blocks with no gap', () => {
+      const source = 'if\nend\nif\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'if', 0);
+    });
+
+    test('should handle keyword immediately after keyword', () => {
+      const source = 'if\ndo\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle whitespace-only input', () => {
+      const source = '   \n\t\n   ';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle single character input', () => {
+      const pairs = parser.parse('x');
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle keyword as entire input', () => {
+      const pairs = parser.parse('if');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match keyword inside identifier', () => {
+      const source = 'endif\ndo_something\nif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle CR-only line endings', () => {
+      const source = 'if true\rdo\r  x\rend\rend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // Verify tokens have correct line numbers with \r-only
+      assertTokenPosition(pairs[1].openKeyword, 0, 0); // if on line 0
+      assertTokenPosition(pairs[0].openKeyword, 1, 0); // do on line 1
+    });
+
+    test('should compute correct line numbers with CR-only line endings', () => {
+      const source = 'if true\rdo\rend\rend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // do on line 1, its end on line 2
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.ok(doPair);
+      assert.strictEqual(doPair.openKeyword.line, 1);
+      assert.strictEqual(doPair.closeKeyword.line, 2);
+      // if on line 0, its end on line 3
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair);
+      assert.strictEqual(ifPair.openKeyword.line, 0);
+      assert.strictEqual(ifPair.closeKeyword.line, 3);
     });
   });
 });

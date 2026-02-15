@@ -220,6 +220,9 @@ export abstract class BaseBlockParser {
     for (let i = 0; i < source.length; i++) {
       if (source[i] === '\n') {
         positions.push(i);
+      } else if (source[i] === '\r' && (i + 1 >= source.length || source[i + 1] !== '\n')) {
+        // CR-only line ending (not part of CRLF)
+        positions.push(i);
       }
     }
     return positions;
@@ -244,7 +247,7 @@ export abstract class BaseBlockParser {
   // Matches a single-line comment (from position to end of line)
   protected matchSingleLineComment(source: string, pos: number): ExcludedRegion {
     let end = pos;
-    while (end < source.length && source[end] !== '\n') {
+    while (end < source.length && source[end] !== '\n' && source[end] !== '\r') {
       end++;
     }
     return { start: pos, end };
@@ -252,7 +255,7 @@ export abstract class BaseBlockParser {
 
   // Checks if a position is at the start of a line
   protected isAtLineStart(source: string, pos: number): boolean {
-    return pos === 0 || source[pos - 1] === '\n';
+    return pos === 0 || source[pos - 1] === '\n' || source[pos - 1] === '\r';
   }
 
   // Escapes regex metacharacters in a string

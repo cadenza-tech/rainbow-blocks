@@ -33,8 +33,10 @@ function validateColors(colors: string[]): string[] {
 export function loadConfig(): ColorConfig {
   const config = vscode.workspace.getConfiguration('rainbowBlocks');
 
-  const colors = config.get<string[]>('colors', [...DEFAULT_COLORS]);
-  const debounceMs = config.get<number>('debounceMs', DEFAULT_DEBOUNCE_MS);
+  const rawColors = config.get<string[]>('colors', [...DEFAULT_COLORS]);
+  const colors = Array.isArray(rawColors) ? rawColors : [...DEFAULT_COLORS];
+  const rawDebounce = config.get<number>('debounceMs', DEFAULT_DEBOUNCE_MS);
+  const debounceMs = typeof rawDebounce === 'number' && !Number.isNaN(rawDebounce) ? rawDebounce : DEFAULT_DEBOUNCE_MS;
 
   const validatedColors = colors.length > 0 ? validateColors(colors) : [...DEFAULT_COLORS];
 

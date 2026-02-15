@@ -139,6 +139,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration(CONFIG_SECTION)) {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = undefined;
+        }
         currentConfig = loadConfig();
         decorator.updateConfig(currentConfig);
         updateDecorations(vscode.window.activeTextEditor);
