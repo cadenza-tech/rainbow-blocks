@@ -18,7 +18,7 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrx]/;
 
 // Characters that indicate the preceding / is division, not regex
-const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`]/;
+const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_?!)\]}"'`]/;
 
 // Keywords after which / starts a regex, not division
 const REGEX_PRECEDING_KEYWORDS = new Set([
@@ -85,6 +85,28 @@ export class CrystalBlockParser extends BaseBlockParser {
     while (i < source.length) {
       const result = this.tryMatchExcludedRegion(source, i);
       if (result) {
+        // If region starts after current position (heredoc opener line gap),
+        // scan the gap for excluded regions (comments, strings)
+        if (result.start > i) {
+          let j = i + 1;
+          while (j < result.start) {
+            // Skip '<' to avoid re-matching heredoc
+            if (source[j] === '<') {
+              j++;
+              continue;
+            }
+            const gapResult = this.tryMatchExcludedRegion(source, j);
+            if (gapResult) {
+              regions.push({
+                start: gapResult.start,
+                end: Math.min(gapResult.end, result.start)
+              });
+              j = gapResult.end;
+            } else {
+              j++;
+            }
+          }
+        }
         regions.push(result);
         i = result.end;
       } else {
@@ -110,14 +132,14 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (region) return region;
     }
 
-    // Double-quoted string
+    // Double-quoted string (with #{} interpolation support)
     if (char === '"') {
-      return this.matchQuotedString(source, pos, '"');
+      return this.matchInterpolatedString(source, pos);
     }
 
-    // Single-quoted char literal
+    // Single-quoted char literal (Crystal: only single characters)
     if (char === "'") {
-      return this.matchQuotedString(source, pos, "'");
+      return this.matchCharLiteral(source, pos);
     }
 
     // Regex literal
@@ -128,11 +150,11 @@ export class CrystalBlockParser extends BaseBlockParser {
     // Heredoc
     if (char === '<' && pos + 1 < source.length && source[pos + 1] === '<') {
       const result = this.matchHeredoc(source, pos);
-      if (result) return { start: pos, end: result.end };
+      if (result) return { start: result.contentStart, end: result.end };
     }
 
-    // Percent literals
-    if (char === '%' && pos + 1 < source.length) {
+    // Percent literals (skip modulo operator: number/identifier % delimiter)
+    if (char === '%' && pos + 1 < source.length && !this.isModuloOperator(source, pos)) {
       const result = this.matchPercentLiteral(source, pos);
       if (result) return { start: pos, end: result.end };
     }
@@ -142,9 +164,9 @@ export class CrystalBlockParser extends BaseBlockParser {
       return this.matchSymbolLiteral(source, pos);
     }
 
-    // Backtick string (command)
+    // Backtick string (command) with #{} interpolation
     if (char === '`') {
-      return this.matchQuotedString(source, pos, '`');
+      return this.matchBacktickString(source, pos);
     }
 
     return null;
@@ -218,10 +240,20 @@ export class CrystalBlockParser extends BaseBlockParser {
     return source.length;
   }
 
-  // Checks if colon starts a symbol (not ternary, named tuple key, or type annotation)
+  // Checks if colon starts a symbol (not ternary, named tuple key, type annotation, or scope resolution)
   private isSymbolStart(source: string, pos: number): boolean {
     const nextChar = source[pos + 1];
     if (!nextChar) {
+      return false;
+    }
+
+    // :: is scope resolution (e.g., Foo::Bar), not a symbol
+    if (nextChar === ':') {
+      return false;
+    }
+
+    // Check if preceded by : (second half of ::)
+    if (pos > 0 && source[pos - 1] === ':') {
       return false;
     }
 
@@ -282,23 +314,92 @@ export class CrystalBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Filters out keywords used as named tuple keys (e.g., { if: value })
+  // Filters out keywords used as named tuple keys, rescue modifiers, and method calls
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
 
-    // Filter out tokens immediately followed by colon
     return tokens.filter((token) => {
-      const afterKeyword = source[token.endOffset];
-      return afterKeyword !== ':';
+      // Filter out dot-preceded tokens (method calls like obj.end, obj.rescue)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
+      }
+      // Filter out tokens immediately followed by colon (named tuple key)
+      if (source[token.endOffset] === ':') {
+        return false;
+      }
+      // Filter out postfix rescue modifier (e.g., risky rescue nil)
+      if (token.type === 'block_middle' && token.value === 'rescue') {
+        return !this.isPostfixRescue(source, token.startOffset, excludedRegions);
+      }
+      // Filter out 'in' after 'for' on the same line (for x in collection)
+      if (token.type === 'block_middle' && token.value === 'in') {
+        return !this.isForIn(source, token.startOffset, excludedRegions);
+      }
+      return true;
     });
   }
 
-  // Matches regex literal
+  // Checks if 'rescue' is used as a postfix modifier (e.g., risky rescue nil)
+  private isPostfixRescue(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    let before = source.slice(lineStart, position);
+    let lastSemicolon = -1;
+    for (let i = before.length - 1; i >= 0; i--) {
+      if (before[i] === ';' && !this.isInExcludedRegion(lineStart + i, excludedRegions)) {
+        lastSemicolon = i;
+        break;
+      }
+    }
+    if (lastSemicolon >= 0) {
+      before = before.slice(lastSemicolon + 1);
+    }
+    before = before.trim();
+    if (before.length === 0) return false;
+    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
+    for (const kw of blockKeywords) {
+      if (before === kw || before.endsWith(` ${kw}`) || before.endsWith(`\t${kw}`)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Checks if 'in' is part of a for-in loop (for x in collection)
+  private isForIn(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    let before = source.slice(lineStart, position);
+    // Find last semicolon not in excluded region
+    let lastSemicolon = -1;
+    for (let i = before.length - 1; i >= 0; i--) {
+      if (before[i] === ';' && !this.isInExcludedRegion(lineStart + i, excludedRegions)) {
+        lastSemicolon = i;
+        break;
+      }
+    }
+    if (lastSemicolon >= 0) {
+      before = before.slice(lastSemicolon + 1);
+    }
+    // Check if this statement starts with 'for'
+    return /^\s*for\b/.test(before);
+  }
+
+  // Matches regex literal with #{} interpolation
   private matchRegexLiteral(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
         i += 2;
+        continue;
+      }
+      // Handle #{} interpolation inside regex
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipRegexInterpolation(source, i + 2);
         continue;
       }
       if (source[i] === '/') {
@@ -309,13 +410,57 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
         return { start: pos, end: i };
       }
-      if (source[i] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         // Unterminated regex
         return { start: pos, end: i };
       }
       i++;
     }
     return { start: pos, end: i };
+  }
+
+  // Skips #{} interpolation inside regex, tracking brace depth
+  private skipRegexInterpolation(source: string, pos: number): number {
+    let depth = 1;
+    let i = pos;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle # line comments (but not #{} interpolation)
+      if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+        while (i < source.length && source[i] !== '\n') {
+          i++;
+        }
+        continue;
+      }
+      if (source[i] === '{') {
+        depth++;
+      } else if (source[i] === '}') {
+        depth--;
+      } else if (source[i] === '"') {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === "'") {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === '`') {
+        i = this.skipNestedBacktickString(source, i);
+        continue;
+      } else if (source[i] === '/' && this.isRegexInInterpolation(source, i, pos)) {
+        i = this.skipNestedRegex(source, i);
+        continue;
+      } else if (source[i] === '%' && i + 1 < source.length && !this.isModuloOperator(source, i)) {
+        const result = this.matchPercentLiteral(source, i);
+        if (result) {
+          i = result.end;
+          continue;
+        }
+      }
+      i++;
+    }
+    return i;
   }
 
   // Checks if slash is regex start (not division)
@@ -351,67 +496,102 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Matches heredoc (Crystal doesn't have <<~ like Ruby)
-  private matchHeredoc(source: string, pos: number): { end: number } | null {
-    // Pattern requires matching quotes: <<'EOF', <<"EOF", <<EOF (no quotes)
-    const heredocPattern = /<<(-)?(['"])([A-Za-z_][A-Za-z0-9_]*)\2|<<(-)?([A-Za-z_][A-Za-z0-9_]*)/g;
+  private matchHeredoc(source: string, pos: number): { contentStart: number; end: number } | null {
+    // Crystal requires <<- (with dash) for heredocs; <<IDENT is not valid
+    if (pos + 2 >= source.length || source[pos + 2] !== '-') {
+      return null;
+    }
+
+    // Pattern requires dash: <<-'EOF', <<-"EOF", <<-EOF
+    const heredocPattern = /<<-(['"])([A-Za-z_][A-Za-z0-9_]*)\1|<<-([A-Za-z_][A-Za-z0-9_]*)/g;
 
     // Find line end
     let lineEnd = pos;
-    while (lineEnd < source.length && source[lineEnd] !== '\n') {
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
       lineEnd++;
     }
 
     // Collect all heredoc terminators on this line
     const lineContent = source.slice(pos, lineEnd);
-    const terminators: { terminator: string; allowIndented: boolean }[] = [];
+    const terminators: { terminator: string }[] = [];
 
     for (const match of lineContent.matchAll(heredocPattern)) {
-      // Pattern has two alternatives: quoted (match[3]) or unquoted (match[5])
-      const terminator = match[3] || match[5];
-      const flag = match[1] || match[4];
-      terminators.push({
-        terminator,
-        allowIndented: flag === '-'
-      });
+      // Pattern has two alternatives: quoted (match[2]) or unquoted (match[3])
+      const terminator = match[2] || match[3];
+      terminators.push({ terminator });
     }
 
     if (terminators.length === 0) return null;
 
+    // contentStart is the position after the newline ending the heredoc opener line
+    let contentStart = lineEnd;
+    if (contentStart < source.length) {
+      // Skip \r\n or \r or \n
+      if (source[contentStart] === '\r' && contentStart + 1 < source.length && source[contentStart + 1] === '\n') {
+        contentStart += 2;
+      } else {
+        contentStart += 1;
+      }
+    }
+
     // Search for terminators after current line
-    let i = lineEnd;
-    if (i < source.length) i++;
+    let i = contentStart;
 
     let terminatorIndex = 0;
 
     while (i < source.length && terminatorIndex < terminators.length) {
       const contentLineStart = i;
       let contentLineEnd = i;
-      while (contentLineEnd < source.length && source[contentLineEnd] !== '\n') {
+      while (contentLineEnd < source.length && source[contentLineEnd] !== '\n' && source[contentLineEnd] !== '\r') {
         contentLineEnd++;
       }
 
-      // Handle CRLF
-      let line = source.slice(contentLineStart, contentLineEnd);
-      if (line.endsWith('\r')) {
-        line = line.slice(0, -1);
-      }
+      const line = source.slice(contentLineStart, contentLineEnd);
 
-      const currentTerminator = terminators[terminatorIndex];
-      const trimmedLine = currentTerminator.allowIndented ? line.trimStart() : line;
+      // Crystal <<- always allows indented terminators
+      const trimmedLine = line.trimStart();
 
-      if (trimmedLine === currentTerminator.terminator) {
+      if (trimmedLine === terminators[terminatorIndex].terminator) {
         terminatorIndex++;
         if (terminatorIndex === terminators.length) {
-          return {
-            end: contentLineEnd + (contentLineEnd < source.length ? 1 : 0)
-          };
+          let end = contentLineEnd;
+          if (end < source.length) {
+            // Skip \r\n or \r or \n
+            if (source[end] === '\r' && end + 1 < source.length && source[end + 1] === '\n') {
+              end += 2;
+            } else {
+              end += 1;
+            }
+          }
+          return { contentStart, end };
         }
       }
 
-      i = contentLineEnd + 1;
+      // Advance past line ending (\r\n or \r or \n)
+      if (contentLineEnd < source.length) {
+        if (source[contentLineEnd] === '\r' && contentLineEnd + 1 < source.length && source[contentLineEnd + 1] === '\n') {
+          i = contentLineEnd + 2;
+        } else {
+          i = contentLineEnd + 1;
+        }
+      } else {
+        i = contentLineEnd;
+      }
     }
 
-    return { end: source.length };
+    return { contentStart, end: source.length };
+  }
+
+  // Checks if % at position is a modulo operator (not a percent literal)
+  private isModuloOperator(source: string, pos: number): boolean {
+    if (pos === 0) return false;
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 0) return false;
+    // After identifier, number, closing bracket, string/regex close, % is modulo
+    return /[a-zA-Z0-9_)\]}"'`/]/.test(source[i]);
   }
 
   // Matches percent literal (%q, %Q, %w, %W, etc)
@@ -430,6 +610,15 @@ export class CrystalBlockParser extends BaseBlockParser {
 
     if (!closeDelimiter) return null;
 
+    // Specifiers that support #{} interpolation: %Q, %W, %I, %x, %r, and bare %
+    const interpolating =
+      !PERCENT_SPECIFIERS_PATTERN.test(specifier) ||
+      specifier === 'Q' ||
+      specifier === 'W' ||
+      specifier === 'I' ||
+      specifier === 'x' ||
+      specifier === 'r';
+
     let i = delimiterPos + 1;
     let depth = 1;
     const isPaired = openDelimiter !== closeDelimiter;
@@ -437,6 +626,11 @@ export class CrystalBlockParser extends BaseBlockParser {
     while (i < source.length && depth > 0) {
       if (source[i] === '\\' && i + 1 < source.length) {
         i += 2;
+        continue;
+      }
+      // Handle #{} interpolation in interpolating percent literals
+      if (interpolating && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
         continue;
       }
       if (isPaired && source[i] === openDelimiter) {
@@ -450,6 +644,239 @@ export class CrystalBlockParser extends BaseBlockParser {
     return { end: i };
   }
 
+  // Matches double-quoted string with #{} interpolation
+  private matchInterpolatedString(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle #{} interpolation
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '"') {
+        return { start: pos, end: i + 1 };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Skips #{} interpolation block, tracking brace depth
+  private skipInterpolation(source: string, pos: number): number {
+    let depth = 1;
+    let i = pos;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle # line comments (but not #{} interpolation)
+      if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+        while (i < source.length && source[i] !== '\n') {
+          i++;
+        }
+        continue;
+      }
+      if (source[i] === '{') {
+        depth++;
+      } else if (source[i] === '}') {
+        depth--;
+      } else if (source[i] === '"') {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === "'") {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === '`') {
+        i = this.skipNestedBacktickString(source, i);
+        continue;
+      } else if (source[i] === '/' && this.isRegexInInterpolation(source, i, pos)) {
+        i = this.skipNestedRegex(source, i);
+        continue;
+      } else if (source[i] === '%' && i + 1 < source.length && !this.isModuloOperator(source, i)) {
+        const result = this.matchPercentLiteral(source, i);
+        if (result) {
+          i = result.end;
+          continue;
+        }
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Checks if / inside interpolation starts a regex (not division)
+  private isRegexInInterpolation(source: string, pos: number, interpStart: number): boolean {
+    if (pos === interpStart) return true;
+    let j = pos - 1;
+    while (j >= interpStart && (source[j] === ' ' || source[j] === '\t')) {
+      j--;
+    }
+    if (j < interpStart) return true;
+    return /[(,=!~|&{[:]/.test(source[j]);
+  }
+
+  // Skips a regex literal inside interpolation
+  private skipNestedRegex(source: string, pos: number): number {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle #{} inside regex
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '/') {
+        i++;
+        // Skip regex flags
+        while (i < source.length && REGEX_FLAGS_PATTERN.test(source[i])) {
+          i++;
+        }
+        return i;
+      }
+      if (source[i] === '\n' || source[i] === '\r') {
+        return i;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Skips a nested string inside interpolation
+  private skipNestedString(source: string, pos: number): number {
+    const quote = source[pos];
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{' && quote !== "'") {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === quote) {
+        return i + 1;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Skips a backtick string inside interpolation (supports #{} interpolation)
+  private skipNestedBacktickString(source: string, pos: number): number {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '`') {
+        return i + 1;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Matches backtick command string with #{} interpolation
+  private matchBacktickString(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle #{} interpolation
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '`') {
+        return { start: pos, end: i + 1 };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Matches Crystal char literal: 'X', '\X', '\uXXXX', '\u{XXXX}'
+  private matchCharLiteral(source: string, pos: number): ExcludedRegion | null {
+    let i = pos + 1;
+    if (i >= source.length) return null;
+
+    if (source[i] === '\\') {
+      // Escape sequence: '\n', '\t', '\uXXXX', '\u{...}', etc.
+      i++;
+      if (i >= source.length) return null;
+      if (source[i] === 'u') {
+        i++;
+        if (i < source.length && source[i] === '{') {
+          // \u{XXXX} form
+          i++;
+          while (i < source.length && source[i] !== '}') {
+            i++;
+          }
+          if (i < source.length) i++; // skip '}'
+        } else {
+          // \uXXXX form (4 hex digits)
+          const end = Math.min(i + 4, source.length);
+          while (i < end && /[0-9a-fA-F]/.test(source[i])) {
+            i++;
+          }
+        }
+      } else if (source[i] === 'x') {
+        // \xNN form (2 hex digits)
+        i++;
+        const end = Math.min(i + 2, source.length);
+        while (i < end && /[0-9a-fA-F]/.test(source[i])) {
+          i++;
+        }
+      } else if (source[i] === 'o') {
+        // \oNNN form (octal digits)
+        i++;
+        while (i < source.length && /[0-7]/.test(source[i])) {
+          i++;
+        }
+      } else if (/[0-7]/.test(source[i])) {
+        // \NNN form (octal digits, legacy)
+        while (i < source.length && /[0-7]/.test(source[i])) {
+          i++;
+        }
+      } else {
+        // Single escape char: '\n', '\t', '\\', '\0', etc.
+        i++;
+      }
+    } else {
+      // Single character: 'a', 'z', '😀', etc.
+      // Handle surrogate pairs (characters outside BMP)
+      const code = source.codePointAt(i);
+      if (code !== undefined && code > 0xffff) {
+        i += 2;
+      } else {
+        i++;
+      }
+    }
+
+    if (i < source.length && source[i] === "'") {
+      return { start: pos, end: i + 1 };
+    }
+
+    // Not a valid char literal, don't exclude
+    return null;
+  }
+
   // Returns matching close delimiter for percent literals
   private getMatchingDelimiter(open: string): string | null {
     if (open in PAIRED_DELIMITERS) {
@@ -459,21 +886,89 @@ export class CrystalBlockParser extends BaseBlockParser {
     return /[^\sa-zA-Z0-9]/.test(open) ? open : null;
   }
 
-  // Validates block open keywords, excluding postfix conditionals
+  // Validates block open keywords, excluding postfix conditionals and loop do
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Only if and unless can be postfix conditionals in Crystal
-    if (keyword !== 'if' && keyword !== 'unless') {
+    // Reject keywords preceded by dot (method calls like obj.class, obj.begin)
+    if (position > 0 && source[position - 1] === '.') {
+      return false;
+    }
+
+    // 'do' as loop separator (while/until/for condition do) is not a block
+    if (keyword === 'do') {
+      return !this.isLoopDo(source, position, excludedRegions);
+    }
+
+    // 'abstract def' has no body and no 'end'
+    if (keyword === 'def') {
+      const textBefore = source.slice(0, position);
+      if (/\babstract[ \t]+$/.test(textBefore)) {
+        return false;
+      }
+    }
+
+    // if, unless, while, until can be postfix conditionals in Crystal
+    if (!['if', 'unless', 'while', 'until'].includes(keyword)) {
       return true;
     }
 
     return !this.isPostfixConditional(source, position, excludedRegions);
   }
 
+  // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
+  private isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+
+    let beforeDo = source.slice(lineStart, position);
+    let lastValidSemicolon = -1;
+    for (let i = beforeDo.length - 1; i >= 0; i--) {
+      if (beforeDo[i] === ';') {
+        const absolutePos = lineStart + i;
+        if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
+          lastValidSemicolon = i;
+          break;
+        }
+      }
+    }
+
+    const searchStart = lastValidSemicolon >= 0 ? lineStart + lastValidSemicolon + 1 : lineStart;
+    beforeDo = source.slice(searchStart, position);
+
+    const loopPattern = /\b(while|until|for)\b/g;
+    const loopMatches = [...beforeDo.matchAll(loopPattern)];
+
+    for (const loopMatch of loopMatches) {
+      const loopAbsolutePos = searchStart + loopMatch.index;
+      if (this.isInExcludedRegion(loopAbsolutePos, excludedRegions)) {
+        continue;
+      }
+
+      const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
+      const searchRange = source.slice(afterLoopStart, position + 2);
+      const doMatches = [...searchRange.matchAll(/\bdo\b/g)];
+
+      for (const doMatch of doMatches) {
+        const doAbsolutePos = afterLoopStart + doMatch.index;
+        if (this.isInExcludedRegion(doAbsolutePos, excludedRegions)) {
+          continue;
+        }
+        if (doAbsolutePos === position) {
+          return true;
+        }
+        break;
+      }
+    }
+
+    return false;
+  }
+
   // Checks if a conditional is postfix (e.g., "return value if condition")
   private isPostfixConditional(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Find line start
     let lineStart = position;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
       lineStart--;
     }
 
@@ -507,9 +1002,15 @@ export class CrystalBlockParser extends BaseBlockParser {
     const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
 
     for (const kw of precedingBlockKeywords) {
-      if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`)) {
+      if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`) || beforeKeyword.endsWith(`\t${kw}`)) {
         return false;
       }
+    }
+
+    // ! and ? after identifier are method name suffixes (save!, valid?),
+    // not operators - the keyword IS postfix in this case
+    if (/[a-zA-Z0-9_][!?]$/.test(beforeKeyword)) {
+      return true;
     }
 
     // Operator expecting expression means not postfix
