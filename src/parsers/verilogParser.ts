@@ -381,6 +381,20 @@ export class VerilogBlockParser extends BaseBlockParser {
                     nestLevel: stack.length
                   });
                 }
+
+                // Continue consuming chained control keywords up the stack
+                // e.g., always -> if -> begin: after closing if, also close always
+                let nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
+                while (nextCheckIndex >= 0 && CONTROL_KEYWORDS.includes(stack[nextCheckIndex].token.value)) {
+                  const chainedBlock = stack.splice(nextCheckIndex, 1)[0];
+                  pairs.push({
+                    openKeyword: chainedBlock.token,
+                    closeKeyword: token,
+                    intermediates: chainedBlock.intermediates,
+                    nestLevel: stack.length
+                  });
+                  nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
+                }
               }
             }
           } else if (validOpeners) {

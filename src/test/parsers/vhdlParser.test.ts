@@ -859,6 +859,62 @@ end process;`;
     });
   });
 
+  suite('matchVhdlString CR-only line endings', () => {
+    test('should terminate string at CR-only line ending', () => {
+      const source = "signal msg : string := \"if then end if\r\nif condition then\nend if;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not leak string across CR-only line boundary', () => {
+      const source = "signal s : string := \"entity\rif a then\nend if;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Chained conditional signal assignment', () => {
+    test('should not treat when/else in chained signal assignment as intermediates', () => {
+      const source = `process (clk)
+begin
+  sig <= a when c1 else b when c2 else c;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+      const nonBeginIntermediates = pairs[0].intermediates.filter((i) => i.value !== 'begin');
+      assert.strictEqual(nonBeginIntermediates.length, 0, 'when/else from chained signal assignment should not be intermediates');
+    });
+
+    test('should not treat when/else in multi-line chained signal assignment as intermediates', () => {
+      const source = `process (clk)
+begin
+  sig <= a when c1
+         else b when c2
+         else c;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+      const nonBeginIntermediates = pairs[0].intermediates.filter((i) => i.value !== 'begin');
+      assert.strictEqual(nonBeginIntermediates.length, 0, 'when/else from multi-line chained signal assignment should not be intermediates');
+    });
+
+    test('should still treat else as intermediate in if block (then acts as boundary)', () => {
+      const source = `process is
+begin
+  sig <= '1';
+  if ready then
+    sig <= '0';
+  else
+    null;
+  end if;
+end process;`;
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(ifPair);
+      assert.ok(ifPair.intermediates.some((i) => i.value.toLowerCase() === 'else'), 'else should still be intermediate of if block');
+    });
+  });
+
   suite('stripTrailingComment position with indentation', () => {
     test('should handle indented wait for with trailing comment', () => {
       const source = `process

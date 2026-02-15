@@ -291,7 +291,7 @@ export class VhdlBlockParser extends BaseBlockParser {
         return { start: pos, end: i + 1 };
       }
       // String cannot span multiple lines in VHDL
-      if (source[i] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         return { start: pos, end: i };
       }
       i++;
@@ -431,7 +431,10 @@ export class VhdlBlockParser extends BaseBlockParser {
         return true;
       }
       // Stop at block boundary keywords that start a new context
-      for (const boundary of ['then', 'begin', 'loop', 'generate', 'else', 'elsif', 'is']) {
+      // Note: 'else'/'elsif' are NOT boundaries here because chained conditional
+      // signal assignments use else (e.g., sig <= a when c1 else b when c2 else c;)
+      // The 'then' keyword already acts as a boundary for if branches.
+      for (const boundary of ['then', 'begin', 'loop', 'generate', 'is']) {
         const len = boundary.length;
         if (i >= len - 1) {
           const start = i - len + 1;

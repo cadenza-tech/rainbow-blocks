@@ -541,11 +541,12 @@ endclocking`;
 
     test('should handle nested control keywords', () => {
       // Tests the control keyword lookahead matching another control keyword
+      // always -> if -> begin chain: end closes begin + if + always (3 pairs)
       const source = `always @(posedge clk) if (enable) begin
   q <= d;
 end`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertBlockCount(pairs, 3);
     });
 
     test('should skip excluded region in control keyword validation', () => {
@@ -581,11 +582,12 @@ end`;
     });
 
     test('should handle nested parentheses in if condition', () => {
+      // always -> if -> begin chain: end closes begin + if + always (3 pairs)
       const source = `always @(posedge clk) if ((a && b)) begin
   q <= d;
 end`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertBlockCount(pairs, 3);
     });
   });
 
@@ -765,6 +767,71 @@ endmodule`;
       const pairs = parser.parse(source);
       const modulePair = findBlock(pairs, 'module');
       assert.ok(modulePair);
+    });
+  });
+
+  suite('Chained control keywords before begin', () => {
+    test('should pair always and if when chained before begin', () => {
+      const source = `module test;
+  always @(posedge clk) if (enable) begin
+    q <= d;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired');
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if should be paired');
+      const beginPair = findBlock(pairs, 'begin');
+      assert.ok(beginPair, 'begin should be paired');
+    });
+
+    test('should pair always_ff and if when chained before begin', () => {
+      const source = `always_ff @(posedge clk) if (reset) begin
+  q <= 0;
+end`;
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always_ff');
+      assert.ok(alwaysPair, 'always_ff should be paired');
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if should be paired');
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should pair always_comb and for when chained before begin', () => {
+      const source = `always_comb for (i = 0; i < 4; i = i + 1) begin
+  sum = sum + data[i];
+end`;
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always_comb');
+      assert.ok(alwaysPair, 'always_comb should be paired');
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'for should be paired');
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should not consume non-control keyword in chain', () => {
+      const source = `module test;
+  if (cond) begin
+    x = 1;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      const modulePair = findBlock(pairs, 'module');
+      assert.ok(modulePair, 'module should be paired with endmodule, not consumed by end');
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if should be paired');
+    });
+
+    test('should handle else-if chain with always before', () => {
+      const source = `always @(posedge clk) if (a) begin
+  x <= 1;
+end else if (b) begin
+  x <= 2;
+end`;
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired');
     });
   });
 
