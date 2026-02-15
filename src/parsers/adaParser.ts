@@ -9,11 +9,14 @@ const COMPOUND_END_TYPES = ['if', 'loop', 'case', 'select', 'record', 'procedure
 // Keywords that can be followed by 'loop'
 const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
 
+// Keywords after 'is' that indicate a non-body declaration
+const IS_NON_BODY_KEYWORDS = ['abstract', 'separate', 'new', 'null'];
+
 // Keywords that can precede 'begin' and are closed together with it
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry', 'accept'];
 
 // Pattern to match compound end keywords (case insensitive)
-const COMPOUND_END_PATTERN = new RegExp(`\\bend\\s+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
+const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 export class AdaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -41,23 +44,141 @@ export class AdaBlockParser extends BaseBlockParser {
 
   // Validates if 'loop' keyword is a valid block opener
   // 'loop' is invalid if preceded by 'for' or 'while' on the same logical statement
-  protected isValidBlockOpen(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
-    if (keyword.toLowerCase() !== 'loop') {
+  protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const lowerKeyword = keyword.toLowerCase();
+
+    // 'entry' declarations (entry Name; or entry Name(params);) are not blocks
+    // Only entry bodies (entry Name ... is begin ... end) are blocks
+    if (lowerKeyword === 'entry') {
+      let j = position + keyword.length;
+      let parenDepth = 0;
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          j++;
+          continue;
+        }
+        if (source[j] === '(') parenDepth++;
+        else if (source[j] === ')') parenDepth--;
+        else if (parenDepth === 0) {
+          if (source[j] === ';') return false;
+          if (
+            source.slice(j, j + 2).toLowerCase() === 'is' &&
+            (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) &&
+            (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))
+          ) {
+            return true;
+          }
+        }
+        j++;
+      }
+      return false;
+    }
+
+    // 'function'/'procedure' after 'access' are access subprogram types, not blocks
+    // Declarations without body (ending with ; before is) are not blocks
+    if (lowerKeyword === 'function' || lowerKeyword === 'procedure') {
+      // Check for 'access' keyword before, ensuring it's not in an excluded region
+      const textBefore = source.slice(0, position);
+      const accessMatch = textBefore.match(/\b(access)\s*$/i);
+      if (accessMatch) {
+        const accessPos = position - accessMatch[0].length + accessMatch[0].indexOf(accessMatch[1]);
+        if (!this.isInExcludedRegion(accessPos, excludedRegions)) {
+          return false;
+        }
+      }
+      // Scan forward: if ';' comes before 'is', it's a declaration, not a body
+      let j = position + keyword.length;
+      let parenDepth = 0;
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          j++;
+          continue;
+        }
+        if (source[j] === '(') parenDepth++;
+        else if (source[j] === ')') parenDepth--;
+        else if (parenDepth === 0) {
+          if (source[j] === ';') return false;
+          if (
+            source.slice(j, j + 2).toLowerCase() === 'is' &&
+            (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) &&
+            (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))
+          ) {
+            // Check if 'is' is followed by abstract/separate/new/null
+            // Skip whitespace including newlines for multi-line cases
+            let k = j + 2;
+            while (k < source.length && /[ \t\r\n]/.test(source[k])) {
+              k++;
+            }
+            const afterIs = source.slice(k).match(/^([a-zA-Z_]\w*)/);
+            if (afterIs && IS_NON_BODY_KEYWORDS.includes(afterIs[1].toLowerCase())) {
+              return false;
+            }
+            break;
+          }
+        }
+        j++;
+      }
+    }
+
+    if (lowerKeyword !== 'loop') {
       return true;
     }
 
     // Look backwards to find if 'for' or 'while' precedes this 'loop'
+    // Check current line and previous lines for multi-line for/while statements
     const textBefore = source.slice(0, position);
-    // Find last newline or start
-    const lastNewline = textBefore.lastIndexOf('\n');
-    const lineStart = lastNewline + 1;
-    const lineText = textBefore.slice(lineStart).toLowerCase();
+    // Split on \r\n, \r, or \n to handle all line ending types
+    const lineParts = textBefore.split(/\r\n|\r|\n/);
+    const maxLines = Math.min(lineParts.length, 5);
 
-    // Check if line starts with 'for' or 'while' (possibly with leading whitespace)
-    for (const prefix of LOOP_PREFIX_KEYWORDS) {
-      const pattern = new RegExp(`^\\s*${prefix}\\b`);
-      if (pattern.test(lineText)) {
-        return false;
+    // Calculate absolute offset for the start of each line by scanning backward
+    // We use findLineStart to correctly handle any line ending type
+    let lineStartOffset = textBefore.length;
+    for (let idx = 0; idx < maxLines; idx++) {
+      const lineIdx = lineParts.length - 1 - idx;
+      const lineText = lineParts[lineIdx];
+      lineStartOffset -= lineText.length;
+      if (idx > 0) {
+        // Account for the line terminator (1 for \n or \r, 2 for \r\n)
+        // Check what's at lineStartOffset - 1 and lineStartOffset - 2
+        if (lineStartOffset >= 2 && source[lineStartOffset - 2] === '\r' && source[lineStartOffset - 1] === '\n') {
+          lineStartOffset -= 2;
+        } else {
+          lineStartOffset -= 1;
+        }
+      }
+
+      // Count non-excluded for/while keywords on this line
+      let prefixCount = 0;
+      for (const prefix of LOOP_PREFIX_KEYWORDS) {
+        const pattern = new RegExp(`\\b${prefix}\\b`, 'gi');
+        for (const prefixMatch of lineText.matchAll(pattern)) {
+          const absolutePos = lineStartOffset + prefixMatch.index;
+          if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
+            prefixCount++;
+          }
+        }
+      }
+      if (prefixCount > 0) {
+        // Count non-excluded 'loop' keywords on the same line
+        let loopCount = 0;
+        for (const loopMatch of lineText.matchAll(/\bloop\b/gi)) {
+          const loopAbsPos = lineStartOffset + loopMatch.index;
+          if (!this.isInExcludedRegion(loopAbsPos, excludedRegions)) {
+            loopCount++;
+          }
+        }
+        // If all for/while are already paired with loops, this loop is standalone
+        return loopCount >= prefixCount;
+      }
+
+      // Stop at a previous statement (indicated by semicolon not in excluded region)
+      if (idx > 0) {
+        for (let ci = 0; ci < lineText.length; ci++) {
+          if (lineText[ci] === ';' && !this.isInExcludedRegion(lineStartOffset + ci, excludedRegions)) {
+            return true;
+          }
+        }
       }
     }
 
@@ -117,7 +238,7 @@ export class AdaBlockParser extends BaseBlockParser {
         return { start: pos, end: i + 1 };
       }
       // String cannot span multiple lines in Ada
-      if (source[i] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         return { start: pos, end: i };
       }
       i++;
@@ -127,14 +248,19 @@ export class AdaBlockParser extends BaseBlockParser {
   }
 
   // Matches character literal: 'x' (single character only)
+  // Also handles attribute tick: Type'Attribute (skip the attribute name)
   private matchCharacterLiteral(source: string, pos: number): ExcludedRegion {
     // Character literal is 'x' where x is a single character
     // It could also be an attribute tick, so we need to be careful
     if (pos + 2 < source.length && source[pos + 2] === "'") {
       return { start: pos, end: pos + 3 };
     }
-    // Not a character literal, might be attribute tick
-    return { start: pos, end: pos + 1 };
+    // Attribute tick: skip the attribute name to avoid matching keywords
+    let i = pos + 1;
+    while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
+      i++;
+    }
+    return { start: pos, end: i };
   }
 
   // Override tokenize to handle compound end keywords and case insensitivity
@@ -179,6 +305,44 @@ export class AdaBlockParser extends BaseBlockParser {
 
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {
         continue;
+      }
+
+      // Skip 'is' in type/subtype declarations (type T is ... / subtype S is ...)
+      // Also handles multi-line: type T\n  is range 1..100;
+      if (type === 'block_middle' && keyword.toLowerCase() === 'is') {
+        const lineStart = this.findLineStart(source, startOffset);
+        const lineBefore = source.slice(lineStart, startOffset).toLowerCase().trimStart();
+        if (/^(type|subtype)\b/.test(lineBefore)) {
+          continue;
+        }
+        // Check previous lines if current line has only whitespace before 'is'
+        if (lineBefore.length === 0) {
+          let scanPos = lineStart - 1;
+          // Skip line terminator (\n, \r\n, or \r)
+          if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+          if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+          let isTypeDecl = false;
+          while (scanPos >= 0) {
+            const prevStart = this.findLineStart(source, scanPos);
+            const prevLine = source
+              .slice(prevStart, scanPos + 1)
+              .toLowerCase()
+              .trimStart();
+            if (prevLine.length > 0) {
+              if (/^(type|subtype)\b/.test(prevLine)) {
+                isTypeDecl = true;
+              }
+              break;
+            }
+            // Move past line terminator to previous line
+            scanPos = prevStart - 1;
+            if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+            if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+          }
+          if (isTypeDecl) {
+            continue;
+          }
+        }
       }
 
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
@@ -252,7 +416,14 @@ export class AdaBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
-            stack[stack.length - 1].intermediates.push(token);
+            // 'or' is only a valid intermediate for 'select' blocks
+            if (token.value.toLowerCase() === 'or') {
+              if (stack[stack.length - 1].token.value.toLowerCase() === 'select') {
+                stack[stack.length - 1].intermediates.push(token);
+              }
+            } else {
+              stack[stack.length - 1].intermediates.push(token);
+            }
           }
           break;
 
@@ -260,8 +431,9 @@ export class AdaBlockParser extends BaseBlockParser {
           const closeValue = token.value.toLowerCase();
 
           // Check if it's a compound end
-          if (closeValue.startsWith('end ')) {
-            const endType = closeValue.slice(4);
+          const compoundMatch = closeValue.match(/^end\s+(\S+)/);
+          if (compoundMatch) {
+            const endType = compoundMatch[1];
             let matchIndex = -1;
 
             // Special case: 'end loop' can close 'for', 'while', or 'loop'
@@ -292,28 +464,26 @@ export class AdaBlockParser extends BaseBlockParser {
             if (beginIndex >= 0) {
               // Check for context keyword immediately before begin
               const contextIndex = beginIndex - 1;
-              let contextBlock: OpenBlock | null = null;
 
               if (contextIndex >= 0 && BEGIN_CONTEXT_KEYWORDS.includes(stack[contextIndex].token.value.toLowerCase())) {
-                contextBlock = stack[contextIndex];
-              }
+                // Merge context keyword + begin into a single pair
+                const contextBlock = stack.splice(contextIndex, 1)[0];
+                // beginIndex shifted by -1 after removing contextBlock
+                const beginBlock = stack.splice(contextIndex, 1)[0];
 
-              // Close the begin block first
-              const beginBlock = stack.splice(beginIndex, 1)[0];
-              pairs.push({
-                openKeyword: beginBlock.token,
-                closeKeyword: token,
-                intermediates: beginBlock.intermediates,
-                nestLevel: stack.length
-              });
-
-              // Close context keyword if present (index shifted after splice)
-              if (contextBlock) {
-                stack.splice(contextIndex, 1);
                 pairs.push({
                   openKeyword: contextBlock.token,
                   closeKeyword: token,
-                  intermediates: contextBlock.intermediates,
+                  intermediates: [...contextBlock.intermediates, beginBlock.token, ...beginBlock.intermediates],
+                  nestLevel: stack.length
+                });
+              } else {
+                // No context keyword, just close begin
+                const beginBlock = stack.splice(beginIndex, 1)[0];
+                pairs.push({
+                  openKeyword: beginBlock.token,
+                  closeKeyword: token,
+                  intermediates: beginBlock.intermediates,
                   nestLevel: stack.length
                 });
               }
@@ -346,6 +516,17 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
     return -1;
+  }
+
+  // Finds the start of the line containing the given position
+  // Handles \n, \r\n, and \r-only line endings
+  private findLineStart(source: string, pos: number): number {
+    for (let i = pos - 1; i >= 0; i--) {
+      if (source[i] === '\n' || source[i] === '\r') {
+        return i + 1;
+      }
+    }
+    return 0;
   }
 
   // Find the last opener for 'end loop' (can be 'for', 'while', or 'loop')

@@ -85,7 +85,8 @@ begin
    X := X + 1;
 end;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'declare', 'end');
+      assertIntermediates(pairs[0], ['begin']);
     });
 
     test('should parse begin block', () => {
@@ -102,7 +103,8 @@ begin
    Put_Line("Hello");
 end Hello;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
     });
 
     test('should parse function block', () => {
@@ -111,7 +113,8 @@ begin
    return A + B;
 end Add;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
     });
 
     test('should parse package block', () => {
@@ -128,7 +131,8 @@ begin
    null;
 end My_Task;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'task', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
     });
 
     test('should parse protected block', () => {
@@ -137,7 +141,8 @@ begin
    null;
 end Semaphore;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'protected', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
     });
 
     test('should parse accept block', () => {
@@ -147,7 +152,8 @@ begin
 end;
 end My_Entry;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'accept', 'end');
+      assertIntermediates(pairs[0], ['begin']);
     });
   });
 
@@ -209,7 +215,7 @@ begin
    end loop;
 end Outer;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 4);
+      assertBlockCount(pairs, 3);
       assertNestLevel(pairs, 'procedure', 0);
     });
 
@@ -320,7 +326,7 @@ begin
    null;
 end B;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 4);
+      assertBlockCount(pairs, 2);
     });
 
     test('should handle simple end without type', () => {
@@ -348,7 +354,7 @@ exception
       Put_Line("Error");
 end Main;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 4);
+      assertBlockCount(pairs, 3);
     });
 
     test('should handle unterminated string', () => {
@@ -387,13 +393,98 @@ end procedure;`;
       assertSingleBlock(pairs, 'if', 'end procedure');
     });
 
+    test('should handle multi-line for loop', () => {
+      const source = `for I in
+   1 .. 10 loop
+   Put(I);
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
     test('should handle named end', () => {
       const source = `procedure Hello is
 begin
    Put_Line("Hello");
 end Hello;`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Entry declarations', () => {
+    test('should not treat entry declaration as block open', () => {
+      const source = `task type Worker is
+  entry Start;
+  entry Stop;
+end Worker;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'task', 'end');
+    });
+
+    test('should not treat entry with parameters as block open', () => {
+      const source = `protected type Buffer is
+  entry Read(V : out Integer);
+  entry Write(V : in Integer);
+end Buffer;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+
+    test('should parse entry body in protected body as block', () => {
+      const source = `entry Read(V : out Integer) when Count > 0 is
+begin
+  V := Value;
+end Read;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entry', 'end');
+    });
+  });
+
+  suite('Access subprogram types', () => {
+    test('should not treat access function as block open', () => {
+      const pairs = parser.parse('declare\n  type Func_Ptr is access function (X : Integer) return Integer;\nbegin\n  null;\nend;');
+      assertSingleBlock(pairs, 'declare', 'end', 0);
+    });
+
+    test('should not treat access procedure as block open', () => {
+      const pairs = parser.parse('declare\n  type Proc_Ptr is access procedure (X : Integer);\nbegin\n  null;\nend;');
+      assertSingleBlock(pairs, 'declare', 'end', 0);
+    });
+  });
+
+  suite('Boolean operator or', () => {
+    test('should not treat or in if condition as intermediate', () => {
+      const pairs = parser.parse('if A or B then\n  null;\nend if;');
+      assertSingleBlock(pairs, 'if', 'end if', 0);
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
+  });
+
+  suite('Type declaration is', () => {
+    test('should not treat is in type declaration as intermediate', () => {
+      const pairs = parser.parse('procedure Test is\n  type T is range 1 .. 10;\nbegin\n  null;\nend Test;');
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediates.includes('is') || intermediates.filter((v) => v === 'is').length === 1, 'should have at most one is intermediate');
+    });
+
+    test('should not treat is on continuation line of type declaration as intermediate', () => {
+      const source = 'procedure Test is\n  type My_Type\n    is range 1 .. 100;\nbegin\n  null;\nend Test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      // Only the 'is' after 'procedure Test' should be an intermediate, not the type 'is'
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
+    });
+
+    test('should not treat is in subtype declaration on continuation line as intermediate', () => {
+      const source = 'procedure Test is\n  subtype S\n    is Integer range 1 .. 10;\nbegin\n  null;\nend Test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
   });
 
@@ -431,6 +522,263 @@ end if;`;
 "string"`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 2);
+    });
+  });
+
+  suite('Procedure/function declarations without body', () => {
+    test('should not treat procedure declaration as block', () => {
+      const pairs = parser.parse('procedure Foo;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat function declaration as block', () => {
+      const pairs = parser.parse('function Bar return Integer;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat procedure with parameters as block', () => {
+      const pairs = parser.parse('procedure Foo(X : Integer);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat procedure with body as block', () => {
+      const source = `procedure Foo is
+begin
+  null;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Compound end with multiple spaces', () => {
+    test('should handle compound end with multiple spaces', () => {
+      const source = `if True then
+null;
+end  if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end  if');
+    });
+  });
+
+  suite('Labeled loops', () => {
+    test('should handle labeled for loop', () => {
+      const source = 'outer: for I in 1..10 loop\n  null;\nend loop;';
+      const result = parser.parse(source);
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].openKeyword.value.toLowerCase(), 'for');
+    });
+
+    test('should handle labeled while loop', () => {
+      const source = 'outer: while Condition loop\n  null;\nend loop;';
+      const result = parser.parse(source);
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].openKeyword.value.toLowerCase(), 'while');
+    });
+
+    test('should handle standalone loop after for loop', () => {
+      const source = 'for I in 1..10 loop\n  loop\n    exit;\n  end loop;\nend loop;';
+      const result = parser.parse(source);
+      assert.strictEqual(result.length, 2);
+    });
+  });
+
+  suite('Attribute tick handling', () => {
+    test('should not match keyword after attribute tick', () => {
+      const source = `for I in T'Range loop
+  Put(I);
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle attribute tick with keyword-like name', () => {
+      // Attribute name like 'Access should not create false keyword match
+      const source = `declare
+  P : access Integer := X'Access;
+begin
+  null;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'declare', 'end');
+    });
+
+    test('should handle tick followed by identifier', () => {
+      const source = `if X'Length > 0 then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: excluded region in forward scan', () => {
+    test('should handle comment in entry declaration', () => {
+      const pairs = parser.parse('protected body Obj is\n  entry E -- comment\n    (X : Integer);\nend Obj;');
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+
+    test('should handle comment in procedure declaration', () => {
+      const pairs = parser.parse('procedure Foo -- comment\n  (X : Integer);\nif True then\n  null;\nend if;');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Complex real-world scenario', () => {
+    test('should handle declare/begin/end with exception and nested if', () => {
+      const source = `procedure Main is
+  X : Integer := 0;
+begin
+  declare
+    Y : Integer := 1;
+  begin
+    if X > 0 then
+      null;
+    end if;
+  exception
+    when others =>
+      null;
+  end;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'procedure');
+      findBlock(pairs, 'declare');
+      findBlock(pairs, 'if');
+    });
+  });
+
+  suite('Multiple for/while on same line', () => {
+    test('should handle two for loops starting on same line', () => {
+      const source = `for I in 1..10 loop  for J in 1..5
+  loop
+    null;
+  end loop;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('CRLF and \\r-only line endings', () => {
+    test('should handle CRLF in loop backward scan', () => {
+      const source = 'for I in 1 .. 10\r\nloop\r\n  Put(I);\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle \\r-only in loop backward scan', () => {
+      const source = 'for I in 1 .. 10\rloop\r  Put(I);\rend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle standalone loop with CRLF', () => {
+      const source = 'X := 1;\r\nloop\r\n  exit;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+
+    test('should skip is in type declaration with \\r-only line endings', () => {
+      const source = 'procedure Test is\r  type T is range 1 .. 10;\rbegin\r  null;\rend Test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
+    });
+
+    test('should skip is on continuation line with \\r-only line endings', () => {
+      const source = 'procedure Test is\r  type My_Type\r    is range 1 .. 100;\rbegin\r  null;\rend Test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
+    });
+
+    test('should terminate string at \\r-only line ending', () => {
+      const source = 'Put("unterminated\rif Condition then\rend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should terminate string at CRLF line ending', () => {
+      const source = 'Put("unterminated\r\nif Condition then\r\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('Bug 15: loop validation with \\r-only backward scan', () => {
+      const source = 'for I in 1 .. 10\rloop\r  Put(I);\rend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('Bug 15: standalone loop with \\r-only', () => {
+      const source = 'X := 1;\rloop\r  exit;\rend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+
+    test('Bug 15: while loop with \\r-only', () => {
+      const source = 'while Count > 0\rloop\r  Count := Count - 1;\rend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end loop');
+    });
+
+    test('Bug 16: is abstract on separate lines', () => {
+      const source = `procedure Test is
+  type T is
+    abstract tagged limited private;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('Bug 16: is separate on separate lines', () => {
+      const source = `procedure Test is
+  procedure Inner is
+    separate;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('Bug 16: is new on separate lines', () => {
+      const source = `package body Test is
+  procedure Inner is
+    new Generic_Proc;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end', 0);
+    });
+
+    test('Bug 16: is null on separate lines', () => {
+      const source = `procedure Test is
+  procedure Inner is
+    null;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('Bug 16: is abstract with CRLF line endings', () => {
+      const source = 'procedure Test is\r\n  type T is\r\n    abstract tagged limited private;\r\nbegin\r\n  null;\r\nend Test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('Bug 16: is abstract with \\r-only line endings', () => {
+      const source = 'procedure Test is\r  type T is\r    abstract tagged limited private;\rbegin\r  null;\rend Test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
     });
   });
 });
