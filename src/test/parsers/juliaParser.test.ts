@@ -542,6 +542,50 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    suite('String interpolation', () => {
+      test('should handle $() interpolation with nested quotes', () => {
+        const source = 'x = "$(if true "yes" else "no" end)"';
+        const result = parser.parse(source);
+        assertNoBlocks(result);
+      });
+
+      test('should handle nested $() interpolation', () => {
+        const source = 'x = "outer $(a * "inner $(b)" * c)"';
+        const result = parser.parse(source);
+        assertNoBlocks(result);
+      });
+
+      test('should handle $() with block keywords inside', () => {
+        const source = '"result: $(if x\n  y\nend)"';
+        const result = parser.parse(source);
+        assertNoBlocks(result);
+      });
+
+      test('should handle empty interpolation', () => {
+        const source = 'x = "value: $()"';
+        const result = parser.parse(source);
+        assertNoBlocks(result);
+      });
+
+      test('should handle $() in triple-quoted string', () => {
+        const source = '"""\n$(if true\n  "yes"\nend)\n"""';
+        const result = parser.parse(source);
+        assertNoBlocks(result);
+      });
+
+      test('should still parse blocks outside interpolated strings', () => {
+        const source = '"$(x)"\nif true\nend';
+        const result = parser.parse(source);
+        assertSingleBlock(result, 'if', 'end');
+      });
+
+      test('should handle $ without parens (variable interpolation)', () => {
+        const source = 'x = "$variable"\nif true\nend';
+        const result = parser.parse(source);
+        assertSingleBlock(result, 'if', 'end');
+      });
+    });
   });
 
   suite('Special Julia constructs', () => {
@@ -827,7 +871,8 @@ end`;
       assert.strictEqual(source.slice(regions[0].start, regions[0].end), 'r"pattern"');
     });
 
-    test('should not treat identifier ending with b as prefix', () => {
+    test('should treat identifier before quote as string macro', () => {
+      // In Julia, myvarb"test" is a string macro call (@myvarb_str)
       const source = `myvarb"test"
 function foo()
 end`;
@@ -835,7 +880,7 @@ end`;
       assertBlockCount(pairs, 1);
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 1);
-      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '"test"');
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), 'myvarb"test"');
     });
 
     test('should handle prefix after operator', () => {
@@ -1241,6 +1286,14 @@ end`;
         assert.strictEqual(source.slice(regions[0].start, regions[0].end), ':=>');
       });
 
+      test('should handle symbol with @ character', () => {
+        const source = `:@something
+if true
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'if', 'end');
+      });
+
       test('should not treat colon after closing bracket as symbol', () => {
         const source = `x = arr[1]:3
 function foo()
@@ -1305,6 +1358,58 @@ end`;
         const regions = parser.getExcludedRegions(source);
         assert.strictEqual(regions.length, 0);
       });
+    });
+  });
+
+  suite('End inside brackets/parentheses', () => {
+    test('should not treat end inside brackets as block close', () => {
+      const pairs = parser.parse('function foo()\n  x = a[end]\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat end inside parentheses as valid block close', () => {
+      // end inside () is a valid block close (not an indexing keyword)
+      // Block expressions in function arguments: f(begin...end)
+      const pairs = parser.parse('function foo()\n  x = f(begin\n    1 + 2\n  end)\nend');
+      assert.strictEqual(pairs.length, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'function');
+    });
+
+    test('should handle end-1 inside brackets', () => {
+      const pairs = parser.parse('function foo()\n  x = a[1:end-1]\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should allow do block inside function call', () => {
+      const pairs = parser.parse('map(1:10) do x\n  x^2\nend');
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still reject end inside brackets in function call', () => {
+      // f(a[end]) - end is indexing inside brackets
+      const pairs = parser.parse('function foo()\n  x = f(a[end])\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Command string interpolation', () => {
+    test('should handle $() interpolation in backtick commands', () => {
+      const source = "x = `echo $(echo '\\`')`\nfor i in 1:10\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle $() interpolation in triple backtick commands', () => {
+      const source = "x = ```echo $(echo '\\`')```\nfor i in 1:10\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle simple $() in backtick command', () => {
+      const source = 'x = `echo $(pwd)`\nfor i in 1:10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
     });
   });
 
@@ -1472,6 +1577,243 @@ function foo()
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Array comprehension exclusion', () => {
+    test('should not parse for inside brackets as block', () => {
+      const source = `x = [i for i in 1:10]
+function foo()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not parse if inside brackets as block', () => {
+      const source = `x = [i for i in 1:10 if i > 5]
+function foo()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should parse for outside brackets as block', () => {
+      const source = `for i in 1:10
+  println(i)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle nested brackets in comprehension', () => {
+      const source = `x = [f(a[i]) for i in 1:10]
+for j in 1:5
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle brackets inside strings when checking comprehension', () => {
+      const source = `x = "]"
+[f(x) for x in xs]`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Triple backtick command strings', () => {
+    test('should handle triple backtick command string', () => {
+      const source = 'x = ```for i in 1:10\nend```\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle triple backtick with keywords inside', () => {
+      const source = 'cmd = ```\nif true\n  echo hello\nend\n```\nfor i in 1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle escaped characters in triple backtick', () => {
+      const source = 'x = ```escaped \\` backtick```\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle unterminated triple backtick', () => {
+      const source = 'x = ```unterminated\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: multi-line comment edge', () => {
+    test('should handle # not followed by = as non-comment', () => {
+      // Tests matchMultiLineComment returning null when not #=
+      const source = '# regular comment\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Generator expressions in parentheses', () => {
+    test('should not treat for in parenthesized generator as block open', () => {
+      const source = `function foo()
+  result = (x^2 for x in 1:10)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat if in parenthesized filter as block open', () => {
+      const source = `function foo()
+  result = (x for x in 1:10 if x > 5)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat for in brackets as comprehension', () => {
+      const source = `function foo()
+  result = [x^2 for x in 1:10]
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Custom string macros', () => {
+    test('should exclude custom string macro html"..."', () => {
+      const source = 'x = html"<div>end</div>"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should exclude custom string macro sql"..."', () => {
+      const source = 'q = sql"SELECT end FROM table"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat block keywords as string macro prefix', () => {
+      const source = 'if true\n  x = "hello"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude uppercase prefix string macro', () => {
+      const source = 'x = L"wide string with end"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should exclude triple-quoted custom string macro', () => {
+      const source = 'x = html"""\n<div>end</div>\n"""\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat block keyword followed by quote as string macro', () => {
+      const source = 'if"true"\n  x = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: nested multi-line comments', () => {
+    test('should handle nested #= =# comments', () => {
+      const regions = parser.getExcludedRegions('#= outer #= inner =# outer =#');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, 29);
+    });
+  });
+
+  suite('Interpolation with nested constructs', () => {
+    test('should handle #= multi-line comment inside string interpolation', () => {
+      const pairs = parser.parse('x = "result: $(\n  #= comment with ) inside =#\n  42\n)"\nfunction foo()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle triple-quoted string inside interpolation', () => {
+      const pairs = parser.parse('x = "$("""hello end world""")"\nfunction foo()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle backslash operator inside interpolation', () => {
+      const pairs = parser.parse('x = "$(A \\ b)"\nfunction foo()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat backslash as escape in interpolation', () => {
+      // \) should not escape the closing paren
+      const regions = parser.getExcludedRegions('"$(x \\)"');
+      assert.strictEqual(regions.length, 1);
+      // The string should end at the final "
+      assert.strictEqual(regions[0].end, 8);
+    });
+  });
+
+  suite('Coverage: prefixed string edge cases', () => {
+    test('should not treat identifier-prefixed quote as string macro', () => {
+      const regions = parser.getExcludedRegions('xend"hello"');
+      // xend is part of identifier, so "hello" is matched as regular string
+      assert.ok(regions.length >= 1);
+    });
+
+    test('should not treat block keyword as string macro prefix', () => {
+      const pairs = parser.parse('if true\n  x = 1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Raw string edge cases', () => {
+    test('should not eat source after raw string with special content', () => {
+      const source = 'r"$(end"\nif true\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('CR-only line endings', () => {
+    test('should handle unterminated char literal with \\r-only line endings in matchCharLiteral', () => {
+      // Unterminated char literal should stop at \r, not scan past it
+      const source = "c = 'unterminated\rfunction foo()\rend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle char literal in interpolation with \\r-only line endings in skipCharLiteral', () => {
+      // skipCharLiteral inside interpolation should stop at \r
+      const source = 'x = "$(\'unterminated\r42)"\rfunction foo()\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle line comment in interpolation with \\r-only line endings', () => {
+      // Line comment inside $() should stop at \r, not consume past it
+      const source = 'x = "$(1 + 2 # comment\r3)"\rfunction foo()\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle normal char literal with \\r-only line endings', () => {
+      const source = "c = 'a'\rfunction foo()\rend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Type annotation with ::', () => {
+    test('should not treat :: as symbol prefix for block keyword', () => {
+      const source = `function f(x::Int)
+  if true
+    1
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'if');
     });
   });
 });
