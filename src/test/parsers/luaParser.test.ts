@@ -428,20 +428,22 @@ until done`;
     });
 
     suite('Strings', () => {
-      test('should handle unterminated double-quoted string', () => {
+      test('should handle unterminated double-quoted string (stops at newline)', () => {
         const source = `msg = "unterminated
 if true then
 end`;
         const pairs = parser.parse(source);
-        assertNoBlocks(pairs);
+        // Lua regular strings cannot span lines, so unterminated string
+        // stops at newline and subsequent keywords are detected
+        assertSingleBlock(pairs, 'if', 'end');
       });
 
-      test('should handle unterminated single-quoted string', () => {
+      test('should handle unterminated single-quoted string (stops at newline)', () => {
         const source = `msg = 'unterminated
 if true then
 end`;
         const pairs = parser.parse(source);
-        assertNoBlocks(pairs);
+        assertSingleBlock(pairs, 'if', 'end');
       });
     });
 
@@ -560,6 +562,103 @@ if true then
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle [ that is not long string', () => {
+      // Tests matchLongString returning null when [ is not followed by [ or =
+      const source = `local x = arr[5]
+if true then
+  print(x)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Goto labels', () => {
+    test('should not treat end inside goto label as block close', () => {
+      const source = `function foo()
+  ::end::
+  return 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle goto label with spaces', () => {
+      const source = `function foo()
+  :: my_label ::
+  return 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not match incomplete goto label', () => {
+      const source = `if true then
+  x = a::b
+  print(x)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle goto label with keyword-like name', () => {
+      const source = `function foo()
+  ::repeat::
+  ::until::
+  return 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not match goto label starting with digit', () => {
+      const source = `function foo()
+  x = a::123
+  return 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Coverage: tryMatchExcludedRegion edge cases', () => {
+    test('should return null for non-special characters', () => {
+      const regions = parser.getExcludedRegions('x = 1 + 2');
+      assert.strictEqual(regions.length, 0);
+    });
+  });
+
+  suite('Edge cases', () => {
+    test('should handle repeat-until with no body', () => {
+      const source = 'repeat until true';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'until');
+    });
+
+    test('should handle CRLF line endings', () => {
+      const source = 'if true then\r\n  x = 1\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle nested long strings with different levels', () => {
+      const source = `x = [==[
+  if true then
+    [[ nested ]]
+  end
+]==]
+function foo()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle do end immediately after for', () => {
+      const source = 'for i=1,10 do end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
     });
   });
 });

@@ -20,20 +20,17 @@ export class LuaBlockParser extends BaseBlockParser {
   }
 
   // Checks if do at position is part of a while/for loop (not standalone)
+  // Searches backwards from do position, crossing newlines since Lua allows multi-line loop headers
   private isDoPartOfLoop(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Find line start
-    let lineStart = position;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n') {
-      lineStart--;
-    }
-
-    // Check for while or for on same line
-    const beforeDo = source.slice(lineStart, position);
+    // Search backwards from the do position for a while/for keyword
+    const beforeDo = source.slice(0, position);
     const loopPattern = /\b(while|for)\b/g;
     const loopMatches = [...beforeDo.matchAll(loopPattern)];
 
-    for (const loopMatch of loopMatches) {
-      const loopAbsolutePos = lineStart + loopMatch.index;
+    // Check matches in reverse order (closest first)
+    for (let m = loopMatches.length - 1; m >= 0; m--) {
+      const loopMatch = loopMatches[m];
+      const loopAbsolutePos = loopMatch.index;
       if (this.isInExcludedRegion(loopAbsolutePos, excludedRegions)) {
         continue;
       }
@@ -53,7 +50,7 @@ export class LuaBlockParser extends BaseBlockParser {
         if (doAbsolutePos === position) {
           return true;
         }
-        // Found a different valid 'do' before our position
+        // Found a different valid 'do' before our position - this loop already has a do
         break;
       }
     }
@@ -86,6 +83,12 @@ export class LuaBlockParser extends BaseBlockParser {
     // Comment (-- single line or --[[ multi-line)
     if (char === '-' && pos + 1 < source.length && source[pos + 1] === '-') {
       return this.matchComment(source, pos);
+    }
+
+    // Goto label ::identifier::
+    if (char === ':' && pos + 1 < source.length && source[pos + 1] === ':') {
+      const region = this.matchGotoLabel(source, pos);
+      if (region) return region;
     }
 
     // Long string [[ ]] or [=[ ]=]
@@ -218,12 +221,87 @@ export class LuaBlockParser extends BaseBlockParser {
   }
 
   // Finds the index of the last non-repeat block in the stack
+  // Only returns a match if the topmost block is not repeat,
+  // preventing end from skipping over unmatched repeat blocks
   private findLastNonRepeatIndex(stack: OpenBlock[]): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value !== 'repeat') {
-        return i;
-      }
+    if (stack.length === 0) {
+      return -1;
     }
-    return -1;
+    // If the topmost block is repeat, end cannot close it
+    if (stack[stack.length - 1].token.value === 'repeat') {
+      return -1;
+    }
+    return stack.length - 1;
+  }
+
+  // Matches Lua regular strings, stopping at unescaped newlines
+  // Lua regular strings cannot span multiple lines (syntax error),
+  // but \z (skip whitespace including newlines) and \<newline> (line
+  // continuation) are supported in Lua 5.2+
+  protected matchQuotedString(source: string, pos: number, quote: string): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        const next = source[i + 1];
+        // \z skips following whitespace including newlines
+        if (next === 'z') {
+          i += 2;
+          while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+            i++;
+          }
+          continue;
+        }
+        // \<newline> is a line continuation
+        if (next === '\n') {
+          i += 2;
+          continue;
+        }
+        if (next === '\r') {
+          i += 2;
+          // \r\n counts as single newline continuation
+          if (i < source.length && source[i] === '\n') {
+            i++;
+          }
+          continue;
+        }
+        // Any other escape sequence
+        i += 2;
+        continue;
+      }
+      if (source[i] === quote) {
+        return { start: pos, end: i + 1 };
+      }
+      // Unescaped newline terminates the string (unterminated)
+      if (source[i] === '\n' || source[i] === '\r') {
+        return { start: pos, end: i };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Matches goto label ::identifier:: allowing newlines in whitespace
+  private matchGotoLabel(source: string, pos: number): ExcludedRegion | null {
+    let i = pos + 2;
+    // Skip whitespace (including newlines) after ::
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+      i++;
+    }
+    // Match identifier
+    if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) {
+      return null;
+    }
+    while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
+      i++;
+    }
+    // Skip whitespace (including newlines) before closing ::
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+      i++;
+    }
+    // Check closing ::
+    if (i + 1 < source.length && source[i] === ':' && source[i + 1] === ':') {
+      return { start: pos, end: i + 2 };
+    }
+    return null;
   }
 }
