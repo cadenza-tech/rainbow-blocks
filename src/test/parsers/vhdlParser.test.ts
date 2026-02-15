@@ -280,6 +280,23 @@ end if;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
+
+    test('should handle attribute tick with keyword-like name', () => {
+      // Attribute tick followed by a keyword-like name should be excluded
+      const source = `signal x : integer := data'for;
+if condition then
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle attribute tick followed by block middle keyword', () => {
+      const source = `signal x : boolean := val'is;
+entity test is
+end entity;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
   });
 
   suite('Case insensitivity', () => {
@@ -395,12 +412,139 @@ end process;`;
       assertSingleBlock(pairs, 'if', 'end process');
     });
 
+    suite('Standalone loop', () => {
+      test('should handle standalone loop after for loop', () => {
+        const source = 'for I in 0 to 9 loop\n  loop\n    exit;\n  end loop;\nend loop;';
+        const result = parser.parse(source);
+        assert.strictEqual(result.length, 2);
+      });
+
+      test('should handle standalone loop after while loop', () => {
+        const source = 'while running loop\n  loop\n    exit;\n  end loop;\nend loop;';
+        const result = parser.parse(source);
+        assert.strictEqual(result.length, 2);
+      });
+    });
+
     test('should handle unterminated block comment', () => {
       const source = `/* unterminated comment
 entity test is
 end entity;`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+
+    test('should not treat entity after use on previous line as use entity', () => {
+      // use on a different line should not prevent entity from being a block
+      const pairs = parser.parse('library ieee;\nuse ieee.std_logic_1164.all;\n\nentity my_entity is\nend entity;');
+      const entityPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'entity');
+      assert.ok(entityPair, 'entity should be detected as block');
+    });
+
+    test('should not treat entity after use in comment as use entity', () => {
+      const pairs = parser.parse('-- use\nentity my_entity is\nend entity;');
+      const entityPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'entity');
+      assert.ok(entityPair, 'entity after use-in-comment should be a block');
+    });
+
+    test('should detect wait for spanning two lines as not a block', () => {
+      const pairs = parser.parse('wait\n  for 10 ns;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat loop in end loop as standalone loop', () => {
+      const source = `end loop;
+for i in 0 to 7 loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should detect wait for with comment between wait and for', () => {
+      const source = `process
+begin
+  wait -- timing
+    for 10 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should detect multi-line wait for with multiple blank lines as not a block', () => {
+      const source = `process
+begin
+  wait
+
+    for 10 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should not treat entity after colon in component instantiation as block', () => {
+      const source = `architecture rtl of test is
+begin
+  inst1: entity work.adder;
+end architecture;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
+  suite('Wait for timing statement', () => {
+    test('should not treat wait for as block open', () => {
+      const source = `process
+begin
+  wait for 10 ns;
+  x <= '1';
+  wait for 20 ns;
+  x <= '0';
+end;`;
+      const pairs = parser.parse(source);
+      // Should have 1 block: process/end (not for/end)
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+
+    test('should not treat wait for as block open with compound end', () => {
+      const source = `process
+begin
+  wait for 10 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should still parse regular for loop', () => {
+      const source = `for i in 0 to 7 loop
+  x(i) <= '0';
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  suite('Function/procedure declarations', () => {
+    test('should not treat function declaration as block open', () => {
+      const pairs = parser.parse('package my_pkg is\n  function add(a, b : integer) return integer;\nend;');
+      assertSingleBlock(pairs, 'package', 'end', 0);
+    });
+
+    test('should not treat procedure declaration as block open', () => {
+      const pairs = parser.parse('package my_pkg is\n  procedure do_something(x : integer);\nend;');
+      assertSingleBlock(pairs, 'package', 'end', 0);
+    });
+
+    test('should still parse function with body as block', () => {
+      const pairs = parser.parse('function add(a, b : integer) return integer is\nbegin\n  return a + b;\nend;');
+      assertSingleBlock(pairs, 'function', 'end', 0);
+    });
+  });
+
+  suite('Use entity', () => {
+    test('should not treat use entity as block open', () => {
+      const pairs = parser.parse('configuration cfg of test is\n  use entity work.impl;\nend configuration;');
+      assertSingleBlock(pairs, 'configuration', 'end configuration', 0);
     });
   });
 
@@ -420,6 +564,15 @@ end entity;`;
       const pairs = parser.parse(source);
       const entityPair = findBlock(pairs, 'entity');
       assertTokenPosition(entityPair.openKeyword, 0, 0);
+    });
+  });
+
+  suite('Compound end with multiple spaces', () => {
+    test('should handle compound end with multiple spaces', () => {
+      const source = `entity test is
+end  entity;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end  entity');
     });
   });
 
@@ -445,6 +598,297 @@ end if;`;
 comment */`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 1);
+    });
+  });
+
+  suite('Conditional signal assignment when/else', () => {
+    test('should not treat when/else in signal assignment as intermediates', () => {
+      const source = `process (clk)
+begin
+  sig <= '1' when cond else '0';
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+      assert.strictEqual(pairs[0].intermediates.filter((i) => i.value === 'when').length, 0, 'when should not be intermediate of process');
+      assert.strictEqual(pairs[0].intermediates.filter((i) => i.value === 'else').length, 0, 'else should not be intermediate of process');
+    });
+
+    test('should have 0 intermediates for process with conditional signal assignment', () => {
+      const source = `process (clk)
+begin
+  sig <= '1' when cond else '0';
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+      const nonBeginIntermediates = pairs[0].intermediates.filter((i) => i.value !== 'begin');
+      assert.strictEqual(nonBeginIntermediates.length, 0);
+    });
+
+    test('should not treat when/else in multi-line signal assignment as intermediates', () => {
+      const source = `process (clk)
+begin
+  sig <= val1 when cond1
+         else val2;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+      const nonBeginIntermediates = pairs[0].intermediates.filter((i) => i.value !== 'begin');
+      assert.strictEqual(nonBeginIntermediates.length, 0, 'when/else from multi-line signal assignment should not be intermediates');
+    });
+
+    test('should still treat when as intermediate in case block', () => {
+      const source = `case x is
+  when "00" =>
+    y <= '1';
+  when others =>
+    y <= '0';
+end case;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      const whenIntermediates = pairs[0].intermediates.filter((i) => i.value === 'when');
+      assert.ok(whenIntermediates.length >= 1, 'when should be intermediate of case');
+    });
+  });
+
+  suite('Multi-line for...loop', () => {
+    test('should handle multi-line for loop', () => {
+      const source = `for i in 0 to 7
+  loop
+    x <= '1';
+  end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle multi-line while loop', () => {
+      const source = `while condition
+  loop
+    x <= '1';
+  end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end loop');
+    });
+
+    test('should stop lookback at semicolon', () => {
+      const source = `x <= '1';
+loop
+  y <= '0';
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+
+    test('should handle for across 3 lines before loop', () => {
+      const source = `for i in
+  0
+  to 7 loop
+    x <= '1';
+  end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  suite('Coverage: use entity and function declaration', () => {
+    test('should not treat use entity as entity block', () => {
+      const pairs = parser.parse('use entity work.my_entity;\nprocess\nbegin\n  null;\nend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should not treat function declaration without body as block', () => {
+      const pairs = parser.parse('function f(x : integer) return integer;\nprocess\nbegin\n  null;\nend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  suite('Signal assignment detection with excluded regions', () => {
+    test('should not filter when after comment containing <=', () => {
+      const source = `process
+begin
+  -- x <= y
+  case state is
+    when idle =>
+      null;
+  end case;
+end process;`;
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assertIntermediates(casePair, ['is', 'when']);
+    });
+
+    test('should still filter when in real signal assignment', () => {
+      const source = `process
+begin
+  sig <= value when condition else other;
+end process;`;
+      const pairs = parser.parse(source);
+      // when and else should be filtered (signal assignment)
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  suite('Complex real-world scenario', () => {
+    test('should handle generate + process + case with signal assignment', () => {
+      const source = `architecture rtl of test is
+begin
+  gen: for i in 0 to 7 generate
+    proc: process(clk)
+    begin
+      -- x <= y
+      case state is
+        when idle =>
+          sig <= value when condition else other;
+        when active =>
+          null;
+      end case;
+    end process;
+  end generate;
+end architecture;`;
+      const pairs = parser.parse(source);
+      // for + generate both pair with 'end generate' (5 total)
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'generate');
+      findBlock(pairs, 'process');
+      findBlock(pairs, 'case');
+      findBlock(pairs, 'architecture');
+      assertBlockCount(pairs, 5);
+    });
+  });
+
+  suite('v7 bug fixes', () => {
+    test('should not treat <= in preceding signal assignment as affecting later block', () => {
+      const source = `process is
+begin
+  sig <= value;
+  if a = b then
+    null;
+  end if;
+end process;`;
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(ifPair);
+      assert.strictEqual(ifPair.intermediates.length, 1);
+      assert.strictEqual(ifPair.intermediates[0].value.toLowerCase(), 'then');
+    });
+
+    test('should stop isInSignalAssignment at block boundary keyword then', () => {
+      const source = `process is
+begin
+  sig <= '1';
+  if ready then
+    sig <= '0';
+  else
+    null;
+  end if;
+end process;`;
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(ifPair);
+      assert.ok(ifPair.intermediates.some((i) => i.value.toLowerCase() === 'else'));
+    });
+
+    test('should ignore for/while in comments when validating loop', () => {
+      const source = `architecture test of test is
+begin
+  -- for testing purposes
+  loop
+    null;
+  end loop;
+end architecture;`;
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'loop');
+    });
+
+    test('should treat loop after for in comment as standalone', () => {
+      const source = `process is
+begin
+  -- while waiting
+  loop
+    exit when done;
+  end loop;
+end process;`;
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'loop');
+    });
+  });
+
+  suite('CRLF handling for wait for', () => {
+    test('should detect wait for with CRLF line endings', () => {
+      const pairs = parser.parse('process\r\nbegin\r\n  wait for 10 ns;\r\nend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should detect multi-line wait for with CRLF', () => {
+      const pairs = parser.parse('process\r\nbegin\r\n  wait\r\n    for 10 ns;\r\nend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  suite('Wait for with wait in excluded region', () => {
+    test('should not falsely detect wait in string as wait for', () => {
+      const source = `process
+begin
+  msg := "wait";
+  for i in 0 to 7 loop
+    null;
+  end loop;
+end process;`;
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'for');
+    });
+
+    test('should not falsely detect wait in comment as wait for', () => {
+      const source = `process
+begin
+  -- wait
+  for i in 0 to 7 loop
+    null;
+  end loop;
+end process;`;
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'for');
+    });
+
+    test('should still detect real wait for correctly', () => {
+      const source = `process
+begin
+  wait for 10 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  suite('stripTrailingComment position with indentation', () => {
+    test('should handle indented wait for with trailing comment', () => {
+      const source = `process
+begin
+    wait -- some comment
+    for 10 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should handle deeply indented wait for with comment', () => {
+      const source = `process
+begin
+        wait   -- timing wait
+        for 5 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should not treat indented for-loop with comment as wait for', () => {
+      const source = `process
+begin
+    for i in 0 to 7 loop -- iterate
+      null;
+    end loop;
+end process;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
     });
   });
 });
