@@ -71,14 +71,14 @@ export class ElixirBlockParser extends BaseBlockParser {
       return this.matchTripleQuotedString(source, pos, "'''");
     }
 
-    // Double-quoted string
+    // Double-quoted string (with #{} interpolation support)
     if (char === '"') {
-      return this.matchQuotedString(source, pos, '"');
+      return this.matchElixirString(source, pos);
     }
 
-    // Single-quoted charlist
+    // Single-quoted charlist (with #{} interpolation support)
     if (char === "'") {
-      return this.matchQuotedString(source, pos, "'");
+      return this.matchElixirCharlist(source, pos);
     }
 
     // Sigil (~r, ~s, ~w, etc)
@@ -153,12 +153,18 @@ export class ElixirBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Matches triple-quoted string (heredoc)
+  // Matches triple-quoted string (heredoc) with #{} interpolation for """ and '''
   private matchTripleQuotedString(source: string, pos: number, delimiter: string): ExcludedRegion {
+    // Both """ and ''' support interpolation in Elixir
     let i = pos + 3;
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
         i += 2;
+        continue;
+      }
+      // Handle #{} interpolation in """ and ''' heredocs
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
         continue;
       }
       if (source.slice(i, i + 3) === delimiter) {
@@ -167,6 +173,160 @@ export class ElixirBlockParser extends BaseBlockParser {
       i++;
     }
     return { start: pos, end: source.length };
+  }
+
+  // Matches Elixir double-quoted string with #{} interpolation
+  private matchElixirString(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle #{} interpolation
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '"') {
+        return { start: pos, end: i + 1 };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Matches Elixir single-quoted charlist with #{} interpolation
+  private matchElixirCharlist(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === "'") {
+        return { start: pos, end: i + 1 };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Skips #{} interpolation block, tracking brace depth
+  private skipInterpolation(source: string, pos: number): number {
+    let depth = 1;
+    let i = pos;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '{') {
+        depth++;
+      } else if (source[i] === '}') {
+        depth--;
+      } else if (source[i] === '"') {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === "'") {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === '#') {
+        // Only treat # as nested interpolation when followed by {
+        if (i + 1 < source.length && source[i + 1] === '{') {
+          // Nested #{} inside interpolation code (e.g. in a nested string)
+          // is handled by skipNestedString, so this is a bare #{
+          i += 2;
+          depth++;
+          continue;
+        }
+        // Bare # (not followed by {) is a regular character, skip it
+        i++;
+        continue;
+      } else if (source[i] === '~' && i + 1 < source.length && /[a-zA-Z]/.test(source[i + 1])) {
+        // Skip sigil inside interpolation (e.g. ~s(}))
+        const sigilEnd = this.skipNestedSigil(source, i);
+        if (sigilEnd > i) {
+          i = sigilEnd;
+          continue;
+        }
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Skips a sigil inside interpolation, returning position after it
+  private skipNestedSigil(source: string, pos: number): number {
+    // pos points to '~', pos+1 is the sigil letter
+    const sigilChar = source[pos + 1];
+    const isLowercase = /[a-z]/.test(sigilChar);
+
+    // Skip past sigil letter(s) to find delimiter
+    let delimiterPos = pos + 2;
+    while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
+      delimiterPos++;
+    }
+
+    if (delimiterPos >= source.length) {
+      return pos;
+    }
+
+    const openDelimiter = source[delimiterPos];
+    const closeDelimiter = this.getSigilCloseDelimiter(openDelimiter);
+
+    if (!closeDelimiter) {
+      return pos;
+    }
+
+    let i = delimiterPos + 1;
+    let depth = 1;
+    const isPaired = openDelimiter !== closeDelimiter;
+
+    while (i < source.length && depth > 0) {
+      if (isLowercase && source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (isPaired && source[i] === openDelimiter) {
+        depth++;
+      } else if (source[i] === closeDelimiter) {
+        depth--;
+      }
+      i++;
+    }
+
+    // Skip optional modifiers
+    while (i < source.length && /[a-zA-Z]/.test(source[i])) {
+      i++;
+    }
+
+    return i;
+  }
+
+  // Skips a nested string inside interpolation
+  private skipNestedString(source: string, pos: number): number {
+    const quote = source[pos];
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{' && quote === '"') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === quote) {
+        return i + 1;
+      }
+      i++;
+    }
+    return i;
   }
 
   // Matches sigil (~r/.../, ~s(...), ~w[...], etc)
@@ -198,8 +358,19 @@ export class ElixirBlockParser extends BaseBlockParser {
     // Check for heredoc-style sigil (~S""")
     if (source.slice(delimiterPos, delimiterPos + 3) === '"""' || source.slice(delimiterPos, delimiterPos + 3) === "'''") {
       const tripleDelim = source.slice(delimiterPos, delimiterPos + 3);
+      const isLowercase = /[a-z]/.test(nextChar);
       let i = delimiterPos + 3;
       while (i < source.length) {
+        // Handle escape sequences for lowercase sigils
+        if (isLowercase && source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        // Handle #{} interpolation for lowercase sigils
+        if (isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          i = this.skipInterpolation(source, i + 2);
+          continue;
+        }
         if (source.slice(i, i + 3) === tripleDelim) {
           // Skip optional modifiers after closing
           let end = i + 3;
@@ -299,10 +470,34 @@ export class ElixirBlockParser extends BaseBlockParser {
     return position < source.length && source[position] === ':';
   }
 
+  // Block keywords that take "do" (excludes "fn")
+  private static readonly DO_BLOCK_KEYWORDS = [
+    'defmodule',
+    'defprotocol',
+    'defimpl',
+    'defmacrop',
+    'defmacro',
+    'defguardp',
+    'defguard',
+    'defp',
+    'def',
+    'unless',
+    'receive',
+    'quote',
+    'with',
+    'cond',
+    'case',
+    'for',
+    'try',
+    'if'
+  ];
+
   // Checks if "do" keyword exists after position (not inside parentheses)
+  // Stops when another block keyword or too many newlines are encountered
   private hasDoKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position;
     let parenDepth = 0;
+    let newlineCount = 0;
 
     while (i < source.length) {
       // Skip to end of excluded region if inside one (using binary search)
@@ -319,6 +514,15 @@ export class ElixirBlockParser extends BaseBlockParser {
         parenDepth++;
       } else if (char === ')') {
         parenDepth--;
+      }
+
+      // Count newlines outside parentheses; stop after 5 lines
+      // Handle \n, \r\n, and \r-only line endings
+      if ((char === '\n' || (char === '\r' && (i + 1 >= source.length || source[i + 1] !== '\n'))) && parenDepth === 0) {
+        newlineCount++;
+        if (newlineCount > 5) {
+          return false;
+        }
       }
 
       // Only look for "do" outside parentheses
@@ -339,6 +543,11 @@ export class ElixirBlockParser extends BaseBlockParser {
           }
         }
 
+        // Stop if another block keyword is found (do would belong to it)
+        if (this.isBlockKeywordAt(source, i)) {
+          return false;
+        }
+
         // Stop if "end" is reached
         if (source.slice(i, i + 3) === 'end') {
           const beforeEnd = i > 0 ? source[i - 1] : ' ';
@@ -351,6 +560,26 @@ export class ElixirBlockParser extends BaseBlockParser {
 
       i++;
     }
+    return false;
+  }
+
+  // Checks if a block keyword that takes "do" starts at position
+  private isBlockKeywordAt(source: string, pos: number): boolean {
+    // Must have word boundary before
+    if (pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
+      return false;
+    }
+
+    for (const kw of ElixirBlockParser.DO_BLOCK_KEYWORDS) {
+      if (source.startsWith(kw, pos)) {
+        const afterKw = source[pos + kw.length];
+        // Must have word boundary after, and not be a keyword argument (e.g. for:)
+        if (afterKw === undefined || (!/[a-zA-Z0-9_]/.test(afterKw) && afterKw !== ':')) {
+          return true;
+        }
+      }
+    }
+
     return false;
   }
 
@@ -367,6 +596,9 @@ export class ElixirBlockParser extends BaseBlockParser {
       'receive',
       'def',
       'defp',
+      'defmodule',
+      'defprotocol',
+      'defimpl',
       'defmacro',
       'defmacrop',
       'defguard',
@@ -381,7 +613,7 @@ export class ElixirBlockParser extends BaseBlockParser {
     // Find "do" on the same line
     let i = position + keyword.length;
 
-    while (i < source.length && source[i] !== '\n') {
+    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
       // Skip excluded regions (strings, comments, etc)
       if (this.isInExcludedRegion(i, excludedRegions)) {
         i++;
@@ -410,9 +642,19 @@ export class ElixirBlockParser extends BaseBlockParser {
           j++;
         }
 
-        // Check for colon
+        // Check for colon (do: syntax)
+        // If colon is followed by a word character or quote, it's an atom like :ok or :"atom", not do:
+        // Bare colon at EOL/EOF (do :) is NOT do: syntax
+        // But if colon is immediately after "do" (no whitespace), it's always do: keyword syntax
         if (source[j] === ':') {
-          return true;
+          if (j === doStart + 2) {
+            // do: with no whitespace between do and colon = always keyword syntax
+            return true;
+          }
+          const afterColon = source[j + 1];
+          if (afterColon && afterColon !== '\n' && afterColon !== '\r' && !/[a-zA-Z_"']/.test(afterColon)) {
+            return true;
+          }
         }
       }
       i++;

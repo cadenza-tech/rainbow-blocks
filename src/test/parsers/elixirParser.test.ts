@@ -335,6 +335,12 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
+    test('should not treat do with bare colon at end of line as do: one-liner', () => {
+      // "do :" at end of line is not do: syntax
+      const pairs = parser.parse('if condition do :\n  body\nend');
+      assertSingleBlock(pairs, 'if', 'end', 0);
+    });
+
     test('should handle mixed do: and do-end', () => {
       const source = `defmodule MyModule do
   def one_liner(x), do: x * 2
@@ -495,6 +501,16 @@ def foo do
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escape in lowercase heredoc sigil', () => {
+      const source = `x = ~s"""
+escaped \\""" still inside
+"""
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -1102,6 +1118,451 @@ def foo do
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: do-colon one-liner detection', () => {
+    test('should not treat non-docolon keyword as one-liner', () => {
+      // Tests isDoColonOneLiner returning false for keywords without do:
+      const source = `if true do
+  x = 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('String interpolation with nested quotes', () => {
+    test('should handle #{} with nested double quotes in string', () => {
+      const source = `defmodule M do
+  x = "text #{func("inner")} end"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmodule', 'end');
+    });
+
+    test('should handle nested #{} in string', () => {
+      const source = `def foo do
+  x = "a #{b} c #{d} end"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle deeply nested interpolation', () => {
+      const source = `def foo do
+  x = "outer #{"inner #{val}"} end"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle #{} in triple-quoted heredoc', () => {
+      const source = `def foo do
+  x = """
+  text #{func("inner")} end
+  """
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not apply interpolation to single-quoted strings', () => {
+      const source = `def foo do
+  x = 'text #{end}'
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escaped hash in string', () => {
+      const source = `def foo do
+  x = "text \\#{end}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escape sequences inside interpolation', () => {
+      const source = `def foo do
+  x = "text #{"\\"end\\"" <> val} more"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle nested braces inside interpolation', () => {
+      const source = `def foo do
+  x = "text #{%{key: "end"}} more"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle single-quoted string inside interpolation', () => {
+      const source = `def foo do
+  x = "text #{'end'} more"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escape in nested string inside interpolation', () => {
+      const source = `def foo do
+  x = "text #{"val\\'s end"} more"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle unterminated nested string inside interpolation', () => {
+      const source = `def foo do
+  x = "text #{"unterminated} end"
+end`;
+      const pairs = parser.parse(source);
+      // Unterminated nested string consumes everything
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('fn keyword do: one-liner handling', () => {
+    test('should not treat fn with do: as one-liner', () => {
+      const source = 'fn x -> x end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+  });
+
+  suite('do :atom false positive (Bug 1)', () => {
+    test('should parse if-do-end when body starts with atom', () => {
+      const source = 'if true do :ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should parse def-do-end when body returns atom', () => {
+      const source = `def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should parse case-do-end with atom pattern in body', () => {
+      const source = `case value do
+  :error -> :retry
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should still detect do: one-liner syntax', () => {
+      const source = `if condition, do: action()
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still detect do: with atom value as one-liner', () => {
+      // do: :ok is keyword syntax (do: with atom value)
+      const source = `if condition, do: :ok
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should parse for-do-end when body starts with atom', () => {
+      const source = 'for x <- list do :process end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should parse unless-do-end when body is atom', () => {
+      const source = `unless done do
+  :continue
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+  });
+
+  suite('Sigil inside interpolation (Bug 4)', () => {
+    test('should handle ~s sigil with } inside interpolation', () => {
+      const source = `def foo do
+  x = "value: #{~s(}) <> str}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ~r regex sigil inside interpolation', () => {
+      const source = `def foo do
+  x = "match: #{Regex.match?(~r/}/, val)}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle uppercase sigil inside interpolation', () => {
+      const source = `def foo do
+  x = "value: #{~S(}) <> str}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle sigil with bracket delimiter inside interpolation', () => {
+      const source = `def foo do
+  x = "value: #{~s[}] <> str}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle sigil with angle bracket inside interpolation', () => {
+      const source = `def foo do
+  x = "value: #{~s<}> <> str}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle sigil with pipe delimiter inside interpolation', () => {
+      const source = `def foo do
+  x = "text: #{~r|pattern| |> inspect}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle sigil with escape inside interpolation', () => {
+      const source = `def foo do
+  x = "value: #{~s(a\\)b)}"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('hasDoKeyword line limit (Bug 5)', () => {
+    test('should not find do from nested for inside if', () => {
+      const source = `if condition
+  for y <- list, do
+    process(y)
+  end
+end`;
+      const pairs = parser.parse(source);
+      // Only the for block should be matched; if has no do within 2 lines
+      const forBlock = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forBlock, 'Expected to find for block');
+      assert.ok(!pairs.some((p) => p.openKeyword.value === 'if'), 'if should not be matched as block');
+    });
+
+    test('should still find do on the same line', () => {
+      const source = `if condition do
+  action()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still find do on the next line', () => {
+      const source = `if condition
+do
+  action()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still find do two lines away', () => {
+      const source = `def my_func(arg)
+    when is_integer(arg)
+    do
+  arg * 2
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match do three or more lines away', () => {
+      const source = `if condition
+
+
+  def inner do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      // if should not be matched (do is too far away)
+      // def inner should be matched
+      const defBlock = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(defBlock, 'Expected to find def block');
+    });
+
+    test('should parse if with condition spanning 4+ lines before do', () => {
+      const source = `if cond1 and
+   cond2 and
+   cond3 and
+   cond4 do
+  body
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle multiline params within 2-line limit', () => {
+      const source = `def my_function(
+    arg1,
+    arg2
+  ) do
+  body
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: multi-letter sigil handling', () => {
+    test('should handle uppercase multi-letter sigil', () => {
+      const regions = parser.getExcludedRegions('~ABC(content)');
+      assert.strictEqual(regions.length, 1);
+    });
+
+    test('should handle sigil at end of source', () => {
+      const regions = parser.getExcludedRegions('~AB');
+      assert.strictEqual(regions.length, 0);
+    });
+
+    test('should handle sigil with nested paired delimiters', () => {
+      const regions = parser.getExcludedRegions('~s(hello (world))');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, 17);
+    });
+  });
+
+  suite('Coverage: sigil in interpolation', () => {
+    test('should handle multi-letter sigil in string interpolation', () => {
+      const pairs = parser.parse('if true do\n  x = "#{~ABC(content)}"\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle sigil at EOF in interpolation', () => {
+      const regions = parser.getExcludedRegions('"#{~AB');
+      assert.ok(regions.length >= 1);
+    });
+
+    test('should handle nested paired delimiter sigil in interpolation', () => {
+      const pairs = parser.parse('if true do\n  x = "#{~s((nested))}"\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Complex real-world scenario', () => {
+    test('should handle pipeline with fn/end and defmodule/def/do/end', () => {
+      const source = `result =
+  list
+  |> Enum.map(fn x -> x * 2 end)
+  |> Enum.filter(fn x -> x > 5 end)
+
+defmodule Test do
+  def hello do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 4);
+      findBlock(pairs, 'defmodule');
+      assertNestLevel(pairs, 'defmodule', 0);
+    });
+  });
+
+  suite('Edge cases', () => {
+    test('should handle CRLF line endings', () => {
+      const source = 'if true do\r\n  :ok\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle atom that looks like keyword', () => {
+      const source = `x = :if
+y = :do
+if true do
+  :end
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle keyword in map key position', () => {
+      const source = `%{if: true, do: :ok}
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Quoted atom after do', () => {
+    test('should not treat do :"atom" as do: one-liner', () => {
+      const pairs = parser.parse('if condition do :"error_atom"\n  more_code\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('do:value without space (keyword syntax)', () => {
+    test('should treat do:value as one-liner', () => {
+      const source = `if condition, do:action()
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat space-do:value as one-liner', () => {
+      const source = `if condition do:action()
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still parse normal do block', () => {
+      const source = `if condition do
+  action()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('CR-only line ending support', () => {
+    test('should handle CR-only line endings in isDoColonOneLiner', () => {
+      // With \r-only endings, isDoColonOneLiner must stop at \r
+      // Otherwise it would scan into the next line and find do: on line 2
+      const source = 'if true do\r  func(a, do: val)\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle CR-only line endings in hasDoKeyword', () => {
+      const source = 'if true do\r  x\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Heredoc sigil interpolation with triple quotes', () => {
+    test('should not prematurely close heredoc sigil when triple quotes appear in interpolation', () => {
+      const source = '~s"""\n#{"""inner"""}\n"""';
+      const regions = parser.getExcludedRegions(source);
+      // The entire ~s"""...""" should be one excluded region
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
     });
   });
 });
