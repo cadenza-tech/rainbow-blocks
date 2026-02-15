@@ -2104,4 +2104,126 @@ esac`;
       assertSingleBlock(pairs, 'case', 'esac');
     });
   });
+
+  suite('Command substitution comment with CR-only line endings', () => {
+    test('should handle comment with CR-only line ending inside command substitution', () => {
+      // Bug 1: matchCommandSubstitution comment skip does not handle \r-only
+      const source = 'if $(echo hello # comment with )\r  ); then\r  echo yes\rfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle comment with CRLF inside command substitution', () => {
+      const source = 'if $(echo hello # comment with )\r\n  ); then\r\n  echo yes\r\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Process substitution comment handling', () => {
+    test('should handle comment inside process substitution', () => {
+      // Bug 2: matchProcessSubstitution missing comment skip
+      const source = 'while read line; do\n  echo "$line"\ndone < <(cat file # comment with )\n)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should handle comment with CR-only inside process substitution', () => {
+      const source = 'while read line; do\r  echo "$line"\rdone < <(cat file # comment with )\r)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should handle output process substitution with comment', () => {
+      const source = 'while read line; do\n  echo "$line"\ndone > >(tee log # comment with )\n)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+  });
+
+  suite('isCasePattern subshell detection with CR-only line endings', () => {
+    test('should not treat keyword in subshell as case pattern with CR-only line endings', () => {
+      // Bug 3: isCasePattern subshell detection does not handle \r-only
+      const source = '(for i in 1 2 3; do\r  echo $i\rdone)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat keyword in subshell as case pattern with CRLF', () => {
+      const source = '(for i in 1 2 3; do\r\n  echo $i\r\ndone)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should still detect actual case patterns with CR-only', () => {
+      const source = 'case $x in\r  for)\r    echo found\r    ;;\resac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Multiple heredocs on same line', () => {
+    test('should handle two heredocs on the same line', () => {
+      // Bug 4: only first heredoc on same line was handled
+      const source = `cat <<EOF1 cat <<EOF2
+body1
+EOF1
+body2
+EOF2
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle two heredocs with keywords in bodies', () => {
+      const source = `cat <<EOF1 cat <<EOF2
+if then fi
+EOF1
+for while done
+EOF2
+{
+  echo test
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle three heredocs on the same line', () => {
+      const source = `cmd <<A cmd <<B cmd <<C
+body A with if
+A
+body B with for
+B
+body C with done
+C
+{
+  echo test
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle multiple heredocs with tab stripping', () => {
+      const source = `cat <<-EOF1 cat <<-EOF2
+\tbody1
+\tEOF1
+\tbody2
+\tEOF2
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle multiple heredocs with CRLF', () => {
+      const source = 'cat <<EOF1 cat <<EOF2\r\nbody1\r\nEOF1\r\nbody2\r\nEOF2\r\nif true; then\r\n  echo ok\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });

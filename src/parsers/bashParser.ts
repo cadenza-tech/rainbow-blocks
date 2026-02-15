@@ -23,12 +23,21 @@ export class BashBlockParser extends BaseBlockParser {
       if (result) {
         // If region starts after current position (heredoc opener line gap),
         // scan the gap for excluded regions (comments, strings)
+        // and collect additional heredoc operators on the same line
+        const additionalHeredocs: { stripTabs: boolean; terminator: string }[] = [];
         if (result.start > i) {
           let j = i + 1;
           while (j < result.start) {
-            // Skip `<<` heredoc operator to avoid re-matching
+            // Check for additional `<<` heredoc operators on the same line
             if (source[j] === '<' && j + 1 < source.length && source[j + 1] === '<' && (j + 2 >= source.length || source[j + 2] !== '<')) {
-              // Skip past the heredoc operator and delimiter
+              // Try to parse the heredoc operator and delimiter
+              const heredocInfo = this.parseHeredocOperator(source, j);
+              if (heredocInfo) {
+                additionalHeredocs.push(heredocInfo);
+                j += heredocInfo.matchLength;
+                continue;
+              }
+              // Skip past the heredoc operator if not parseable
               j += 2;
               continue;
             }
@@ -46,12 +55,78 @@ export class BashBlockParser extends BaseBlockParser {
         }
         regions.push(result);
         i = result.end;
+
+        // Process additional heredoc bodies that follow the first one
+        for (const heredocInfo of additionalHeredocs) {
+          const bodyRegion = this.matchHeredocBody(source, i, heredocInfo.stripTabs, heredocInfo.terminator);
+          if (bodyRegion) {
+            regions.push(bodyRegion);
+            i = bodyRegion.end;
+          }
+        }
       } else {
         i++;
       }
     }
 
     return regions;
+  }
+
+  // Parses a heredoc operator at position and extracts delimiter info
+  // Returns null if the position is not a valid heredoc operator
+  private parseHeredocOperator(source: string, pos: number): { stripTabs: boolean; terminator: string; matchLength: number } | null {
+    const heredocPattern = /^<<(-)?[\t ]*\\?(['"])?([A-Za-z_][A-Za-z0-9_]*)\2?/;
+    const match = source.slice(pos).match(heredocPattern);
+    if (!match) return null;
+    return {
+      stripTabs: match[1] === '-',
+      terminator: match[3],
+      matchLength: match[0].length
+    };
+  }
+
+  // Matches a heredoc body starting from a given position (after a previous heredoc body)
+  private matchHeredocBody(source: string, bodyStart: number, stripTabs: boolean, terminator: string): ExcludedRegion | null {
+    let i = bodyStart;
+
+    while (i < source.length) {
+      const lineStart = i;
+      let lineEnd = i;
+      while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+        lineEnd++;
+      }
+
+      const line = source.slice(lineStart, lineEnd);
+      const trimmedLine = stripTabs ? line.replace(/^\t*/, '') : line;
+
+      if (trimmedLine === terminator) {
+        let regionEnd = lineEnd;
+        if (regionEnd < source.length) {
+          if (source[regionEnd] === '\r' && regionEnd + 1 < source.length && source[regionEnd + 1] === '\n') {
+            regionEnd += 2;
+          } else {
+            regionEnd += 1;
+          }
+        }
+        return {
+          start: bodyStart,
+          end: regionEnd
+        };
+      }
+
+      // Skip past line ending
+      if (lineEnd < source.length) {
+        if (source[lineEnd] === '\r' && lineEnd + 1 < source.length && source[lineEnd + 1] === '\n') {
+          i = lineEnd + 2;
+        } else {
+          i = lineEnd + 1;
+        }
+      } else {
+        i = lineEnd;
+      }
+    }
+
+    return { start: bodyStart, end: source.length };
   }
 
   // Tries to match an excluded region at the given position
@@ -250,7 +325,7 @@ export class BashBlockParser extends BaseBlockParser {
 
       // Skip comments (# to end of line)
       if (char === '#') {
-        while (i < source.length && source[i] !== '\n') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         continue;
@@ -440,6 +515,14 @@ export class BashBlockParser extends BaseBlockParser {
       if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
         const nested = this.matchParameterExpansion(source, i);
         i = nested.end;
+        continue;
+      }
+
+      // Skip comments (# to end of line)
+      if (char === '#') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
         continue;
       }
 
@@ -678,7 +761,7 @@ export class BashBlockParser extends BaseBlockParser {
           // Case pattern: (pattern) has no semicolons/newlines between ( and keyword
           // Subshell: (commands; ...) has semicolons/newlines between ( and keyword
           const contentBetween = source.slice(k + 1, position);
-          if (contentBetween.includes(';') || contentBetween.includes('\n')) {
+          if (contentBetween.includes(';') || contentBetween.includes('\n') || contentBetween.includes('\r')) {
             return false;
           }
           const lineStart = source.lastIndexOf('\n', k) + 1;
