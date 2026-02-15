@@ -781,4 +781,130 @@ end Test;`;
       assertSingleBlock(pairs, 'procedure', 'end', 0);
     });
   });
+
+  suite('Accept without do', () => {
+    test('should not treat accept without do as block opener', () => {
+      const source = `select
+  accept Entry_Name;
+or
+  delay 1.0;
+end select;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('should not treat accept with parameters but no do as block opener', () => {
+      const source = `select
+  accept Read(V : out Integer);
+or
+  delay 1.0;
+end select;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('should treat accept with do as block opener', () => {
+      const source = `accept My_Entry do
+  null;
+end My_Entry;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'accept', 'end');
+    });
+
+    test('should treat accept with parameters and do as block opener', () => {
+      const source = `accept Read(V : out Integer) do
+  V := Buffer_Value;
+end Read;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'accept', 'end');
+    });
+
+    test('should handle accept with comment before do', () => {
+      const source = `accept My_Entry -- comment
+  do
+  null;
+end My_Entry;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'accept', 'end');
+    });
+  });
+
+  suite('Type/subtype is with comment lines in backward scan', () => {
+    test('should skip comment line when scanning backward for type declaration', () => {
+      const source = `procedure Test is
+  type My_Type
+    -- This is a comment
+    is range 1 .. 100;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
+    });
+
+    test('should skip multiple comment lines when scanning backward for type', () => {
+      const source = `procedure Test is
+  subtype My_Sub
+    -- Comment line 1
+    -- Comment line 2
+    is Integer range 1 .. 10;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
+    });
+
+    test('should not skip non-comment lines as type declaration', () => {
+      const source = `procedure Test is
+  X := 1;
+    is
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      // 'is' after procedure should count, and the standalone 'is' should also count
+      // since 'X := 1;' is not a type/subtype declaration
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 2);
+    });
+  });
+
+  suite('Generic default is <>', () => {
+    test('should not treat function with is <> as block opener', () => {
+      const source = `generic
+  with function F(X : Integer) return Integer is <>;
+procedure Test is
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('should not treat procedure with is <> as block opener', () => {
+      const source = `generic
+  with procedure P(X : Integer) is <>;
+procedure Test is
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('should still treat procedure with is and body as block', () => {
+      const source = `procedure Test is
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+  });
 });

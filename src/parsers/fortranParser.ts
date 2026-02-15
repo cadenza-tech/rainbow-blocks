@@ -98,7 +98,9 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // 'module procedure' inside submodule is not a new module block
     if (lowerKeyword === 'module') {
-      const afterModule = source.slice(position + keyword.length);
+      let afterModule = source.slice(position + keyword.length);
+      // Handle continuation lines
+      afterModule = afterModule.replace(/&[^\r\n]*(?:\r\n|\r|\n)\s*&?/g, ' ');
       if (/^\s+procedure\b/i.test(afterModule)) {
         return false;
       }
@@ -467,7 +469,8 @@ export class FortranBlockParser extends BaseBlockParser {
       return true;
     }
     // If next line starts with 'end' (other), this was single-line spread
-    if (i < source.length && /^end\b/i.test(source.slice(i))) {
+    // Match both separated (end do) and concatenated (enddo) forms
+    if (i < source.length && /^end(do|if|where|forall|program|module|submodule|function|subroutine|block|blockdata|type|select|associate|critical|team|change|enum|interface|procedure|subprogram)?\b/i.test(source.slice(i))) {
       return false;
     }
     // More statements follow, it's block form
@@ -521,6 +524,11 @@ export class FortranBlockParser extends BaseBlockParser {
   // Tries to match an excluded region at the given position
   private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
+
+    // C preprocessor directive: # at line start (after optional whitespace)
+    if (char === '#' && this.isAtLineStart(source, pos)) {
+      return this.matchSingleLineComment(source, pos);
+    }
 
     // Fixed-form comment: * in column 1, or C/c in column 1 followed by non-identifier char
     if (char === '*' && this.isAtLineStart(source, pos)) {

@@ -1300,4 +1300,114 @@ end function`;
       assertSingleBlock(pairs, 'program', 'end program');
     });
   });
+
+  suite('isContinuationBlockForm with concatenated end keywords', () => {
+    test('should detect single-line where spread when next line is enddo (concatenated)', () => {
+      // enddo (concatenated) should be recognized as 'end' keyword
+      // making where a single-line spread, not a block
+      const source = `do i = 1, n
+  where (mask) &
+    a(i) = b(i)
+enddo`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'enddo');
+    });
+
+    test('should detect single-line forall spread when next line is endif (concatenated)', () => {
+      const source = `if (x) then
+  forall (i = 1:n) &
+    a(i) = b(i)
+endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should still detect block form where with endwhere', () => {
+      const source = `where (a > 0)
+  b = sqrt(a)
+  c = log(a)
+endwhere`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'endwhere');
+    });
+  });
+
+  suite('C preprocessor directives', () => {
+    test('should treat #endif as excluded region, not compound end if', () => {
+      const source = `#ifdef DEBUG
+if (x > 0) then
+  y = 1
+end if
+#endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should treat #if as excluded region', () => {
+      const source = `#if defined(FEATURE)
+program test
+  x = 1
+end program
+#endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should treat #include as excluded region', () => {
+      const source = `#include "header.h"
+subroutine test()
+  x = 1
+end subroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should not treat # in middle of line as preprocessor directive', () => {
+      const source = `program test
+  x = 1 # 2
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Module procedure continuation', () => {
+    test('should not treat module &\\n procedure as module block', () => {
+      const source = `submodule (parent) child
+contains
+  module &
+    procedure my_proc
+    x = 1
+  end procedure
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'submodule');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'procedure');
+    });
+
+    test('should not treat module & with comment then procedure as module block', () => {
+      const source = `submodule (parent) child
+contains
+  module & ! comment
+    procedure my_proc
+    x = 1
+  end procedure
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'submodule');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'procedure');
+    });
+
+    test('should still treat standalone module as block', () => {
+      const source = `module mymod
+  implicit none
+end module`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'end module');
+    });
+  });
 });

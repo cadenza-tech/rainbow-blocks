@@ -113,11 +113,43 @@ export class AdaBlockParser extends BaseBlockParser {
             if (afterIs && IS_NON_BODY_KEYWORDS.includes(afterIs[1].toLowerCase())) {
               return false;
             }
+            // 'is <>' is a generic default, not a body
+            if (k < source.length && source[k] === '<' && k + 1 < source.length && source[k + 1] === '>') {
+              return false;
+            }
             break;
           }
         }
         j++;
       }
+    }
+
+    // 'accept' without 'do' is not a block opener (e.g., accept Entry_Name;)
+    if (lowerKeyword === 'accept') {
+      let j = position + keyword.length;
+      let parenDepth = 0;
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          j++;
+          continue;
+        }
+        const ch = source[j];
+        if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth--;
+        else if (parenDepth === 0) {
+          if (ch === ';') return false;
+          const slice = source.slice(j, j + 2).toLowerCase();
+          if (
+            slice === 'do' &&
+            (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) &&
+            (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))
+          ) {
+            return true;
+          }
+        }
+        j++;
+      }
+      return false;
     }
 
     if (lowerKeyword !== 'loop') {
@@ -329,6 +361,13 @@ export class AdaBlockParser extends BaseBlockParser {
               .toLowerCase()
               .trimStart();
             if (prevLine.length > 0) {
+              // Skip comment lines (starting with --)
+              if (/^--/.test(prevLine)) {
+                scanPos = prevStart - 1;
+                if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+                if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                continue;
+              }
               if (/^(type|subtype)\b/.test(prevLine)) {
                 isTypeDecl = true;
               }
