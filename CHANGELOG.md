@@ -5,6 +5,132 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-02-15
+
+### Added
+
+- Octave: Support `do`/`until` loop blocks
+- Octave: Add specific close keywords (`endclassdef`, `endmethods`, `endproperties`, `endevents`, `endenumeration`)
+- Verilog: Support SystemVerilog constructs (`class`/`endclass`, `interface`/`endinterface`, `program`/`endprogram`, `package`/`endpackage`, `property`/`endproperty`, `sequence`/`endsequence`, `checker`/`endchecker`, `clocking`/`endclocking`)
+- Verilog: Support `always_comb`, `always_ff`, `always_latch` block openers
+- Verilog: Support preprocessor directives (`` `ifdef ``/`` `ifndef ``/`` `elsif ``/`` `else ``/`` `endif ``)
+- Erlang: Support `maybe`/`end` blocks and `else` intermediate
+- Erlang: Support triple-quoted strings (OTP 27+)
+- Erlang: Support character literals (`$x`, `$\n`, etc.) as excluded regions
+- Julia: Support `$()` interpolation in double-quoted, triple-quoted, and command strings
+- Julia: Support any identifier prefix as string macro (e.g., `sql"..."`)
+- Julia: Support triple backtick command strings
+- Pascal: Support `asm`/`end` blocks
+- MATLAB: Support `arguments` block keyword
+- Lua: Support `\z` and `\<newline>` escape sequences in strings (Lua 5.2+)
+- Lua: Exclude goto labels (`::identifier::`) from keyword matching
+- Fortran: Support fixed-form comment indicators (`*`, `C`/`c` in column 1)
+- MATLAB/Octave: Support line continuation (`...`) as excluded regions
+
+### Fixed
+
+- Ada: Skip `entry` declarations without body (ending with `;` before `is`)
+- Ada: Skip `access function`/`procedure` (access subprogram types)
+- Ada: Skip function/procedure declarations without body (`;` before `is`)
+- Ada: Skip `is abstract`/`is separate`/`is new`/`is null` non-body declarations
+- Ada: Skip `is` in `type`/`subtype` declarations (including multi-line)
+- Ada: Restrict `or` intermediate to `select` blocks only
+- Ada: Handle multi-line `for`/`while` statements when validating `loop`
+- Ada: Merge `begin` context keyword into single pair (e.g., `procedure`/`begin`/`end` = 1 pair)
+- Ada: Skip attribute name after tick to avoid false keyword matches
+- AppleScript: Detect single-line `if ... then action` (not treated as block)
+- AppleScript: Detect `tell ... to` one-liner form (not treated as block)
+- AppleScript: Skip keywords used as variable names (`set X to`, `copy X to` patterns)
+- AppleScript: Remove incorrect `#` comment support
+- Bash: Exclude process substitution `<(...)` and `>(...)` from keyword matching
+- Bash: Exclude bare arithmetic evaluation `((...))` from keyword matching
+- Bash: Handle `case`/`esac` nesting inside `$(...)` command substitution
+- Bash: Handle `${...}`, backtick commands, comments, and `$'...'` inside command substitution
+- Bash: Handle `\{`/`\}` escapes and nested `${...}` inside parameter expansion
+- Bash: Handle `${...}` inside arithmetic expansion `$(( ))`
+- Bash: Scan heredoc opener line gap for excluded regions (comments, strings)
+- COBOL: Validate block openers by checking for matching `END-keyword`
+- COBOL: Validate fixed-format column 7 comment area (digits/spaces only)
+- COBOL: Restrict `ELSE` intermediate to `IF` blocks, `WHEN` to `EVALUATE`/`SEARCH`
+- Crystal: Handle `#{}` interpolation in double-quoted strings, regex, backtick strings, and percent literals
+- Crystal: Detect `::` scope resolution (not treated as symbol start)
+- Crystal: Require `<<-` (dash) for heredoc syntax
+- Crystal: Skip postfix `rescue` modifier
+- Crystal: Skip `for`/`in` loop keywords
+- Crystal: Skip dot-preceded keywords (method calls like `obj.end`)
+- Crystal: Distinguish `%` modulo operator from percent literals
+- Crystal: Handle `?`/`!` characters in division preceders
+- Crystal: Handle proper character literal matching (hex/octal escapes)
+- Crystal: Scan heredoc opener line gap for excluded regions
+- Elixir: Handle `#{}` interpolation in double-quoted strings, single-quoted charlists, triple-quoted heredocs, and sigil heredocs
+- Elixir: Limit `hasDoKeyword` search scope (max 5 lines, stop at other block keywords)
+- Elixir: Handle `do:value` (no space) one-liner pattern
+- Elixir: Skip nested sigils inside interpolation
+- Erlang: Skip `fun` in `-spec`/`-type`/`-callback`/`-opaque` type contexts
+- Erlang: Skip `fun Module:Function/Arity` function references
+- Erlang: Properly scope `fun()` type context (period-separated declarations)
+- Erlang: Restrict `catch` to `try`, `of` to `case`/`try`, `after` to `receive`/`try`
+- Erlang: Skip keywords used as map keys (followed by `=>`)
+- Erlang: Handle multi-byte escape sequences in atoms (hex, octal)
+- Fortran: Skip `type is(...)` guard in select type blocks
+- Fortran: Skip `type(name)` type specifier (with `::` or `,`)
+- Fortran: Require `select` to be followed by `type` or `case` (with `&` continuation)
+- Fortran: Skip `module procedure` (not a module block)
+- Fortran: Skip type-bound `procedure` declarations (with `::`)
+- Fortran: Detect single-line `where`/`forall` (with `&` continuation support)
+- Fortran: Skip `if` preceded by `else` (including `&` continuation)
+- Fortran: Skip `end` used as variable name (followed by `=`)
+- Fortran: Handle `&` continuation and comment-only lines in `if`/`then` detection
+- Fortran: Check all `::` occurrences and excluded regions in `isAfterDoubleColon`
+- Julia: Skip `for`/`if` inside brackets and parentheses (array comprehensions/generators)
+- Julia: Skip `end` inside brackets (array indexing)
+- Julia: Skip block keywords inside square brackets
+- Julia: Handle `::` type annotation (not treated as symbol start)
+- Julia: Improve prefixed string detection (reject block keywords as prefixes)
+- Lua: Search backwards across multiple lines for `while`/`for` loop `do`
+- Lua: Prevent `end` from closing `repeat` blocks (only `until` can)
+- Lua: Terminate strings at unescaped newlines
+- MATLAB: Skip `end` inside parentheses, brackets, and braces (array indexing)
+- MATLAB: Skip struct field access for keywords (`s.end`, `s.if`, etc.)
+- MATLAB: Skip classdef section keywords used as function calls or variables
+- MATLAB: Support nested block comments (`%{`/`%}`)
+- MATLAB: Require `%{` to be alone on line for block comments
+- MATLAB: Improve digit followed by `'` detection (transpose vs string)
+- Octave: Prevent generic `end` from closing `do` blocks (only `until` can)
+- Octave: Support nested block comments (`%{`/`%}` and `#{`/`#}`)
+- Octave: Require block comment openers to be alone on line
+- Octave: Improve digit followed by `'` detection (transpose vs string)
+- Pascal: Skip `class` forward declarations (with nested parentheses and qualified type names)
+- Pascal: Skip `class` with modifiers (`sealed`, `abstract`, `helper`) after semicolon
+- Pascal: Improve `object` detection inside record types
+- Ruby: Handle `#{}` interpolation in double-quoted strings, regex, backtick strings, percent literals, and double-quoted symbols
+- Ruby: Detect `::` scope resolution (not treated as symbol start)
+- Ruby: Include entire `=end` line in excluded region
+- Ruby: Skip postfix `rescue` modifier
+- Ruby: Add `not`/`and`/`or` to preceding block keywords for postfix detection
+- Ruby: Skip method name suffixes (`?`/`!`/`=`) on keywords
+- Ruby: Skip dot-preceded keywords (method calls like `obj.end`)
+- Ruby: Distinguish `%` modulo operator from percent literals
+- Ruby: Handle `?`/`!` characters in division preceders
+- Ruby: Disambiguate `<<` (shift operator vs heredoc) after identifiers
+- Ruby: Scan heredoc opener line gap for excluded regions
+- Verilog: Validate control keywords (require following `begin` through chained keywords)
+- Verilog: Merge `else` before control keyword into single pair
+- Verilog: Restrict `default` intermediate to case context (followed by `:`)
+- Verilog: Reject backtick-prefixed control keywords (preprocessor directives)
+- VHDL: Detect `wait for` timing statements (including multi-line)
+- VHDL: Skip `use entity` and `label: entity` direct instantiation
+- VHDL: Skip function/procedure declarations (ending with `;` before `is`)
+- VHDL: Filter `when`/`else` in conditional signal assignments (`<=`)
+- VHDL: Handle multi-line `for`/`while` statements when validating `loop`
+- VHDL: Restrict `when` intermediate to `case` blocks only
+- VHDL: Skip attribute name after tick to avoid false keyword matches
+- Base parser: Handle `\r`-only line endings in single-line comment matching
+- All parsers: Handle `\r` and `\r\n` line endings consistently throughout
+- All parsers: Use `[ \t]` instead of `\s` in compound end patterns to avoid matching newlines
+- Config: Validate `colors` and `debounceMs` setting types with fallback to defaults
+- Extension: Clear pending debounce timer on configuration change
+
 ## [1.1.1] - 2026-02-11
 
 ### Fixed
@@ -100,6 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.2]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.0.0...v1.0.1
