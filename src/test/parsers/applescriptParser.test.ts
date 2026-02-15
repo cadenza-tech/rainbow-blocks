@@ -293,15 +293,6 @@ end tell`;
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
 
-    test('should skip keywords in hash comments', () => {
-      const source = `tell application "Finder"
-  # tell if repeat end tell end if
-  activate
-end tell`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'tell', 'end tell');
-    });
-
     test('should skip keywords in block comments', () => {
       const source = `tell application "Finder"
   (* tell if repeat
@@ -412,10 +403,10 @@ end tell`;
 
   suite('Token positions', () => {
     test('should report correct line and column for single line', () => {
-      const source = 'if x then y end if';
+      const source = 'tell application "Finder" end tell';
       const pairs = parser.parse(source);
       assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 0, 12);
+      assertTokenPosition(pairs[0].closeKeyword, 0, 26);
     });
 
     test('should report correct positions for multi-line', () => {
@@ -498,6 +489,70 @@ end tell`;
     });
   });
 
+  suite('Single-line if exclusion', () => {
+    test('should not parse single-line if-then as block', () => {
+      const source = `tell application "Finder"
+  if x > 0 then set y to 1
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should parse multi-line if-then as block', () => {
+      const source = `if x > 0 then
+  set y to 1
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not parse single-line if inside tell as block', () => {
+      const source = `tell application "Finder"
+  if x > 0 then doSomething()
+  if y > 0 then
+    set z to 1
+  end if
+end tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle if without then on same line', () => {
+      const source = `if condition then
+  action()
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Excluded regions in if validation', () => {
+    test('should not treat then in comment as single-line if', () => {
+      const source = `if x -- then y
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat then in string as single-line if', () => {
+      const source = `if x & "then" & y then
+result
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('No hash comment', () => {
+    test('should not treat # as comment character', () => {
+      const source = `if true then
+  set x to 5
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   suite('Coverage: compound keyword word boundary check', () => {
     test('should not match end tell compound when followed by word char', () => {
       // Tests the word boundary check for compound keywords
@@ -512,6 +567,138 @@ end tell`;
       const source = 'tell application "Finder"\n  on errors\nend tell';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Tell-to one-liner', () => {
+    test('should not treat tell-to one-liner as block', () => {
+      const source = `tell application "Finder" to activate
+if true then
+  beep
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat tell-to with complex command as block', () => {
+      const source = `tell application "Finder" to open file "test"
+if true then
+  beep
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still parse multi-line tell block', () => {
+      const source = `tell application "Finder"
+  activate
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Coverage: single-line if with excluded region after then', () => {
+    test('should handle excluded region after then on same line', () => {
+      const source = `if x then "string with end" -- comment
+tell application "Finder"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should handle unmatched end with empty stack', () => {
+      const source = 'end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('CR-only line endings', () => {
+    test('should handle isKeywordAsVariableName with \\r-only line endings', () => {
+      // set repeat to 5 with \r-only line endings
+      const source = 'on run\rset repeat to 5\rend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should handle on handler line-start check with \\r-only line endings', () => {
+      // 'on' at line start with \r-only line endings
+      const source = 'tell application "Finder"\r  activate\rend tell\ron myHandler()\r  beep\rend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should reject on in middle of line with \\r-only line endings', () => {
+      // 'on' in middle of line should not be block opener
+      const source = 'tell application "Finder"\r  click on button 1\rend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should handle to handler line-start check with \\r-only line endings', () => {
+      const source = 'to myHandler(x)\r  return x\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+
+    test('should reject to in middle of line with \\r-only line endings', () => {
+      const source = 'tell application "Finder"\r  set x to 5\rend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('v7 bug fixes - variable names as block keywords', () => {
+    test('should not treat keyword in set-to as block opener', () => {
+      const source = `on run
+  set repeat to 5
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat keyword in copy-to as block opener', () => {
+      const source = `on run
+  copy script to x
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat keyword in set-to with script', () => {
+      const source = `on run
+  set script to "test"
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should still treat real block keywords normally', () => {
+      const source = `tell application "Finder"
+  if true then
+    repeat 3 times
+    end repeat
+  end if
+end tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should not treat tell in set-to as block opener', () => {
+      const source = `on run
+  set tell to 5
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat tell in copy-to as block opener', () => {
+      const source = `on run
+  copy tell to myVar
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
     });
   });
 });

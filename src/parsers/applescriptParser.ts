@@ -68,7 +68,73 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'else if', 'on error']
   };
 
-  // Finds excluded regions: comments (3 styles), strings
+  // Validates block open: single-line 'if' and 'tell...to' one-liners are not blocks
+  // Also rejects keywords used as variable names in 'set X to' / 'copy X to' patterns
+  protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Check if this keyword is used as a variable/property name
+    // Patterns: 'set X to', 'copy X to', 'get X', 'X of Y', 'Y's X'
+    if (this.isKeywordAsVariableName(source, position, keyword)) {
+      return false;
+    }
+
+    // 'tell ... to action' on one line is a one-liner, not a block
+    if (keyword === 'tell') {
+      return !this.isTellToOneLiner(source, position, excludedRegions);
+    }
+
+    if (keyword !== 'if') {
+      return true;
+    }
+
+    // Find end of current line
+    let lineEnd = position + keyword.length;
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+      lineEnd++;
+    }
+
+    // Search for 'then' after 'if', skipping excluded regions
+    let i = position + keyword.length;
+    let thenPos = -1;
+    while (i < lineEnd) {
+      // Skip excluded regions
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      // Check for 'then' keyword
+      if (
+        source.slice(i, i + 4).toLowerCase() === 'then' &&
+        (i === 0 || !/\w/.test(source[i - 1])) &&
+        (i + 4 >= source.length || !/\w/.test(source[i + 4]))
+      ) {
+        thenPos = i;
+        break;
+      }
+      i++;
+    }
+
+    if (thenPos >= 0) {
+      // Check if there's non-excluded content after 'then' on the same line
+      let j = thenPos + 4;
+      while (j < lineEnd) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+        if (source[j] !== ' ' && source[j] !== '\t' && source[j] !== '\r') {
+          // Non-whitespace, non-excluded content after 'then' → single-line if
+          return false;
+        }
+        j++;
+      }
+    }
+
+    return true;
+  }
+
+  // Finds excluded regions: comments and strings
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
     let i = 0;
@@ -92,11 +158,6 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
     // Single-line comment: -- to end of line
     if (char === '-' && pos + 1 < source.length && source[pos + 1] === '-') {
-      return this.matchSingleLineComment(source, pos);
-    }
-
-    // Single-line comment: # to end of line (AppleScript 2.0+)
-    if (char === '#') {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -202,7 +263,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           // 'to' and 'on' are block openers only at line start (handler defs)
           if (type === 'block_open' && (keyword === 'to' || keyword === 'on')) {
             let lineStart = i;
-            while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+            while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
               lineStart--;
             }
             if (!/^\s*$/.test(source.substring(lineStart, i))) {
@@ -210,6 +271,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
               matched = true;
               break;
             }
+          }
+
+          // Validate block open keywords (e.g., single-line if)
+          if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, i, excludedRegions)) {
+            i = endPos;
+            matched = true;
+            break;
           }
 
           const { line, column } = this.getLineAndColumn(i, newlinePositions);
@@ -282,6 +350,68 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     return pairs;
+  }
+
+  // Checks if 'tell' is followed by 'to' on the same line (one-liner form)
+  private isTellToOneLiner(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineEnd = position + 4;
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+      lineEnd++;
+    }
+
+    let i = position + 4;
+    while (i < lineEnd) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      if (
+        source.slice(i, i + 2).toLowerCase() === 'to' &&
+        (i === 0 || !/\w/.test(source[i - 1])) &&
+        (i + 2 >= source.length || !/\w/.test(source[i + 2]))
+      ) {
+        return true;
+      }
+      i++;
+    }
+    return false;
+  }
+
+  // Checks if a block keyword is being used as a variable name
+  // e.g., 'set repeat to 5', 'set script to "test"', 'copy tell to x'
+  private isKeywordAsVariableName(source: string, position: number, keyword: string): boolean {
+    const lowerSource = source.toLowerCase();
+    // Find start of current line
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    const lineBefore = lowerSource.slice(lineStart, position).trimStart();
+
+    // 'set <keyword> to' pattern
+    if (/^set\s+$/.test(lineBefore)) {
+      const afterKw = lowerSource.slice(position + keyword.length);
+      if (/^\s+to\b/.test(afterKw)) {
+        return true;
+      }
+    }
+
+    // 'copy <keyword> to' pattern
+    if (/^copy\s+$/.test(lineBefore)) {
+      const afterKw = lowerSource.slice(position + keyword.length);
+      if (/^\s+to\b/.test(afterKw)) {
+        return true;
+      }
+    }
+
+    // '<keyword> of' pattern (property access)
+    const afterKw = lowerSource.slice(position + keyword.length);
+    if (/^\s+of\b/.test(afterKw) && !/^\s*$/.test(lineBefore) && !/^(if|tell|repeat)\s/i.test(lineBefore.trimStart())) {
+      return true;
+    }
+
+    return false;
   }
 
   // Finds the index of the last opener with the given keyword
