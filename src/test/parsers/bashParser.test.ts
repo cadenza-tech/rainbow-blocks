@@ -342,6 +342,17 @@ EOF
       assertSingleBlock(pairs, '{', '}');
     });
 
+    test('should ignore keywords in comment on heredoc start line', () => {
+      const source = `cat <<EOF # if fi
+body
+EOF
+{
+  echo "test"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
     test('should handle heredoc with single-quoted delimiter', () => {
       const source = `cat <<'EOF'
 if $var fi
@@ -390,6 +401,25 @@ EOF2
 }`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Excluded regions - Command substitution comments and ANSI-C', () => {
+    test('should handle comments inside command substitution', () => {
+      const source = `if $(echo hello # this is a comment with )
+  ); then
+  echo yes
+fi`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should handle ANSI-C quotes inside command substitution', () => {
+      const source = `if $(echo $'it\\'s a test'); then
+  echo yes
+fi`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
     });
   });
 
@@ -790,13 +820,14 @@ fi`;
         const source = `{
   if [ "$a" ]; then
     case "$b" in
-      *) for i in 1; do
-           while true; do
-             echo "test"
-             break
-           done
-         done
-         ;;
+      *)
+        for i in 1; do
+          while true; do
+            echo "test"
+            break
+          done
+        done
+        ;;
     esac
   fi
 }`;
@@ -1227,6 +1258,39 @@ fi`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'for', 'done');
       });
+
+      test('should parse blocks after semicolon on heredoc line', () => {
+        const source = `cat <<EOF; if true; then
+heredoc content
+EOF
+echo "done"; fi`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'if', 'fi');
+      });
+
+      test('should parse blocks after heredoc marker with && on same line', () => {
+        const source = `cat <<EOF && for i in 1 2; do
+heredoc body
+EOF
+echo "$i"; done`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'for', 'done');
+      });
+
+      test('should not exclude same-line code after heredoc marker', () => {
+        const source = `cat <<EOF; while true; do
+line1
+EOF
+break; done`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'while', 'done');
+      });
+
+      test('should handle heredoc marker at end of file without newline', () => {
+        const source = 'cat <<EOF';
+        const pairs = parser.parse(source);
+        assertNoBlocks(pairs);
+      });
     });
 
     suite('Here-strings', () => {
@@ -1381,6 +1445,176 @@ done`;
         const pairs = parser.parse(source);
         assertNoBlocks(pairs);
       });
+    });
+  });
+
+  suite('Block middle keyword validation', () => {
+    test('should not treat then in echo as intermediate', () => {
+      const pairs = parser.parse('if true; then\n  echo then\nfi');
+      assertSingleBlock(pairs, 'if', 'fi', 0);
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value, 'then');
+    });
+
+    test('should not treat else in echo as intermediate', () => {
+      const pairs = parser.parse('if true; then\n  echo else\nfi');
+      assertSingleBlock(pairs, 'if', 'fi', 0);
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value, 'then');
+    });
+
+    test('should not treat do in echo as intermediate', () => {
+      const pairs = parser.parse('for i in 1 2 3; do\n  echo do\ndone');
+      assertSingleBlock(pairs, 'for', 'done', 0);
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value, 'do');
+    });
+  });
+
+  suite('Negation operator', () => {
+    test('should recognize keyword after ! negation', () => {
+      const pairs = parser.parse('! if true; then\n  false\nfi');
+      assertSingleBlock(pairs, 'if', 'fi', 0);
+    });
+
+    test('should recognize for after ! negation', () => {
+      const pairs = parser.parse('! for i in 1 2 3; do\n  false\ndone');
+      assertSingleBlock(pairs, 'for', 'done', 0);
+    });
+  });
+
+  suite('Subshell handling', () => {
+    test('should parse blocks inside single-line subshell', () => {
+      const pairs = parser.parse('(if true; then echo yes; fi)');
+      assertSingleBlock(pairs, 'if', 'fi', 0);
+    });
+
+    test('should parse blocks inside subshell with for loop', () => {
+      const pairs = parser.parse('(for i in 1 2 3; do echo "$i"; done)');
+      assertSingleBlock(pairs, 'for', 'done', 0);
+    });
+  });
+
+  suite('Time prefix', () => {
+    test('should recognize for loop after time', () => {
+      const pairs = parser.parse('time for i in 1 2 3; do\n  process "$i"\ndone');
+      assertSingleBlock(pairs, 'for', 'done', 0);
+    });
+
+    test('should recognize while loop after time', () => {
+      const pairs = parser.parse('time while true; do\n  break\ndone');
+      assertSingleBlock(pairs, 'while', 'done', 0);
+    });
+  });
+
+  suite('Command argument keywords', () => {
+    test('should not treat echo done as block close', () => {
+      const source = `for f in *.txt; do
+  echo done processing $f
+done`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat status=done as block close', () => {
+      const source = `for f in files; do
+  status=done
+done`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat grep fi as block close', () => {
+      const source = `if true; then
+  grep fi file
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat echo fi as block close', () => {
+      const source = `if true; then
+  echo fi
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat echo esac as block close', () => {
+      const source = `case $x in
+  a) echo esac ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Keywords in arithmetic (( ))', () => {
+    test('should not treat for in (( )) as block keyword', () => {
+      const source = `((for=1))
+for x in a b; do
+  echo $x
+done`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat if in (( )) as block keyword', () => {
+      const source = `((if=1+2))
+if true; then
+  echo yes
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat while in (( )) as block keyword', () => {
+      const source = `((while=x))
+while true; do
+  break
+done`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should still parse regular blocks around arithmetic', () => {
+      const source = `for x in a b; do
+  y=$((x + 1))
+  echo $y
+done`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Case pattern keywords', () => {
+    test('should not treat keywords in case patterns as block keywords', () => {
+      const source = `case $action in
+  for)
+    echo starting loop
+    ;;
+  done)
+    echo loop ended
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not treat if in case pattern as block open', () => {
+      const source = `case $x in
+  if) echo matched ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not treat for in POSIX (pattern) case syntax as block open', () => {
+      const source = `case $x in
+  (for) echo found ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
     });
   });
 
@@ -1599,6 +1833,275 @@ fi`;
       const pairs = parser.parse(source);
       // fi has no matching if, so no pairs
       assertNoBlocks(pairs);
+    });
+
+    test('should not treat ${ as command group brace', () => {
+      // Tests the parameter expansion skip in tokenize
+      const source = `if [ "\${#arr[@]}" -gt 0 ]; then
+  echo "has items"
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle ${# parameter expansion for comment detection', () => {
+      // Tests isParameterExpansion returning true
+      const source = `if true; then
+  len=\${#str}
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: heredoc at end of file', () => {
+    test('should handle heredoc without trailing newline at EOF', () => {
+      const regions = parser.getExcludedRegions('cat <<EOF');
+      assert.strictEqual(regions.length, 0);
+    });
+  });
+
+  suite('Case pattern with pipe-separated alternatives', () => {
+    test('should not treat keyword in pipe-separated case pattern as block', () => {
+      const source = `case $x in
+  if|then)
+    echo matched
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not steal fi when keyword is in pipe pattern', () => {
+      const source = `if true; then
+  case $x in
+    if|then)
+      echo matched
+      ;;
+  esac
+fi`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'case');
+    });
+
+    test('should handle keyword as middle alternative', () => {
+      const source = `case $x in
+  a|if|b)
+    echo matched
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle keyword with POSIX paren and pipe', () => {
+      const source = `case $x in
+  (if|then)
+    echo matched
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Complex real-world scenario', () => {
+    test('should handle nested case + subshell + heredoc with keywords', () => {
+      const source = `if true; then
+  case $x in
+    a)
+      (while read line; do echo "$line"; done < file)
+      ;;
+    *)
+      cat <<'EOF'
+if false; then
+  echo "in heredoc"
+fi
+EOF
+      ;;
+  esac
+fi`;
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'case');
+      findBlock(pairs, 'while');
+      assertBlockCount(pairs, 3);
+    });
+  });
+
+  suite('Heredoc with underscore delimiter', () => {
+    test('should match heredoc with underscore in delimiter', () => {
+      const source = `cat <<END_DATA
+if true; then echo 1; fi
+END_DATA
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Parameter expansion in substitutions', () => {
+    test('should handle parameter expansion inside command substitution', () => {
+      const source = `if true; then
+  x=$(echo \${var:-)})
+  echo test
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle parameter expansion inside process substitution', () => {
+      const source = `while read line; do
+  echo "$line"
+done < <(cat \${file:-default)txt})`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should handle parameter expansion inside arithmetic expansion', () => {
+      const source = `if true; then
+  x=$((\${var:-0} + 1))
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle parameter expansion inside bare arithmetic evaluation', () => {
+      const source = `if true; then
+  ((x = \${var:-0} + 1))
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle backtick inside command substitution', () => {
+      const source = 'if true; then\n  x=$(echo `if true; then echo 1; fi`)\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle backtick inside parameter expansion', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Testing Bash parameter expansion syntax
+      const source = 'if true; then\n  x=${var:-`if true; then echo 1; fi`}\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Edge cases', () => {
+    test('should handle CRLF heredoc terminator', () => {
+      const source = 'if true; then\r\n  cat <<EOF\r\nhello\r\nEOF\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle CRLF in case statement', () => {
+      const source = 'case $x in\r\n  a)\r\n    echo ok\r\n    ;;\r\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle empty case statement', () => {
+      const source = 'case $x in\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle if/fi on same line after semicolons', () => {
+      const source = 'if true; then echo ok; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle nested case with keywords as patterns', () => {
+      const source = `case $cmd in
+  for|while|until)
+    echo "loop keyword"
+    ;;
+  if|case)
+    echo "conditional"
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should recognize block keywords after ) in case body', () => {
+      const source = 'case $x in\n  a) for i in 1 2; do\n       echo $i\n     done\n     ;;\nesac';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      assert.strictEqual(pairs[0].openKeyword.value, 'for');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'done');
+      assert.strictEqual(pairs[0].nestLevel, 1);
+      assert.strictEqual(pairs[1].openKeyword.value, 'case');
+      assert.strictEqual(pairs[1].closeKeyword.value, 'esac');
+      assert.strictEqual(pairs[1].nestLevel, 0);
+    });
+  });
+
+  suite('isCasePattern default return false (Bug 6)', () => {
+    test('should match fi followed by ) outside case statement', () => {
+      const source = 'result=$(cmd)\nif true; then\n  echo x\nfi)';
+      const pairs = parser.parse(source);
+      // fi should still be matched as block close even though followed by )
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match fi inside function body with closing paren nearby', () => {
+      const source = 'f() {\n  if true; then\n    echo x\n  fi\n}';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, '{');
+    });
+
+    test('should match done followed by ) outside case statement', () => {
+      const source = 'x=$(for i in 1 2; do echo $i; done)\nfor j in a b; do\n  echo $j\ndone)';
+      const pairs = parser.parse(source);
+      // The outer done) should still be matched
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('CR-only line endings (Bug 7, 8, 9, 23)', () => {
+    test('should recognize keyword at command position with CR-only line endings (Bug 7)', () => {
+      const source = 'if true; then\r  echo ok\rfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize for-done with CR-only line endings (Bug 7)', () => {
+      const source = 'for i in 1 2; do\r  echo $i\rdone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should recognize } after newline with CR-only line endings (Bug 8)', () => {
+      const source = '{\r  echo test\r}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle heredoc with CR-only line endings (Bug 9)', () => {
+      const source = 'cat <<EOF\rheredoc content\rEOF\rif true; then\r  echo ok\rfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle heredoc opener line with CR-only ending (Bug 9)', () => {
+      const source = 'cat <<EOF\rcontent with if fi\rEOF\r{\r  echo test\r}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should handle pipe case pattern with CR-only line endings (Bug 23)', () => {
+      const source = 'case $x in\r  if|then)\r    echo matched\r    ;;\resac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
     });
   });
 });
