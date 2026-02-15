@@ -18,7 +18,7 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrsx]/;
 
 // Characters that indicate the preceding / is division, not regex
-const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`]/;
+const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_?!)\]}"'`]/;
 
 // Keywords after which / starts a regex, not division
 const REGEX_PRECEDING_KEYWORDS = new Set([
@@ -55,6 +55,11 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Validates block open keywords, excluding postfix conditionals
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Reject keywords preceded by dot (method calls like obj.class, obj.begin)
+    if (position > 0 && source[position - 1] === '.') {
+      return false;
+    }
+
     // Check if 'do' is a loop separator (while/until/for ... do)
     if (keyword === 'do') {
       return !this.isLoopDo(source, position, excludedRegions);
@@ -68,22 +73,65 @@ export class RubyBlockParser extends BaseBlockParser {
     return !this.isPostfixConditional(source, position, excludedRegions);
   }
 
-  // Filters out keywords used as hash keys (e.g., { if: value })
+  // Filters out keywords used as hash keys, rescue modifiers, and method calls
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
 
-    // Filter out tokens immediately followed by colon (hash key syntax)
     return tokens.filter((token) => {
-      const afterKeyword = source[token.endOffset];
-      return afterKeyword !== ':';
+      // Filter out dot-preceded tokens (method calls like obj.end, obj.class)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
+      }
+      // Filter out tokens immediately followed by colon (hash key syntax)
+      if (source[token.endOffset] === ':') {
+        return false;
+      }
+      // Filter out keywords followed by ?, !, or = (method names like end?, begin!, do=)
+      const afterChar = source[token.endOffset];
+      if (afterChar === '?' || afterChar === '!' || afterChar === '=') {
+        return false;
+      }
+      // Filter out postfix rescue modifier (e.g., risky rescue nil)
+      if (token.type === 'block_middle' && token.value === 'rescue') {
+        return !this.isPostfixRescue(source, token.startOffset, excludedRegions);
+      }
+      return true;
     });
+  }
+
+  // Checks if 'rescue' is used as a postfix modifier (e.g., risky rescue nil)
+  private isPostfixRescue(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    let before = source.slice(lineStart, position);
+    let lastSemicolon = -1;
+    for (let i = before.length - 1; i >= 0; i--) {
+      if (before[i] === ';' && !this.isInExcludedRegion(lineStart + i, excludedRegions)) {
+        lastSemicolon = i;
+        break;
+      }
+    }
+    if (lastSemicolon >= 0) {
+      before = before.slice(lastSemicolon + 1);
+    }
+    before = before.trim();
+    if (before.length === 0) return false;
+    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
+    for (const kw of blockKeywords) {
+      if (before === kw || before.endsWith(` ${kw}`) || before.endsWith(`\t${kw}`)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // Checks if a conditional is postfix (e.g., "return value if condition")
   private isPostfixConditional(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Find line start
     let lineStart = position;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
       lineStart--;
     }
 
@@ -114,12 +162,18 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     // Block keyword before means not postfix
-    const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
+    const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
 
     for (const kw of precedingBlockKeywords) {
-      if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`)) {
+      if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`) || beforeKeyword.endsWith(`\t${kw}`)) {
         return false;
       }
+    }
+
+    // ! and ? after identifier are method name suffixes (save!, valid?),
+    // not operators - the keyword IS postfix in this case
+    if (/[a-zA-Z0-9_][!?]$/.test(beforeKeyword)) {
+      return true;
     }
 
     // Operator expecting expression means not postfix
@@ -136,7 +190,7 @@ export class RubyBlockParser extends BaseBlockParser {
   private isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Find line start
     let lineStart = position;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n') {
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
       lineStart--;
     }
 
@@ -199,6 +253,28 @@ export class RubyBlockParser extends BaseBlockParser {
     while (i < source.length) {
       const result = this.tryMatchExcludedRegion(source, i);
       if (result) {
+        // If region starts after current position (heredoc opener line gap),
+        // scan the gap for excluded regions (comments, strings)
+        if (result.start > i) {
+          let j = i + 1;
+          while (j < result.start) {
+            // Skip '<' to avoid re-matching heredoc
+            if (source[j] === '<') {
+              j++;
+              continue;
+            }
+            const gapResult = this.tryMatchExcludedRegion(source, j);
+            if (gapResult) {
+              regions.push({
+                start: gapResult.start,
+                end: Math.min(gapResult.end, result.start)
+              });
+              j = gapResult.end;
+            } else {
+              j++;
+            }
+          }
+        }
         regions.push(result);
         i = result.end;
       } else {
@@ -234,9 +310,9 @@ export class RubyBlockParser extends BaseBlockParser {
       if (region) return region;
     }
 
-    // Double-quoted string
+    // Double-quoted string (with #{} interpolation support)
     if (char === '"') {
-      return this.matchQuotedString(source, pos, '"');
+      return this.matchInterpolatedString(source, pos);
     }
 
     // Single-quoted string
@@ -252,11 +328,11 @@ export class RubyBlockParser extends BaseBlockParser {
     // Heredoc
     if (char === '<' && pos + 1 < source.length && source[pos + 1] === '<') {
       const result = this.matchHeredoc(source, pos);
-      if (result) return { start: pos, end: result.end };
+      if (result) return { start: result.contentStart, end: result.end };
     }
 
-    // Percent literals
-    if (char === '%' && pos + 1 < source.length) {
+    // Percent literals (skip modulo operator: number/identifier % delimiter)
+    if (char === '%' && pos + 1 < source.length && !this.isModuloOperator(source, pos)) {
       const result = this.matchPercentLiteral(source, pos);
       if (result) return { start: pos, end: result.end };
     }
@@ -266,9 +342,9 @@ export class RubyBlockParser extends BaseBlockParser {
       return this.matchSymbolLiteral(source, pos);
     }
 
-    // Backtick string (command)
+    // Backtick string (command) with #{} interpolation support
     if (char === '`') {
-      return this.matchQuotedString(source, pos, '`');
+      return this.matchBacktickString(source, pos);
     }
 
     return null;
@@ -293,7 +369,12 @@ export class RubyBlockParser extends BaseBlockParser {
         // =end must be followed by whitespace, newline, or EOF
         const afterEnd = source[i + 4];
         if (afterEnd === undefined || afterEnd === ' ' || afterEnd === '\t' || afterEnd === '\n' || afterEnd === '\r') {
-          return { start: pos, end: i + 4 };
+          // Exclude the entire =end line (content after =end is still a comment)
+          let lineEnd = i + 4;
+          while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+            lineEnd++;
+          }
+          return { start: pos, end: lineEnd };
         }
       }
       i++;
@@ -301,7 +382,7 @@ export class RubyBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Checks if colon starts a symbol (not ternary or hash key)
+  // Checks if colon starts a symbol (not ternary, hash key, or scope resolution)
   private isSymbolStart(source: string, pos: number): boolean {
     const nextChar = source[pos + 1];
     if (!nextChar) {
@@ -310,6 +391,11 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // Symbol must start with letter, underscore, or quote
     if (!/[a-zA-Z_"']/.test(nextChar)) {
+      return false;
+    }
+
+    // Colon after another colon is scope resolution (::), not symbol
+    if (pos > 0 && source[pos - 1] === ':') {
       return false;
     }
 
@@ -328,16 +414,35 @@ export class RubyBlockParser extends BaseBlockParser {
   private matchSymbolLiteral(source: string, pos: number): ExcludedRegion {
     const nextChar = source[pos + 1];
 
-    // Quoted symbol
-    if (nextChar === '"' || nextChar === "'") {
-      const quote = nextChar;
+    // Double-quoted symbol with interpolation support
+    if (nextChar === '"') {
       let i = pos + 2;
       while (i < source.length) {
         if (source[i] === '\\' && i + 1 < source.length) {
           i += 2;
           continue;
         }
-        if (source[i] === quote) {
+        if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          i = this.skipInterpolation(source, i + 2);
+          continue;
+        }
+        if (source[i] === '"') {
+          return { start: pos, end: i + 1 };
+        }
+        i++;
+      }
+      return { start: pos, end: i };
+    }
+
+    // Single-quoted symbol (no interpolation)
+    if (nextChar === "'") {
+      let i = pos + 2;
+      while (i < source.length) {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        if (source[i] === "'") {
           return { start: pos, end: i + 1 };
         }
         i++;
@@ -359,12 +464,17 @@ export class RubyBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Matches regex literal with flags
+  // Matches regex literal with flags and #{} interpolation
   private matchRegexLiteral(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
         i += 2;
+        continue;
+      }
+      // Handle #{} interpolation inside regex
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipRegexInterpolation(source, i + 2);
         continue;
       }
       if (source[i] === '/') {
@@ -375,13 +485,54 @@ export class RubyBlockParser extends BaseBlockParser {
         }
         return { start: pos, end: i };
       }
-      if (source[i] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         // Unterminated regex ends at newline
         return { start: pos, end: i };
       }
       i++;
     }
     return { start: pos, end: i };
+  }
+
+  // Skips #{} interpolation inside regex, tracking brace depth
+  private skipRegexInterpolation(source: string, pos: number): number {
+    let depth = 1;
+    let i = pos;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle # line comments (but not #{} interpolation)
+      if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+        while (i < source.length && source[i] !== '\n') {
+          i++;
+        }
+        continue;
+      }
+      if (source[i] === '{') {
+        depth++;
+      } else if (source[i] === '}') {
+        depth--;
+      } else if (source[i] === '"') {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === "'") {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === '`') {
+        i = this.skipNestedBacktickString(source, i);
+        continue;
+      } else if (source[i] === '%' && i + 1 < source.length && !this.isModuloOperator(source, i)) {
+        const result = this.matchPercentLiteral(source, i);
+        if (result) {
+          i = result.end;
+          continue;
+        }
+      }
+      i++;
+    }
+    return i;
   }
 
   // Checks if slash is regex start (not division)
@@ -417,14 +568,30 @@ export class RubyBlockParser extends BaseBlockParser {
   }
 
   // Matches heredoc, handling multiple heredocs on same line
-  private matchHeredoc(source: string, pos: number): { end: number } | null {
+  private matchHeredoc(source: string, pos: number): { contentStart: number; end: number } | null {
+    // Reject bare <<IDENT when preceded by identifier/number/closing bracket (likely shift operator)
+    if (pos > 0) {
+      let i = pos - 1;
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+        i--;
+      }
+      if (i >= 0 && /[a-zA-Z0-9_)\]}]/.test(source[i])) {
+        // After identifier/number/bracket, only allow heredoc with flag (- or ~)
+        // Rejects ambiguous cases like x <<"EOF" (could be shift + string)
+        const afterLtLt = source.slice(pos + 2);
+        if (!/^[~-]/.test(afterLtLt)) {
+          return null;
+        }
+      }
+    }
+
     // Pattern requires matching quotes: <<'EOF', <<"EOF", <<EOF (no quotes)
     // The backreference \2 ensures opening and closing quotes match
-    const heredocPattern = /<<([~-])?(['"`])([A-Za-z_][A-Za-z0-9_]*)\2|<<([~-])?([A-Za-z_][A-Za-z0-9_]*)/g;
+    const heredocPattern = /<<([~-]?)(['"`])([A-Za-z_][A-Za-z0-9_]*)\2|<<([~-]?)([A-Za-z_][A-Za-z0-9_]*)/g;
 
     // Find line end
     let lineEnd = pos;
-    while (lineEnd < source.length && source[lineEnd] !== '\n') {
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
       lineEnd++;
     }
 
@@ -444,16 +611,25 @@ export class RubyBlockParser extends BaseBlockParser {
 
     if (terminators.length === 0) return null;
 
+    // contentStart is the position after the line ending (skip \r\n or \r or \n)
+    let contentStart = lineEnd;
+    if (contentStart < source.length) {
+      if (source[contentStart] === '\r' && contentStart + 1 < source.length && source[contentStart + 1] === '\n') {
+        contentStart += 2;
+      } else {
+        contentStart += 1;
+      }
+    }
+
     // Search for terminators after current line
-    let i = lineEnd;
-    if (i < source.length) i++;
+    let i = contentStart;
 
     let terminatorIndex = 0;
 
     while (i < source.length && terminatorIndex < terminators.length) {
       const contentLineStart = i;
       let contentLineEnd = i;
-      while (contentLineEnd < source.length && source[contentLineEnd] !== '\n') {
+      while (contentLineEnd < source.length && source[contentLineEnd] !== '\n' && source[contentLineEnd] !== '\r') {
         contentLineEnd++;
       }
 
@@ -469,16 +645,47 @@ export class RubyBlockParser extends BaseBlockParser {
       if (trimmedLine === currentTerminator.terminator) {
         terminatorIndex++;
         if (terminatorIndex === terminators.length) {
+          let endPos = contentLineEnd;
+          if (endPos < source.length) {
+            if (source[endPos] === '\r' && endPos + 1 < source.length && source[endPos + 1] === '\n') {
+              endPos += 2;
+            } else {
+              endPos += 1;
+            }
+          }
           return {
-            end: contentLineEnd + (contentLineEnd < source.length ? 1 : 0)
+            contentStart,
+            end: endPos
           };
         }
       }
 
-      i = contentLineEnd + 1;
+      // Advance past the line ending (\r\n, \r, or \n)
+      if (contentLineEnd < source.length) {
+        if (source[contentLineEnd] === '\r' && contentLineEnd + 1 < source.length && source[contentLineEnd + 1] === '\n') {
+          i = contentLineEnd + 2;
+        } else {
+          i = contentLineEnd + 1;
+        }
+      } else {
+        i = contentLineEnd;
+      }
     }
 
-    return { end: source.length };
+    return { contentStart, end: source.length };
+  }
+
+  // Checks if % at position is a modulo operator (not a percent literal)
+  private isModuloOperator(source: string, pos: number): boolean {
+    if (pos === 0) return false;
+    // Look back, skipping whitespace
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 0) return false;
+    // After identifier, number, closing bracket, string/regex close, % is modulo
+    return /[a-zA-Z0-9_)\]}"'`/]/.test(source[i]);
   }
 
   // Matches percent literal (%q, %Q, %w, %W, etc)
@@ -486,8 +693,13 @@ export class RubyBlockParser extends BaseBlockParser {
     const specifier = source[pos + 1];
 
     let delimiterPos = pos + 1;
+    let hasInterpolation = true;
     if (PERCENT_SPECIFIERS_PATTERN.test(specifier)) {
       delimiterPos = pos + 2;
+      // %q, %w, %i, %s do not support interpolation
+      if (/[qwis]/.test(specifier)) {
+        hasInterpolation = false;
+      }
     }
 
     if (delimiterPos >= source.length) return null;
@@ -506,6 +718,11 @@ export class RubyBlockParser extends BaseBlockParser {
         i += 2;
         continue;
       }
+      // Handle #{} interpolation in interpolating percent literals
+      if (hasInterpolation && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
       if (isPaired && source[i] === openDelimiter) {
         depth++;
       } else if (source[i] === closeDelimiter) {
@@ -515,6 +732,172 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     return { end: i };
+  }
+
+  // Matches double-quoted string with #{} interpolation
+  private matchInterpolatedString(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle #{} interpolation
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '"') {
+        return { start: pos, end: i + 1 };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Matches backtick string (command) with #{} interpolation
+  private matchBacktickString(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '`') {
+        return { start: pos, end: i + 1 };
+      }
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Skips #{} interpolation block, tracking brace depth
+  private skipInterpolation(source: string, pos: number): number {
+    let depth = 1;
+    let i = pos;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle # line comments (but not #{} interpolation)
+      if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+        while (i < source.length && source[i] !== '\n') {
+          i++;
+        }
+        continue;
+      }
+      if (source[i] === '{') {
+        depth++;
+      } else if (source[i] === '}') {
+        depth--;
+      } else if (source[i] === '"') {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === "'") {
+        i = this.skipNestedString(source, i);
+        continue;
+      } else if (source[i] === '`') {
+        i = this.skipNestedBacktickString(source, i);
+        continue;
+      } else if (source[i] === '/' && this.isRegexInInterpolation(source, i, pos)) {
+        i = this.skipNestedRegex(source, i);
+        continue;
+      } else if (source[i] === '%' && i + 1 < source.length && !this.isModuloOperator(source, i)) {
+        const result = this.matchPercentLiteral(source, i);
+        if (result) {
+          i = result.end;
+          continue;
+        }
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Checks if / inside interpolation starts a regex (not division)
+  private isRegexInInterpolation(source: string, pos: number, interpStart: number): boolean {
+    if (pos === interpStart) return true;
+    let j = pos - 1;
+    while (j >= interpStart && (source[j] === ' ' || source[j] === '\t')) {
+      j--;
+    }
+    if (j < interpStart) return true;
+    return /[(,=!~|&{[:]/.test(source[j]);
+  }
+
+  // Skips a regex literal inside interpolation
+  private skipNestedRegex(source: string, pos: number): number {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      // Handle #{} inside regex
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '/') {
+        i++;
+        // Skip regex flags
+        while (i < source.length && REGEX_FLAGS_PATTERN.test(source[i])) {
+          i++;
+        }
+        return i;
+      }
+      if (source[i] === '\n') {
+        return i;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Skips a nested string inside interpolation
+  private skipNestedString(source: string, pos: number): number {
+    const quote = source[pos];
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{' && quote === '"') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === quote) {
+        return i + 1;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Skips a backtick string inside interpolation (supports #{} interpolation)
+  private skipNestedBacktickString(source: string, pos: number): number {
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
+      if (source[i] === '`') {
+        return i + 1;
+      }
+      i++;
+    }
+    return i;
   }
 
   // Returns matching close delimiter for percent literals
