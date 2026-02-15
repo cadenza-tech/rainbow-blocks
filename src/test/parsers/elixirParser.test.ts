@@ -1555,6 +1555,111 @@ end`;
     });
   });
 
+  suite('Non-heredoc sigil interpolation', () => {
+    test('should handle interpolation with close delimiter in string inside ~s()', () => {
+      // ~s(#{")"}), the ) inside ")" should not close the sigil
+      const source = `x = ~s(#{")"}))
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle interpolation with close delimiter in ~s[]', () => {
+      const source = `x = ~s[#{"]"}]
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle interpolation with close delimiter in ~s<>', () => {
+      const source = `x = ~s<#{">"}>
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle interpolation with close delimiter in ~r//', () => {
+      const source = `x = ~r/#{Regex.escape("/")}/
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle interpolation with close delimiter in ~s||', () => {
+      const source = `x = ~s|#{"|"}|
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle interpolation with block keywords in ~s()', () => {
+      const source = `x = ~s(#{if true do "end" end})
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not apply interpolation to uppercase non-heredoc sigils', () => {
+      // Uppercase sigils don't have interpolation
+      const source = `x = ~S(#{raw})
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('hasDoKeyword bracket and brace depth tracking', () => {
+    test('should not find do inside brackets as block do', () => {
+      // "do" inside [] should not be treated as block do
+      const source = `x = [do: 1]
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not find do inside braces as block do', () => {
+      // "do" inside {} should not be treated as block do
+      const source = `x = %{do: 1}
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match if with do inside keyword list', () => {
+      // if with do only inside a keyword list should not be matched
+      const source = `func([if: true, do: action])
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match case with do inside map', () => {
+      const source = `x = %{case: val, do: body}
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still find do outside brackets and braces', () => {
+      const source = `for x <- [1, 2, 3] do
+  x
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   suite('Heredoc sigil interpolation with triple quotes', () => {
     test('should not prematurely close heredoc sigil when triple quotes appear in interpolation', () => {
       const source = '~s"""\n#{"""inner"""}\n"""';

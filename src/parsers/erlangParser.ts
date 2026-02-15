@@ -23,7 +23,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     }
 
     // 'fun' in -spec/-type/-callback/-opaque declarations is a type, not a block
-    const lineStart = source.lastIndexOf('\n', position) + 1;
+    const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
     const lineBefore = source.slice(lineStart, position).trimStart();
     if (/^-\s*(spec|type|callback|opaque)\b/.test(lineBefore)) {
       return false;

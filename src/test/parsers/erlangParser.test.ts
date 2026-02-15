@@ -983,6 +983,29 @@ end`;
     });
   });
 
+  suite('CR-only line ending in isValidBlockOpen', () => {
+    test('should detect -spec on same line with CR-only endings', () => {
+      // With \r-only line endings, lastIndexOf('\n') would miss \r
+      const source = '-spec foo() -> fun(() -> ok).\rbegin\r  ok\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject fun in -spec with CR-only line endings', () => {
+      const source = '-spec bar() -> fun(() -> ok).';
+      const crSource = source.replace(/\n/g, '\r');
+      const pairs = parser.parse(crSource);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject fun in -type with CR-only line endings', () => {
+      const source = '-type handler() :: fun((atom()) -> ok).';
+      const crSource = source.replace(/\n/g, '\r');
+      const pairs = parser.parse(crSource);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Quoted atom module in fun reference', () => {
     test('should not treat fun with quoted atom module as block opener', () => {
       const source = `F = fun 'my.module':handler/2,

@@ -395,6 +395,11 @@ export class ElixirBlockParser extends BaseBlockParser {
         i += 2;
         continue;
       }
+      // Handle #{} interpolation for lowercase sigils
+      if (isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        i = this.skipInterpolation(source, i + 2);
+        continue;
+      }
       if (isPaired && source[i] === openDelimiter) {
         depth++;
       } else if (source[i] === closeDelimiter) {
@@ -497,6 +502,8 @@ export class ElixirBlockParser extends BaseBlockParser {
   private hasDoKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position;
     let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
     let newlineCount = 0;
 
     while (i < source.length) {
@@ -514,6 +521,14 @@ export class ElixirBlockParser extends BaseBlockParser {
         parenDepth++;
       } else if (char === ')') {
         parenDepth--;
+      } else if (char === '[') {
+        bracketDepth++;
+      } else if (char === ']') {
+        bracketDepth--;
+      } else if (char === '{') {
+        braceDepth++;
+      } else if (char === '}') {
+        braceDepth--;
       }
 
       // Count newlines outside parentheses; stop after 5 lines
@@ -525,8 +540,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         }
       }
 
-      // Only look for "do" outside parentheses
-      if (parenDepth === 0) {
+      // Only look for "do" outside all brackets
+      if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
         // Check for "do" with word boundary
         if (i > 0 && /\s/.test(source[i - 1]) && source.slice(i, i + 2) === 'do') {
           const afterDo = source[i + 2];
