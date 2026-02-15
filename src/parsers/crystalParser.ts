@@ -139,7 +139,22 @@ export class CrystalBlockParser extends BaseBlockParser {
 
     // Single-quoted char literal (Crystal: only single characters)
     if (char === "'") {
-      return this.matchCharLiteral(source, pos);
+      const charLiteral = this.matchCharLiteral(source, pos);
+      if (charLiteral) return charLiteral;
+      // Invalid char literal (multi-char): skip to next ' on same line
+      // to prevent keywords between quotes from being detected
+      let j = pos + 1;
+      while (j < source.length && source[j] !== "'" && source[j] !== '\n' && source[j] !== '\r') {
+        if (source[j] === '\\' && j + 1 < source.length) {
+          j += 2;
+          continue;
+        }
+        j++;
+      }
+      if (j < source.length && source[j] === "'") {
+        return { start: pos, end: j + 1 };
+      }
+      return null;
     }
 
     // Regex literal
@@ -430,7 +445,7 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
       // Handle # line comments (but not #{} interpolation)
       if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
-        while (i < source.length && source[i] !== '\n') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         continue;
@@ -676,7 +691,7 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
       // Handle # line comments (but not #{} interpolation)
       if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
-        while (i < source.length && source[i] !== '\n') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         continue;

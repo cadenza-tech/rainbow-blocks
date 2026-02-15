@@ -1627,5 +1627,40 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle comment with \\r in skipInterpolation', () => {
+      // Comment inside interpolation with \r line ending should stop at \r
+      const source = '"#{x # comment\r}"\rif true\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle comment with \\r in skipRegexInterpolation', () => {
+      // Comment inside regex interpolation with \r line ending should stop at \r
+      const source = '/#{x # comment\r}/\rdef foo\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle unterminated nested regex with \\r in skipNestedRegex', () => {
+      // Nested regex inside interpolation terminated by \r should not consume past line
+      const source = '"#{x = /unterminated\r}"\rif true\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Backtick string inside interpolation', () => {
+    test('should handle backtick string inside #{} interpolation in string', () => {
+      const source = '"result = #{`echo end`}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle backtick string inside #{} interpolation in regex', () => {
+      const source = '/result = #{`echo end`}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 });

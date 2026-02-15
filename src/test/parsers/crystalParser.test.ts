@@ -1744,5 +1744,49 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle comment with \\r in skipInterpolation', () => {
+      // Comment inside interpolation with \r line ending should stop at \r
+      const source = '"#{x # comment\r}"\rif true\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle comment with \\r in skipRegexInterpolation', () => {
+      // Comment inside regex interpolation with \r line ending should stop at \r
+      const source = '/#{x # comment\r}/\rdef foo\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Invalid multi-char literal fallback', () => {
+    test('should exclude keywords between quotes in invalid char literal', () => {
+      // 'do' is not a valid Crystal char literal (multi-char), but keywords
+      // between quotes should still be excluded
+      const source = "x = 'do'\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude keywords in multi-char quoted text', () => {
+      // 'end' between quotes should be excluded even though it is not a valid char literal
+      const source = "x = 'end'\ndef foo\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not exclude across line boundary for invalid char literal', () => {
+      // If no closing quote on same line, the quote should not be excluded
+      const source = "x = 'unterminated\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escaped characters in invalid char literal fallback', () => {
+      const source = "x = 'if\\'s'\ndef foo\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 });

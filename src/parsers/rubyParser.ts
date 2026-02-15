@@ -505,7 +505,7 @@ export class RubyBlockParser extends BaseBlockParser {
       }
       // Handle # line comments (but not #{} interpolation)
       if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
-        while (i < source.length && source[i] !== '\n') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         continue;
@@ -786,7 +786,7 @@ export class RubyBlockParser extends BaseBlockParser {
       }
       // Handle # line comments (but not #{} interpolation)
       if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
-        while (i < source.length && source[i] !== '\n') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         continue;
@@ -851,7 +851,7 @@ export class RubyBlockParser extends BaseBlockParser {
         }
         return i;
       }
-      if (source[i] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         return i;
       }
       i++;
