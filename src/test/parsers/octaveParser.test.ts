@@ -486,6 +486,57 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle end inside parens within a string context', () => {
+      const source = `for i = 1:10
+  x = foo('end');
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('Typed end keyword', () => {
+    test('should not close wrong block with typed end keyword', () => {
+      const source = `if true
+endfor`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Line continuation', () => {
+    test('should ignore keywords in line continuation', () => {
+      const source = `function f ... if
+endfunction`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+  });
+
+  suite('Block comment trailing content', () => {
+    test('should treat %{ with trailing text as single-line comment', () => {
+      const source = `%{ not a block comment
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat #{ with trailing text as single-line comment', () => {
+      const source = `#{ not a block comment
+if true
+endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+  });
+
+  suite('Digit transpose vs string', () => {
+    test('should treat digit followed by quote-letter as string, not transpose', () => {
+      const pairs = parser.parse("x = [1'end for while'];\nif true\nend");
+      assertSingleBlock(pairs, 'if', 'end', 0);
+    });
   });
 
   suite('Token positions', () => {
@@ -541,6 +592,207 @@ block comment
 #}`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 1);
+    });
+  });
+
+  suite('Octave-specific close keywords for OOP', () => {
+    test('should parse classdef-endclassdef block', () => {
+      const source = `classdef MyClass
+  properties
+    x
+  endproperties
+endclassdef`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'classdef');
+      findBlock(pairs, 'properties');
+    });
+
+    test('should parse methods-endmethods block', () => {
+      const source = `methods
+  function foo(obj)
+  end
+endmethods`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'methods');
+    });
+
+    test('should parse events-endevents block', () => {
+      const source = `events
+  StateChanged
+endevents`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'events', 'endevents');
+    });
+
+    test('should parse enumeration-endenumeration block', () => {
+      const source = `enumeration
+  Red
+  Green
+endenumeration`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enumeration', 'endenumeration');
+    });
+  });
+
+  suite('Block comment with leading whitespace', () => {
+    test('should handle %{ with leading whitespace', () => {
+      const source = `  %{
+  if inside comment
+  %}
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle #{ with leading whitespace', () => {
+      const source = `  #{
+  if inside comment
+  #}
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Curly brace indexing', () => {
+    test('should not treat end inside curly braces as block close', () => {
+      const source = `function result = foo(C)
+  x = C{end};
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end inside nested curly braces as block close', () => {
+      const source = `function result = foo(C)
+  x = C{1}{end};
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Coverage: transpose after number', () => {
+    test('should treat apostrophe after number without letter as transpose', () => {
+      const regions = parser.getExcludedRegions("x = 5'");
+      assert.ok(regions.some((r) => r.end - r.start === 1));
+    });
+
+    test('should treat apostrophe after closing bracket as transpose', () => {
+      const regions = parser.getExcludedRegions("x = A(1)'");
+      assert.ok(regions.some((r) => r.end - r.start === 1));
+    });
+  });
+
+  suite('do-until blocks', () => {
+    test('should match do-until loop', () => {
+      const pairs = parser.parse('do\n  i++;\nuntil (i == 10)');
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should match nested do-until', () => {
+      const pairs = parser.parse('do\n  do\n    x++;\n  until (x > 5)\nuntil (i == 10)');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not let generic end close do block', () => {
+      // do should only be closed by until, not by generic end
+      const pairs = parser.parse('for i = 1:10\n  do\n    x = 1\n  end\nend');
+      // end should close for, not do; do should be orphaned
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'for block should be paired');
+      assert.strictEqual(forPair.closeKeyword.value, 'end');
+      // do should not be paired with end
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do should not be paired with generic end');
+    });
+
+    test('should correctly pair do-until inside for-end', () => {
+      const pairs = parser.parse('for i = 1:10\n  do\n    x = 1\n  until condition\nend');
+      assertBlockCount(pairs, 2);
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword.value, 'until');
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(forPair.closeKeyword.value, 'end');
+    });
+  });
+
+  suite('CRLF block comments', () => {
+    test('should handle block comment with CRLF line endings', () => {
+      const pairs = parser.parse('%{\r\nif inside\r\nend\r\n%}\r\nif true\r\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Nested block comment trailing content', () => {
+    test('should not increment depth for %{ with trailing content inside block comment', () => {
+      const pairs = parser.parse('%{\n  text about %{ braces }\n%}\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not increment depth for #{ with trailing content inside block comment', () => {
+      const pairs = parser.parse('#{\n  text about #{ patterns }\n#}\nfor i = 1:10\nend');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('v7 bug fixes', () => {
+    test('should handle nested MATLAB-style block comments', () => {
+      const source = `%{
+  %{
+    inner comment
+  %}
+  if true
+  end
+%}
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle nested Octave-style block comments', () => {
+      const source = `#{
+  #{
+    inner comment
+  #}
+  if true
+  end
+#}
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('CR-only line endings', () => {
+    test('should handle string with CR-only ending', () => {
+      const source = "x = 'unterminated\rif true\r  action;\rend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle MATLAB-style block comment with CR-only', () => {
+      const source = '%{\rcomment\r%}\rfor i = 1:10\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle Octave-style block comment with CR-only', () => {
+      const source = '#{\rcomment\r#}\rif true\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should recognize block comment start with CR-only ending', () => {
+      const source = '#{\rcomment\r#}\rwhile true\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
     });
   });
 });

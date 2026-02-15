@@ -12,7 +12,13 @@ const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   endswitch: 'switch',
   end_try_catch: 'try',
   endparfor: 'parfor',
-  end_unwind_protect: 'unwind_protect'
+  end_unwind_protect: 'unwind_protect',
+  endclassdef: 'classdef',
+  endmethods: 'methods',
+  endproperties: 'properties',
+  endevents: 'events',
+  endenumeration: 'enumeration',
+  until: 'do'
 };
 
 export class OctaveBlockParser extends MatlabBlockParser {
@@ -22,6 +28,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
       'if',
       'for',
       'while',
+      'do',
       'switch',
       'try',
       'parfor',
@@ -33,7 +40,23 @@ export class OctaveBlockParser extends MatlabBlockParser {
       'enumeration',
       'unwind_protect'
     ],
-    blockClose: ['end', 'endfunction', 'endif', 'endfor', 'endwhile', 'endswitch', 'end_try_catch', 'endparfor', 'end_unwind_protect'],
+    blockClose: [
+      'end',
+      'until',
+      'endfunction',
+      'endif',
+      'endfor',
+      'endwhile',
+      'endswitch',
+      'end_try_catch',
+      'endparfor',
+      'end_unwind_protect',
+      'endclassdef',
+      'endmethods',
+      'endproperties',
+      'endevents',
+      'endenumeration'
+    ],
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch', 'unwind_protect_cleanup']
   };
 
@@ -64,9 +87,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
             matchIndex = this.findLastOpenerByType(stack, validOpener);
           }
 
-          // If no specific match found or generic 'end', close the last opener
-          if (matchIndex < 0 && stack.length > 0) {
-            matchIndex = stack.length - 1;
+          // If no specific match found, only fallback for generic 'end'
+          // Generic 'end' should NOT close 'do' blocks (only 'until' can)
+          if (matchIndex < 0 && !validOpener && stack.length > 0) {
+            for (let si = stack.length - 1; si >= 0; si--) {
+              if (stack[si].token.value.toLowerCase() !== 'do') {
+                matchIndex = si;
+                break;
+              }
+            }
           }
 
           if (matchIndex >= 0) {
@@ -117,16 +146,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
-    // Block comment: %{ ... %} (MATLAB style, must be at line start)
+    // Block comment: %{ ... %} (MATLAB style, at line start with optional whitespace, no trailing content)
     if (char === '%' && pos + 1 < source.length && source[pos + 1] === '{') {
-      if (this.isAtLineStart(source, pos)) {
+      if (this.isAtLineStartWithWhitespace(source, pos) && this.isOctaveBlockCommentStart(source, pos)) {
         return this.matchMatlabBlockComment(source, pos);
       }
     }
 
-    // Block comment: #{ ... #} (Octave style, must be at line start)
+    // Block comment: #{ ... #} (Octave style, at line start with optional whitespace, no trailing content)
     if (char === '#' && pos + 1 < source.length && source[pos + 1] === '{') {
-      if (this.isAtLineStart(source, pos)) {
+      if (this.isAtLineStartWithWhitespace(source, pos) && this.isOctaveBlockCommentStart(source, pos)) {
         return this.matchOctaveBlockComment(source, pos);
       }
     }
@@ -151,21 +180,51 @@ export class OctaveBlockParser extends MatlabBlockParser {
       return this.matchOctaveString(source, pos, '"');
     }
 
+    // Line continuation: ... to end of line (treated as comment)
+    if (char === '.' && pos + 2 < source.length && source[pos + 1] === '.' && source[pos + 2] === '.') {
+      return this.matchSingleLineComment(source, pos);
+    }
+
     return null;
   }
 
-  // Matches MATLAB-style block comment: %{ ... %}
+  // Checks if block comment opener (%{ or #{) has no trailing non-whitespace content
+  private isOctaveBlockCommentStart(source: string, pos: number): boolean {
+    let i = pos + 2;
+    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+      if (source[i] !== ' ' && source[i] !== '\t') {
+        return false;
+      }
+      i++;
+    }
+    return true;
+  }
+
+  // Matches MATLAB-style block comment: %{ ... %} with nesting support
   private matchMatlabBlockComment(source: string, pos: number): ExcludedRegion {
     let i = pos + 2;
+    let depth = 1;
 
     while (i < source.length) {
+      if (source[i] === '%' && i + 1 < source.length && source[i + 1] === '{') {
+        if (this.isAtLineStartWithWhitespace(source, i) && this.isOctaveBlockCommentStart(source, i)) {
+          depth++;
+          i += 2;
+          continue;
+        }
+      }
       if (source[i] === '%' && i + 1 < source.length && source[i + 1] === '}') {
-        if (this.isAtLineStart(source, i)) {
-          let lineEnd = i + 2;
-          while (lineEnd < source.length && source[lineEnd] !== '\n') {
-            lineEnd++;
+        if (this.isAtLineStartWithWhitespace(source, i)) {
+          depth--;
+          if (depth === 0) {
+            let lineEnd = i + 2;
+            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+              lineEnd++;
+            }
+            return { start: pos, end: lineEnd };
           }
-          return { start: pos, end: lineEnd };
+          i += 2;
+          continue;
         }
       }
       i++;
@@ -174,18 +233,31 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return { start: pos, end: source.length };
   }
 
-  // Matches Octave-style block comment: #{ ... #}
+  // Matches Octave-style block comment: #{ ... #} with nesting support
   private matchOctaveBlockComment(source: string, pos: number): ExcludedRegion {
     let i = pos + 2;
+    let depth = 1;
 
     while (i < source.length) {
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+        if (this.isAtLineStartWithWhitespace(source, i) && this.isOctaveBlockCommentStart(source, i)) {
+          depth++;
+          i += 2;
+          continue;
+        }
+      }
       if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '}') {
-        if (this.isAtLineStart(source, i)) {
-          let lineEnd = i + 2;
-          while (lineEnd < source.length && source[lineEnd] !== '\n') {
-            lineEnd++;
+        if (this.isAtLineStartWithWhitespace(source, i)) {
+          depth--;
+          if (depth === 0) {
+            let lineEnd = i + 2;
+            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+              lineEnd++;
+            }
+            return { start: pos, end: lineEnd };
           }
-          return { start: pos, end: lineEnd };
+          i += 2;
+          continue;
         }
       }
       i++;
@@ -200,7 +272,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (quote === "'" && pos > 0) {
       const prevChar = source[pos - 1];
       if (/[a-zA-Z0-9_)\]}.]/.test(prevChar)) {
-        return { start: pos, end: pos + 1 };
+        // After a digit, check if ' starts a string (e.g., [1'text'])
+        if (/[0-9]/.test(prevChar)) {
+          const nextChar = source[pos + 1];
+          if (nextChar && /[a-zA-Z_]/.test(nextChar)) {
+            // Fall through to string matching
+          } else {
+            return { start: pos, end: pos + 1 };
+          }
+        } else {
+          return { start: pos, end: pos + 1 };
+        }
       }
     }
 
@@ -221,7 +303,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
         }
         return { start: pos, end: i + 1 };
       }
-      if (source[i] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         return { start: pos, end: i };
       }
       i++;
