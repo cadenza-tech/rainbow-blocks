@@ -79,9 +79,10 @@ export class JuliaBlockParser extends BaseBlockParser {
     return true;
   }
 
-  // Checks if position is inside brackets or parentheses
+  // Checks if position is inside brackets (tracks parens to handle nested calls)
   private isInsideBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
+    let parenDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
@@ -92,6 +93,11 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === '[') {
         if (bracketDepth === 0) return true;
         bracketDepth--;
+      } else if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) return false;
+        parenDepth--;
       }
     }
     return false;
@@ -270,8 +276,8 @@ export class JuliaBlockParser extends BaseBlockParser {
           return null;
         }
         const prefixLength = prefixEnd - pos;
-        // r"..." and raw"..." don't support $() interpolation
-        const interp = prefix !== 'r' && prefix !== 'raw';
+        // All prefixed strings receive raw content without interpolation
+        const interp = false;
         // Check for triple-quoted prefixed string
         if (source.slice(prefixEnd, prefixEnd + 3) === '"""') {
           return this.matchPrefixedTripleQuotedString(source, pos, prefixLength, interp);

@@ -1803,6 +1803,70 @@ end`;
     });
   });
 
+  suite('isInsideBrackets with nested parentheses', () => {
+    test('should allow end inside parens inside brackets', () => {
+      // [f(begin...end)] - end is inside (), so not array indexing
+      const source = `function foo()
+  x = [f(begin
+    1 + 2
+  end)]
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'function');
+    });
+
+    test('should still reject end directly inside brackets', () => {
+      // a[end] - end is directly inside [], should be rejected
+      const source = `function foo()
+  x = a[end]
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should allow end inside deeply nested parens in brackets', () => {
+      // [g(f(begin...end))] - end is inside nested (), not array indexing
+      const source = `function foo()
+  x = [g(f(begin
+    42
+  end))]
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'function');
+    });
+  });
+
+  suite('Prefixed string interpolation', () => {
+    test('should not process interpolation in custom string macros', () => {
+      // Custom string macros like html"..." should not process $() as interpolation
+      const source = 'x = html"$(end)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not process interpolation in s-prefixed strings', () => {
+      const source = 's"$(if true 1 else 2 end)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not process interpolation in v-prefixed strings', () => {
+      const source = 'v"$(begin 1 end)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not process interpolation in b-prefixed strings', () => {
+      const source = 'b"$(end)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Type annotation with ::', () => {
     test('should not treat :: as symbol prefix for block keyword', () => {
       const source = `function f(x::Int)
@@ -1814,6 +1878,20 @@ end`;
       assertBlockCount(pairs, 2);
       findBlock(pairs, 'function');
       findBlock(pairs, 'if');
+    });
+  });
+
+  suite('Backtick command inside interpolation', () => {
+    test('should handle backtick command inside $() interpolation', () => {
+      const source = '"result = $(run(`echo end`))" \nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle triple backtick command inside $() interpolation', () => {
+      const source = '"result = $(run(```echo end```))" \nfor i in 1:10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
     });
   });
 });
