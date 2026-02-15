@@ -381,6 +381,14 @@ MOVE END-PERFORM-FLAG TO STATUS`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
+
+    test('should not match END-PERFORM inside hyphenated identifier', () => {
+      const source = `PERFORM
+  MOVE MY-END-PERFORM-LOOP TO X
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
   });
 
   suite('Token positions', () => {
@@ -419,6 +427,15 @@ END-IF`;
 'string'`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions.length, 2);
+    });
+  });
+
+  suite('END-keyword in comment', () => {
+    test('should not treat keyword as block open when END-keyword is only in comment', () => {
+      const source = `PERFORM SECTION-A
+*> END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 
@@ -487,6 +504,88 @@ END-IF`;
        END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Nesting-aware validation', () => {
+    test('should correctly validate nested IF blocks', () => {
+      const source = 'IF condition-1\n  IF condition-2\n    DISPLAY "inner"\n  END-IF\nEND-IF';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+    });
+
+    test('should correctly validate nested PERFORM blocks', () => {
+      const source = 'PERFORM\n  PERFORM\n    DISPLAY "inner"\n  END-PERFORM\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+    });
+
+    test('should not validate opener without matching closer at correct depth', () => {
+      const source = 'IF condition-1\n  DISPLAY "hello"\n  IF condition-2\n    DISPLAY "nested"\n  END-IF';
+      const pairs = parser.parse(source);
+      // Only the inner IF should be validated (it has its own END-IF)
+      // The outer IF has no END-IF at depth 0
+      assert.strictEqual(pairs.length, 1);
+    });
+  });
+
+  suite('Column 7 comment detection', () => {
+    test('should treat column 7 star as comment in fixed-format', () => {
+      const source = '000100*This is a comment\n       IF condition\n       END-IF';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+    });
+
+    test('should not treat column 7 star as comment when prefix is not sequence area', () => {
+      const source = 'abcdef*not a comment\n       IF condition\n       END-IF';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+    });
+
+    test('should handle column 7 with spaces in sequence area', () => {
+      const source = '      *This is a comment with IF keyword\n       IF condition\n       END-IF';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+    });
+  });
+
+  suite('Type-aware intermediates', () => {
+    test('should add ELSE to IF block', () => {
+      const source = 'IF condition\n  DISPLAY "yes"\nELSE\n  DISPLAY "no"\nEND-IF';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'else');
+    });
+
+    test('should not add ELSE to PERFORM block', () => {
+      const source = 'PERFORM\n  DISPLAY "hello"\n  ELSE\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      const performPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'perform');
+      assert.ok(performPair);
+      assert.strictEqual(performPair.intermediates.length, 0);
+    });
+
+    test('should add WHEN to EVALUATE block', () => {
+      const source = 'EVALUATE TRUE\n  WHEN condition\n    DISPLAY "match"\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.ok(pairs[0].intermediates.length >= 1);
+    });
+
+    test('should add WHEN to SEARCH block', () => {
+      const source = 'SEARCH table-name\n  WHEN condition\n    DISPLAY "found"\nEND-SEARCH';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.ok(pairs[0].intermediates.length >= 1);
+    });
+
+    test('should not add WHEN to PERFORM block', () => {
+      const source = 'PERFORM\n  WHEN\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      const performPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'perform');
+      assert.ok(performPair);
+      assert.strictEqual(performPair.intermediates.length, 0);
     });
   });
 });
