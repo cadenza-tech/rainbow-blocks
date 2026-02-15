@@ -549,6 +549,40 @@ END-IF`;
     });
   });
 
+  suite('Underscore in identifiers', () => {
+    test('should not match keyword inside underscored identifier', () => {
+      const source = 'MOVE PERFORM_COUNT TO WS-STATUS';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match keyword with leading underscore', () => {
+      const source = 'MOVE _PERFORM TO WS-STATUS';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match keyword with trailing underscore', () => {
+      const source = 'MOVE IF_ TO WS-FLAG';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match END-IF inside underscored identifier', () => {
+      const source = 'MOVE END-IF_FLAG TO WS-STATUS';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still match standalone keywords after underscore fix', () => {
+      const source = `IF CONDITION
+  DISPLAY "Test"
+END-IF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   suite('Type-aware intermediates', () => {
     test('should add ELSE to IF block', () => {
       const source = 'IF condition\n  DISPLAY "yes"\nELSE\n  DISPLAY "no"\nEND-IF';

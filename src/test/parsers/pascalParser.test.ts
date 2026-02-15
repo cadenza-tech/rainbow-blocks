@@ -693,6 +693,86 @@ end`;
     });
   });
 
+  suite('isInsideRecord with class and interface blocks', () => {
+    test('should not treat variant case after class-end as inside record', () => {
+      // class...end should cancel out end when scanning backward
+      const source = `TMyClass = class
+  FValue: Integer;
+end;
+TVariant = record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'class');
+      findBlock(pairs, 'record');
+    });
+
+    test('should not treat variant case after interface-end as inside record', () => {
+      const source = `IMyIntf = interface
+  procedure DoSomething;
+end;
+TVariant = record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'interface');
+      findBlock(pairs, 'record');
+    });
+
+    test('should not treat variant case after try-end as inside record', () => {
+      const source = `try
+  DoSomething;
+end;
+TVariant = record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'try');
+      findBlock(pairs, 'record');
+    });
+
+    test('should not treat variant case after case-end as inside record', () => {
+      const source = `case X of
+  1: DoOne;
+end;
+TVariant = record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'case');
+      findBlock(pairs, 'record');
+    });
+
+    test('should still detect variant case inside record with class-end before', () => {
+      // The class-end pair should be consumed, and the record
+      // should still be detected as a record context
+      const source = `TMyClass = class
+  FValue: Integer;
+end;
+TVariant = record
+  TInner = class
+    FX: Integer;
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // Outer class, record, inner class (3 blocks)
+      // Variant case is NOT a block because it's inside a record
+      assertBlockCount(pairs, 3);
+      const recordPair = findBlock(pairs, 'record');
+      assert.ok(recordPair);
+    });
+  });
+
   suite('Nested parentheses in class forward declaration', () => {
     test('should treat class with nested parens followed by semicolon as forward declaration', () => {
       const pairs = parser.parse('TMyClass = class(TBase(TParam));\nbegin\nend');

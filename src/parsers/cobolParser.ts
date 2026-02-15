@@ -92,8 +92,8 @@ export class CobolBlockParser extends BaseBlockParser {
       const escaped = this.escapeRegex(lowerKeyword);
       const escapedEnd = this.escapeRegex(endKeyword);
       cached = {
-        opener: new RegExp(`(?<![a-zA-Z0-9\\-])${escaped}(?![a-zA-Z0-9\\-])`, 'gi'),
-        closer: new RegExp(`(?<![a-zA-Z0-9\\-])${escapedEnd}(?![a-zA-Z0-9\\-])`, 'gi')
+        opener: new RegExp(`(?<![a-zA-Z0-9_\\-])${escaped}(?![a-zA-Z0-9_\\-])`, 'gi'),
+        closer: new RegExp(`(?<![a-zA-Z0-9_\\-])${escapedEnd}(?![a-zA-Z0-9_\\-])`, 'gi')
       };
       this.regexCache.set(lowerKeyword, cached);
     }

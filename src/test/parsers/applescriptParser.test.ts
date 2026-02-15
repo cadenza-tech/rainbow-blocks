@@ -649,6 +649,107 @@ end tell`;
     });
   });
 
+  suite('Compound keywords with multiple spaces', () => {
+    test('should match end tell with multiple spaces', () => {
+      const source = `tell application "Finder"
+  activate
+end  tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should match end if with tab between words', () => {
+      const source = `if true then
+  beep
+end\tif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should match end repeat with multiple spaces and tabs', () => {
+      const source = `repeat 3 times
+  beep
+end  \t repeat`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should match on error with multiple spaces', () => {
+      const source = `try
+  riskyOperation()
+on  error errMsg
+  display dialog errMsg
+end try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('should match else if with multiple spaces', () => {
+      const source = `if x = 1 then
+  set result to "one"
+else  if x = 2 then
+  set result to "two"
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if']);
+    });
+
+    test('should match using terms from with extra spaces', () => {
+      const source = `using  terms  from application "Mail"
+  set newMessage to make new outgoing message
+end  using  terms  from`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+    });
+  });
+
+  suite('on error as standalone handler', () => {
+    test('should treat on error as block open outside try', () => {
+      const source = `on error errMsg
+  display dialog errMsg
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on error', 'end');
+    });
+
+    test('should treat on error as intermediate inside try', () => {
+      const source = `try
+  riskyOperation()
+on error errMsg
+  display dialog errMsg
+end try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('should treat on error as block open in tell block', () => {
+      const source = `tell application "Finder"
+  on error errMsg
+    display dialog errMsg
+  end
+end tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'tell');
+      findBlock(pairs, 'on error');
+    });
+
+    test('should treat on error as block open when nested in non-try', () => {
+      const source = `on run
+  on error errMsg
+    log errMsg
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'on');
+      findBlock(pairs, 'on error');
+    });
+  });
+
   suite('v7 bug fixes - variable names as block keywords', () => {
     test('should not treat keyword in set-to as block opener', () => {
       const source = `on run

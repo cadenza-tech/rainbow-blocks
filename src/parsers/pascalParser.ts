@@ -189,8 +189,9 @@ export class PascalBlockParser extends BaseBlockParser {
         i--;
         continue;
       }
-      // Look for 'end', 'begin', 'record', or 'object'
-      // 'begin' cancels out 'end' (begin-end pairs are not records)
+      // Look for 'end', 'begin', 'record', 'object', 'class', 'interface',
+      // 'try', 'case', 'asm'
+      // 'begin' and other block openers cancel out 'end'
       if (
         i >= 4 &&
         lowerSource.slice(i - 4, i + 1) === 'begin' &&
@@ -231,6 +232,61 @@ export class PascalBlockParser extends BaseBlockParser {
         if (depth === 0) return true;
         depth--;
         i -= 6;
+        continue;
+      }
+      // 'class' closes an 'end' (class...end pairs are not records)
+      if (
+        i >= 4 &&
+        lowerSource.slice(i - 4, i + 1) === 'class' &&
+        (i - 5 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 5])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        if (depth > 0) depth--;
+        i -= 5;
+        continue;
+      }
+      // 'interface' closes an 'end'
+      if (
+        i >= 8 &&
+        lowerSource.slice(i - 8, i + 1) === 'interface' &&
+        (i - 9 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 9])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        if (depth > 0) depth--;
+        i -= 9;
+        continue;
+      }
+      // 'try' closes an 'end'
+      if (
+        i >= 2 &&
+        lowerSource.slice(i - 2, i + 1) === 'try' &&
+        (i - 3 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 3])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        if (depth > 0) depth--;
+        i -= 3;
+        continue;
+      }
+      // 'case' closes an 'end'
+      if (
+        i >= 3 &&
+        lowerSource.slice(i - 3, i + 1) === 'case' &&
+        (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        if (depth > 0) depth--;
+        i -= 4;
+        continue;
+      }
+      // 'asm' closes an 'end'
+      if (
+        i >= 2 &&
+        lowerSource.slice(i - 2, i + 1) === 'asm' &&
+        (i - 3 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 3])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        if (depth > 0) depth--;
+        i -= 3;
         continue;
       }
       i--;

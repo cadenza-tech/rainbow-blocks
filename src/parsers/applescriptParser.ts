@@ -217,12 +217,17 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
 
       // Try to match compound keywords first (longest first)
+      // Allow flexible whitespace (spaces/tabs) between words
       let matched = false;
       for (const keyword of COMPOUND_KEYWORDS) {
-        if (lowerSource.slice(i, i + keyword.length) === keyword) {
+        const flexMatch = this.matchCompoundKeyword(
+          lowerSource,
+          i,
+          keyword
+        );
+        if (flexMatch >= 0) {
           // Check word boundary at end
-          const endPos = i + keyword.length;
-          if (endPos < source.length && /\w/.test(source[endPos])) {
+          if (flexMatch < source.length && /\w/.test(source[flexMatch])) {
             continue;
           }
 
@@ -233,12 +238,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
             type,
             value: keyword,
             startOffset: i,
-            endOffset: endPos,
+            endOffset: flexMatch,
             line,
             column
           });
 
-          i = endPos;
+          i = flexMatch;
           matched = true;
           break;
         }
@@ -317,6 +322,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           break;
 
         case 'block_middle':
+          // 'on error' outside a try block is a standalone handler (block_open)
+          if (token.value === 'on error') {
+            const topOpener = stack.length > 0 ? stack[stack.length - 1].token.value : null;
+            if (topOpener !== 'try') {
+              stack.push({ token, intermediates: [] });
+              break;
+            }
+          }
           if (stack.length > 0) {
             stack[stack.length - 1].intermediates.push(token);
           }
@@ -412,6 +425,30 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     return false;
+  }
+
+  // Matches a compound keyword allowing flexible whitespace between words
+  // Returns the end position if matched, or -1 if not matched
+  private matchCompoundKeyword(lowerSource: string, pos: number, keyword: string): number {
+    const words = keyword.split(' ');
+    let j = pos;
+    for (let w = 0; w < words.length; w++) {
+      const word = words[w];
+      if (lowerSource.slice(j, j + word.length) !== word) {
+        return -1;
+      }
+      j += word.length;
+      // After each word except the last, consume one or more spaces/tabs
+      if (w < words.length - 1) {
+        if (j >= lowerSource.length || (lowerSource[j] !== ' ' && lowerSource[j] !== '\t')) {
+          return -1;
+        }
+        while (j < lowerSource.length && (lowerSource[j] === ' ' || lowerSource[j] === '\t')) {
+          j++;
+        }
+      }
+    }
+    return j;
   }
 
   // Finds the index of the last opener with the given keyword
