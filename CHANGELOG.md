@@ -5,6 +5,37 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-02-16
+
+### Fixed
+
+- Ada: Skip `accept` without `do` (simple accept statements)
+- Ada: Skip comment lines when scanning backward for `type`/`subtype is` declarations
+- Ada: Skip `is <>` generic default declarations
+- AppleScript: Support multiple spaces/tabs in compound keywords (e.g., `end  tell`)
+- AppleScript: Treat `on error` as block opener when outside `try` blocks (standalone handler)
+- Bash: Handle `\r`-only line endings in comment scanning inside command substitution
+- Bash: Skip comments inside process substitution `<(...)` and `>(...)`
+- Bash: Handle `\r`-only line endings in subshell detection for case pattern check
+- Bash: Support multiple heredocs on the same line
+- COBOL: Include underscore in word boundary detection for keyword validation
+- Crystal: Handle `\r`-only line endings in comment scanning inside string and regex interpolation
+- Crystal: Exclude keywords between invalid multi-char literals (e.g., `'end'`) from detection
+- Elixir: Handle `#{}` interpolation in non-heredoc lowercase sigils (e.g., `~s()`, `~r//`)
+- Elixir: Track bracket `[]` and brace `{}` depth in `hasDoKeyword` scope detection
+- Erlang: Handle `\r`-only line endings in `-spec`/`-type` line detection for `fun()` context
+- Fortran: Recognize concatenated end keywords (e.g., `enddo`, `endif`) in continuation block form detection
+- Fortran: Exclude C preprocessor directives (`#ifdef`, `#endif`, etc.) from keyword matching
+- Fortran: Handle `module &\n procedure` continuation lines
+- Julia: Track parenthesis depth in bracket detection (e.g., `[f(begin...end)]`)
+- Julia: Disable `$()` interpolation processing in prefixed string macros
+- Pascal: Handle `class`/`interface`/`try`/`case`/`asm` blocks in record type detection
+- Ruby: Handle `\r`-only line endings in comment scanning inside string and regex interpolation
+- Ruby: Handle `\r`-only line endings in unterminated nested regex detection
+- Verilog: Consume chained control keywords before `begin` (e.g., `always -> if -> begin -> end`)
+- VHDL: Handle `\r`-only line endings in unterminated string detection
+- VHDL: Support chained conditional signal assignments (e.g., `sig <= a when c1 else b when c2 else c`)
+
 ## [1.1.2] - 2026-02-15
 
 ### Added
@@ -226,6 +257,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.3]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.0.1...v1.1.0
