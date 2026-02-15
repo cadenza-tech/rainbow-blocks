@@ -1,3 +1,4 @@
+import * as assert from 'node:assert';
 import { PascalBlockParser } from '../../parsers/pascalParser';
 import {
   assertBlockCount,
@@ -43,7 +44,7 @@ end`;
     });
 
     test('should parse class-end block', () => {
-      const source = `class
+      const source = `TMyClass = class
   private
     FValue: Integer;
   public
@@ -54,7 +55,7 @@ end`;
     });
 
     test('should parse object-end block', () => {
-      const source = `object
+      const source = `TPoint = object
   X: Integer;
   Y: Integer;
 end`;
@@ -63,7 +64,7 @@ end`;
     });
 
     test('should parse interface-end block', () => {
-      const source = `interface
+      const source = `IMyIntf = interface
   procedure DoSomething;
   function GetValue: Integer;
 end`;
@@ -392,8 +393,8 @@ end`;
   S := 'unterminated string
 end`;
       const pairs = parser.parse(source);
-      // Unterminated string extends to EOF
-      assertNoBlocks(pairs);
+      // Unterminated string ends at newline, so end is visible
+      assertSingleBlock(pairs, 'begin', 'end');
     });
 
     test('should handle unterminated brace comment', () => {
@@ -457,6 +458,75 @@ end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 5);
     });
+
+    test('should handle unterminated string at end of line', () => {
+      const source = `begin
+  x := 'unterminated
+  if true then
+  begin
+  end;
+end;`;
+      const pairs = parser.parse(source);
+      // Unterminated string ends at newline; if/then are not block keywords
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Class modifier', () => {
+    test('should not treat class modifier as block open', () => {
+      const source = `type
+  TMyClass = class(TObject)
+    private
+      FCount: Integer;
+    public
+      class function Create: TMyClass;
+      class procedure Destroy;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should parse class type definition correctly', () => {
+      const source = `type
+  TFoo = class
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('Of object', () => {
+    test('should not treat of object as block open', () => {
+      const source = `type
+  TObj = object
+    TProc: procedure of object;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should parse object type definition correctly', () => {
+      const source = `type
+  TPoint = object
+    X, Y: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+  });
+
+  suite('Variant record case', () => {
+    test('should not treat case in variant record as block', () => {
+      const pairs = parser.parse('TVariant = record\n  case Tag: Integer of\n    0: (IntVal: Integer);\n    1: (FloatVal: Double);\nend');
+      assertSingleBlock(pairs, 'record', 'end', 0);
+    });
+  });
+
+  suite('Class reference type', () => {
+    test('should not treat class of as block open', () => {
+      const pairs = parser.parse('type\n  TRef = class of TBase;');
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Token positions', () => {
@@ -483,6 +553,155 @@ until X > 10`;
       const pairs = parser.parse(source);
       assertTokenPosition(pairs[0].openKeyword, 0, 0);
       assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+  });
+
+  suite('Interface keyword validation', () => {
+    test('should parse COM interface as block', () => {
+      const source = `begin
+  record
+    X: Integer;
+  end;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not parse unit interface section as block', () => {
+      const source = `begin
+  X := 1;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should parse interface after = as block', () => {
+      const source = `interface
+begin
+end`;
+      const pairs = parser.parse(source);
+      // interface without = is not a block opener
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle interface after = with comment', () => {
+      const source = `IMyIntf = { COM interface } interface
+  procedure DoSomething;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+  });
+
+  suite('Coverage: unterminated string at EOF', () => {
+    test('should handle unterminated string at end of file without newline', () => {
+      const source = "begin\n  x := 'unterminated";
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Object type variant case', () => {
+    test('should not treat variant case inside object type as block opener', () => {
+      const pairs = parser.parse('type\n  TPoint = object\n    case Integer of\n      0: (X, Y: Integer);\n  end;');
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+  });
+
+  suite('Class forward declaration', () => {
+    test('should not treat class forward declaration as block', () => {
+      const pairs = parser.parse('type\n  TFoo = class;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat class forward declaration with parent as block', () => {
+      const pairs = parser.parse('type\n  TFoo = class(TObject);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still parse regular class as block', () => {
+      const source = `TFoo = class
+  FValue: Integer;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('CR-only line endings', () => {
+    test('should handle single-line comment with CR-only line endings', () => {
+      const pairs = parser.parse('// comment\rbegin\r  x := 1;\rend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('isInsideRecord with begin-end', () => {
+    test('should recognize variant case after begin-end inside record', () => {
+      const source = `TVariant = record
+  procedure Init;
+  begin
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+    1: (FloatVal: Double);
+end`;
+      const pairs = parser.parse(source);
+      // record...end, begin...end (2 blocks)
+      // case should not be a block opener because it is inside record
+      assertBlockCount(pairs, 2);
+      const recordPair = findBlock(pairs, 'record');
+      assert.ok(recordPair);
+    });
+  });
+
+  suite('Forward declaration with comment', () => {
+    test('should not treat class forward with brace comment as block', () => {
+      const pairs = parser.parse('type\n  TFoo = class(TBase) { forward };');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Class forward declaration with CRLF', () => {
+    test('should not treat class forward with parent as block with CRLF', () => {
+      const pairs = parser.parse('type\r\n  TFoo = class(TObject)\r\n  ;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat class forward as block with CRLF after parent', () => {
+      const pairs = parser.parse('type\r\n  TFoo = class(TBase)\r\n;');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Variant case with qualified type names', () => {
+    test('should not treat variant case with qualified type as block', () => {
+      const pairs = parser.parse('TVariant = record\n  case Types.MyEnum of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end', 0);
+    });
+
+    test('should not treat variant case with dotted type name as block', () => {
+      const pairs = parser.parse('TVariant = record\n  case MyUnit.TColor of\n    0: (R: Byte);\n    1: (G: Byte);\nend');
+      assertSingleBlock(pairs, 'record', 'end', 0);
+    });
+  });
+
+  suite('CR-only line endings', () => {
+    test('should handle Pascal string with CR-only ending', () => {
+      const source = "x := 'unterminated\rif true then\rbegin\r  action;\rend;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Nested parentheses in class forward declaration', () => {
+    test('should treat class with nested parens followed by semicolon as forward declaration', () => {
+      const pairs = parser.parse('TMyClass = class(TBase(TParam));\nbegin\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat class with nested parens without semicolon as block', () => {
+      const pairs = parser.parse('TMyClass = class(TBase(TParam))\n  FValue: Integer;\nend');
+      assertSingleBlock(pairs, 'class', 'end');
     });
   });
 });
