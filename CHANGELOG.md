@@ -5,6 +5,21 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-02-17
+
+### Fixed
+
+- Bash: Handle `\r`-only line endings in case pattern line-start detection
+- Crystal: Allow symbol after `>` operator (e.g., `x > :end`)
+- Crystal: Treat `not`/`and`/`or` as preceding block keywords for postfix detection
+- Elixir: Allow atom after `>` operator (e.g., `x>:atom`)
+- Elixir: Count newlines only outside all bracket types in `hasDoKeyword` scope detection
+- Fortran: Skip comment-only lines in `module procedure` continuation detection
+- Fortran: Skip comment-only lines in procedure `::` declaration detection
+- Fortran: Skip comment-only lines in continuation block form detection
+- VHDL: Support `end for` compound end keyword (generate blocks)
+- VHDL: Support `case generate` blocks
+
 ## [1.1.3] - 2026-02-16
 
 ### Fixed
@@ -257,6 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.4]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.0...v1.1.1
