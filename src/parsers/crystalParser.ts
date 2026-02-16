@@ -283,10 +283,11 @@ export class CrystalBlockParser extends BaseBlockParser {
       i--;
     }
 
-    // Colon after identifier/number/bracket is ternary or type annotation, not symbol
+    // Colon after identifier/number/closing bracket is ternary or type annotation, not symbol
+    // Note: > is excluded from check because x > :symbol is a valid comparison with symbol
     if (i >= 0) {
       const prevChar = source[i];
-      if (/[a-zA-Z0-9_)\]}>]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}]/.test(prevChar)) {
         return false;
       }
     }
@@ -373,7 +374,7 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
     before = before.trim();
     if (before.length === 0) return false;
-    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
+    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
     for (const kw of blockKeywords) {
       if (before === kw || before.endsWith(` ${kw}`) || before.endsWith(`\t${kw}`)) {
         return false;
@@ -1014,7 +1015,7 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
 
     // Block keyword before means not postfix
-    const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
+    const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
 
     for (const kw of precedingBlockKeywords) {
       if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`) || beforeKeyword.endsWith(`\t${kw}`)) {

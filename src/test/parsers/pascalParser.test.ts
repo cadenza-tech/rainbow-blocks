@@ -783,5 +783,266 @@ end`;
       const pairs = parser.parse('TMyClass = class(TBase(TParam))\n  FValue: Integer;\nend');
       assertSingleBlock(pairs, 'class', 'end');
     });
+
+    test('should handle class forward declaration with comment before semicolon', () => {
+      const source = `TMyClass = class(TParent) { comment } ;
+begin
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle class forward declaration with whitespace and newline before semicolon', () => {
+      const source = `TMyClass = class(TParent)\r\n  ;
+begin
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle deeply nested parentheses in class forward declaration', () => {
+      const source = 'TMyClass = class(TBase(TParam(TInner)));\nbegin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Qualified type names in variant case', () => {
+    test('should detect variant case with qualified type name', () => {
+      const source = `record
+  case Types.MyEnum of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect variant case with multi-level qualified type', () => {
+      const source = `record
+  case System.Types.MyEnum of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('isInsideRecord with various block keywords', () => {
+    test('should detect record context after try-end pair', () => {
+      const source = `try
+  DoSomething;
+except
+  HandleError;
+end;
+record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'try');
+      findBlock(pairs, 'record');
+    });
+
+    test('should detect record context after interface-end pair', () => {
+      const source = `IMyIntf = interface
+  procedure DoSomething;
+end;
+record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'interface');
+      findBlock(pairs, 'record');
+    });
+
+    test('should detect record context after asm-end pair', () => {
+      const source = `asm
+  mov ax, bx
+end;
+record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect record context after case-end pair', () => {
+      const source = `case X of
+  1: DoOne;
+  2: DoTwo;
+end;
+record
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect record at end of source after object', () => {
+      const source = `TPoint = object
+  X: Integer;
+end;
+record`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should detect record at end of source after interface', () => {
+      const source = `IMyIntf = interface
+  procedure DoSomething;
+end;
+record`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+
+    test('should handle variant case at end of source', () => {
+      const source = `record
+  X: Integer;
+  case Integer of`;
+      const pairs = parser.parse(source);
+      // No matching end keyword, so no blocks
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle deeply nested record contexts', () => {
+      const source = `record
+  case Integer of
+    0: (case Byte of
+         0: (B: Byte));
+end`;
+      const pairs = parser.parse(source);
+      // Both variant cases should be detected (only record block)
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Edge cases with excluded regions in forward declarations', () => {
+    test('should handle class forward declaration with string in parentheses', () => {
+      const source = `TMyClass = class(TBase('test'));
+begin
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle class forward declaration with comment in parentheses', () => {
+      const source = `TMyClass = class(TBase{comment}(TParam));
+begin
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  // Coverage: lines 58-59, 328-329
+  suite('Class forward declaration whitespace handling', () => {
+    test('should handle class forward declaration with tab before parenthesis', () => {
+      const source = `TMyClass = class\t(TBase);
+begin
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle class forward declaration with multiple spaces before parenthesis', () => {
+      const source = `TMyClass = class     (TBase);
+begin
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject block close followed by colon as keyword argument', () => {
+      const source = `begin
+  x := SomeFunc(end: 42);
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  // Coverage: lines 189-191, 222-225, 233-236, 253-258, 264-269, 286-291
+  suite('isInsideRecord excluded region handling', () => {
+    test('should handle excluded regions when scanning backward for record', () => {
+      const source = `record
+  X: Integer;
+  { comment with record keyword }
+  case Integer of
+    0: (Y: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should skip excluded regions while scanning for object blocks', () => {
+      const source = `object
+  { this is a 'string' }
+  case Integer of
+    0: (Y: Integer);
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip string while scanning backward for interface', () => {
+      const source = `interface
+  procedure DoIt;
+  { 'interface' in comment }
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip comment while scanning backward for try block', () => {
+      const source = `try
+  DoSomething;
+  (* try keyword in comment *)
+except
+  on E: Exception do;
+end`;
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'try');
+      assertIntermediates(pair, ['except']);
+    });
+
+    test('should skip excluded regions when checking for case blocks', () => {
+      const source = `case X of
+  0: begin
+    (* case in comment *)
+  end;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should skip excluded regions when checking for asm blocks', () => {
+      const source = `asm
+  { 'asm' in comment }
+  MOV AX, BX
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'asm', 'end');
+    });
+
+    test('should correctly track depth with nested blocks and excluded regions', () => {
+      const source = `record
+  case Integer of
+    0: (
+      record
+        { comment with 'record' }
+        case Byte of
+          0: (B: Byte);
+      end;
+    );
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
   });
 });

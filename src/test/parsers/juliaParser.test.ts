@@ -1894,4 +1894,176 @@ end`;
       assertSingleBlock(pairs, 'for', 'end');
     });
   });
+
+  suite('Nested strings and commands in interpolation', () => {
+    test('should handle triple-quoted string inside interpolation', () => {
+      const source = 'x = "prefix $("""nested end""") suffix"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle triple-quoted string with interpolation inside interpolation', () => {
+      const source = 'x = "outer $("""inner $(42) end""") suffix"\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should handle triple-quoted string with escape sequence inside interpolation', () => {
+      const source = 'x = "outer $("""inner \\" end""") suffix"\nmodule M\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'end');
+    });
+
+    test('should handle triple backtick command inside interpolation', () => {
+      const source = 'x = "prefix $(```inner end```) postfix"\nfor i in 1:10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle triple backtick with nested interpolation inside interpolation', () => {
+      const source = 'x = "prefix $(```inner $(42) end```) postfix"\nstruct Point\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'struct', 'end');
+    });
+
+    test('should handle triple backtick with escape sequence inside interpolation', () => {
+      const source = 'x = "prefix $(```inner \\` end```) postfix"\ntry\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+    });
+
+    test('should handle single backtick with escape inside interpolation', () => {
+      const source = 'x = "prefix $(`inner \\` end`) postfix"\nlet x=1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+
+    test('should handle regular string with escape inside interpolation', () => {
+      const source = 'x = "outer $("inner \\" end") postfix"\nquote\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'quote', 'end');
+    });
+
+    test('should handle nested multi-line comment inside interpolation', () => {
+      const source = 'x = "$( #= outer #= inner end =# comment =# 42)"\nbegin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle multi-line comment with end keyword inside interpolation', () => {
+      const source = 'x = "$( #= comment with end keyword =# 42)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle unterminated triple-quoted string inside interpolation', () => {
+      const source = 'x = "prefix $("""unterminated\nfunction foo()\nend';
+      const regions = parser.getExcludedRegions(source);
+      // The whole source from "prefix onwards should be excluded as an unterminated string
+      assert.ok(regions.length > 0);
+    });
+
+    test('should handle unterminated triple backtick inside interpolation', () => {
+      const source = 'x = "prefix $(```unterminated\nfor i in 1:10\nend';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0);
+    });
+
+    test('should handle unterminated backtick inside interpolation', () => {
+      const source = 'x = "prefix $(`unterminated\nwhile true\nend';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0);
+    });
+
+    test('should handle unterminated regular string inside interpolation', () => {
+      const source = 'x = "outer $("unterminated\nbegin\nend';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0);
+    });
+  });
+
+  // Covers lines 67-68: block keywords inside square brackets (not for/if)
+  suite('Block keywords inside square brackets', () => {
+    test('should not detect begin inside square brackets', () => {
+      const source = 'x = [begin, end]\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect function inside square brackets', () => {
+      const source = 'arr = [function, module, end]\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should detect block after square bracket array', () => {
+      const source = 'arr = [struct, try]\nmodule M\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'end');
+    });
+  });
+
+  // Covers lines 79-80: isValidBlockClose for non-'end' keyword
+  suite('Block close validation edge case', () => {
+    test('should validate non-end block close keyword', () => {
+      // Note: Julia only has 'end' as block close, so this tests the else branch
+      const source = 'if true\n  x = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers lines 208-209: matchMultiLineComment early return
+  suite('Invalid multi-line comment start', () => {
+    test('should not match comment if not starting with #=', () => {
+      const source = '#this is a line comment\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers lines 310-312, 332-334: prefixed triple-quoted string and findStringEnd with interpolation
+  suite('Prefixed strings with interpolation', () => {
+    test('should handle prefixed triple-quoted string with interpolation disabled', () => {
+      const source = 'x = raw"""text $(end) more"""\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle prefixed regular string', () => {
+      const source = 'x = r"text $(if) more"\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  // Covers lines 595-596: skipCharLiteral reaching EOF
+  suite('Character literal at EOF in interpolation', () => {
+    test('should handle unterminated char literal at EOF inside interpolation', () => {
+      const source = '"text $(\'x';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0);
+    });
+
+    test('should handle char literal without closing quote in interpolation', () => {
+      const source = '"x $(\'\nfunction foo()\nend';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0);
+    });
+  });
+
+  // Covers lines 627-629: skipBacktickString interpolation handling
+  suite('Backtick with interpolation in nested context', () => {
+    test('should handle backtick with interpolation inside string interpolation', () => {
+      const source = '"outer $(`cmd $(x) end`) after"\nfor i in 1:10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle backtick with nested interpolation', () => {
+      const source = 'x = "a $(`b $(c) if end`) d"\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
 });

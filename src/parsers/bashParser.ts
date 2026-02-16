@@ -764,7 +764,7 @@ export class BashBlockParser extends BaseBlockParser {
           if (contentBetween.includes(';') || contentBetween.includes('\n') || contentBetween.includes('\r')) {
             return false;
           }
-          const lineStart = source.lastIndexOf('\n', k) + 1;
+          const lineStart = this.findLineStart(source, k);
           const textBefore = source.slice(lineStart, k);
           if (/^\s*$/.test(textBefore) || /;;\s*$|;&\s*$|;;&\s*$/.test(textBefore)) {
             return true;
@@ -782,7 +782,7 @@ export class BashBlockParser extends BaseBlockParser {
       k--;
     }
     if (k >= 0 && source[k] === '(') {
-      const lineStart = source.lastIndexOf('\n', k) + 1;
+      const lineStart = this.findLineStart(source, k);
       const textBefore = source.slice(lineStart, k);
       if (/^\s*$/.test(textBefore) || /;;\s*$|;&\s*$|;;&\s*$/.test(textBefore)) {
         return true;
@@ -806,6 +806,15 @@ export class BashBlockParser extends BaseBlockParser {
       return true;
     }
     return false;
+  }
+
+  private findLineStart(source: string, pos: number): number {
+    for (let i = pos - 1; i >= 0; i--) {
+      if (source[i] === '\n' || source[i] === '\r') {
+        return i + 1;
+      }
+    }
+    return 0;
   }
 
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {

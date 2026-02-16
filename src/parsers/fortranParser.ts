@@ -99,8 +99,8 @@ export class FortranBlockParser extends BaseBlockParser {
     // 'module procedure' inside submodule is not a new module block
     if (lowerKeyword === 'module') {
       let afterModule = source.slice(position + keyword.length);
-      // Handle continuation lines
-      afterModule = afterModule.replace(/&[^\r\n]*(?:\r\n|\r|\n)\s*&?/g, ' ');
+      // Handle continuation lines, including comment-only lines between continuations
+      afterModule = afterModule.replace(/&[^\r\n]*(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?/g, ' ');
       if (/^\s+procedure\b/i.test(afterModule)) {
         return false;
       }
@@ -113,15 +113,25 @@ export class FortranBlockParser extends BaseBlockParser {
       while (j < source.length) {
         const lineEnd = this.findLineEnd(source, j);
         const lineContent = source.slice(j, lineEnd);
-        const colonIdx = lineContent.indexOf('::');
-        if (colonIdx >= 0 && !this.isInExcludedRegion(j + colonIdx, excludedRegions)) {
-          return false;
-        }
-        // Strip inline comment before checking for continuation &
+        // Strip inline comment before checking for continuation & and ::
         let trimmedLine = lineContent.trimEnd();
         const commentPos = this.findInlineCommentIndex(trimmedLine);
         if (commentPos >= 0) {
           trimmedLine = trimmedLine.slice(0, commentPos).trimEnd();
+        }
+        // Skip comment-only lines (empty after stripping comment)
+        if (trimmedLine.trimStart().length === 0 && commentPos >= 0) {
+          j = lineEnd;
+          if (j < source.length && source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
+            j += 2;
+          } else if (j < source.length) {
+            j++;
+          }
+          continue;
+        }
+        const colonIdx = lineContent.indexOf('::');
+        if (colonIdx >= 0 && !this.isInExcludedRegion(j + colonIdx, excludedRegions)) {
+          return false;
         }
         if (!trimmedLine.endsWith('&')) {
           break;
@@ -442,6 +452,10 @@ export class FortranBlockParser extends BaseBlockParser {
       if (commentIdx >= 0) {
         lineContent = lineContent.slice(0, commentIdx).trimEnd();
       }
+      // Skip comment-only lines (empty after stripping comment)
+      if (lineContent.length === 0 && commentIdx >= 0) {
+        continue;
+      }
       // If this line ends with &, it's another continuation - keep following
       if (lineContent.endsWith('&')) {
         continue;
@@ -470,7 +484,12 @@ export class FortranBlockParser extends BaseBlockParser {
     }
     // If next line starts with 'end' (other), this was single-line spread
     // Match both separated (end do) and concatenated (enddo) forms
-    if (i < source.length && /^end(do|if|where|forall|program|module|submodule|function|subroutine|block|blockdata|type|select|associate|critical|team|change|enum|interface|procedure|subprogram)?\b/i.test(source.slice(i))) {
+    if (
+      i < source.length &&
+      /^end(do|if|where|forall|program|module|submodule|function|subroutine|block|blockdata|type|select|associate|critical|team|change|enum|interface|procedure|subprogram)?\b/i.test(
+        source.slice(i)
+      )
+    ) {
       return false;
     }
     // More statements follow, it's block form

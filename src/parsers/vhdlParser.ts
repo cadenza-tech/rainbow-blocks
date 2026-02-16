@@ -19,7 +19,8 @@ const COMPOUND_END_TYPES = [
   'block',
   'record',
   'configuration',
-  'protected'
+  'protected',
+  'for'
 ];
 
 // Pattern to match compound end keywords (case insensitive)
@@ -27,7 +28,7 @@ const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join
 
 // Keywords that can be followed by 'loop' or 'generate'
 const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
-const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if'];
+const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
 export class VhdlBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {

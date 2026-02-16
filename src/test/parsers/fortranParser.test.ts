@@ -1371,6 +1371,26 @@ end program`;
     });
   });
 
+  suite('Module and procedure continuation edge cases', () => {
+    test('should reject module procedure with comment between continuation lines', () => {
+      const source = 'module &\n  ! comment\n  procedure foo\nend module';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject procedure with comment between continuation and ::', () => {
+      const source = 'procedure &\n  ! comment\n  :: foo';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle comment line between continuation lines in where block', () => {
+      const source = 'where (a > 0) &\n  ! comment\n  a = 1\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+  });
+
   suite('Module procedure continuation', () => {
     test('should not treat module &\\n procedure as module block', () => {
       const source = `submodule (parent) child
@@ -1408,6 +1428,308 @@ end`;
 end module`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'end module');
+    });
+  });
+
+  suite('Edge cases for uncovered branches', () => {
+    test('where with string containing quote at line end', () => {
+      const source = `where (a > 0 .and. s == 'test')
+  a = 1
+end where`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('where with comment inside condition', () => {
+      const source = `where (a > 0 & ! comment
+  .and. b > 0)
+  a = 1
+end where`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('where with standalone CR line ending', () => {
+      const source = 'where (a > 0)\r  a = 1\rend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('where with continuation at end of source', () => {
+      const source = 'where (a > 0) &';
+      const pairs = parser.parse(source);
+      // No matching end keyword, continuation at EOF
+      assertNoBlocks(pairs);
+    });
+
+    test('where continuation with empty line', () => {
+      const source = 'where (a > 0) &\n\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('where continuation ending at EOF', () => {
+      const source = 'where (a > 0) &\n  a = 1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('where continuation with CRLF followed by end block', () => {
+      const source = 'where (a > 0) &\r\n  a = 1\r\nend do';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('where continuation with standalone CR followed by end block', () => {
+      const source = 'where (a > 0) &\r  a = 1\rend if';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('forall with unmatched parenthesis', () => {
+      const source = 'forall (i=1:10\n  a(i) = i\nend forall';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('select type with continuation after type keyword', () => {
+      const source = `select &
+  type (var)
+  type is (integer)
+    x = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('select case with continuation after case keyword', () => {
+      const source = `select &
+  case (var)
+  case (1)
+    x = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('function with :: in string should not trigger type check', () => {
+      const source = `function test() result(x)
+  character(len=20) :: x
+  x = "test::value"
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('if statement with continuation to else if', () => {
+      const source = `if (a > 0) then
+  x = 1
+else &
+  if (b > 0) then
+  x = 2
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('inline comment with doubled quote inside string', () => {
+      const source = `program test
+  s = 'it''s here' ! comment
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('string at end of source without closing quote', () => {
+      const source = `program test
+  s = "unclosed`;
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0);
+      assert.strictEqual(regions[regions.length - 1].end, source.length);
+    });
+
+    test('string with newline inside (invalid but handled)', () => {
+      const source = `program test
+  s = "line1
+line2"
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Uncovered line coverage', () => {
+    // Covers lines 82-83: type(name) as type specifier check
+    test('type(name) as variable declaration type specifier', () => {
+      const source = `program test
+  type(mytype) :: var
+  var%field = 1
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 126, 142: CRLF line ending in procedure validation
+    test('procedure declaration with CRLF line endings and comment-only lines', () => {
+      const source = `module test\r
+  type :: mytype\r
+    procedure :: method\r
+    ! comment line\r
+  end type\r
+end module`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 220-231: comment-only continuation lines in if validation
+    test('if with comment-only continuation lines', () => {
+      const source = `program test
+  if (condition) &
+  ! comment line
+  &
+  then
+    x = 1
+  end if
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 271-273: string escaping in isBlockWhereOrForall
+    test('where with doubled quote in condition', () => {
+      const source = `program test
+  where (str == 'can''t')
+    arr = 0
+  end where
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 316-318: carriage return handling in isBlockWhereOrForall
+    test('where with standalone carriage return', () => {
+      const source = 'program test\r  where (mask)\r  arr = 1\rend where\rend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 339-342: end of source after where condition
+    test('where at end of source without body', () => {
+      const source = `program test
+  where (mask > 0)
+end program`;
+      const pairs = parser.parse(source);
+      // where is block form (no assignment after condition), but unterminated
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 348-349: type specifier detection for end(1)
+    test('end with double parentheses as array element', () => {
+      const source = `program test
+  integer :: end(5,5)
+  end(1,1) = 42
+  end(2)(1) = 10
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 356-357: end() comparison check
+    test('end array with comparison operator', () => {
+      const source = `program test
+  integer :: end(10)
+  if (end(1) == 0) then
+    x = 1
+  end if
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 386-390: type specifier detection with parentheses
+    test('type(...) with nested parentheses in type specifier', () => {
+      const source = `program test
+  type(mytype(kind=8)) :: var
+  var%x = 1
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 400-401: unmatched parenthesis in type specifier
+    test('type specifier with unmatched paren at EOF', () => {
+      const source = `program test
+  type(incomplete
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 404-405: double colon detection in type specifier
+    test('type specifier followed by double colon', () => {
+      const source = `program test
+  type(mytype) :: x, y
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 407-408: comma in type specifier
+    test('type specifier followed by comma', () => {
+      const source = `program test
+  type(t1), type(t2) :: x
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 410-411: no :: or comma after type specifier
+    test('type definition not followed by :: returns false', () => {
+      const source = `type :: mytype
+  integer :: field
+end type`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'type', 'end type');
+    });
+
+    // Covers lines 440-441: leading & on continuation line in isContinuationBlockForm
+    test('where with continuation having leading &', () => {
+      const source = `program test
+  where (mask) &
+  &arr = 1
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 686-696: compound end fallback matching
+    test('compound end keyword concatenated form', () => {
+      const source = `program test
+  do i = 1, 10
+    x = i
+  enddo
+endprogram`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 795-796: isPrecedingContinuationKeyword with \r in prevLine
+    test('select type continuation with \\r line ending', () => {
+      const source = 'program test\r  select &\r  type(var)\r  end select\rend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 815-816: isPrecedingContinuationKeyword word boundary
+    test('continuation keyword with word boundary check', () => {
+      const source = `program test
+  myselect = 1
+  if (x > 0) then
+    y = 1
+  end if
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
     });
   });
 });

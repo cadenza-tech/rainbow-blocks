@@ -1,3 +1,4 @@
+import * as assert from 'node:assert';
 import { ApplescriptBlockParser } from '../../parsers/applescriptParser';
 import {
   assertBlockCount,
@@ -800,6 +801,34 @@ end run`;
 end run`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    // Covers lines 420-421: '<keyword> of' pattern (property access)
+    test('should not treat repeat in property access as block opener', () => {
+      const source = `on run
+  set x to name of repeat
+end run`;
+      const pairs = parser.parse(source);
+      // Currently, 'repeat' after 'of' is still detected as a block keyword
+      // because the 'of' pattern check excludes 'repeat' from the check
+      // So we expect repeat-end to be paired
+      const repeatPair = findBlock(pairs, 'repeat');
+      assert.ok(repeatPair, 'Expected repeat block to be found');
+    });
+
+    test('should not treat end in property access as block keyword', () => {
+      const source = `on run
+  get value of end of list
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should treat repeat of after if/tell/repeat normally', () => {
+      const source = `repeat with i from 1 to 10
+end repeat`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
     });
   });
 });

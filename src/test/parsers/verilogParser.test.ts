@@ -857,4 +857,31 @@ endmodule`;
       assertSingleBlock(pairs, 'module', 'endmodule');
     });
   });
+
+  suite('Parentheses with excluded regions', () => {
+    // Covers lines 223-224: skipping excluded regions inside parentheses
+    test('should skip comments inside parentheses when checking for begin', () => {
+      const source = `module test;
+  always @(posedge /* comment with ( inside */ clk) begin
+    x <= 1;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired with end');
+    });
+
+    test('should skip strings inside parentheses when checking for begin', () => {
+      const source = `module test;
+  initial #(10, "string ( inside") begin
+    $display("test");
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'begin should be paired with end');
+    });
+  });
 });

@@ -861,13 +861,13 @@ end process;`;
 
   suite('matchVhdlString CR-only line endings', () => {
     test('should terminate string at CR-only line ending', () => {
-      const source = "signal msg : string := \"if then end if\r\nif condition then\nend if;";
+      const source = 'signal msg : string := "if then end if\r\nif condition then\nend if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
 
     test('should not leak string across CR-only line boundary', () => {
-      const source = "signal s : string := \"entity\rif a then\nend if;";
+      const source = 'signal s : string := "entity\rif a then\nend if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
@@ -911,7 +911,31 @@ end process;`;
       const pairs = parser.parse(source);
       const ifPair = findBlock(pairs, 'if');
       assert.ok(ifPair);
-      assert.ok(ifPair.intermediates.some((i) => i.value.toLowerCase() === 'else'), 'else should still be intermediate of if block');
+      assert.ok(
+        ifPair.intermediates.some((i) => i.value.toLowerCase() === 'else'),
+        'else should still be intermediate of if block'
+      );
+    });
+  });
+
+  suite('VHDL-2008 case generate and end for', () => {
+    test('should handle end for in configuration', () => {
+      const source = 'configuration cfg of ent is\n  for label : comp\n    use entity work.impl;\n  end for;\nend configuration;';
+      const result = parser.parse(source);
+      // configuration block should be matched, and for block inside it
+      assert.ok(result.length >= 1);
+      // Make sure 'for' in 'end for' is not a stray token
+      const forBlocks = result.filter((b) => b.openKeyword.value.toLowerCase() === 'for');
+      assert.strictEqual(forBlocks.length, 1, 'Should have exactly one for block');
+    });
+
+    test('should handle case generate (VHDL-2008)', () => {
+      const source = 'label: case expr generate\n  when choice =>\n    signal_assign;\nend generate label;';
+      const result = parser.parse(source);
+      assert.ok(result.length >= 1);
+      // case should be consumed as generate prefix, not as standalone block
+      const generateBlocks = result.filter((b) => b.openKeyword.value.toLowerCase() === 'generate');
+      assert.ok(generateBlocks.length >= 1, 'Should have generate block');
     });
   });
 
@@ -945,6 +969,96 @@ begin
 end process;`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
+    });
+  });
+
+  // Covers lines 120-122: function/procedure validation with excluded regions in parens
+  suite('Function/procedure with comments in parameters', () => {
+    test('should handle function with comment in parameter list', () => {
+      const source = `function calc(
+  a : integer; -- first param
+  b : integer  -- second param
+) return integer is
+begin
+  return a + b;
+end function;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('should handle procedure with string in parameter list', () => {
+      const source = `procedure print(
+  msg : string := "default;"
+) is
+begin
+  report msg;
+end procedure;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end procedure');
+    });
+  });
+
+  // Covers lines 138-139: function/procedure reaching EOF without is or semicolon
+  suite('Function/procedure at EOF', () => {
+    test('should not treat incomplete function at EOF as block', () => {
+      const source = 'function calc(a : integer)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat incomplete procedure at EOF as block', () => {
+      const source = 'procedure test(x : integer';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  // Covers lines 173-174, 178-179: loop validation with excluded regions and end loop check
+  suite('Loop validation with comments and end loop', () => {
+    test('should handle for-loop with comment containing loop keyword', () => {
+      const source = `for i in 0 to 7 -- this is a loop
+loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should recognize standalone loop when for-loop on same line', () => {
+      const source = `for i in 0 to 7 loop null; end loop;
+loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'loop');
+    });
+
+    test('should handle loop after end loop on same line', () => {
+      const source = `for i in 0 to 7 loop end loop; loop
+  wait;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  // Covers lines 453-454: isInSignalAssignment reaching start of file
+  suite('Signal assignment at start of file', () => {
+    test('should detect when/else in signal assignment at file start', () => {
+      const source = 'sig <= a when cond else b;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat when at start as signal assignment if no <=', () => {
+      const source = `case x is
+  when 0 =>
+    null;
+end case;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
     });
   });
 });

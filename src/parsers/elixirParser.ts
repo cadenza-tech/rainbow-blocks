@@ -107,10 +107,11 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Colon after identifier/number/bracket is not an atom
+    // Colon after identifier/number/closing bracket is not an atom (keyword list key)
+    // Note: > is excluded from check because x>:atom is a valid comparison with atom
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}>]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}]/.test(prevChar)) {
         return false;
       }
     }
@@ -531,9 +532,14 @@ export class ElixirBlockParser extends BaseBlockParser {
         braceDepth--;
       }
 
-      // Count newlines outside parentheses; stop after 5 lines
+      // Count newlines outside all brackets; stop after 5 lines
       // Handle \n, \r\n, and \r-only line endings
-      if ((char === '\n' || (char === '\r' && (i + 1 >= source.length || source[i + 1] !== '\n'))) && parenDepth === 0) {
+      if (
+        (char === '\n' || (char === '\r' && (i + 1 >= source.length || source[i + 1] !== '\n'))) &&
+        parenDepth === 0 &&
+        bracketDepth === 0 &&
+        braceDepth === 0
+      ) {
         newlineCount++;
         if (newlineCount > 5) {
           return false;

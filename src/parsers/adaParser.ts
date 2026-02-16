@@ -139,11 +139,7 @@ export class AdaBlockParser extends BaseBlockParser {
         else if (parenDepth === 0) {
           if (ch === ';') return false;
           const slice = source.slice(j, j + 2).toLowerCase();
-          if (
-            slice === 'do' &&
-            (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) &&
-            (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))
-          ) {
+          if (slice === 'do' && (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) && (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))) {
             return true;
           }
         }

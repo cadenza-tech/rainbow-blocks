@@ -661,4 +661,107 @@ end`;
       assertSingleBlock(pairs, 'for', 'end');
     });
   });
+
+  suite('String escape sequences', () => {
+    test('should handle \\z escape (skip whitespace including newlines)', () => {
+      const source = `x = "text \\z
+      continued if end"
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle \\n line continuation', () => {
+      const source = `x = "line1\\
+line2 if end"
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle \\r line continuation', () => {
+      const source = 'x = "line1\\\rline2 if end"\rif true then\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle \\r\\n line continuation', () => {
+      const source = 'x = "line1\\\r\nline2 if end"\r\nif true then\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Goto label edge cases', () => {
+    test('should handle goto label with invalid format', () => {
+      const source = `:: invalid
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle goto label without closing ::', () => {
+      const source = `::label
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle goto label with whitespace around identifier', () => {
+      const source = `::  label  ::
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle :: followed by non-identifier', () => {
+      const source = `:: 123 ::
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle :: at end of source', () => {
+      const source = `if true then
+end
+::`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle valid goto label with newlines', () => {
+      const source = `::
+  label
+::
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Long string edge cases', () => {
+    // Covers lines 130-131: return null when not starting with '['
+    test('should not treat -- followed by non-bracket as multi-line comment', () => {
+      const source = `-- comment with = sign
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle -- followed by identifier', () => {
+      const source = `--xyz
+if true then
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });

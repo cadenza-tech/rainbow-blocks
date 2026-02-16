@@ -1663,4 +1663,246 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
     });
   });
+
+  suite('Coverage: double-quoted symbol with interpolation', () => {
+    test('should handle #{} interpolation inside double-quoted symbol', () => {
+      const source = 'sym = :"value_#{x}_end"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: skipRegexInterpolation escape and percent', () => {
+    test('should handle escape sequences inside regex interpolation', () => {
+      const source = '/#{x = "\\n"}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle percent literal inside regex interpolation', () => {
+      const source = '/#{%w(a b)}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: heredoc CRLF handling', () => {
+    test('should handle heredoc with trailing CR in content line', () => {
+      const source = 'x = <<EOF\rcontent line\r\nEOF\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: skipInterpolation percent literal', () => {
+    test('should handle percent literal with braces inside string interpolation', () => {
+      const source = '"#{%q{text}}"';
+      const result = parser.parse(source);
+      assertNoBlocks(result);
+    });
+  });
+
+  suite('Coverage: isSymbolStart with colon after colon', () => {
+    test('should not treat second colon in :: as symbol start', () => {
+      const source = 'Foo::Bar\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat colon followed by non-letter as symbol', () => {
+      const source = 'x = : \ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: matchMultiLineComment edge cases', () => {
+    test('should not match =begin followed by non-whitespace', () => {
+      const source = '=beginx\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle =end at line start without proper prefix', () => {
+      const source = '=begin\n=endfoo\nstill in comment\n=end\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: heredoc edge cases', () => {
+    test('should handle heredoc with <<~ tilde prefix', () => {
+      const source = 'x = <<~EOF\n  content\n  EOF\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle bare heredoc without dash or tilde', () => {
+      const source = 'x = <<EOF\ncontent\nEOF\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: matchPercentLiteral interpolation flags', () => {
+    test('should handle %q without interpolation', () => {
+      const source = '%q(#{x})\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle %w without interpolation', () => {
+      const source = '%w(#{x})\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle %i without interpolation', () => {
+      const source = '%i(#{x})\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle %s without interpolation', () => {
+      const source = '%s(#{x})\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: getMatchingDelimiter edge cases', () => {
+    test('should reject percent literal with alphanumeric delimiter', () => {
+      const source = '%qa\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject percent literal with whitespace delimiter', () => {
+      const source = '% \nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: __END__ edge cases', () => {
+    test('should handle __END__ with trailing space', () => {
+      const source = 'if true\nend\n__END__ \ndata section';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle __END__ with trailing tab', () => {
+      const source = 'if true\nend\n__END__\t\ndata section';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: skipNestedBacktickString in skipRegexInterpolation', () => {
+    test('should handle backtick string with nested interpolation inside regex interpolation', () => {
+      const source = '/#{`cmd #{x}`}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: isRegexStart after keyword', () => {
+    test('should detect regex after "return" keyword', () => {
+      const source = 'def foo\n  return /pattern/\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: skipRegexInterpolation edge cases', () => {
+    // Covers lines 503-505: escape sequences in regex interpolation
+    test('should handle escape sequences inside regex interpolation', () => {
+      const source = '/#{x = "\\n"}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: matchHeredoc CRLF handling', () => {
+    // Covers lines 639-640: CRLF in heredoc content
+    test('should handle CRLF line endings in heredoc content', () => {
+      const source = '<<EOF\r\ncontent\r\nEOF\r\ndef foo\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: matchPercentLiteral with interpolation', () => {
+    // Covers lines 723-725: interpolation in percent literal
+    test('should handle interpolation in %Q percent literal', () => {
+      const source = '%Q{hello #{name}}; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: matchBacktickString edge cases', () => {
+    // Covers lines 767-769: escape and interpolation in backtick
+    test('should handle escape sequences in backtick command', () => {
+      const source = '`echo \\n`; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle interpolation in backtick command', () => {
+      const source = '`echo #{var}`; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: skipInterpolation edge cases', () => {
+    // Covers lines 784-786: escape sequences in interpolation
+    test('should handle escape sequences inside interpolation', () => {
+      const source = '"#{x = "\\t"}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: skipNestedRegex', () => {
+    // Covers lines 850-851: regex flags in nested regex
+    test('should handle regex with flags inside interpolation', () => {
+      const source = '"#{/pattern/imxo}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // Covers lines 859-860: EOF in nested regex
+    test('should handle unterminated regex at EOF in interpolation', () => {
+      const source = '"#{/pattern'; // unterminated
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: skipNestedString', () => {
+    // Covers lines 880-881: unterminated nested string
+    test('should handle unterminated nested string in interpolation', () => {
+      const source = '"#{"unterminated}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: skipNestedBacktickString', () => {
+    // Covers lines 888-890: escape sequences in nested backtick
+    test('should handle escape sequences in nested backtick', () => {
+      const source = '"#{`cmd\\n`}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // Covers lines 900-901: unterminated nested backtick
+    test('should handle unterminated nested backtick in interpolation', () => {
+      const source = '"#{`unterminated}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });

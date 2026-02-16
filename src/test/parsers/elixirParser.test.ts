@@ -1670,4 +1670,250 @@ end`;
       assert.strictEqual(regions[0].end, source.length);
     });
   });
+
+  suite('hasDoKeyword edge cases', () => {
+    test('should find do after multi-line list argument', () => {
+      const source = 'if [\n  1,\n  2,\n  3,\n  4,\n  5,\n  6\n] do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should find do after multi-line map argument', () => {
+      const source = 'if %{\n  a: 1,\n  b: 2,\n  c: 3,\n  d: 4,\n  e: 5,\n  f: 6\n} do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude atom :end after > without space', () => {
+      const source = 'x>:end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Interpolation edge cases', () => {
+    test('should handle bare # (not #{) inside interpolation', () => {
+      const source = `x = "text #{1 # comment char} text"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle nested #{} inside interpolation', () => {
+      const source = `x = "outer #{y = "inner #{z}"} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle sigil inside interpolation with closing delimiter', () => {
+      const source = `x = "text #{~s(})} text"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escape sequences inside nested strings', () => {
+      const source = `x = "outer #{y = "inner \\"quote\\""} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Sigil edge cases in interpolation', () => {
+    test('should handle skipNestedSigil reaching end of source', () => {
+      const source = `x = "text #{~s`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle skipNestedSigil with invalid delimiter', () => {
+      const source = `x = "text #{~s9}"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle skipNestedSigil with modifiers', () => {
+      const source = `x = "text #{~r/pattern/iu} text"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle lowercase sigil with escape inside interpolation', () => {
+      const source = `x = "outer #{~s(\\))} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle paired delimiter depth in nested sigil', () => {
+      const source = `x = "outer #{~s({nested})} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Nested string in interpolation', () => {
+    test('should handle single-quoted string inside interpolation', () => {
+      const source = `x = "outer #{'inner if end'} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escaped characters in nested single-quoted string', () => {
+      const source = `x = "outer #{'inner \\' quote'} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Coverage: lines 205-207, 226-228
+  suite('Charlist interpolation with escapes', () => {
+    test('should handle escaped backslash in charlist interpolation', () => {
+      const source = `x = 'text #{\\\\ if end} text'
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escaped quote in charlist interpolation', () => {
+      const source = `x = 'text #{\\' if end} text'
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escape in skipInterpolation', () => {
+      const source = `x = "text #{\\{ \\} if end} text"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Coverage: lines 242-247
+  suite('Bare interpolation inside interpolation', () => {
+    test('should handle bare #{} not followed by nested string', () => {
+      const source = `x = "outer #{y = 1; #{x} = 2} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle multiple bare #{} in interpolation', () => {
+      const source = `x = "outer #{#{a}} outer"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Coverage: lines 330-331
+  suite('skipNestedString unterminated string', () => {
+    test('should handle unterminated string inside interpolation', () => {
+      const source = `x = "outer #{"inner`;
+      const regions = parser.getExcludedRegions(source);
+      // Should include the entire unterminated region
+      assert.ok(regions.length >= 1);
+      assert.strictEqual(regions[0].start, 4);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should handle unterminated charlist inside interpolation', () => {
+      const source = `x = "outer #{'inner`;
+      const regions = parser.getExcludedRegions(source);
+      // Should include the entire unterminated region
+      assert.ok(regions.length >= 1);
+      assert.strictEqual(regions[0].start, 4);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+  });
+
+  // Coverage: lines 545-546
+  suite('hasDoKeyword with many newlines', () => {
+    test('should return false when more than 5 newlines before do', () => {
+      const source = `if true
+
+
+
+
+do
+end`;
+      const pairs = parser.parse(source);
+      // Should find the block since there are only 5 newlines (6 lines total)
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should return false when more than 5 newlines before do (boundary test)', () => {
+      const source = `if true
+
+
+
+
+
+do
+end`;
+      const pairs = parser.parse(source);
+      // Should NOT find the block since there are 6 newlines
+      assertNoBlocks(pairs);
+    });
+  });
+
+  // Coverage: lines 631-632, 651, 672-674
+  suite('do: one-liner edge cases', () => {
+    test('should not match doColonKeywords if keyword not in list', () => {
+      const source = `begin do: value
+end`;
+      const pairs = parser.parse(source);
+      // begin is not in doColonKeywords list
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: with tab before do (line 651)', () => {
+      const source = 'if true,\tdo: value';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: with no whitespace between do and colon (lines 672-674)', () => {
+      const source = 'if true, do:value';
+      const pairs = parser.parse(source);
+      // do: with no whitespace is always keyword syntax
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: immediately after do without space', () => {
+      const source = 'if true, do:42';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: immediately after do for complex value', () => {
+      const source = 'if true, do::ok';
+      const pairs = parser.parse(source);
+      // do: followed immediately by atom :ok
+      assertNoBlocks(pairs);
+    });
+  });
 });

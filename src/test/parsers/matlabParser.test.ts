@@ -775,4 +775,132 @@ end`;
       assertSingleBlock(pairs, 'for', 'end');
     });
   });
+
+  suite('Nested block comments', () => {
+    test('should handle nested block comments', () => {
+      const source = `%{
+outer comment
+  %{
+  inner comment
+  %}
+%}
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should track depth in nested block comments', () => {
+      const source = `%{
+level 1
+  %{
+  level 2
+    %{
+    level 3
+    %}
+  %}
+%}
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('Classdef section keyword edge cases', () => {
+    test('should handle properties at line start followed by parentheses', () => {
+      const source = `classdef MyClass
+  properties (Access = public)
+    Value
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should reject properties as function call after equals', () => {
+      const source = `x = properties(obj);
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject methods as function call in expression', () => {
+      const source = `result = methods(obj);
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject events as function call after comma', () => {
+      const source = `list = [func1(), events(obj)]
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject enumeration as function call after opening paren', () => {
+      const source = `func(enumeration(obj))
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject arguments as function call after opening bracket', () => {
+      const source = `arr = [arguments(obj)]
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject properties as function call after opening brace', () => {
+      const source = `cell = {properties(obj)}
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject methods as function call after semicolon', () => {
+      const source = `x = 1; methods(obj)
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should accept properties at line start not in expression', () => {
+      const source = `classdef MyClass
+properties(obj)
+end`;
+      const pairs = parser.parse(source);
+      // properties at line start is treated as block keyword, not function call
+      assertBlockCount(pairs, 1);
+    });
+
+    // Covers lines 76-77: return false when preceded by other characters (not =,(,[,{,,,;)
+    test('should accept properties(obj) after identifier as block keyword', () => {
+      const source = `classdef MyClass
+x properties(Access = public)
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should accept methods(obj) after dot as struct field', () => {
+      const source = `classdef MyClass
+obj.methods(Static = true)
+  properties
+  end
+end`;
+      const pairs = parser.parse(source);
+      // methods is preceded by '.' so should be filtered out
+      assertBlockCount(pairs, 2);
+    });
+  });
 });

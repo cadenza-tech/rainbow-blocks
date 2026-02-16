@@ -220,11 +220,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Allow flexible whitespace (spaces/tabs) between words
       let matched = false;
       for (const keyword of COMPOUND_KEYWORDS) {
-        const flexMatch = this.matchCompoundKeyword(
-          lowerSource,
-          i,
-          keyword
-        );
+        const flexMatch = this.matchCompoundKeyword(lowerSource, i, keyword);
         if (flexMatch >= 0) {
           // Check word boundary at end
           if (flexMatch < source.length && /\w/.test(source[flexMatch])) {

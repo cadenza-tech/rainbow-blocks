@@ -907,4 +907,104 @@ end Test;`;
       assertSingleBlock(pairs, 'procedure', 'end', 0);
     });
   });
+
+  // Covers lines 74-75: entry validation reaching EOF
+  suite('Entry declaration at EOF', () => {
+    test('should not treat incomplete entry at EOF as block', () => {
+      const source = 'entry Start(X : Integer';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat entry without is or do at EOF as block', () => {
+      const source = 'entry Start';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  // Covers lines 148-149: accept validation reaching EOF
+  suite('Accept statement at EOF', () => {
+    test('should not treat incomplete accept at EOF as block', () => {
+      const source = 'accept Entry_Name(X : Integer';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat accept without do at EOF as block', () => {
+      const source = 'accept Entry_Name';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  // Covers line 173: \r\n line ending handling in loop validation
+  suite('Loop validation with CRLF line endings', () => {
+    test('should handle for-loop with CRLF line endings', () => {
+      const source = 'for I in 1..10\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle multi-line for-loop with mixed line endings', () => {
+      const source = 'for I in\r\n  1..10\r\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  // Covers line 210: loop validation with semicolon in excluded regions
+  suite('Loop validation with semicolon in string or comment', () => {
+    test('should handle loop after line with semicolon in comment', () => {
+      const source = `X : Integer; -- has semicolon;
+loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+
+    test('should handle loop after line with semicolon in string', () => {
+      const source = `Text : String := "value;";
+loop
+  exit;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+  });
+
+  // Covers lines 372-373: multi-line 'is' checking reaching start of file
+  suite('Type declaration at start of file', () => {
+    test('should not treat is in type declaration at file start as block middle', () => {
+      const source = `type Color is (Red, Green, Blue);
+procedure Test is
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should handle multi-line type declaration at file start', () => {
+      const source = `type Range_Type
+  is range 1..100;
+function F return Integer is
+begin
+  return 1;
+end F;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle subtype at file start', () => {
+      const source = `subtype Small is Integer range 1..10;
+procedure P is
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
 });
