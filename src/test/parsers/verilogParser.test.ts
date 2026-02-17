@@ -884,4 +884,31 @@ endmodule`;
       assert.ok(beginPair, 'begin should be paired with end');
     });
   });
+
+  // Covers lines 223-225: excluded region inside parentheses during condition scan
+  suite('Excluded region in paren tracking', () => {
+    test('should skip string inside parenthesized condition', () => {
+      const source = `module test;
+  if ("param") begin
+    a = 1;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should skip comment inside parenthesized condition', () => {
+      const source = `module test;
+  if (a /* comment */ && b) begin
+    a = 1;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'begin');
+    });
+  });
 });

@@ -831,4 +831,25 @@ end repeat`;
       assertSingleBlock(pairs, 'repeat', 'end repeat');
     });
   });
+
+  // Covers lines 420-421: keyword followed by 'of' as property access
+  suite('Keyword of property access', () => {
+    test('should reject block keyword followed by of as property access', () => {
+      const source = `log repeat of myList
+repeat 3 times
+  beep
+end repeat`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should reject script of as property access', () => {
+      const source = `log script of myApp
+tell application "Finder"
+  activate
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
 });

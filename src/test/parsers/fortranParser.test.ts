@@ -1732,4 +1732,112 @@ end program`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  suite('CRLF coverage for procedure, if, where/forall, and isPrecedingContinuationKeyword', () => {
+    // Covers line 126: j += 2 for CRLF after comment-only continuation line in procedure scanning
+    test('procedure with CRLF comment-only continuation line before ::', () => {
+      // procedure & CRLF ! comment CRLF :: name -> should reject as declaration
+      const source = 'type :: mytype\r\ncontains\r\n  procedure &\r\n  ! comment\r\n  :: get_x\r\nend type';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'type', 'end type');
+    });
+
+    // Covers line 142: j += 2 for CRLF at end of continuation line in procedure scanning
+    test('procedure with CRLF continuation ending with &', () => {
+      // procedure, pass & CRLF :: name -> continuation line ends with &, CRLF skip
+      const source = 'type :: mytype\r\ncontains\r\n  procedure, pass &\r\n    :: get_x\r\nend type';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'type', 'end type');
+    });
+
+    // Covers line 225: i += 2 for CRLF after comment-only line during if-then scanning
+    test('if with CRLF comment-only continuation line before then', () => {
+      const source = 'if (condition) &\r\n! comment line\r\n  then\r\n  x = 1\r\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    // Covers lines 316-318: CRLF pair inside where/forall after closing paren
+    test('where with CRLF after condition (not standalone CR)', () => {
+      const source = 'where (a > 0)\r\n  a = 1\r\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    // Covers lines 316-318: CRLF in forall as well
+    test('forall with CRLF after condition', () => {
+      const source = 'forall (i = 1:n)\r\n  a(i) = b(i)\r\nend forall';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'forall', 'end forall');
+    });
+
+    // Covers lines 339-342: source ends inside condition scanner without finding
+    // non-whitespace after closing paren
+    test('where condition at end of source with trailing whitespace', () => {
+      const source = 'where (a > 0)   ';
+      const pairs = parser.parse(source);
+      // Block form detected (no assignment after condition), but no end keyword
+      assertNoBlocks(pairs);
+    });
+
+    // Covers lines 339-342: source ends right after closing paren
+    test('where condition at end of source without trailing content', () => {
+      const source = 'where (a > 0)';
+      const pairs = parser.parse(source);
+      // Block form detected (end of source), but no matching end keyword
+      assertNoBlocks(pairs);
+    });
+
+    // Covers lines 356-357: end = ... assignment (not ==)
+    test('end used as variable name with assignment', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 356-357: end = assignment should not be block close
+    test('end = value should not close a block', () => {
+      const source = 'do i = 1, 10\n  end = i\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    // Covers lines 795-796: isPrecedingContinuationKeyword with \r-only line ending
+    test('isPrecedingContinuationKeyword with standalone CR line ending', () => {
+      // else &\r  if (x > 0) then -> prevLine ends with \r which should be stripped
+      const source = 'if (x > 0) then\r  y = 1\relse &\r  if (x < 0) then\r  y = -1\rend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    // Covers lines 815-816: non-whole-word keyword match in isPrecedingContinuationKeyword
+    test('isPrecedingContinuationKeyword rejects non-whole-word match', () => {
+      // "someelse &\n  if" -> someelse ends with "else" but is not a whole word match
+      // so if should be treated as a new block opener
+      const source = 'if (a) then\n  x = 1\nend if\nsomeelse &\n  if (b) then\n  y = 2\nend if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    // Covers lines 316-318: CRLF where with whitespace between paren and CRLF
+    test('where with whitespace then CRLF after condition', () => {
+      const source = 'where (a > 0)  \r\n  a = 1\r\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    // Covers line 126: multiple comment-only continuation lines with CRLF in procedure
+    test('procedure with multiple CRLF comment-only continuation lines', () => {
+      const source = 'type :: mytype\r\ncontains\r\n  procedure &\r\n  ! first comment\r\n  ! second comment\r\n  :: get_x\r\nend type';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'type', 'end type');
+    });
+
+    // Covers line 225: multiple comment-only continuation lines with CRLF in if
+    test('if with multiple CRLF comment-only continuation lines before then', () => {
+      const source = 'if (cond) &\r\n! first\r\n! second\r\n  then\r\n  x = 1\r\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
 });

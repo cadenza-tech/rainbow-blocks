@@ -2592,4 +2592,167 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Coverage: matchHeredocBody EOF without terminator', () => {
+    test('should handle second heredoc on same line ending at EOF without terminator', () => {
+      // Covers matchHeredocBody lines 124-129: lineEnd >= source.length (no line ending)
+      // and the loop-exit fallback returning { start: bodyStart, end: source.length }
+      const source = 'cat <<EOF1 cat <<EOF2\nbody1\nEOF1\nunterminated body2';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      // Second heredoc body should be excluded until end of source
+      assert.ok(regions.some((r) => r.end === source.length));
+    });
+
+    test('should handle second heredoc without terminator and block before', () => {
+      // The second heredoc body has no line ending at EOF
+      const source = 'if true; then\n  cat <<EOF1 cat <<EOF2\nbody1\nEOF1\nunterminated';
+      const pairs = parser.parse(source);
+      // if has no fi, so no blocks
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: isParameterExpansion $' + '{#var}', () => {
+    test('should treat # after ${ as parameter expansion, not comment', () => {
+      // Covers isParameterExpansion lines 200-202: pos >= 2 && source[pos-1] === '{' && source[pos-2] === '$'
+      // The # inside ${#array[@]} should not start a comment
+      const source = 'echo $' + '{#array[@]}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle $' + '{# for array length without treating rest as comment', () => {
+      // Unquoted ${#arr[@]} where # is directly after ${
+      const source = 'x=$' + '{#arr[@]}\nfor i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Coverage: matchParameterExpansion backslash escape', () => {
+    test('should handle backslash escape inside unquoted parameter expansion', () => {
+      // Covers matchParameterExpansion lines 231-233: backslash skips next char
+      // Unquoted ${var/\n/x} has a backslash inside the expansion
+      const source = 'x=$' + '{var/\\n/x}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle backslash-escaped brace inside parameter expansion', () => {
+      // Backslash before } should not close the expansion prematurely
+      const source = 'x=$' + '{var/\\}/replacement}\nfor i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Coverage: matchParameterExpansion nested bare brace', () => {
+    test('should track nested bare { inside parameter expansion', () => {
+      // Covers matchParameterExpansion line 279: char === '{' incrementing depth
+      // This requires a bare { (not ${) inside ${...}
+      // In bash, ${var/pattern/{replacement}} has a bare { inside
+      const source = 'x=$' + '{var/{old}/{new}}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle multiple nested bare braces in parameter expansion', () => {
+      // Multiple bare { characters inside ${...} to increase depth
+      const source = 'x=$' + '{var/pattern/{a{b}}}\nfor i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Coverage: matchesWord followed by word char', () => {
+    test('should not match case as keyword when followed by word character', () => {
+      // Covers matchesWord line 390: after position has alphanumeric char
+      // "cased" should not match "case" as a keyword inside $()
+      const source = 'result=$(cased)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not match esac as keyword when followed by underscore', () => {
+      // "esac_handler" should not match "esac" as a keyword inside $()
+      const source = 'result=$(esac_handler)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: isCasePattern ( found but not case pattern opener', () => {
+    test('should not treat keyword inside function call parens as case pattern', () => {
+      // Covers isCasePattern line 772: ( at parenDepth 0, text before ( is not whitespace or ;;
+      // func(for means the ( is part of "func(" — not a case pattern
+      const source = 'test_func(for i in 1 2; do\n  echo $i\ndone)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat keyword after non-whitespace ( as case pattern', () => {
+      // "x=(if" — the ( is after "x=" which is not whitespace or ;;
+      const source = 'x=(if true; then echo ok; fi)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: isCasePattern POSIX (pattern) style', () => {
+    test('should detect POSIX case pattern with leading whitespace before (', () => {
+      // Covers isCasePattern lines 785-790: ( preceded by whitespace on same line
+      const source = 'case $x in\n  (for) echo match;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect POSIX case pattern (while) in case', () => {
+      const source = 'case $cmd in\n  (while) echo loop;;\n  (until) echo loop;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Coverage: isCasePattern ;;&  separator', () => {
+    test('should detect case pattern after ;;&  double-semicolon-ampersand', () => {
+      // Covers isCasePattern line 803: s >= 2 && source[s-1] === ';' && source[s-2] === ';'
+      // ;;&  is Bash 4+ fall-through that re-tests subsequent patterns
+      const source = 'case $x in\n  a) cmd1;;&\n  for) cmd2;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect case pattern after ;;&  with whitespace', () => {
+      const source = 'case $x in\n  a) cmd1 ;;&\n  if) cmd2 ;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle multiple ;;&  separators with keyword patterns', () => {
+      const source = 'case $x in\n  a) echo 1;;&\n  while) echo 2;;&\n  done) echo 3;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Coverage: tokenize ${ skip in brace matching', () => {
+    test('should skip ${ inside brace group and not treat it as command grouping', () => {
+      // Covers tokenize lines 866-867: char === '{' && source[i-1] === '$' → continue
+      // ${var} inside { } should be skipped in brace matching
+      const source = 'if true; then\n  { echo $' + '{var}; }\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, '{');
+    });
+
+    test('should skip ${ inside brace group with nested expansion', () => {
+      // ${var:-${default}} inside { } — the ${ should be skipped
+      const source = '{ echo $' + '{var:-$' + '{default}}; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
 });

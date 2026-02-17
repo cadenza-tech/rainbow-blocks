@@ -2085,4 +2085,127 @@ end`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  suite('Coverage: skipRegexInterpolation backslash escape', () => {
+    // Covers lines 442-445: backslash escape inside #{} in regex
+    test('should handle backslash escape inside regex interpolation', () => {
+      const source = 'x = /#{a\\tb}/\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude block keywords inside regex interpolation with escapes', () => {
+      const source = 'x = /#{\\ndo\\n}/\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: isModuloOperator at start of source', () => {
+    // Covers lines 607-608: % with only whitespace before it at source start
+    test('should treat percent literal at start of source as excluded region', () => {
+      const source = '%w(foo bar)\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat percent literal with leading whitespace as excluded region', () => {
+      const source = '  %w(do end)\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: skipInterpolation backslash escape', () => {
+    // Covers lines 688-691: backslash escape inside #{} in string
+    test('should handle backslash escape inside string interpolation', () => {
+      const source = 'x = "#{a\\tb}"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude block keywords in string interpolation with escapes', () => {
+      const source = 'x = "#{\\ndo\\n}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: skipInterpolation single-quoted string', () => {
+    // Covers lines 706-708: single-quoted string inside #{} in string
+    test('should handle single-quoted string inside interpolation', () => {
+      const source = 'x = "#{\'hello\'}"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude block keywords in single-quoted string inside interpolation', () => {
+      const source = 'x = "#{\'do end\'}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: isRegexInInterpolation only whitespace', () => {
+    // Covers line 735: / as first non-whitespace in #{} (j < interpStart)
+    test('should treat slash as regex when only whitespace before it in interpolation', () => {
+      const source = 'x = "#{  /pattern/}"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: skipNestedString unterminated', () => {
+    // Covers lines 785-786: source ends without closing quote inside interpolation
+    test('should handle unterminated string inside interpolation', () => {
+      const source = 'x = "#{"hello';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle unterminated string with block keyword inside interpolation', () => {
+      const source = 'x = "#{"do end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: matchCharLiteral EOF edges', () => {
+    // Covers line 832-833: single quote at end of source
+    test('should handle single quote at end of source', () => {
+      const source = "if true\nend\nx = '";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Covers lines 837-838: backslash-quote at end of source
+    test('should handle backslash at end of source after single quote', () => {
+      const source = "if true\nend\nx = '\\";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: isLoopDo excluded region checks', () => {
+    // Covers lines 959-961: loop keyword in string on same line as do
+    test('should not treat string-contained loop keyword as loop do', () => {
+      const source = '"while" ; x.each do\n  action\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    // Covers lines 969-977: do keyword in excluded region (string) after loop
+    test('should skip do in string after loop keyword', () => {
+      const source = 'while x > "do"; while true do\n  action\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+
+    // Covers: loop keyword in comment on same line
+    test('should ignore comment-contained loop keyword before real loop do', () => {
+      const source = '# for\nwhile cond do\n  action\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+  });
 });

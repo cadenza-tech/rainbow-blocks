@@ -1007,4 +1007,28 @@ end P;`;
       assertSingleBlock(pairs, 'procedure', 'end');
     });
   });
+
+  // Covers line 173: CRLF in loop line offset calculation
+  suite('CRLF loop validation', () => {
+    test('should handle for loop across CRLF blank lines before loop', () => {
+      const source = 'for I in 1 .. 10\r\n\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  // Covers lines 372-375: blank line in backward type declaration scan
+  suite('Type declaration with blank line', () => {
+    test('should skip is in type declaration with blank line before is', () => {
+      const source = `type T
+
+  is range 1 .. 100;
+procedure P is
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
 });

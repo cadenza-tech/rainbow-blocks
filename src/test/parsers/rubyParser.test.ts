@@ -1905,4 +1905,55 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  // Covers lines 503-505: backslash escape inside regex interpolation
+  suite('Regex interpolation backslash escape', () => {
+    test('should handle backslash escape inside regex interpolation', () => {
+      const source = 'x = /#{a\\}b}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers line 639: heredoc content with CRLF line endings
+  suite('Heredoc CRLF', () => {
+    test('should handle heredoc with CRLF line endings', () => {
+      const source = 'x = <<~HEREDOC\r\n  hello\r\nHEREDOC\r\ndef foo\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers line 686: isModuloOperator with only whitespace before percent
+  suite('Percent literal at source start', () => {
+    test('should handle percent literal at position 0', () => {
+      const source = '%w(foo bar)\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle percent literal with only whitespace before', () => {
+      const source = '  %w(foo bar)\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers lines 783-785: backslash escape inside skipInterpolation
+  suite('Interpolation backslash escape', () => {
+    test('should handle backslash escape in string interpolation', () => {
+      const source = '"#{a\\}b}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers lines 880-881: unterminated nested regex in interpolation
+  suite('Unterminated nested regex', () => {
+    test('should handle unterminated nested regex in interpolation', () => {
+      const source = '"#{/abc'; // source ends without closing /
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });

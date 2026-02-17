@@ -1045,4 +1045,164 @@ end`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  // Coverage: isInsideRecord - nested record with depth > 0 (lines 222-225)
+  suite('isInsideRecord with nested record at depth > 0', () => {
+    test('should suppress variant case when inner record-end pair is consumed at depth > 0', () => {
+      // Scanning backward from the second case:
+      // end (from inner record) -> depth=1, record (inner) -> depth>0 so depth=0,
+      // record (outer) -> depth=0 -> return true (inside record)
+      const source = `TRec = record
+  inner: record
+    field: Integer;
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // Only 2 blocks: outer record...end and inner record...end
+      // The variant case is suppressed because isInsideRecord returns true
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+    });
+  });
+
+  // Coverage: isInsideRecord - nested object with depth > 0 (lines 233-236)
+  suite('isInsideRecord with nested object at depth > 0', () => {
+    test('should suppress variant case when inner object-end pair is consumed at depth > 0', () => {
+      // Scanning backward from case:
+      // end (from object) -> depth=1, object -> depth>0 so depth=0,
+      // record -> depth=0 -> return true
+      const source = `TRec = record
+  TInner = object
+    X: Integer;
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // 2 blocks: record...end and object...end
+      // Variant case suppressed
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+    });
+  });
+
+  // Coverage: isInsideRecord - interface keyword handler at depth > 0 (lines 255-258)
+  suite('isInsideRecord with interface-end at depth > 0', () => {
+    test('should suppress variant case when interface-end pair is consumed at depth > 0', () => {
+      // Scanning backward from case:
+      // end (from interface) -> depth=1, interface -> depth>0 so depth=0,
+      // record -> depth=0 -> return true
+      const source = `TRec = record
+  IInner = interface
+    procedure DoIt;
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // 2 blocks: record...end and interface...end
+      // Variant case suppressed
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+    });
+  });
+
+  // Coverage: isInsideRecord - try keyword handler at depth > 0 (lines 266-269)
+  suite('isInsideRecord with try-end at depth > 0', () => {
+    test('should suppress variant case when try-end pair is consumed at depth > 0', () => {
+      // Scanning backward from case:
+      // end (from try) -> depth=1, try -> depth>0 so depth=0,
+      // record -> depth=0 -> return true
+      const source = `TRec = record
+  begin
+    try
+      DoSomething;
+    except
+      HandleError;
+    end;
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // 3 blocks: record...end, begin...end, try...end
+      // Variant case suppressed
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'try');
+    });
+  });
+
+  // Coverage: isInsideRecord - asm keyword handler at depth > 0 (lines 288-291)
+  suite('isInsideRecord with asm-end at depth > 0', () => {
+    test('should suppress variant case when asm-end pair is consumed at depth > 0', () => {
+      // Scanning backward from case:
+      // end (from asm) -> depth=1, asm -> depth>0 so depth=0,
+      // record -> depth=0 -> return true
+      const source = `TRec = record
+  begin
+    asm
+      MOV AX, BX
+    end;
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // 3 blocks: record...end, begin...end, asm...end
+      // Variant case suppressed
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'asm');
+    });
+  });
+
+  // Coverage: isInsideRecord - case with depth > 0 (line 277)
+  suite('isInsideRecord with case-end at depth > 0', () => {
+    test('should suppress variant case when inner case-end pair is consumed at depth > 0', () => {
+      // The inner case X of is also a variant case inside the record (suppressed).
+      // Scanning backward from the tagless variant case Integer of:
+      // end (from inner case) -> depth=1, case (inner) -> depth>0 so depth=0,
+      // record -> depth=0 -> return true
+      const source = `TRec = record
+  case X: Integer of
+    1: (A: Integer);
+  end;
+  case Integer of
+    0: (IntVal: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // Only 1 block: record...end
+      // Both variant cases are suppressed (inside record context)
+      // The inner case X: Integer of -> tagged variant, suppressed
+      // The outer case Integer of -> tagless variant, isInsideRecord returns true
+      // During isInsideRecord backward scan, end->depth=1, case->depth>0 decrements to 0
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  // Coverage: isValidBlockClose returning false in tokenize (lines 328-329)
+  suite('isValidBlockClose in tokenize', () => {
+    test('should treat end used as variable assignment as block close', () => {
+      // The base isValidBlockClose always returns true for Pascal,
+      // so end := 5 is still treated as a block close keyword
+      const source = `begin
+  end := 5;
+end`;
+      const pairs = parser.parse(source);
+      // begin matches first end (the variable), leaving the second end unmatched
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat end used as array element as block close', () => {
+      const source = `begin
+  end[0] := 1;
+end`;
+      const pairs = parser.parse(source);
+      // end[0] has end as a word boundary match, so it is treated as block close
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
 });

@@ -1916,4 +1916,65 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  suite('Coverage: matchElixirCharlist escape', () => {
+    // Covers lines 203-206: backslash escape in single-quoted charlist
+    test('should handle escape sequence in charlist', () => {
+      const source = "x = 'hello\\nworld'\nif true do\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude block keywords inside charlist with escapes', () => {
+      const source = "x = 'do\\nend'\ndef foo do\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: hasDoKeyword \\r-only line endings', () => {
+    // Covers line 537-538: \r-only line ending counting in hasDoKeyword
+    test('should detect do keyword with \\r-only line endings', () => {
+      const source = 'if true do\r  x\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should stop after too many \\r-only lines without do', () => {
+      const source = 'if true\r  a\r  b\r  c\r  d\r  e\r  f\r  do\rend';
+      const pairs = parser.parse(source);
+      // More than 5 \r-only lines before do, so hasDoKeyword returns false
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: isDoColonOneLiner comma-do no space', () => {
+    // Covers lines 649-650: ,do without space between comma and do
+    test('should detect do: with comma directly before do', () => {
+      const source = 'if true,do: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: with comma-do and complex value', () => {
+      const source = 'def foo(x),do: x + 1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: isDoColonOneLiner do: no whitespace', () => {
+    // Covers lines 670-673: do: with no space between do and colon
+    test('should detect do: as keyword syntax when colon immediately follows do', () => {
+      const source = 'if true, do: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: with tab before do colon', () => {
+      const source = 'if true,\tdo: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });
