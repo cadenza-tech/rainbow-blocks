@@ -5,6 +5,27 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-02-18
+
+### Fixed
+
+- VHDL: Handle `\r`-only line endings in `for`/`entity`/`loop` validation within `isValidBlockOpen`
+
+### Tests
+
+- Improve overall test coverage: Statements 98.49% → 99.29%, Branches 97.29% → 98.81% (+81 tests)
+- Add coverage tests for Pascal `isInsideRecord` nested block handlers (`record`, `object`, `interface`, `try`, `asm`, `case` at depth > 0)
+- Add coverage tests for Fortran CRLF handling in procedure/if/where/forall continuations and `isPrecedingContinuationKeyword`
+- Add coverage tests for Fortran `isValidBlockClose` variable assignment detection (`end = 5`)
+- Add coverage tests for Bash heredoc EOF, `${#var}` expansion, backslash/nested braces in `${...}`, POSIX case patterns, and `;;&` separator
+- Add coverage tests for Crystal escape/string handling in interpolation, char literal EOF edges, and `isLoopDo` excluded regions
+- Add coverage tests for Elixir charlist escapes, `hasDoKeyword` `\r`-only, and `isDoColonOneLiner` edge cases (`,do`, `do:`)
+- Add coverage tests for Ruby regex/percent interpolation escapes, CRLF heredoc, and unterminated nested regex
+- Add coverage tests for VHDL `\r`-only and CRLF line endings in wait/loop/entity validation, `end loop` same-line detection, and signal assignment exhausted scan
+- Add coverage tests for Ada CRLF loop validation and `isTypeDecl` blank line backward scan
+- Add coverage tests for AppleScript `<keyword> of` property access pattern
+- Add coverage tests for Verilog excluded regions inside parenthesized conditions
+
 ## [1.1.4] - 2026-02-17
 
 ### Fixed
@@ -272,6 +293,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.5]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.1...v1.1.2
