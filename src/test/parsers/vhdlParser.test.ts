@@ -859,6 +859,35 @@ end process;`;
     });
   });
 
+  suite('CR-only line endings for wait for, loop, and entity', () => {
+    test('should detect wait for with CR-only line endings', () => {
+      const pairs = parser.parse('process\rbegin\r  wait for 10 ns;\rend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should detect multi-line wait for with CR-only', () => {
+      const pairs = parser.parse('process\rbegin\r  wait\r    for 10 ns;\rend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should handle standalone loop with CR-only line endings', () => {
+      const pairs = parser.parse('process\rbegin\r  loop\r    null;\r  end loop;\rend process;');
+      assert.strictEqual(pairs.length, 2);
+      findBlock(pairs, 'loop');
+    });
+
+    test('should handle for-loop with CR-only line endings', () => {
+      const pairs = parser.parse('process\rbegin\r  for i in 0 to 10\r  loop\r    null;\r  end loop;\rend process;');
+      assert.strictEqual(pairs.length, 2);
+      findBlock(pairs, 'for');
+    });
+
+    test('should detect use entity with CR-only line endings', () => {
+      const pairs = parser.parse('architecture rtl of top is\rbegin\r  u1: entity work.comp\r    port map (a => b);\rend architecture;');
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
   suite('matchVhdlString CR-only line endings', () => {
     test('should terminate string at CR-only line ending', () => {
       const source = 'signal msg : string := "if then end if\r\nif condition then\nend if;';
@@ -1059,6 +1088,42 @@ end loop;`;
 end case;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'end case');
+    });
+  });
+
+  // Covers lines 93-94: CRLF in blank-line skip during multi-line wait for
+  suite('CRLF wait for blank line', () => {
+    test('should treat wait for as timing statement with CRLF blank line', () => {
+      const source = 'process\r\nbegin\r\n  wait\r\n\r\n    for 10 ns;\r\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  // Covers line 167: CRLF in loop line offset calculation
+  suite('CRLF loop validation', () => {
+    test('should handle for loop across CRLF blank lines before loop', () => {
+      const source = 'for i in 0 to 10\r\n\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  // Covers lines 190-192: end loop before for on same line skips end loop match
+  suite('End loop before for on same line', () => {
+    test('should skip end loop when checking for loop pairing on same line', () => {
+      const source = 'end loop; for i in 0 to 10 loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  // Covers lines 466-467: isInSignalAssignment backward scan reaches start of source
+  suite('Signal assignment exhausted scan', () => {
+    test('should not treat when as signal assignment when scan reaches source start', () => {
+      const source = 'when others => null';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 });

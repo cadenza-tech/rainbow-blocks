@@ -65,7 +65,7 @@ export class VhdlBlockParser extends BaseBlockParser {
     // 'wait for' is a timing statement, not a for-loop block
     if (lowerKeyword === 'for') {
       const textBefore = source.slice(0, position).toLowerCase();
-      const lastNewline = textBefore.lastIndexOf('\n');
+      const lastNewline = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
       const lineStart = lastNewline + 1;
       const rawLineBefore = textBefore.slice(lineStart);
       const lineBefore = rawLineBefore.trimStart();
@@ -78,13 +78,20 @@ export class VhdlBlockParser extends BaseBlockParser {
       // Check previous lines for 'wait' (multi-line wait for, skip blank lines)
       if (/^\s*$/.test(lineBefore) && lastNewline > 0) {
         let scanEnd = lastNewline;
+        // Skip the \r in \r\n pairs
+        if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
+          scanEnd--;
+        }
         for (let attempt = 0; attempt < 5; attempt++) {
-          const prevNl = textBefore.lastIndexOf('\n', scanEnd - 1);
+          const prevNl = Math.max(textBefore.lastIndexOf('\n', scanEnd - 1), textBefore.lastIndexOf('\r', scanEnd - 1));
           const rawPrevLine = textBefore.slice(prevNl + 1, scanEnd);
           const prevLine = rawPrevLine.trimStart();
           if (/^\s*$/.test(prevLine)) {
             if (prevNl <= 0) break;
             scanEnd = prevNl;
+            if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
+              scanEnd--;
+            }
             continue;
           }
           const prevTrimOffset = rawPrevLine.length - prevLine.length;
@@ -101,7 +108,7 @@ export class VhdlBlockParser extends BaseBlockParser {
     // 'label: entity' is direct entity instantiation (VHDL-93+), not entity block
     if (lowerKeyword === 'entity') {
       const textBefore = source.slice(0, position).toLowerCase();
-      const lastNl = textBefore.lastIndexOf('\n');
+      const lastNl = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
       const lineBefore = textBefore.slice(lastNl + 1);
       if (/\buse[ \t]+$/.test(lineBefore)) {
         return false;
@@ -144,7 +151,8 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     // Look backwards across multiple lines to find if a prefix keyword precedes this
     const textBefore = source.slice(0, position).toLowerCase();
-    const lines = textBefore.split('\n');
+    // Split on \r\n, \r, or \n to handle all line ending types
+    const lines = textBefore.split(/\r\n|\r|\n/);
     const maxLines = Math.min(lines.length, 5);
 
     // Calculate absolute offsets for each line
@@ -154,7 +162,12 @@ export class VhdlBlockParser extends BaseBlockParser {
       const lineText = lines[lineIdx];
       lineStartOffset -= lineText.length;
       if (idx > 0) {
-        lineStartOffset -= 1;
+        // Account for the line terminator (1 for \n or \r, 2 for \r\n)
+        if (lineStartOffset >= 2 && source[lineStartOffset - 2] === '\r' && source[lineStartOffset - 1] === '\n') {
+          lineStartOffset -= 2;
+        } else {
+          lineStartOffset -= 1;
+        }
       }
 
       for (const prefix of LOOP_PREFIX_KEYWORDS) {
