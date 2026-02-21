@@ -1692,8 +1692,20 @@ end`;
   });
 
   suite('Interpolation edge cases', () => {
-    test('should handle bare # (not #{) inside interpolation', () => {
+    test('should handle bare # as comment inside interpolation', () => {
+      // # inside #{} starts a comment; } in the comment doesn't close interpolation
+      // The string becomes unterminated since } is never found
       const source = `x = "text #{1 # comment char} text"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle # comment in multi-line interpolation', () => {
+      // # starts comment to EOL; } on next line closes interpolation
+      const source = `x = "#{1 # comment with } brace
+}"
 if true do
 end`;
       const pairs = parser.parse(source);
@@ -1803,6 +1815,26 @@ end`;
 
     test('should handle escape in skipInterpolation', () => {
       const source = `x = "text #{\\{ \\} if end} text"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle comment with closing brace in multi-line interpolation', () => {
+      // # starts comment; } in comment doesn't close interpolation; } on next line does
+      const source = `x = "#{1 # closing } here
+}"
+if true do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle comment with block keyword in multi-line interpolation', () => {
+      // Block keywords after # in interpolation are in comment, not detected
+      const source = `x = "#{value # do end
+}"
 if true do
 end`;
       const pairs = parser.parse(source);
@@ -1973,6 +2005,15 @@ end`;
 
     test('should detect do: with tab before do colon', () => {
       const source = 'if true,\tdo: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  // Covers line 652: isDoColonOneLiner ,do branch (comma directly before do)
+  suite('Coverage: isDoColonOneLiner comma-do branch', () => {
+    test('should detect ,do: on same line as valid do block', () => {
+      const source = 'if true do ,do: :ok';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });

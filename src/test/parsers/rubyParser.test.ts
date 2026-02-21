@@ -1956,4 +1956,22 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  // Covers line 829: isRegexInInterpolation whitespace-only before /
+  suite('Coverage: regex in interpolation with whitespace before slash', () => {
+    test('should treat / as regex when only whitespace follows #{', () => {
+      const source = '"#{   /regex/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers line 880: skipNestedString unterminated string in interpolation
+  suite('Coverage: unterminated nested string in interpolation', () => {
+    test('should handle source ending inside nested string in interpolation', () => {
+      const source = '"#{"abc';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });

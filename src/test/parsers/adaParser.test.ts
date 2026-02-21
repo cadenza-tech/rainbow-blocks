@@ -1008,12 +1008,24 @@ end P;`;
     });
   });
 
-  // Covers line 173: CRLF in loop line offset calculation
+  // Covers CRLF in loop line offset calculation
   suite('CRLF loop validation', () => {
     test('should handle for loop across CRLF blank lines before loop', () => {
       const source = 'for I in 1 .. 10\r\n\r\nloop\r\n  null;\r\nend loop;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle for loop with CRLF and comment near boundary', () => {
+      const source = 'for I in 1 .. 10 -- "iter"\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle standalone loop with CRLF after semicolon', () => {
+      const source = 'null;\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
     });
   });
 
@@ -1027,6 +1039,30 @@ procedure P is
 begin
   null;
 end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  // Covers line 363: CRLF handling when skipping comment between type and is
+  suite('Coverage: type declaration with comment and CRLF', () => {
+    test('should skip is in type declaration with CRLF comment line between', () => {
+      const source = 'type T\r\n-- comment\r\n  is range 1 .. 100;\r\nprocedure P is\r\nbegin\r\n  null;\r\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  // Covers lines 371-374: multiple blank lines between type and is
+  suite('Coverage: type declaration with multiple blank lines', () => {
+    test('should skip is in type declaration with two blank lines before is', () => {
+      const source = 'type T\n\n\n  is range 1 .. 100;\nprocedure P is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should skip is in type declaration with multiple CRLF blank lines', () => {
+      const source = 'type T\r\n\r\n\r\n  is range 1 .. 100;\r\nprocedure P is\r\nbegin\r\n  null;\r\nend P;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end');
     });

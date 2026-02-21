@@ -2698,6 +2698,18 @@ fi`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });
+
+    test('should return false from backward scan when ( preceded by non-separator text', () => {
+      const source = 'case $x in\n  a) echo func(for);;  \nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should decrement parenDepth when scanning backward through balanced parens', () => {
+      const source = 'case $x in\n  a) (cmd) (for);;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
   });
 
   suite('Coverage: isCasePattern POSIX (pattern) style', () => {

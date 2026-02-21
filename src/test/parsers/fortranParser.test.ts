@@ -1840,4 +1840,33 @@ end program`;
       assertSingleBlock(pairs, 'if', 'end if');
     });
   });
+
+  // Covers line 385-387: isTypeSpecifier whitespace before (
+  suite('Coverage: isTypeSpecifier whitespace before paren', () => {
+    test('should treat type with space before paren as type specifier', () => {
+      const source = 'program test\n  type (mytype) :: var\n  var = 1\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  // Covers line 810: isPrecedingContinuationKeyword returns false
+  suite('Coverage: isPrecedingContinuationKeyword false path', () => {
+    test('should not treat type as continuation when previous line has non-keyword before &', () => {
+      const source = 'program test\n  x = y &\n  type point\n    real :: x, y\n  end type\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'type');
+      findBlock(pairs, 'program');
+    });
+  });
+
+  // Covers line 366: nested paren depth++ in isValidBlockClose
+  suite('Coverage: isValidBlockClose nested parens', () => {
+    test('should not treat end with nested parens as block close', () => {
+      const source = 'program test\n  integer :: end(5)\n  end(func(2)) = 42\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
 });

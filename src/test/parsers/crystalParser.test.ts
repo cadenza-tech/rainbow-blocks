@@ -2207,5 +2207,20 @@ end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
     });
+
+    test('should skip loop keyword in string before standalone do', () => {
+      const source = 'x = "for"; [1].each do |i|\n  puts i\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
+  // Covers: matchHeredoc terminators empty
+  suite('Coverage: heredoc with no valid identifier', () => {
+    test('should handle heredoc with dash but no valid identifier', () => {
+      const source = 'x = <<-123\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 });

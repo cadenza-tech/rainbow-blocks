@@ -358,6 +358,21 @@ end`;
       // $\x with no hex digits - just the 3-char escape
       assert.strictEqual(source.slice(charRegion.start, charRegion.end), '$\\x');
     });
+
+    test('should handle surrogate pair character literal', () => {
+      const source = '$\u{1F600} begin end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      const charRegion = regions[0];
+      assert.strictEqual(charRegion.end - charRegion.start, 3);
+    });
+
+    test('should handle surrogate pair character literal before block keyword', () => {
+      const source = '$\u{1F4A9}begin end';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions[0].end, 3);
+    });
   });
 
   suite('Catch expression prefix', () => {

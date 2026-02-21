@@ -1100,12 +1100,30 @@ end case;`;
     });
   });
 
-  // Covers line 167: CRLF in loop line offset calculation
+  // Covers CRLF in loop line offset calculation
   suite('CRLF loop validation', () => {
     test('should handle for loop across CRLF blank lines before loop', () => {
       const source = 'for i in 0 to 10\r\n\r\nloop\r\n  null;\r\nend loop;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle for loop with CRLF and comment near boundary', () => {
+      const source = 'for i in 0 to 10 -- "range"\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should handle standalone loop with CRLF after semicolon', () => {
+      const source = 'null;\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+
+    test('should handle while loop with multiple CRLF lines', () => {
+      const source = 'while condition\r\n\r\n\r\nloop\r\n  null;\r\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end loop');
     });
   });
 
