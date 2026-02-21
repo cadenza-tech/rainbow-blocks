@@ -245,8 +245,10 @@ export class ElixirBlockParser extends BaseBlockParser {
           depth++;
           continue;
         }
-        // Bare # (not followed by {) is a regular character, skip it
-        i++;
+        // Bare # starts a comment, skip to end of line
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
         continue;
       } else if (source[i] === '~' && i + 1 < source.length && /[a-zA-Z]/.test(source[i + 1])) {
         // Skip sigil inside interpolation (e.g. ~s(}))

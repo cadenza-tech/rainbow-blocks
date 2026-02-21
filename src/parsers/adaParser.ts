@@ -165,16 +165,15 @@ export class AdaBlockParser extends BaseBlockParser {
     for (let idx = 0; idx < maxLines; idx++) {
       const lineIdx = lineParts.length - 1 - idx;
       const lineText = lineParts[lineIdx];
-      lineStartOffset -= lineText.length;
       if (idx > 0) {
         // Account for the line terminator (1 for \n or \r, 2 for \r\n)
-        // Check what's at lineStartOffset - 1 and lineStartOffset - 2
         if (lineStartOffset >= 2 && source[lineStartOffset - 2] === '\r' && source[lineStartOffset - 1] === '\n') {
           lineStartOffset -= 2;
         } else {
           lineStartOffset -= 1;
         }
       }
+      lineStartOffset -= lineText.length;
 
       // Count non-excluded for/while keywords on this line
       let prefixCount = 0;

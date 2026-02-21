@@ -189,8 +189,10 @@ export class ErlangBlockParser extends BaseBlockParser {
       // $\n, $\t, $\\, etc - basic escape (3 chars)
       return { start: pos, end: pos + 3 };
     }
-    // $x where x is any character
-    return { start: pos, end: pos + 2 };
+    // $x where x is any character (handle surrogate pairs for characters outside BMP)
+    const code = source.codePointAt(pos + 1);
+    const charLen = code !== undefined && code > 0xffff ? 2 : 1;
+    return { start: pos, end: pos + 1 + charLen };
   }
 
   // Matches triple-quoted string (OTP 27+): """..."""

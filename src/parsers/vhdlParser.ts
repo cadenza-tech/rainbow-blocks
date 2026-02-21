@@ -160,7 +160,6 @@ export class VhdlBlockParser extends BaseBlockParser {
     for (let idx = 0; idx < maxLines; idx++) {
       const lineIdx = lines.length - 1 - idx;
       const lineText = lines[lineIdx];
-      lineStartOffset -= lineText.length;
       if (idx > 0) {
         // Account for the line terminator (1 for \n or \r, 2 for \r\n)
         if (lineStartOffset >= 2 && source[lineStartOffset - 2] === '\r' && source[lineStartOffset - 1] === '\n') {
@@ -169,6 +168,7 @@ export class VhdlBlockParser extends BaseBlockParser {
           lineStartOffset -= 1;
         }
       }
+      lineStartOffset -= lineText.length;
 
       for (const prefix of LOOP_PREFIX_KEYWORDS) {
         const pattern = new RegExp(`\\b${prefix}\\b`, 'g');
