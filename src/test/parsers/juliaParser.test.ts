@@ -9,6 +9,8 @@ import {
   assertTokenPosition,
   findBlock
 } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('JuliaBlockParser Test Suite', () => {
   let parser: JuliaBlockParser;
@@ -16,6 +18,22 @@ suite('JuliaBlockParser Test Suite', () => {
   setup(() => {
     parser = new JuliaBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'x = 1 + 2\ny = x * 3\nprintln(y)',
+    tokenSource: 'if true\nend',
+    expectedTokenValues: ['if', 'end'],
+    excludedSource: '"string" # comment\nfunction foo()\nend',
+    expectedRegionCount: 2,
+    twoLineSource: 'if true\nend',
+    singleLineCommentSource: '# if this is a comment end\nfunction foo()\nend',
+    commentBlockOpen: 'function',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'x = "if this is a string end"\nfunction foo()\nend',
+    stringBlockOpen: 'function',
+    stringBlockClose: 'end'
+  };
 
   suite('Simple blocks', () => {
     test('should parse simple if-end block', () => {
@@ -366,13 +384,7 @@ end`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `# if this is a comment end
-function foo()
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end');
-    });
+    generateExcludedRegionTests(config);
 
     test('should ignore keywords in multi-line comments', () => {
       const source = `#=
@@ -438,14 +450,6 @@ end`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `x = "if this is a string end"
-function foo()
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end');
-    });
-
     test('should ignore keywords in triple-quoted strings', () => {
       const source = `x = """
 if this is a multiline string
@@ -904,19 +908,7 @@ end`;
 
   suite('Edge cases', () => {
     suite('General', () => {
-      test('should handle empty source', () => {
-        const source = '';
-        const pairs = parser.parse(source);
-        assertNoBlocks(pairs);
-      });
-
-      test('should handle source with no blocks', () => {
-        const source = `x = 1 + 2
-y = x * 3
-println(y)`;
-        const pairs = parser.parse(source);
-        assertNoBlocks(pairs);
-      });
+      generateEdgeCaseTests(config);
 
       test('should handle only comments', () => {
         const source = `# just a comment
@@ -1413,24 +1405,9 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line numbers', () => {
-      const source = `function foo()
-  if condition
-    for i in 1:10
-    end
-  end
-end`;
-      const pairs = parser.parse(source);
-      const functionPair = findBlock(pairs, 'function');
-      const ifPair = findBlock(pairs, 'if');
-      const forPair = findBlock(pairs, 'for');
+  generateCommonTests(config);
 
-      assert.strictEqual(functionPair.openKeyword.line, 0);
-      assert.strictEqual(ifPair.openKeyword.line, 1);
-      assert.strictEqual(forPair.openKeyword.line, 2);
-    });
-
+  suite('Token positions - language-specific', () => {
     test('should have correct column numbers', () => {
       const source = `function foo()
   if condition
@@ -1479,33 +1456,7 @@ end`;
     });
   });
 
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if condition
-  do_something()
-else
-  do_else()
-end`;
-      const tokens = parser.getTokens(source);
-      assert.strictEqual(tokens.length, 3);
-      assert.strictEqual(tokens[0].value, 'if');
-      assert.strictEqual(tokens[0].type, 'block_open');
-      assert.strictEqual(tokens[1].value, 'else');
-      assert.strictEqual(tokens[1].type, 'block_middle');
-      assert.strictEqual(tokens[2].value, 'end');
-      assert.strictEqual(tokens[2].type, 'block_close');
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `"string" # comment
-function foo()
-end`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '"string"');
-      assert.strictEqual(source.slice(regions[1].start, regions[1].end), '# comment');
-    });
-
+  suite('Test helper methods - language-specific', () => {
     test('getExcludedRegions should return nested comment as single region', () => {
       const source = `#= outer #= inner =# outer =#
 function foo()

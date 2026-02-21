@@ -8,6 +8,8 @@ import {
   assertTokenPosition,
   findBlock
 } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('PascalBlockParser Test Suite', () => {
   let parser: PascalBlockParser;
@@ -15,6 +17,21 @@ suite('PascalBlockParser Test Suite', () => {
   setup(() => {
     parser = new PascalBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'program Test; var X: Integer;',
+    tokenSource: 'begin\nend',
+    expectedTokenValues: ['begin', 'end'],
+    excludedSource: "// comment\n'string'",
+    expectedRegionCount: 2,
+    twoLineSource: 'begin\nend',
+    singleLineCommentSource: '// begin end repeat until case\nbegin\n  X := 1;\nend',
+    commentBlockOpen: 'begin',
+    commentBlockClose: 'end'
+  };
+
+  generateCommonTests(config);
 
   suite('Simple blocks', () => {
     test('should parse simple begin-end block', () => {
@@ -286,14 +303,7 @@ end`;
   });
 
   suite('Excluded regions', () => {
-    test('should skip keywords in single-line comments', () => {
-      const source = `begin
-  // begin end repeat until case
-  X := 1;
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
-    });
+    generateExcludedRegionTests(config);
 
     test('should skip keywords in brace comments', () => {
       const source = `begin
@@ -364,13 +374,7 @@ end`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      assertNoBlocks(parser.parse(''));
-    });
-
-    test('should handle source with no blocks', () => {
-      assertNoBlocks(parser.parse('program Test; var X: Integer;'));
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle unmatched begin', () => {
       assertNoBlocks(parser.parse('begin X := 1;'));
@@ -529,7 +533,7 @@ end;`;
     });
   });
 
-  suite('Token positions', () => {
+  suite('Token positions - language-specific', () => {
     test('should report correct line and column for single line', () => {
       const source = 'begin X end';
       const pairs = parser.parse(source);

@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { FortranBlockParser } from '../../parsers/fortranParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('FortranBlockParser Test Suite', () => {
   let parser: FortranBlockParser;
@@ -16,6 +10,26 @@ suite('FortranBlockParser Test Suite', () => {
   setup(() => {
     parser = new FortranBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'x = 1',
+    tokenSource: 'if (condition) then\nend if',
+    expectedTokenValues: ['if', 'then', 'end if'],
+    excludedSource: "! comment\n'string'",
+    expectedRegionCount: 2,
+    twoLineSource: 'if (condition) then\nend if',
+    nestedPositionSource: 'program test\n  do i = 1, 10\n  end do\nend program',
+    nestedKeyword: 'do',
+    nestedLine: 1,
+    nestedColumn: 2,
+    singleLineCommentSource: '! if then end if do\nif (condition) then\nend if',
+    commentBlockOpen: 'if',
+    commentBlockClose: 'end if',
+    doubleQuotedStringSource: 'print *, "if then end if do"\nif (condition) then\nend if',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end if'
+  };
 
   suite('Simple blocks', () => {
     test('should parse program block', () => {
@@ -237,13 +251,7 @@ end if`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in comments', () => {
-      const source = `! if then end if do
-if (condition) then
-end if`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
+    generateExcludedRegionTests(config);
 
     test('should handle comment at end of line', () => {
       const source = `if (condition) then ! end if here
@@ -257,14 +265,6 @@ end if`;
   suite('Excluded regions - Strings', () => {
     test('should ignore keywords in single-quoted strings', () => {
       const source = `print *, 'if then end if do'
-if (condition) then
-end if`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `print *, "if then end if do"
 if (condition) then
 end if`;
       const pairs = parser.parse(source);
@@ -298,15 +298,7 @@ End Program`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      const pairs = parser.parse('');
-      assertNoBlocks(pairs);
-    });
-
-    test('should handle source with no blocks', () => {
-      const pairs = parser.parse('x = 1');
-      assertNoBlocks(pairs);
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle multiple subroutines', () => {
       const source = `subroutine a
@@ -467,45 +459,7 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `if (condition) then
-end if`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 1, 0);
-    });
-
-    test('should have correct positions for nested blocks', () => {
-      const source = `program test
-  do i = 1, 10
-  end do
-end program`;
-      const pairs = parser.parse(source);
-      const doPair = findBlock(pairs, 'do');
-      const progPair = findBlock(pairs, 'program');
-      assertTokenPosition(doPair.openKeyword, 1, 2);
-      assertTokenPosition(progPair.openKeyword, 0, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if (condition) then
-end if`;
-      const tokens = parser.getTokens(source);
-      assert.ok(tokens.some((t) => t.value === 'if'));
-      assert.ok(tokens.some((t) => t.value === 'then'));
-      assert.ok(tokens.some((t) => t.value === 'end if'));
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `! comment
-'string'`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Concatenated compound end keywords', () => {
     test('should parse endif as block close', () => {

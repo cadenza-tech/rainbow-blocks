@@ -1,15 +1,8 @@
 import * as assert from 'node:assert';
 import { MatlabBlockParser } from '../../parsers/matlabParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  assertTokens,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('MatlabBlockParser Test Suite', () => {
   let parser: MatlabBlockParser;
@@ -17,6 +10,28 @@ suite('MatlabBlockParser Test Suite', () => {
   setup(() => {
     parser = new MatlabBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'x = 1 + 2;',
+    tokenSource: 'if true\nend',
+    expectedTokenValues: ['if', 'end'],
+    excludedSource: "% comment\n'string'",
+    expectedRegionCount: 2,
+    twoLineSource: 'if true\nend',
+    nestedPositionSource: 'function test()\n  if true\n    action();\n  end\nend',
+    nestedKeyword: 'if',
+    nestedLine: 1,
+    nestedColumn: 2,
+    singleLineCommentSource: '% if for while end function\nif true\nend',
+    commentBlockOpen: 'if',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'msg = "if for while end";\nif true\nend',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end'
+  };
+
+  generateCommonTests(config);
 
   suite('Simple blocks', () => {
     test('should parse function-end block', () => {
@@ -225,13 +240,7 @@ end`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `% if for while end function
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
+    generateExcludedRegionTests(config);
 
     test('should ignore keywords in block comments', () => {
       const source = `%{
@@ -268,14 +277,6 @@ end`;
 
     test('should handle escaped quotes in strings', () => {
       const source = `msg = 'it''s an if statement';
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `msg = "if for while end";
 if true
 end`;
       const pairs = parser.parse(source);
@@ -332,15 +333,7 @@ end`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      const pairs = parser.parse('');
-      assertNoBlocks(pairs);
-    });
-
-    test('should handle source with no blocks', () => {
-      const pairs = parser.parse('x = 1 + 2;');
-      assertNoBlocks(pairs);
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle multiple functions', () => {
       const source = `function a()
@@ -510,46 +503,7 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `if true
-  action();
-end`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
-    });
-
-    test('should have correct positions for nested blocks', () => {
-      const source = `function test()
-  if true
-    action();
-  end
-end`;
-      const pairs = parser.parse(source);
-      const ifPair = findBlock(pairs, 'if');
-      const funcPair = findBlock(pairs, 'function');
-      assertTokenPosition(ifPair.openKeyword, 1, 2);
-      assertTokenPosition(funcPair.openKeyword, 0, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if true
-else
-end`;
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [{ value: 'if' }, { value: 'else' }, { value: 'end' }]);
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `% comment
-'string'`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-    });
-
+  suite('Test helper methods - language-specific', () => {
     test('getExcludedRegions should return block comment', () => {
       const source = `%{
 block comment

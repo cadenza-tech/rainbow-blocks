@@ -1,13 +1,8 @@
 import * as assert from 'node:assert';
 import { ApplescriptBlockParser } from '../../parsers/applescriptParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('ApplescriptBlockParser Test Suite', () => {
   let parser: ApplescriptBlockParser;
@@ -15,6 +10,22 @@ suite('ApplescriptBlockParser Test Suite', () => {
   setup(() => {
     parser = new ApplescriptBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'display dialog "Hello"',
+    tokenSource: 'if true then\nend if',
+    expectedTokenValues: ['if', 'end if'],
+    excludedSource: '-- comment\n"string"',
+    expectedRegionCount: 2,
+    twoLineSource: 'if true then\nend if',
+    singleLineCommentSource: '-- if then end if repeat\nif true then\nend if',
+    commentBlockOpen: 'if',
+    commentBlockClose: 'end if',
+    doubleQuotedStringSource: 'set x to "if then end if"\nif true then\nend if',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end if'
+  };
 
   suite('Simple blocks', () => {
     test('should parse simple tell-end tell block', () => {
@@ -285,6 +296,8 @@ end tell`;
   });
 
   suite('Excluded regions', () => {
+    generateExcludedRegionTests(config);
+
     test('should skip keywords in double-dash comments', () => {
       const source = `tell application "Finder"
   -- tell if repeat end tell end if
@@ -341,13 +354,7 @@ end tell`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      assertNoBlocks(parser.parse(''));
-    });
-
-    test('should handle source with no blocks', () => {
-      assertNoBlocks(parser.parse('display dialog "Hello"'));
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle unmatched tell', () => {
       assertNoBlocks(parser.parse('tell application "Finder"'));
@@ -402,32 +409,7 @@ end tell`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should report correct line and column for single line', () => {
-      const source = 'tell application "Finder" end tell';
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 0, 26);
-    });
-
-    test('should report correct positions for multi-line', () => {
-      const source = `if x then
-  y
-end if`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
-    });
-
-    test('should report correct positions for compound keywords', () => {
-      const source = `tell application "Finder"
-  activate
-end tell`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Keyword as substring of identifier', () => {
     test('should not match repeat inside repetition', () => {

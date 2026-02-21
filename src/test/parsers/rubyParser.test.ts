@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { RubyBlockParser } from '../../parsers/rubyParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokens,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('RubyBlockParser Test Suite', () => {
   let parser: RubyBlockParser;
@@ -16,6 +10,22 @@ suite('RubyBlockParser Test Suite', () => {
   setup(() => {
     parser = new RubyBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'puts "hello world"',
+    tokenSource: 'def foo\nend',
+    expectedTokenValues: ['def', 'end'],
+    excludedSource: '"string" # comment\ndef foo\nend',
+    expectedRegionCount: 2,
+    twoLineSource: 'def foo\nend',
+    singleLineCommentSource: '# if end\ndef foo\nend',
+    commentBlockOpen: 'def',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'x = "if end"\ndef foo\nend',
+    stringBlockOpen: 'def',
+    stringBlockClose: 'end'
+  };
 
   suite('Simple blocks', () => {
     test('should parse simple do-end block', () => {
@@ -349,11 +359,7 @@ end`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = '# if end\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
+    generateExcludedRegionTests(config);
 
     test('should ignore keywords in multi-line comments', () => {
       const source = `=begin
@@ -369,12 +375,6 @@ end`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = 'x = "if end"\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
     test('should ignore keywords in single-quoted strings', () => {
       const source = "x = 'begin end'\ndef foo\nend";
       const pairs = parser.parse(source);
@@ -872,15 +872,7 @@ end`;
 
   suite('Edge cases', () => {
     suite('General', () => {
-      test('should handle empty source', () => {
-        const pairs = parser.parse('');
-        assertNoBlocks(pairs);
-      });
-
-      test('should handle source with no blocks', () => {
-        const pairs = parser.parse('puts "hello world"');
-        assertNoBlocks(pairs);
-      });
+      generateEdgeCaseTests(config);
 
       test('should handle for-end block', () => {
         const source = `for i in 1..10
@@ -1335,39 +1327,7 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `def foo
-  if bar
-  end
-end`;
-      const pairs = parser.parse(source);
-      const defPair = findBlock(pairs, 'def');
-      const ifPair = findBlock(pairs, 'if');
-
-      assert.strictEqual(defPair.openKeyword.line, 0);
-      assert.strictEqual(defPair.openKeyword.column, 0);
-      assert.strictEqual(ifPair.openKeyword.line, 1);
-      assert.strictEqual(ifPair.openKeyword.column, 2);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = 'def foo\nend';
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [{ value: 'def' }, { value: 'end' }]);
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = '"string" # comment\ndef foo\nend';
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-      assert.strictEqual(regions[0].start, 0);
-      assert.strictEqual(regions[0].end, 8);
-      assert.strictEqual(regions[1].start, 9);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Coverage: loopDo semicolon and excluded region branches', () => {
     test('should handle semicolon before loop do on same line', () => {

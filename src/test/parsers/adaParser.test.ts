@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { AdaBlockParser } from '../../parsers/adaParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('AdaBlockParser Test Suite', () => {
   let parser: AdaBlockParser;
@@ -16,6 +10,26 @@ suite('AdaBlockParser Test Suite', () => {
   setup(() => {
     parser = new AdaBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'X : Integer := 0;',
+    tokenSource: 'if Condition then\nend if;',
+    expectedTokenValues: ['if', 'then', 'end if'],
+    excludedSource: '-- comment\n"string"',
+    expectedRegionCount: 2,
+    twoLineSource: 'if Condition then\nend if;',
+    nestedPositionSource: 'procedure Test is\nbegin\nend Test;',
+    nestedKeyword: 'procedure',
+    nestedLine: 0,
+    nestedColumn: 0,
+    singleLineCommentSource: '-- if then end if loop\nif Condition then\nend if;',
+    commentBlockOpen: 'if',
+    commentBlockClose: 'end if',
+    doubleQuotedStringSource: 'Put("if then end if loop");\nif Condition then\nend if;',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end if'
+  };
 
   suite('Simple blocks', () => {
     test('should parse if block', () => {
@@ -233,13 +247,7 @@ end if;`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in comments', () => {
-      const source = `-- if then end if loop
-if Condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
+    generateExcludedRegionTests(config);
 
     test('should handle comment at end of line', () => {
       const source = `if Condition then -- end if here
@@ -251,14 +259,6 @@ end if;`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in strings', () => {
-      const source = `Put("if then end if loop");
-if Condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-
     test('should handle escaped quotes in strings', () => {
       const source = `Put("say ""if""");
 if Condition then
@@ -305,15 +305,7 @@ End If;`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      const pairs = parser.parse('');
-      assertNoBlocks(pairs);
-    });
-
-    test('should handle source with no blocks', () => {
-      const pairs = parser.parse('X : Integer := 0;');
-      assertNoBlocks(pairs);
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle multiple procedures', () => {
       const source = `procedure A is
@@ -488,42 +480,7 @@ end Read;`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `if Condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 1, 0);
-    });
-
-    test('should have correct positions for nested blocks', () => {
-      const source = `procedure Test is
-begin
-end Test;`;
-      const pairs = parser.parse(source);
-      const procPair = findBlock(pairs, 'procedure');
-      assertTokenPosition(procPair.openKeyword, 0, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if Condition then
-end if;`;
-      const tokens = parser.getTokens(source);
-      assert.ok(tokens.some((t) => t.value === 'if'));
-      assert.ok(tokens.some((t) => t.value === 'then'));
-      assert.ok(tokens.some((t) => t.value === 'end if'));
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `-- comment
-"string"`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Procedure/function declarations without body', () => {
     test('should not treat procedure declaration as block', () => {

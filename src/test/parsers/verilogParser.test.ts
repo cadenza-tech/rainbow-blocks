@@ -1,15 +1,8 @@
 import * as assert from 'node:assert';
 import { VerilogBlockParser } from '../../parsers/verilogParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  assertTokens,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('VerilogBlockParser Test Suite', () => {
   let parser: VerilogBlockParser;
@@ -17,6 +10,28 @@ suite('VerilogBlockParser Test Suite', () => {
   setup(() => {
     parser = new VerilogBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'wire a, b, c;',
+    tokenSource: 'module test;\nendmodule',
+    expectedTokenValues: ['module', 'endmodule'],
+    excludedSource: '// comment\n"string"',
+    expectedRegionCount: 2,
+    twoLineSource: 'module test;\nendmodule',
+    nestedPositionSource: 'module test;\n  begin\n    a = 1;\n  end\nendmodule',
+    nestedKeyword: 'begin',
+    nestedLine: 1,
+    nestedColumn: 2,
+    singleLineCommentSource: '// module begin end endmodule\nmodule test;\nendmodule',
+    commentBlockOpen: 'module',
+    commentBlockClose: 'endmodule',
+    doubleQuotedStringSource: 'module test;\n  initial $display("begin end module endmodule");\nendmodule',
+    stringBlockOpen: 'module',
+    stringBlockClose: 'endmodule'
+  };
+
+  generateCommonTests(config);
 
   suite('Simple blocks', () => {
     test('should parse module-endmodule block', () => {
@@ -243,13 +258,7 @@ endmodule`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `// module begin end endmodule
-module test;
-endmodule`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'module', 'endmodule');
-    });
+    generateExcludedRegionTests(config);
 
     test('should ignore keywords in block comments', () => {
       const source = `/*
@@ -284,15 +293,6 @@ endmodule`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in strings', () => {
-      const source = `module test;
-  initial $display("begin end module endmodule");
-endmodule`;
-      const pairs = parser.parse(source);
-      // Only module-endmodule pair; initial has no matching end
-      assertSingleBlock(pairs, 'module', 'endmodule');
-    });
-
     test('should handle escaped quotes in strings', () => {
       const source = `module test;
   initial $display("say \\"begin\\"");
@@ -322,15 +322,7 @@ endmodule`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      const pairs = parser.parse('');
-      assertNoBlocks(pairs);
-    });
-
-    test('should handle source with no blocks', () => {
-      const pairs = parser.parse('wire a, b, c;');
-      assertNoBlocks(pairs);
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle multiple modules', () => {
       const source = `module a;
@@ -416,52 +408,6 @@ module test;
 endmodule`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
-    });
-  });
-
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `module test;
-endmodule`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 1, 0);
-    });
-
-    test('should have correct positions for nested blocks', () => {
-      const source = `module test;
-  begin
-    a = 1;
-  end
-endmodule`;
-      const pairs = parser.parse(source);
-      const beginPair = findBlock(pairs, 'begin');
-      const modulePair = findBlock(pairs, 'module');
-      assertTokenPosition(beginPair.openKeyword, 1, 2);
-      assertTokenPosition(modulePair.openKeyword, 0, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `module test;
-endmodule`;
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [{ value: 'module' }, { value: 'endmodule' }]);
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `// comment
-"string"`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-    });
-
-    test('getExcludedRegions should return block comment', () => {
-      const source = `/* block
-comment */`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 1);
     });
   });
 
@@ -855,6 +801,15 @@ endmodule`;
       const source = 'module test;\r  initial $display("begin");\rendmodule';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Test helper methods - language-specific', () => {
+    test('getExcludedRegions should return block comment', () => {
+      const source = `/* block
+comment */`;
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
     });
   });
 

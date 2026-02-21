@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { LuaBlockParser } from '../../parsers/luaParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  assertTokens,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('LuaBlockParser Test Suite', () => {
   let parser: LuaBlockParser;
@@ -16,6 +10,22 @@ suite('LuaBlockParser Test Suite', () => {
   setup(() => {
     parser = new LuaBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: "print('hello world')",
+    tokenSource: 'if true then\nend',
+    expectedTokenValues: ['if', 'then', 'end'],
+    excludedSource: '-- comment\n"string"\n[[long string]]',
+    expectedRegionCount: 3,
+    twoLineSource: 'if true then\nend',
+    singleLineCommentSource: '-- if then end function\nif true then\nend',
+    commentBlockOpen: 'if',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'x = "if then end while"\nif true then\nend',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end'
+  };
 
   suite('Simple blocks', () => {
     test('should parse if-then-end block', () => {
@@ -193,13 +203,7 @@ end`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `-- if then end function
-if true then
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
+    generateExcludedRegionTests(config);
 
     test('should ignore keywords in multi-line comments', () => {
       const source = `--[[
@@ -236,14 +240,6 @@ end`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `x = "if then end while"
-if true then
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
     test('should ignore keywords in single-quoted strings', () => {
       const source = `x = 'if then end while'
 if true then
@@ -308,15 +304,7 @@ end`;
 
   suite('Edge cases', () => {
     suite('General', () => {
-      test('should handle empty source', () => {
-        const pairs = parser.parse('');
-        assertNoBlocks(pairs);
-      });
-
-      test('should handle source with no blocks', () => {
-        const pairs = parser.parse("print('hello world')");
-        assertNoBlocks(pairs);
-      });
+      generateEdgeCaseTests(config);
 
       test('should handle complex real-world Lua code', () => {
         const source = `local function process(items)
@@ -502,33 +490,7 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `if true then
-  action()
-end`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if true then
-end`;
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [{ value: 'if' }, { value: 'then' }, { value: 'end' }]);
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `-- comment
-"string"
-[[long string]]`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 3);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Coverage: isDoPartOfLoop edge cases', () => {
     test('should handle do keyword inside string between loop and real do', () => {

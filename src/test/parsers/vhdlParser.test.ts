@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { VhdlBlockParser } from '../../parsers/vhdlParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('VhdlBlockParser Test Suite', () => {
   let parser: VhdlBlockParser;
@@ -16,6 +10,26 @@ suite('VhdlBlockParser Test Suite', () => {
   setup(() => {
     parser = new VhdlBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'signal a : std_logic;',
+    tokenSource: 'if condition then\nend if;',
+    expectedTokenValues: ['if', 'then', 'end if'],
+    excludedSource: '-- comment\n"string"',
+    expectedRegionCount: 2,
+    twoLineSource: 'if condition then\nend if;',
+    nestedPositionSource: 'entity test is\n  -- body\nend entity;',
+    nestedKeyword: 'entity',
+    nestedLine: 0,
+    nestedColumn: 0,
+    singleLineCommentSource: '-- if then end if entity\nif condition then\nend if;',
+    commentBlockOpen: 'if',
+    commentBlockClose: 'end if',
+    doubleQuotedStringSource: 'signal msg : string := "if then end if";\nif condition then\nend if;',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end if'
+  };
 
   suite('Simple blocks', () => {
     test('should parse entity block', () => {
@@ -218,13 +232,7 @@ end if;`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `-- if then end if entity
-if condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
+    generateExcludedRegionTests(config);
 
     test('should ignore keywords in block comments (VHDL-2008)', () => {
       const source = `/*
@@ -247,14 +255,6 @@ end if;`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in strings', () => {
-      const source = `signal msg : string := "if then end if";
-if condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-
     test('should handle escaped quotes in strings', () => {
       const source = `signal msg : string := "say ""if""";
 if condition then
@@ -317,15 +317,7 @@ End Entity;`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      const pairs = parser.parse('');
-      assertNoBlocks(pairs);
-    });
-
-    test('should handle source with no blocks', () => {
-      const pairs = parser.parse('signal a : std_logic;');
-      assertNoBlocks(pairs);
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle multiple entities', () => {
       const source = `entity a is
@@ -548,22 +540,14 @@ end loop;`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `if condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 1, 0);
-    });
+  generateCommonTests(config);
 
-    test('should have correct positions for nested blocks', () => {
-      const source = `entity test is
-  -- body
-end entity;`;
-      const pairs = parser.parse(source);
-      const entityPair = findBlock(pairs, 'entity');
-      assertTokenPosition(entityPair.openKeyword, 0, 0);
+  suite('Test helper methods - VHDL specific', () => {
+    test('getExcludedRegions should return block comment', () => {
+      const source = `/* block
+comment */`;
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
     });
   });
 
@@ -573,31 +557,6 @@ end entity;`;
 end  entity;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'entity', 'end  entity');
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if condition then
-end if;`;
-      const tokens = parser.getTokens(source);
-      assert.ok(tokens.some((t) => t.value === 'if'));
-      assert.ok(tokens.some((t) => t.value === 'then'));
-      assert.ok(tokens.some((t) => t.value === 'end if'));
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `-- comment
-"string"`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-    });
-
-    test('getExcludedRegions should return block comment', () => {
-      const source = `/* block
-comment */`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 1);
     });
   });
 

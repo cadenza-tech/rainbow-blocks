@@ -8,6 +8,8 @@ import {
   assertTokenPosition,
   findBlock
 } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('ErlangBlockParser Test Suite', () => {
   let parser: ErlangBlockParser;
@@ -15,6 +17,24 @@ suite('ErlangBlockParser Test Suite', () => {
   setup(() => {
     parser = new ErlangBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'foo() -> ok.',
+    tokenSource: 'if true ->\n  ok\nend',
+    expectedTokenValues: ['if', 'end'],
+    excludedSource: '% comment\n"string"',
+    expectedRegionCount: 2,
+    twoLineSource: 'begin\nend',
+    singleLineCommentSource: 'begin\n  % if end\nend',
+    commentBlockOpen: 'begin',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'begin\n  "if end"\nend',
+    stringBlockOpen: 'begin',
+    stringBlockClose: 'end'
+  };
+
+  generateCommonTests(config);
 
   suite('Simple blocks', () => {
     test('should parse simple begin-end block', () => {
@@ -209,23 +229,7 @@ end`;
   });
 
   suite('Excluded regions', () => {
-    test('should skip keywords in single-line comments', () => {
-      const source = `begin
-  % if case receive try fun end
-  X = 1
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
-    });
-
-    test('should skip keywords in double-quoted strings', () => {
-      const source = `begin
-  S = "if case receive try fun begin end",
-  ok
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
-    });
+    generateExcludedRegionTests(config);
 
     test('should skip keywords in single-quoted atoms', () => {
       const source = `begin
@@ -391,13 +395,7 @@ end`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      assertNoBlocks(parser.parse(''));
-    });
-
-    test('should handle source with no blocks', () => {
-      assertNoBlocks(parser.parse('foo() -> ok.'));
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle unmatched begin', () => {
       assertNoBlocks(parser.parse('begin X = 1'));
@@ -485,31 +483,6 @@ end`;
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'fun', 'end');
-    });
-  });
-
-  suite('Token positions', () => {
-    test('should report correct line and column for single line', () => {
-      const source = 'begin X end';
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 0, 8);
-    });
-
-    test('should report correct positions for multi-line', () => {
-      const source = `begin
-  X = 1
-end`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
-    });
-
-    test('should report correct column with leading spaces', () => {
-      const source = '  begin X end';
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 2);
-      assertTokenPosition(pairs[0].closeKeyword, 0, 10);
     });
   });
 
@@ -1018,6 +991,22 @@ end`;
       const crSource = source.replace(/\n/g, '\r');
       const pairs = parser.parse(crSource);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Token positions - language-specific', () => {
+    test('should report correct line and column for single line', () => {
+      const source = 'begin X end';
+      const pairs = parser.parse(source);
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+      assertTokenPosition(pairs[0].closeKeyword, 0, 8);
+    });
+
+    test('should report correct column with leading spaces', () => {
+      const source = '  begin X end';
+      const pairs = parser.parse(source);
+      assertTokenPosition(pairs[0].openKeyword, 0, 2);
+      assertTokenPosition(pairs[0].closeKeyword, 0, 10);
     });
   });
 

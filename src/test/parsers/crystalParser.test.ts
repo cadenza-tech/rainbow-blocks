@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { CrystalBlockParser } from '../../parsers/crystalParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('CrystalBlockParser Test Suite', () => {
   let parser: CrystalBlockParser;
@@ -16,6 +10,22 @@ suite('CrystalBlockParser Test Suite', () => {
   setup(() => {
     parser = new CrystalBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: "puts 'hello world'",
+    tokenSource: 'if true\nend',
+    expectedTokenValues: ['if', 'end'],
+    excludedSource: '# comment\n"string"\n{% template %}',
+    expectedRegionCount: 3,
+    twoLineSource: 'if true\nend',
+    singleLineCommentSource: '# if condition do end\ndef real_method\nend',
+    commentBlockOpen: 'def',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'x = "if end while"\nif true\nend',
+    stringBlockOpen: 'if',
+    stringBlockClose: 'end'
+  };
 
   suite('Simple blocks', () => {
     test('should parse simple do-end block', () => {
@@ -198,24 +208,10 @@ end`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `# if condition do end
-def real_method
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
+    generateExcludedRegionTests(config);
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `x = "if end while"
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
     test('should ignore keywords in single-quoted char literals', () => {
       const source = `ch = 'e'
 if true
@@ -639,15 +635,7 @@ end`;
 
   suite('Edge cases', () => {
     suite('General', () => {
-      test('should handle empty source', () => {
-        const pairs = parser.parse('');
-        assertNoBlocks(pairs);
-      });
-
-      test('should handle source with no blocks', () => {
-        const pairs = parser.parse("puts 'hello world'");
-        assertNoBlocks(pairs);
-      });
+      generateEdgeCaseTests(config);
 
       test('should handle for-end block', () => {
         const source = `for i in 1..10
@@ -1377,35 +1365,7 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `if true
-  do_something
-end`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `if true
-end`;
-      const tokens = parser.getTokens(source);
-      assert.strictEqual(tokens.length, 2);
-      assert.strictEqual(tokens[0].value, 'if');
-      assert.strictEqual(tokens[1].value, 'end');
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `# comment
-"string"
-{% template %}`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 3);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Regex after keyword', () => {
     test('should treat / after if keyword as regex start', () => {

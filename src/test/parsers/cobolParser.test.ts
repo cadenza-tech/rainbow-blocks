@@ -1,15 +1,8 @@
 import * as assert from 'node:assert';
 import { CobolBlockParser } from '../../parsers/cobolParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokenPosition,
-  assertTokens,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('CobolBlockParser Test Suite', () => {
   let parser: CobolBlockParser;
@@ -17,6 +10,28 @@ suite('CobolBlockParser Test Suite', () => {
   setup(() => {
     parser = new CobolBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'MOVE A TO B',
+    tokenSource: 'IF CONDITION\nELSE\nEND-IF',
+    expectedTokenValues: ['IF', 'ELSE', 'END-IF'],
+    excludedSource: "*> comment\n'string'",
+    expectedRegionCount: 2,
+    twoLineSource: 'IF CONDITION\nEND-IF',
+    nestedPositionSource: 'PERFORM\n  IF CONDITION\n  END-IF\nEND-PERFORM',
+    nestedKeyword: 'IF',
+    nestedLine: 1,
+    nestedColumn: 2,
+    singleLineCommentSource: 'IF CONDITION\n  *> IF PERFORM END-IF\nEND-IF',
+    commentBlockOpen: 'IF',
+    commentBlockClose: 'END-IF',
+    doubleQuotedStringSource: 'IF CONDITION\n  "IF PERFORM END-IF"\nEND-IF',
+    stringBlockOpen: 'IF',
+    stringBlockClose: 'END-IF'
+  };
+
+  generateCommonTests(config);
 
   suite('Simple blocks', () => {
     test('should parse PERFORM block', () => {
@@ -227,13 +242,7 @@ END-IF`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in inline comments', () => {
-      const source = `*> IF PERFORM END-IF END-PERFORM
-IF CONDITION
-END-IF`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
-    });
+    generateExcludedRegionTests(config);
 
     test('should handle comment at end of line', () => {
       const source = `IF CONDITION *> END-IF here
@@ -247,14 +256,6 @@ END-IF`;
   suite('Excluded regions - Strings', () => {
     test('should ignore keywords in single-quoted strings', () => {
       const source = `MOVE 'IF PERFORM END-IF END-PERFORM' TO A
-IF CONDITION
-END-IF`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
-    });
-
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `MOVE "IF PERFORM END-IF END-PERFORM" TO A
 IF CONDITION
 END-IF`;
       const pairs = parser.parse(source);
@@ -289,15 +290,7 @@ End-If`;
   });
 
   suite('Edge cases', () => {
-    test('should handle empty source', () => {
-      const pairs = parser.parse('');
-      assertNoBlocks(pairs);
-    });
-
-    test('should handle source with no blocks', () => {
-      const pairs = parser.parse('MOVE A TO B');
-      assertNoBlocks(pairs);
-    });
+    generateEdgeCaseTests(config);
 
     test('should handle multiple PERFORM blocks', () => {
       const source = `PERFORM
@@ -388,45 +381,6 @@ MOVE END-PERFORM-FLAG TO STATUS`;
 END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
-    });
-  });
-
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `IF CONDITION
-END-IF`;
-      const pairs = parser.parse(source);
-      assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      assertTokenPosition(pairs[0].closeKeyword, 1, 0);
-    });
-
-    test('should have correct positions for nested blocks', () => {
-      const source = `PERFORM
-  IF CONDITION
-  END-IF
-END-PERFORM`;
-      const pairs = parser.parse(source);
-      const ifPair = findBlock(pairs, 'IF');
-      const performPair = findBlock(pairs, 'PERFORM');
-      assertTokenPosition(ifPair.openKeyword, 1, 2);
-      assertTokenPosition(performPair.openKeyword, 0, 0);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = `IF CONDITION
-ELSE
-END-IF`;
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [{ value: 'IF' }, { value: 'ELSE' }, { value: 'END-IF' }]);
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = `*> comment
-'string'`;
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
     });
   });
 

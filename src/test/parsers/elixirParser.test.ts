@@ -1,14 +1,8 @@
 import * as assert from 'node:assert';
 import { ElixirBlockParser } from '../../parsers/elixirParser';
-import {
-  assertBlockCount,
-  assertIntermediates,
-  assertNestLevel,
-  assertNoBlocks,
-  assertSingleBlock,
-  assertTokens,
-  findBlock
-} from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
 
 suite('ElixirBlockParser Test Suite', () => {
   let parser: ElixirBlockParser;
@@ -16,6 +10,22 @@ suite('ElixirBlockParser Test Suite', () => {
   setup(() => {
     parser = new ElixirBlockParser();
   });
+
+  const config: CommonTestConfig = {
+    getParser: () => parser,
+    noBlockSource: 'IO.puts("hello")',
+    tokenSource: 'def foo do\nend',
+    expectedTokenValues: ['def', 'end'],
+    excludedSource: '"string" # comment\ndef foo do\nend',
+    expectedRegionCount: 2,
+    twoLineSource: 'def foo do\nend',
+    singleLineCommentSource: '# if end def\ndef foo do\nend',
+    commentBlockOpen: 'def',
+    commentBlockClose: 'end',
+    doubleQuotedStringSource: 'x = "if end def"\ndef foo do\nend',
+    stringBlockOpen: 'def',
+    stringBlockClose: 'end'
+  };
 
   suite('Simple blocks', () => {
     test('should parse def-do-end block', () => {
@@ -357,24 +367,10 @@ end`;
   });
 
   suite('Excluded regions - Comments', () => {
-    test('should ignore keywords in single-line comments', () => {
-      const source = `# if end def
-def foo do
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
+    generateExcludedRegionTests(config);
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in double-quoted strings', () => {
-      const source = `x = "if end def"
-def foo do
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
     test('should ignore keywords in single-quoted charlists', () => {
       const source = `x = 'if end def'
 def foo do
@@ -646,15 +642,7 @@ end`;
 
   suite('Edge cases', () => {
     suite('General', () => {
-      test('should handle empty source', () => {
-        const pairs = parser.parse('');
-        assertNoBlocks(pairs);
-      });
-
-      test('should handle source with no blocks', () => {
-        const pairs = parser.parse('IO.puts("hello")');
-        assertNoBlocks(pairs);
-      });
+      generateEdgeCaseTests(config);
 
       test('should handle multiple fn blocks', () => {
         const source = `list
@@ -1059,39 +1047,7 @@ end`;
     });
   });
 
-  suite('Token positions', () => {
-    test('should have correct line and column for tokens', () => {
-      const source = `def foo do
-  if bar do
-  end
-end`;
-      const pairs = parser.parse(source);
-      const defPair = findBlock(pairs, 'def');
-      const ifPair = findBlock(pairs, 'if');
-
-      assert.strictEqual(defPair.openKeyword.line, 0);
-      assert.strictEqual(defPair.openKeyword.column, 0);
-      assert.strictEqual(ifPair.openKeyword.line, 1);
-      assert.strictEqual(ifPair.openKeyword.column, 2);
-    });
-  });
-
-  suite('Test helper methods', () => {
-    test('getTokens should return all tokens', () => {
-      const source = 'def foo do\nend';
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [{ value: 'def' }, { value: 'end' }]);
-    });
-
-    test('getExcludedRegions should return excluded regions', () => {
-      const source = '"string" # comment\ndef foo do\nend';
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 2);
-      assert.strictEqual(regions[0].start, 0);
-      assert.strictEqual(regions[0].end, 8);
-      assert.strictEqual(regions[1].start, 9);
-    });
-  });
+  generateCommonTests(config);
 
   suite('Triple-quoted string escape handling', () => {
     test('should handle backslash escape inside triple-quoted string', () => {
