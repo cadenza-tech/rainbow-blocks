@@ -5,6 +5,30 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-02-21
+
+### Fixed
+
+- Elixir: Treat `#` inside `#{}` interpolation as comment start (skip to end of line)
+- Ada: Fix CRLF line offset calculation in `loop` backward scan for `for`/`while` validation
+- VHDL: Fix CRLF line offset calculation in `loop` backward scan for `for`/`while` validation
+- Erlang: Handle surrogate pair characters in `$` character literals (e.g., `$😀`)
+
+### Tests
+
+- Improve branch coverage: Branches 98.81% → 99.15% (+13 tests)
+- Add coverage tests for Elixir `#` comment handling in interpolation and `,do:` one-liner detection
+- Add coverage tests for Ada/VHDL CRLF loop validation and type declaration with comments/blank lines
+- Add coverage tests for Erlang surrogate pair character literals
+- Add coverage tests for Fortran `isTypeSpecifier` whitespace, `isPrecedingContinuationKeyword` false path, and `isValidBlockClose` nested parens
+- Add coverage tests for Bash `isCasePattern` backward paren scan and depth tracking
+- Add coverage tests for Crystal `matchHeredoc` empty terminators and `isLoopDo` excluded region handling
+- Add coverage tests for Ruby regex-in-interpolation whitespace and unterminated nested string
+
+### Refactored
+
+- Extract shared test generators to reduce duplication across 16 parser tests
+
 ## [1.1.5] - 2026-02-18
 
 ### Fixed
@@ -293,6 +317,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.6]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.2...v1.1.3
