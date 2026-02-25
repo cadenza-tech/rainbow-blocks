@@ -96,7 +96,7 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === ')') {
         parenDepth++;
       } else if (char === '(') {
-        if (parenDepth === 0) return false;
+        if (parenDepth === 0 && bracketDepth === 0) return false;
         parenDepth--;
       }
     }

@@ -25,7 +25,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     // 'fun' in -spec/-type/-callback/-opaque declarations is a type, not a block
     const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
     const lineBefore = source.slice(lineStart, position).trimStart();
-    if (/^-\s*(spec|type|callback|opaque)\b/.test(lineBefore)) {
+    if (/^-\s*(spec|type|callback|opaque|record)\b/.test(lineBefore)) {
       return false;
     }
 
@@ -48,7 +48,7 @@ export class ErlangBlockParser extends BaseBlockParser {
       // Must search for actual attribute pattern, not just '-'
       // (to avoid matching '-' in '->' operator)
       const textBefore = source.slice(0, position);
-      const attrPattern = /-\s*(?:spec|type|callback|opaque)\b/g;
+      const attrPattern = /-\s*(?:spec|type|callback|opaque|record)\b/g;
       let lastAttr = -1;
       for (const match of textBefore.matchAll(attrPattern)) {
         // Skip matches inside excluded regions (strings, comments)

@@ -320,11 +320,21 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         case 'block_middle':
           // 'on error' outside a try block is a standalone handler (block_open)
           if (token.value === 'on error') {
-            const topOpener = stack.length > 0 ? stack[stack.length - 1].token.value : null;
-            if (topOpener !== 'try') {
+            // Search stack for 'try' (not just top), since other blocks may be nested inside try
+            let tryIndex = -1;
+            for (let si = stack.length - 1; si >= 0; si--) {
+              if (stack[si].token.value === 'try') {
+                tryIndex = si;
+                break;
+              }
+            }
+            if (tryIndex === -1) {
               stack.push({ token, intermediates: [] });
               break;
             }
+            // Add as intermediate of the found try block
+            stack[tryIndex].intermediates.push(token);
+            break;
           }
           if (stack.length > 0) {
             stack[stack.length - 1].intermediates.push(token);

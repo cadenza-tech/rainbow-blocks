@@ -805,6 +805,10 @@ export class BashBlockParser extends BaseBlockParser {
     if (s >= 1 && source[s] === 'n' && source[s - 1] === 'i' && (s < 2 || !/[a-zA-Z0-9_]/.test(source[s - 2]))) {
       return true;
     }
+    // After pipe (|) separator in case pattern alternatives (e.g., foo|for))
+    if (s >= 0 && source[s] === '|') {
+      return true;
+    }
     return false;
   }
 

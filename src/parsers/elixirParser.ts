@@ -658,6 +658,13 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
 
       if (doStart !== -1) {
+        // Verify 'do' is a standalone keyword, not a prefix (e.g., do_something)
+        const afterDo = source[doStart + 2];
+        if (afterDo !== undefined && /[a-zA-Z0-9_]/.test(afterDo)) {
+          i++;
+          continue;
+        }
+
         let j = doStart + 2;
 
         // Skip whitespace after "do"
@@ -679,6 +686,8 @@ export class ElixirBlockParser extends BaseBlockParser {
             return true;
           }
         }
+        // Bare 'do' found (not do:) - this is a block do, not a one-liner
+        return false;
       }
       i++;
     }

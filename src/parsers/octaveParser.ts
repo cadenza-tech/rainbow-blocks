@@ -215,16 +215,28 @@ export class OctaveBlockParser extends MatlabBlockParser {
       }
       if (source[i] === '%' && i + 1 < source.length && source[i + 1] === '}') {
         if (this.isAtLineStartWithWhitespace(source, i)) {
-          depth--;
-          if (depth === 0) {
-            let lineEnd = i + 2;
-            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-              lineEnd++;
+          // Verify no trailing content after %}
+          let trailingPos = i + 2;
+          let hasTrailingContent = false;
+          while (trailingPos < source.length && source[trailingPos] !== '\n' && source[trailingPos] !== '\r') {
+            if (source[trailingPos] !== ' ' && source[trailingPos] !== '\t') {
+              hasTrailingContent = true;
+              break;
             }
-            return { start: pos, end: lineEnd };
+            trailingPos++;
           }
-          i += 2;
-          continue;
+          if (!hasTrailingContent) {
+            depth--;
+            if (depth === 0) {
+              let lineEnd = i + 2;
+              while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+                lineEnd++;
+              }
+              return { start: pos, end: lineEnd };
+            }
+            i += 2;
+            continue;
+          }
         }
       }
       i++;
@@ -248,16 +260,28 @@ export class OctaveBlockParser extends MatlabBlockParser {
       }
       if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '}') {
         if (this.isAtLineStartWithWhitespace(source, i)) {
-          depth--;
-          if (depth === 0) {
-            let lineEnd = i + 2;
-            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-              lineEnd++;
+          // Verify no trailing content after #}
+          let trailingPos = i + 2;
+          let hasTrailingContent = false;
+          while (trailingPos < source.length && source[trailingPos] !== '\n' && source[trailingPos] !== '\r') {
+            if (source[trailingPos] !== ' ' && source[trailingPos] !== '\t') {
+              hasTrailingContent = true;
+              break;
             }
-            return { start: pos, end: lineEnd };
+            trailingPos++;
           }
-          i += 2;
-          continue;
+          if (!hasTrailingContent) {
+            depth--;
+            if (depth === 0) {
+              let lineEnd = i + 2;
+              while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+                lineEnd++;
+              }
+              return { start: pos, end: lineEnd };
+            }
+            i += 2;
+            continue;
+          }
         }
       }
       i++;

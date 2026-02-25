@@ -82,6 +82,10 @@ export class RubyBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
         return false;
       }
+      // Filter out :: scope resolution (e.g., Module::Class::Begin)
+      if (token.startOffset > 1 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
+        return false;
+      }
       // Filter out tokens immediately followed by colon (hash key syntax)
       if (source[token.endOffset] === ':') {
         return false;

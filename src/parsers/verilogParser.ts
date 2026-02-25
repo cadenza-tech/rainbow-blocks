@@ -230,6 +230,47 @@ export class VerilogBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip #delay: #number, #(expr), #identifier
+      if (source[i] === '#') {
+        i++;
+        while (i < source.length && /\s/.test(source[i])) i++;
+        if (i < source.length && source[i] === '(') {
+          let depth = 1;
+          i++;
+          while (i < source.length && depth > 0) {
+            if (this.isInExcludedRegion(i, excludedRegions)) {
+              i++;
+              continue;
+            }
+            if (source[i] === '(') depth++;
+            else if (source[i] === ')') depth--;
+            i++;
+          }
+        } else if (i < source.length && /[0-9]/.test(source[i])) {
+          while (i < source.length && /[0-9_.]/.test(source[i])) i++;
+          // Skip time unit (e.g., ns, ps)
+          while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
+        } else if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
+          while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+        }
+        continue;
+      }
+
+      // Skip labels: identifier followed by ':'
+      if (/[a-zA-Z_]/.test(source[i])) {
+        const labelStart = i;
+        while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+        // Skip whitespace after identifier
+        let afterIdent = i;
+        while (afterIdent < source.length && /\s/.test(source[afterIdent])) afterIdent++;
+        if (afterIdent < source.length && source[afterIdent] === ':') {
+          i = afterIdent + 1;
+          continue;
+        }
+        // Not a label, restore position and fall through to default return false
+        i = labelStart;
+      }
+
       // Any other non-whitespace, non-begin token means no begin follows
       return false;
     }

@@ -339,8 +339,17 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
         return false;
       }
+      // Filter out :: scope resolution (e.g., Module::Class::Begin)
+      if (token.startOffset > 1 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
+        return false;
+      }
       // Filter out tokens immediately followed by colon (named tuple key)
       if (source[token.endOffset] === ':') {
+        return false;
+      }
+      // Filter out keywords followed by ?, !, or = (method names like end?, begin!, do=)
+      const afterChar = source[token.endOffset];
+      if (afterChar === '?' || afterChar === '!' || afterChar === '=') {
         return false;
       }
       // Filter out postfix rescue modifier (e.g., risky rescue nil)

@@ -351,6 +351,27 @@ export class FortranBlockParser extends BaseBlockParser {
     while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
       i++;
     }
+    // Handle & continuation: end &\n  = ... (assignment across lines)
+    if (i < source.length && source[i] === '&') {
+      i++;
+      // Skip to next line
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        i++;
+      }
+      if (i < source.length && source[i] === '\r') i++;
+      if (i < source.length && source[i] === '\n') i++;
+      // Skip whitespace on next line
+      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+        i++;
+      }
+      // Skip optional & continuation marker on the next line
+      if (i < source.length && source[i] === '&') {
+        i++;
+        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+          i++;
+        }
+      }
+    }
     // end = ... (assignment) but not end == ... (comparison)
     if (i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
       return false;
@@ -523,6 +544,16 @@ export class FortranBlockParser extends BaseBlockParser {
     return -1;
   }
 
+  // Checks if position is at line start allowing leading whitespace (for # preprocessor)
+  private isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
+    if (pos === 0) return true;
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    return i < 0 || source[i] === '\n' || source[i] === '\r';
+  }
+
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
     let i = 0;
@@ -545,7 +576,7 @@ export class FortranBlockParser extends BaseBlockParser {
     const char = source[pos];
 
     // C preprocessor directive: # at line start (after optional whitespace)
-    if (char === '#' && this.isAtLineStart(source, pos)) {
+    if (char === '#' && this.isAtLineStartAllowingWhitespace(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -774,48 +805,61 @@ export class FortranBlockParser extends BaseBlockParser {
   // Checks if the previous continuation line ends with the given keyword
   // e.g. for `select &\n  type`, checks if 'select' precedes via &
   private isPrecedingContinuationKeyword(source: string, position: number, keyword: string): boolean {
-    const lineStart = this.findLineStart(source, position);
-    if (lineStart === 0) return false;
+    const currentLineStart = this.findLineStart(source, position);
+    if (currentLineStart === 0) return false;
 
     // Current line before position must be just whitespace/continuation &
-    const currentLineBefore = source.slice(lineStart, position).trimStart();
+    const currentLineBefore = source.slice(currentLineStart, position).trimStart();
     if (currentLineBefore !== '' && currentLineBefore !== '&') {
       return false;
     }
 
-    // Get previous line: lineStart - 1 is the line break char (\n or \r)
-    // If it's \n preceded by \r (CRLF), step back one more
-    let prevLineEnd = lineStart - 1;
+    // Scan backward, skipping comment-only lines
+    let prevLineEnd = currentLineStart - 1;
     if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
       prevLineEnd--;
     }
-    const prevLineStart = this.findLineStart(source, prevLineEnd);
-    let prevLine = source.slice(prevLineStart, prevLineEnd);
-    if (prevLine.endsWith('\r')) {
-      prevLine = prevLine.slice(0, -1);
+
+    while (prevLineEnd >= 0) {
+      const prevLineStart = this.findLineStart(source, prevLineEnd);
+      let prevLine = source.slice(prevLineStart, prevLineEnd);
+      if (prevLine.endsWith('\r')) {
+        prevLine = prevLine.slice(0, -1);
+      }
+      prevLine = prevLine.trimEnd();
+
+      // Strip inline comment
+      const commentIdx = this.findInlineCommentIndex(prevLine);
+      if (commentIdx >= 0) {
+        prevLine = prevLine.slice(0, commentIdx).trimEnd();
+      }
+
+      // Skip comment-only lines (empty after stripping comment)
+      if (prevLine.length === 0) {
+        prevLineEnd = prevLineStart - 1;
+        if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+          prevLineEnd--;
+        }
+        continue;
+      }
+
+      // Must end with &
+      if (!prevLine.endsWith('&')) return false;
+
+      // Check if the content before & ends with the keyword
+      const beforeAmp = prevLine.slice(0, -1).trimEnd().toLowerCase();
+      if (!beforeAmp.endsWith(keyword)) return false;
+
+      // Ensure it's a whole word
+      const keywordStart = beforeAmp.length - keyword.length;
+      if (keywordStart > 0 && /[a-zA-Z0-9_]/.test(beforeAmp[keywordStart - 1])) {
+        return false;
+      }
+
+      return true;
     }
-    prevLine = prevLine.trimEnd();
 
-    // Strip inline comment
-    const commentIdx = this.findInlineCommentIndex(prevLine);
-    if (commentIdx >= 0) {
-      prevLine = prevLine.slice(0, commentIdx).trimEnd();
-    }
-
-    // Must end with &
-    if (!prevLine.endsWith('&')) return false;
-
-    // Check if the content before & ends with the keyword
-    const beforeAmp = prevLine.slice(0, -1).trimEnd().toLowerCase();
-    if (!beforeAmp.endsWith(keyword)) return false;
-
-    // Ensure it's a whole word
-    const keywordStart = beforeAmp.length - keyword.length;
-    if (keywordStart > 0 && /[a-zA-Z0-9_]/.test(beforeAmp[keywordStart - 1])) {
-      return false;
-    }
-
-    return true;
+    return false;
   }
 
   // Returns the token type for a keyword (case-insensitive)

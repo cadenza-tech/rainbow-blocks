@@ -53,8 +53,8 @@ export class PascalBlockParser extends BaseBlockParser {
       // Handle nested parentheses like class(TBase(TParam))
       if (/^\s*\(/.test(afterClass)) {
         let j = position + keyword.length;
-        // Skip leading whitespace to find '('
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+        // Skip leading whitespace (including newlines) to find '('
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
           j++;
         }
         if (j < source.length && source[j] === '(') {
