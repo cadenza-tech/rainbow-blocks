@@ -5,6 +5,34 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-02-26
+
+### Fixed
+
+- Ada: Skip Ada `--` comments when scanning past whitespace after `is` keyword (multi-line `is abstract/separate` with comments)
+- Ada: Fix `type`/`subtype is` detection to only skip when no `;` exists between keyword and `is` (allows `is` in subsequent declarations on same type block)
+- AppleScript: `on error` now searches the entire stack for an enclosing `try` (not just the top), handling nested blocks inside `try`
+- Bash: Treat `|` separator in case pattern alternatives as a command position
+- Crystal: Filter out `::` scope resolution as block keyword (e.g., `Module::Begin`)
+- Crystal: Filter out keywords followed by `?`, `!`, or `=` suffix (method names like `end?`, `begin!`)
+- Elixir: Verify `do` is a standalone keyword (not a prefix like `do_something`) in `isDoColonOneLiner`
+- Erlang: Suppress `fun` block detection inside `-record` attribute declarations
+- Fortran: Handle `&` line continuation for assignment context (`end &\n  = ...`)
+- Fortran: Allow leading whitespace before `#` preprocessor directives (fix `isAtLineStart` check)
+- Fortran: Skip comment-only continuation lines in `isPrecedingContinuationKeyword`
+- Julia: Fix `isInsideBrackets` to not reject `end` inside `()` when already inside `[]`
+- MATLAB: Require no trailing content after `%}` to close a block comment (per MATLAB spec)
+- Octave: Require no trailing content after `%}` or `#}` to close a block comment (per Octave spec)
+- Pascal: Skip newlines (in addition to spaces/tabs) when scanning for `(` after `class` keyword
+- Ruby: Filter out `::` scope resolution as block keyword (e.g., `Module::Begin`)
+- Verilog: Skip `#delay` expressions in `isFollowedByBegin` (e.g., `always #5 begin`)
+- Verilog: Skip labels in `isFollowedByBegin` (e.g., `label: begin`)
+
+### Tests
+
+- Update MATLAB/Octave `%}`/`#}` trailing-content tests to `assertNoBlocks` (aligned with spec)
+- Update Verilog labeled `begin` test: expect 3 blocks (module + always + labeled begin)
+
 ## [1.1.6] - 2026-02-21
 
 ### Fixed
@@ -317,6 +345,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.7]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.3...v1.1.4
