@@ -440,14 +440,14 @@ end`;
     });
 
     test('should handle %{ block comment with content after %}', () => {
-      // Tests lines 165-167 in matchMatlabBlockComment
+      // %} with trailing content does not close the block comment per MATLAB spec
       const source = `%{
 comment
 %} ignored content
 if true
 end`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      assertNoBlocks(pairs);
     });
 
     test('should handle unterminated %{ block comment', () => {
@@ -461,14 +461,14 @@ end`;
     });
 
     test('should handle #{ block comment with content after #}', () => {
-      // Tests lines 185-187 in matchOctaveBlockComment
+      // #} with trailing content does not close the block comment per Octave spec
       const source = `#{
 comment
 #} ignored content
 if true
 end`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      assertNoBlocks(pairs);
     });
 
     test('should handle unmatched Octave-specific end keyword', () => {

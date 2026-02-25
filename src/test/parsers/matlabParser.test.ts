@@ -414,14 +414,14 @@ end`;
     });
 
     test('should handle %{ block comment with content after %}', () => {
-      // Tests lines 70-72: block comment with extra content on closing line
+      // %} with trailing content does not close the block comment per MATLAB spec
       const source = `%{
 comment
 %} ignored content
 if true
 end`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      assertNoBlocks(pairs);
     });
 
     test('should handle unterminated block comment', () => {

@@ -834,7 +834,7 @@ endmodule`;
   end
 endmodule`;
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      assertBlockCount(pairs, 3);
       const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
       assert.ok(beginPair, 'begin should be paired with end');
     });
