@@ -1103,4 +1103,127 @@ end case;`;
       assertNoBlocks(pairs);
     });
   });
+
+  // Fix: when keywords inside case-generate constructs
+  suite('Case-generate when intermediates', () => {
+    test('should attach when as intermediate in case-generate', () => {
+      const source =
+        "case_gen: case SOME_GENERIC generate\n  when \"00\" =>\n    sig1 <= '1';\n  when others =>\n    sig1 <= '0';\nend generate case_gen;";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const caseBlock = findBlock(pairs, 'case');
+      assertIntermediates(caseBlock, ['when', 'when']);
+    });
+
+    test('should still attach when as intermediate in plain case', () => {
+      const source = "case sel is\n  when \"00\" =>\n    sig1 <= '1';\n  when others =>\n    sig1 <= '0';\nend case;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      assertIntermediates(pairs[0], ['is', 'when', 'when']);
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 13: use configuration should not create false block opener', () => {
+      const source = `configuration cfg of test is
+  for all : counter
+    use configuration work.counter_cfg;
+  end for;
+end configuration;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('Bug 19: extended identifiers should be treated as excluded regions', () => {
+      const source = `signal \\entity\\ : std_logic;
+entity test is
+end entity;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+
+    test('Bug 20: else should not be filtered as signal assignment with missing semicolon', () => {
+      const source = `if cond then
+  sig <= val
+else
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('Bug 21: library path keywords should not be falsely detected', () => {
+      const source = `use entity work.process;
+process
+begin
+  null;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  suite('Coverage: extended identifier edge cases', () => {
+    test('should handle unterminated extended identifier at EOF', () => {
+      // Line 95 / Lines 316-317: return { start: pos, end: source.length }
+      const source = 'signal \\myident';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 7);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should handle unterminated extended identifier without closing backslash', () => {
+      const source = 'signal \\myident\nif condition then\nend if;';
+      const regions = parser.getExcludedRegions(source);
+      // Extended identifier cannot span lines, so it ends at newline
+      assert.ok(regions.length >= 1);
+      const extIdRegion = regions.find((r) => r.start === 7);
+      assert.ok(extIdRegion);
+      // Should end at newline (line 311-312)
+      assert.ok(extIdRegion.end <= source.indexOf('\n') + 1);
+    });
+
+    test('should handle doubled backslash inside extended identifier', () => {
+      // Lines 304-307: source[i + 1] === '\\' -> i += 2
+      const source = 'signal \\my\\\\id\\ : std_logic;\nif condition then\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should exclude extended identifier containing keywords', () => {
+      const source = 'signal \\entity\\ : std_logic;\nentity test is\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+
+    test('should handle extended identifier with only doubled backslash content', () => {
+      const source = 'signal \\\\\\\\\\ : std_logic;\nif a then\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Dot-prefixed loop validation', () => {
+    test('should not treat record.loop as block start', () => {
+      const source = 'record.loop';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat record . loop (with spaces) as block start', () => {
+      const source = 'record . loop';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still recognize standalone loop ... end loop', () => {
+      const source = `loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+  });
 });

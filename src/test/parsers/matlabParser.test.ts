@@ -857,4 +857,70 @@ end`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  suite('Coverage: isKeywordUsedAsFunctionCall at file start', () => {
+    test('should not treat properties(obj) at file start as function call', () => {
+      // Line 70: beforePos < 0 (keyword at very start of file)
+      const source = 'properties(Access = public)\n  Value\nend';
+      const pairs = parser.parse(source);
+      // At file start, properties with ( is ambiguous but treated as block keyword
+      assertSingleBlock(pairs, 'properties', 'end');
+    });
+
+    test('should not treat methods(obj) at very start of file as function call', () => {
+      const source = 'methods\n  function f()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Coverage: classdef section keyword inside parens', () => {
+    test('should not treat properties inside parentheses as block open', () => {
+      // isInsideParensOrBrackets returns true for classdef section keyword
+      const source = `function f
+  x = foo(properties);
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat events inside brackets as block open', () => {
+      const source = `function f
+  x = [events];
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test("Bug 15: double transpose A'' should not create false string", () => {
+      const source = `function f
+  x = A''; if true, end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('Bug 16: classdef section keyword used in switch should not create block', () => {
+      const source = `function f
+  switch methods
+    case 1
+      x = 1;
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const switchPair = pairs.find((p) => p.openKeyword.value === 'switch');
+      assert.ok(switchPair);
+    });
+
+    test('Bug 16: classdef section keyword after other tokens on line should not create block', () => {
+      const source = `function f
+  disp(methods)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
 });

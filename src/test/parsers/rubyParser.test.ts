@@ -1075,12 +1075,13 @@ end`;
         assertBlockCount(pairs, 1);
       });
 
-      test('should handle unterminated regex (newline before closing)', () => {
+      test('should handle multiline regex (Ruby allows multiline regex between bare / delimiters)', () => {
         const source = `/unterminated regex
 def foo
 end`;
         const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'def', 'end');
+        // Multiline regex consumes everything until closing / or EOF
+        assertNoBlocks(pairs);
       });
 
       test('should handle regex at end of file without terminator', () => {
@@ -1576,10 +1577,11 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
-    test('should handle unterminated regex with CR-only ending', () => {
+    test('should handle multiline regex with CR-only ending', () => {
       const source = 'x = /unterminated\rif true\r  action\rend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      // Multiline regex consumes everything until closing / or EOF
+      assertNoBlocks(pairs);
     });
 
     test('should handle heredoc with CR-only endings', () => {
@@ -1727,6 +1729,87 @@ end`;
       const source = '%s(#{x})\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: scope resolution filter', () => {
+    test('should filter out begin preceded by :: scope resolution', () => {
+      // Lines 85-87: source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':'
+      // Use lowercase keywords since Ruby is case-sensitive
+      const source = 'x = Foo::begin\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should filter out end preceded by :: scope resolution', () => {
+      const source = 'x = Module::end\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should filter out class preceded by :: scope resolution', () => {
+      const source = 'x = Mod::class\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: heredoc gap scanning', () => {
+    test('should scan gap for excluded regions between heredoc opener and content', () => {
+      // Lines 341-342: gap scanning when result.start > i
+      // The heredoc opener line has a comment after the heredoc start
+      const source = "x = <<~HEREDOC # comment with end\n  body text\nHEREDOC\ndef foo\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should scan gap for string between heredoc opener and content', () => {
+      const source = 'x = <<~HEREDOC, "a string"\n  body text\nHEREDOC\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: paired delimiter in percent literals', () => {
+    test('should handle %(...) paired delimiter', () => {
+      // Lines 689-690: getMatchingDelimiter returns PAIRED_DELIMITERS value
+      const source = '%(if end do)\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle %[...] paired delimiter', () => {
+      const source = '%[if end while]\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle %{...} paired delimiter', () => {
+      const source = '%{if end begin}\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle %<...> paired delimiter', () => {
+      const source = '%<if end module>\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: character literal escape sequences', () => {
+    test('should handle ?\\ with non-special escape character as character literal', () => {
+      // Line 351: escChar is not C, M, u, or x -> generic 3-char escape literal (?\X)
+      const source = '?\\n\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?\\u{...} without closing brace', () => {
+      // Line 342-343: closeIdx < 0 fallback (unterminated \\u{...})
+      const source = '?\\u{1F600\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
     });
   });
 
@@ -1932,6 +2015,115 @@ end`;
       const source = '"#{"abc';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  // Fix: postfix conditional after regex literal without flags
+  suite('Postfix conditional after regex literal', () => {
+    test('should treat if after /regex/ as postfix', () => {
+      const source = 'def foo\n  x = /hello/ if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat unless after /regex/ as postfix', () => {
+      const source = 'def foo\n  puts /pattern/ unless condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat while after /regex/ as postfix', () => {
+      const source = 'def foo\n  x = /test/ while running\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat if after regex with flags as postfix', () => {
+      const source = 'def foo\n  x = /hello/i if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat if after division operator as block open', () => {
+      const source = 'x = a / if true then 1 else 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 11: multiline regex should be treated as excluded region', () => {
+      const source = `x = /
+if true
+end
+/
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('Bug 12: heredoc after ) should be recognized', () => {
+      const source = `x = foo() <<HEREDOC
+if true
+end
+HEREDOC
+def bar
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Multibyte character literals', () => {
+    test('should handle BMP multibyte character literal', () => {
+      const source = 'x = ?\u3042\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle surrogate pair character literal', () => {
+      const source = 'x = ?\u{1F600}\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Character literal multi-char escape sequences', () => {
+    test('should handle ?\\C-x control character', () => {
+      const source = 'x = ?\\C-a\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?\\M-x meta character', () => {
+      const source = 'x = ?\\M-a\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?\\M-\\C-x meta-control character', () => {
+      const source = 'x = ?\\M-\\C-a\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?\\uXXXX unicode escape', () => {
+      const source = 'x = ?\\u0041\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?\\u{...} unicode escape', () => {
+      const source = 'x = ?\\u{1F600}\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?\\xNN hex escape', () => {
+      const source = 'x = ?\\x41\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
     });
   });
 });

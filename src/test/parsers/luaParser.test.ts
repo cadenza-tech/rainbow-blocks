@@ -708,6 +708,43 @@ end`;
     });
   });
 
+  suite('Coverage: unterminated string at EOF', () => {
+    test('should handle unterminated double-quoted string at EOF without newline', () => {
+      // matchQuotedString line 280: return { start: pos, end: i } when EOF reached
+      const source = 'x = "unterminated';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      const strRegion = regions.find((r) => r.start === 4);
+      assert.ok(strRegion);
+      assert.strictEqual(strRegion.end, source.length);
+    });
+
+    test('should handle unterminated single-quoted string at EOF without newline', () => {
+      const source = "x = 'unterminated";
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      const strRegion = regions.find((r) => r.start === 4);
+      assert.ok(strRegion);
+      assert.strictEqual(strRegion.end, source.length);
+    });
+  });
+
+  suite('Coverage: matchGotoLabel edge cases', () => {
+    test('should return null when :: is followed by nothing (EOF immediately)', () => {
+      // matchGotoLabel line 291: i >= source.length
+      const source = '::';
+      const regions = parser.getExcludedRegions(source);
+      // :: at end of file -> matchGotoLabel returns null, then : is just a character
+      assert.strictEqual(regions.length, 0);
+    });
+
+    test('should return null when :: is followed by whitespace only at EOF', () => {
+      const source = '::   ';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 0);
+    });
+  });
+
   suite('Long string edge cases', () => {
     // Covers lines 130-131: return null when not starting with '['
     test('should not treat -- followed by non-bracket as multi-line comment', () => {

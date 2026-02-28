@@ -834,4 +834,82 @@ end tell`;
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
   });
+
+  suite('Bug fixes', () => {
+    test('Bug 2: end as property name should not close enclosing block', () => {
+      const source = `tell application "Finder"
+  set end to 5
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('Bug 2: end of myList should not close enclosing block', () => {
+      const source = `tell application "Finder"
+  get end of myList
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('Bug 2: copy end to x should not close enclosing block', () => {
+      const source = `tell application "Finder"
+  copy end to x
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('Bug 18: on after block comment should be recognized', () => {
+      const source = `(* handler description *) on run
+  beep
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('Bug 18: to after block comment should be recognized', () => {
+      const source = `(* handler *) to doSomething()
+  beep
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+  });
+
+  suite('on error in non-try blocks', () => {
+    test('should treat on error as standalone handler when not directly inside try', () => {
+      const source = `try
+  repeat
+    on error
+      display dialog "error"
+    end
+  end repeat
+on error
+  display dialog "caught"
+end try`;
+      const pairs = parser.parse(source);
+      // on error inside repeat is standalone (closed by end), repeat..end repeat, try..on error..end try
+      const tryPair = pairs.find((p) => p.openKeyword.value === 'try');
+      assert.ok(tryPair);
+      // The outer on error (after end repeat) is intermediate of try (stack top is try at that point)
+      assert.strictEqual(tryPair.intermediates.length, 1);
+      assert.strictEqual(tryPair.intermediates[0].value, 'on error');
+      // The inner on error is a standalone handler
+      const handlerPair = pairs.find((p) => p.openKeyword.value === 'on error');
+      assert.ok(handlerPair);
+    });
+
+    test('should correctly pair on error as intermediate of try when directly nested', () => {
+      const source = `try
+  set x to 1
+on error
+  set x to 0
+end try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value, 'on error');
+    });
+  });
 });

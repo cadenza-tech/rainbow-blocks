@@ -2183,4 +2183,201 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
+
+  // Fix: postfix conditional after regex literal without flags
+  suite('Postfix conditional after regex literal', () => {
+    test('should treat if after /regex/ as postfix', () => {
+      const source = 'def foo\n  x = /hello/ if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat unless after /regex/ as postfix', () => {
+      const source = 'def foo\n  puts /pattern/ unless condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat if after regex with flags as postfix', () => {
+      const source = 'def foo\n  x = /hello/i if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers lines 346-348: :: scope resolution before keyword
+  suite('Coverage: scope resolution :: before keyword', () => {
+    test('should not match keyword after :: scope resolution', () => {
+      const source = 'Foo::Begin\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match do after :: scope resolution', () => {
+      const source = 'Module::Do::Something\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  // Covers lines 350-352: colon after keyword (named tuple key)
+  suite('Coverage: colon after keyword (named tuple)', () => {
+    test('should not match begin: in named tuple', () => {
+      const source = '{begin: 1, end: 2}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match do: in named tuple', () => {
+      const source = '{do: "action"}\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers lines 363-365: ? after keyword (predicate method name)
+  suite('Coverage: ? after keyword (predicate method)', () => {
+    test('should not match end? as block close', () => {
+      const source = 'def end?\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match do? as block open', () => {
+      const source = 'x = do?\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers lines 366-368: = after keyword (setter method, not at EOF)
+  suite('Coverage: = after keyword (setter method)', () => {
+    test('should not match end= as block close', () => {
+      const source = 'def end=(val)\n  @x = val\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match do= as block open', () => {
+      const source = 'x.do=(1)\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still match end followed by == (comparison)', () => {
+      const source = 'if x == end\nend';
+      const pairs = parser.parse(source);
+      // end== would not filter because source[endOffset+1] === '='
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still match end followed by =~ (regex match)', () => {
+      const source = 'if true\n  x = end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers lines 369-371: = after keyword at EOF
+  suite('Coverage: = after keyword at EOF', () => {
+    test('should not match keyword followed by = at end of source', () => {
+      const source = 'if true\nend\nx = end=';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match begin= at end of source', () => {
+      const source = 'if true\nend\nbegin=';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers lines 373-375: ! after keyword (bang method)
+  suite('Coverage: ! after keyword (bang method)', () => {
+    test('should not match do! as block open', () => {
+      const source = 'def do!\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match end! as block close', () => {
+      const source = 'def end!\n  raise\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still match end followed by != (not-equal)', () => {
+      const source = 'if x != 0\n  action\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match begin! at EOF', () => {
+      const source = 'if true\nend\nbegin!';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers lines 993-995: isLoopDo loop keyword in excluded region
+  suite('Coverage: isLoopDo loop keyword in excluded region', () => {
+    test('should skip loop keyword inside string on same line as do', () => {
+      const source = '"while" do\n  action\nend';
+      const pairs = parser.parse(source);
+      // "while" is in a string, so do is not a loop do but a block do
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should find real loop keyword after string-contained one', () => {
+      const source = '"for"; while cond do\n  action\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+  });
+
+  // Covers lines 1003-1005: isLoopDo with do in excluded region between loop and real do
+  suite('Coverage: isLoopDo do in excluded region', () => {
+    test('should skip do inside string between loop keyword and real do', () => {
+      const source = 'while "do" do\n  action\nend';
+      const pairs = parser.parse(source);
+      // "do" in string is skipped, real do at end is loop do -> isLoopDo returns true
+      // while/end is the block pair (while is blockOpen, do is rejected as loop do)
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  // Covers line 1009: inner do break in isLoopDo (non-matching do found before position)
+  suite('Coverage: isLoopDo inner do break', () => {
+    test('should treat do as block opener when earlier do exists after loop keyword', () => {
+      const source = 'while cond do; arr.each do\n  action\nend\nend';
+      const pairs = parser.parse(source);
+      // while..do creates a loop (while is blockOpen, first do is rejected as loop do)
+      // After semicolon, arr.each do is a separate block do -> valid blockOpen
+      // Results: while/end and do/end = 2 pairs
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 7: keywords after .. range operator should not be filtered', () => {
+      const source = `x = 1..if condition
+  10
+else
+  5
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('Bug 7: keywords after ... range operator should not be filtered', () => {
+      const source = `x = 1...if condition
+  10
+else
+  5
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });

@@ -655,14 +655,13 @@ end`;
 
     test('should not let generic end close do block', () => {
       // do should only be closed by until, not by generic end
+      // When do is on top of stack, generic end cannot skip past it
       const pairs = parser.parse('for i = 1:10\n  do\n    x = 1\n  end\nend');
-      // end should close for, not do; do should be orphaned
-      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
-      assert.ok(forPair, 'for block should be paired');
-      assert.strictEqual(forPair.closeKeyword.value, 'end');
-      // do should not be paired with end
+      // Both for and do remain unmatched since do blocks the stack
       const doPair = pairs.find((p) => p.openKeyword.value === 'do');
       assert.strictEqual(doPair, undefined, 'do should not be paired with generic end');
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.strictEqual(forPair, undefined, 'for should not be paired because do blocks the stack');
     });
 
     test('should correctly pair do-until inside for-end', () => {
@@ -672,6 +671,20 @@ end`;
       assert.strictEqual(doPair.closeKeyword.value, 'until');
       const forPair = findBlock(pairs, 'for');
       assert.strictEqual(forPair.closeKeyword.value, 'end');
+    });
+
+    test('should not let end close outer block past unclosed do', () => {
+      const source = 'if true\n  do\n  end\nuntil x';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should still close do-until inside function-end normally', () => {
+      const source = 'function foo()\n  do\n  until x;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'do', 1);
+      assertNestLevel(pairs, 'function', 0);
     });
   });
 
@@ -747,6 +760,169 @@ end`;
       const source = '#{\rcomment\r#}\rwhile true\rend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 10: double-quoted string backslash escape with CRLF', () => {
+      const source = '"line1\\\r\nline2"; if true\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test("Bug 15: double transpose A'' should not create false string", () => {
+      const source = `function f
+  x = A''; if true, end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('Bug 16: Octave-specific close keywords should check parenthesis context', () => {
+      const source = `function f
+  x = A(endfunction);
+endfunction`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+  });
+
+  suite('Coverage: unwind_protect_cleanup mismatched opener', () => {
+    test('should reject unwind_protect_cleanup when stack top is NOT unwind_protect', () => {
+      // Line 86: if (topOpener !== 'unwind_protect') break
+      const source = `if true
+  unwind_protect_cleanup
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'unwind_protect_cleanup should not be attached to if block');
+    });
+
+    test('should reject unwind_protect_cleanup in function block', () => {
+      const source = `function foo()
+  unwind_protect_cleanup
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should accept unwind_protect_cleanup in unwind_protect block', () => {
+      const source = `unwind_protect
+  risky();
+unwind_protect_cleanup
+  cleanup();
+end_unwind_protect`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unwind_protect', 'end_unwind_protect');
+      assertIntermediates(pairs[0], ['unwind_protect_cleanup']);
+    });
+  });
+
+  suite('Coverage: %} with trailing whitespace before newline', () => {
+    test('should close %{ block comment when %} has trailing spaces before newline', () => {
+      // Lines 242-244: lineEnd scan after %} closer with trailing whitespace
+      const source = '%{\ncomment\n%}   \nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close %{ block comment when %} has trailing tab before newline', () => {
+      const source = '%{\ncomment\n%}\t\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close %{ block comment when %} has trailing spaces at EOF', () => {
+      // Lines 242-244: lineEnd scan to EOF after trailing whitespace
+      const source = '%{\ncomment\n%}   ';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: #} with trailing whitespace before newline', () => {
+    test('should close #{ block comment when #} has trailing spaces before newline', () => {
+      // Lines 287-289: lineEnd scan after #} closer with trailing whitespace
+      const source = '#{\ncomment\n#}   \nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close #{ block comment when #} has trailing tab before newline', () => {
+      const source = '#{\ncomment\n#}\t\nfor i = 1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should close #{ block comment when #} has trailing spaces at EOF', () => {
+      // Lines 287-289: lineEnd scan to EOF after trailing whitespace
+      const source = '#{\ncomment\n#}   ';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Intermediate keyword validation', () => {
+    test('should reject catch in if block', () => {
+      const source = `if condition
+  catch
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject case in if block', () => {
+      const source = `if condition
+  case 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject elseif in switch block', () => {
+      const source = `switch x
+  elseif condition
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should accept catch in try block', () => {
+      const source = `try
+  x = 1;
+catch e
+  x = 2;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should accept else in if block', () => {
+      const source = `if condition
+  x = 1;
+else
+  x = 2;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should accept case in switch block', () => {
+      const source = `switch x
+  case 1
+    y = 1;
+  otherwise
+    y = 0;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case', 'otherwise']);
     });
   });
 });

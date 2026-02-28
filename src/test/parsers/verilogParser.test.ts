@@ -866,4 +866,205 @@ endmodule`;
       findBlock(pairs, 'begin');
     });
   });
+
+  // Fix: escaped identifiers should be excluded regions
+  suite('Escaped identifiers', () => {
+    test('should not match keywords inside escaped identifiers', () => {
+      const source = 'module test;\n  wire \\begin ;\n  wire \\end ;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not match module inside escaped identifier', () => {
+      const source = 'module test;\n  wire \\module ;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle escaped identifier with multiple keyword-like chars', () => {
+      const source = 'module test;\n  wire \\begin_end_module ;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  // Fix: (* *) attributes should be excluded regions
+  suite('SystemVerilog attributes', () => {
+    test('should not match keywords inside (* *) attributes', () => {
+      const source = '(* begin = 1, end = 0 *)\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle attribute before module declaration', () => {
+      const source = '(* synthesis *)\nmodule test;\n  (* full_case *)\n  case (sel)\n    default: out = 0;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'module');
+      findBlock(pairs, 'case');
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 4: always @ (*) with whitespace should work correctly', () => {
+      const source = `always @ (*) begin
+  x = a;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('Bug 4: SystemVerilog attribute (* *) should be excluded region', () => {
+      const source = `(* synthesis, full_case *)
+module test;
+  case (state)
+    default: x = 0;
+  endcase
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('Bug 4: @(*) without whitespace should still work', () => {
+      const source = `always @(*) begin
+  x = a;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('Bug 17: escaped identifier labels should be recognized', () => {
+      const source = `always @(posedge clk) \\my_label : begin
+  q <= d;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Edge case: @ followed by newline and (* *)', () => {
+    test('should treat @\\n(* attr *) as sensitivity list, not attribute', () => {
+      const source = 'always @\n(* attr *)\nbegin\n  q <= d;\nend';
+      const pairs = parser.parse(source);
+      // The (* attr *) should not be confused with sensitivity list
+      // @\\n should skip the newline and see (* as attribute, treating it as excluded region
+      // begin..end should still be parsed as a block
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair);
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 18: scope resolution :: should not be treated as label colon', () => {
+      const source = 'class pkg::my_class;\nbegin\n  x = 1;\nend\nendclass';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classPair = pairs.find((p) => p.openKeyword.value === 'class');
+      assert.ok(classPair);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair);
+    });
+  });
+
+  suite('Uncovered line coverage', () => {
+    // Covers line 236: skip whitespace after # in delay
+    test('should handle # with whitespace before delay value', () => {
+      const source = 'always # 10 begin\n  clk = ~clk;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    // Covers line 245: nested ( depth inside #(expr)
+    test('should handle nested parentheses in # delay expression', () => {
+      const source = 'always #(T/2 + (offset)) begin\n  clk = ~clk;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    // Covers lines 249-252: # followed by digit (number delay with time unit)
+    test('should handle #number delay with time unit', () => {
+      const source = 'always #10ns begin\n  clk = ~clk;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    test('should handle #number delay without time unit', () => {
+      const source = 'always #10 begin\n  clk = ~clk;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    // Covers lines 253-255: # followed by identifier (parameter delay)
+    test('should handle #identifier delay', () => {
+      const source = 'always #HALF_PERIOD begin\n  clk = ~clk;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    // Covers lines 262-264: double-colon :: scope resolution rejects control keyword
+    test('should reject control keyword before :: scope resolution', () => {
+      const source = 'module test;\n  initial pkg::my_task();\nendmodule';
+      const pairs = parser.parse(source);
+      // initial before :: should not be treated as block opener
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    // Covers lines 273-276: escaped identifier label
+    test('should handle escaped identifier label before begin', () => {
+      const source = 'always @(posedge clk) \\my-label : begin\n  q <= d;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    // Covers lines 283-286: regular label followed by : consumed and scanning continues
+    test('should handle regular label before begin', () => {
+      const source = 'always @(posedge clk) my_label : begin\n  q <= d;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
+    });
+
+    test('should reject control keyword followed by non-label identifier then no begin', () => {
+      // task foo; begin end endtask - foo is not a label (not followed by :), so if is invalid
+      const source = 'task foo;\n  begin\n    x = 1;\n  end\nendtask';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'task');
+      findBlock(pairs, 'begin');
+    });
+
+    // Covers lines 398-399: unterminated (* ... *) attribute
+    test('should handle unterminated (* attribute at EOF', () => {
+      const source = '(* synthesis keep\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      // The unterminated attribute should exclude everything to EOF
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle unterminated (* attribute with block keywords inside', () => {
+      const source = '(* begin = 1, end = 0';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    // Additional: # with excluded region inside #(...)
+    test('should handle excluded region inside # delay parentheses', () => {
+      const source = 'always #(/* comment */ 10) begin\n  clk = ~clk;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
 });

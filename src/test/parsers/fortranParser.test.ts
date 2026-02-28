@@ -1823,4 +1823,214 @@ end program`;
       assertSingleBlock(pairs, 'program', 'end program');
     });
   });
+
+  suite('Bug fixes', () => {
+    test('Bug 14: else should not be added as intermediate to do block', () => {
+      const source = `do i = 1, 10
+  else
+end do`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('Bug 14: elseif should not be added as intermediate to do block', () => {
+      const source = `do i = 1, 10
+  elseif
+end do`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('Bug 14: contains should only be intermediate for program/module/function/subroutine', () => {
+      const source = `do i = 1, 10
+  contains
+end do`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('Bug 14: contains should be valid intermediate for module', () => {
+      const source = `module mymod
+  integer :: x
+contains
+  subroutine sub
+  end subroutine
+end module`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Continuation line compound end', () => {
+    test('should recognize end &\\nfunction as compound end', () => {
+      const source = `function f()
+  x = 1
+end &
+function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('should recognize end &\\n  subroutine with indentation', () => {
+      const source = `subroutine sub()
+  x = 1
+end &
+  subroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should recognize end &\\n  &function with double continuation marker', () => {
+      const source = `function f()
+  x = 1
+end &
+  &function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('should still recognize normal end function', () => {
+      const source = `function f()
+  x = 1
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 9: type(name) function should not create false type block opener', () => {
+      const source = `type(integer) function foo()
+  foo = 42
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('Bug 9: type(real) pure function should not create false type block opener', () => {
+      const source = `type(real) pure function bar(x)
+  bar = x * 2.0
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('Bug 10: else  if with multiple spaces should be treated as intermediate', () => {
+      const source = `if (x > 0) then
+  y = 1
+else  if (x < 0) then
+  y = -1
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Uncovered line coverage - isValidBlockClose', () => {
+    // Covers lines 361-363: end%component is derived type component access
+    test('should not treat end%component as block close', () => {
+      const source = 'program test\n  end%field = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 368-371: end & continuation then = on next line
+    test('should not treat end with & continuation then = as block close', () => {
+      const source = 'program test\n  integer :: end\n  end &\n  = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers line 371: CRLF in end & continuation
+    test('should not treat end with & CRLF continuation then = as block close', () => {
+      const source = 'program test\r\n  integer :: end\r\n  end &\r\n  = 5\r\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 380-382: optional & on next continuation line
+    test('should not treat end with & continuation and leading & on next line as block close', () => {
+      const source = 'program test\n  integer :: end\n  end &\n  & = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    // Covers lines 386-388: end &\n%component continuation
+    test('should not treat end with & continuation then %component as block close', () => {
+      const source = 'program test\n  end &\n  %field = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Uncovered line coverage - isTypeSpecifier', () => {
+    // Covers lines 423-425: isTypeSpecifier when no ( follows type keyword
+    test('should not reject type when no paren follows (type :: definition)', () => {
+      const source = 'type :: mytype\n  integer :: field\nend type';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'type', 'end type');
+    });
+
+    // Covers line 452-453: isTypeSpecifier returns false when nothing follows closing paren
+    test('should treat type() at end of source as block opener', () => {
+      const source = 'type(mytype)';
+      const pairs = parser.parse(source);
+      // type(mytype) at EOF - isTypeSpecifier returns false, so treated as block opener
+      // but no matching end, so no pairs
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Uncovered line coverage - else if handling', () => {
+    // Fortran treats 'else if' as 'else' + rejected 'if' (isValidBlockOpen returns false)
+    // The 'elseif' keyword (no space) is directly supported as block_middle
+    test('should treat else if as intermediate else with rejected if', () => {
+      const source = `if (x > 0) then
+  y = 1
+else if (x < 0) then
+  y = -1
+else
+  y = 0
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // else if: the 'if' after 'else' is rejected by isValidBlockOpen
+      // So we get else + then + else as intermediates (no merged else if token)
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('else'), 'should have else intermediate');
+      assert.ok(intermediates.includes('then'), 'should have then intermediate');
+    });
+
+    test('should not merge else if across line boundaries', () => {
+      const source = `if (x > 0) then
+  y = 1
+else
+if (x < 0) then
+  y = -1
+end if
+end if`;
+      const pairs = parser.parse(source);
+      // else and if on different lines should NOT be merged
+      // Two separate if blocks
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Uncovered line coverage - isPrecedingContinuationKeyword CRLF', () => {
+    // Covers lines 867-869: CRLF in backward continuation scan (prevLine ends with \r)
+    test('should handle select type continuation with CRLF line endings', () => {
+      const source = 'program test\r\n  select &\r\n  type(var)\r\n  end select\r\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle else if continuation with CRLF line endings', () => {
+      const source = 'if (x > 0) then\r\n  y = 1\r\nelse &\r\n  if (x < 0) then\r\n  y = -1\r\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
 });

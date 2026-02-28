@@ -3,6 +3,7 @@ import { PascalBlockParser } from '../../parsers/pascalParser';
 import {
   assertBlockCount,
   assertIntermediates,
+  assertNestLevel,
   assertNoBlocks,
   assertSingleBlock,
   assertTokenPosition,
@@ -1207,6 +1208,116 @@ end`;
       const pairs = parser.parse(source);
       // end[0] has end as a word boundary match, so it is treated as block close
       assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  // Fix: end should not skip past unclosed repeat blocks on the stack
+  suite('end should not skip past repeat', () => {
+    test('should not let end close outer block past unclosed repeat', () => {
+      const source = 'case x of\n  repeat\n  end\nuntil y';
+      const pairs = parser.parse(source);
+      // end cannot close case because repeat is on top of stack
+      // only repeat..until should pair
+      assertSingleBlock(pairs, 'repeat', 'until');
+    });
+
+    test('should still close repeat..until inside begin..end normally', () => {
+      const source = 'begin\n  repeat\n  until x;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'repeat', 1);
+      assertNestLevel(pairs, 'begin', 0);
+    });
+  });
+
+  suite('Coverage: packed keyword with comment between = and packed', () => {
+    test('should recognize = (* comment *) packed object ... end as a block', () => {
+      // Lines 110-113: isInExcludedRegion check in packed scanning
+      const source = `type
+  TMyObj = (* comment *) packed object
+    field1: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should recognize = { comment } packed object ... end as a block', () => {
+      const source = `type
+  TMyObj = { brace comment } packed object
+    field1: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should reject object without = before packed keyword', () => {
+      const source = `packed object
+  X: Integer;
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: except/finally in non-try block', () => {
+    test('should reject except when stack top is not try', () => {
+      // Line 403: (middleValue === 'except' || middleValue === 'finally') && topValue !== 'try'
+      const source = `begin
+  except
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'except should not attach to begin');
+    });
+
+    test('should reject finally when stack top is not try', () => {
+      const source = `begin
+  finally
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'finally should not attach to begin');
+    });
+  });
+
+  suite('Coverage: else in non-case non-try block', () => {
+    test('should reject else when stack top is begin', () => {
+      // Line 405: middleValue === 'else' && topValue !== 'case' && topValue !== 'try'
+      const source = `begin
+  else
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else should not attach to begin');
+    });
+
+    test('should reject else when stack top is record', () => {
+      const source = `TRec = record
+  else
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else should not attach to record');
+    });
+  });
+
+  suite('Packed object syntax', () => {
+    test('should recognize = packed object ... end as a block', () => {
+      const source = `type
+  TMyObj = packed object
+    field1: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should still recognize = object ... end as a block', () => {
+      const source = `type
+  TMyObj = object
+    field1: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
     });
   });
 });

@@ -1047,4 +1047,88 @@ end.`;
       assertSingleBlock(pairs, 'begin', 'end');
     });
   });
+
+  suite('Bug fixes', () => {
+    test('Bug 8: fun() in -record should be recognized as block', () => {
+      const source = '-record(state, {handler = fun() -> ok end}).';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('Bug 8: fun() with args in -record should be recognized', () => {
+      const source = `-record(config, {
+  callback = fun(X) -> X * 2 end
+}).`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test("Bug 9: fun 'quoted-atom'/Arity should not create block", () => {
+      const source = "F = fun 'my-helper'/1,\nreceive\n  Msg -> ok\nend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+    });
+
+    test("Bug 9: fun 'quoted-atom-with-escape'/N should not create block", () => {
+      const source = "F = fun 'it\\'s-ok'/2,\nif\n  true -> ok\nend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Uncovered line coverage', () => {
+    // Covers lines 96-98: keywords preceded by . (record field access)
+    test('should reject keyword preceded by dot (record field access)', () => {
+      const source = 'begin\n  X = State.end,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject begin preceded by dot as record field', () => {
+      const source = 'begin\n  Y = Rec.begin,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject if preceded by dot as record field', () => {
+      const source = 'begin\n  Z = Config#state.if,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    // Covers lines 100-108: keywords preceded by - at line start (preprocessor directives)
+    test('should reject keyword preceded by - at line start (preprocessor -if)', () => {
+      const source = '-if(FEATURE).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject -else preprocessor directive', () => {
+      const source = '-else.\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject -end preprocessor directive', () => {
+      const source = '-end.\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject -if with indented whitespace before hyphen', () => {
+      const source = '  -if(DEBUG).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not reject keyword preceded by - mid-line (not preprocessor)', () => {
+      // X = 5 - end should not filter out end as preprocessor
+      const source = 'begin\n  X = 5 -end,\n  ok\nend';
+      const pairs = parser.parse(source);
+      // The -end mid-line has characters before it (not at line start), so it's NOT filtered
+      // Two 'end' tokens found, the first is rejected by map key check (preceded by -end) but
+      // actually the tokenize filter checks if - is at line start; here 5 precedes it so it passes
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
 });

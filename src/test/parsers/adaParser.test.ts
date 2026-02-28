@@ -1024,4 +1024,257 @@ end P;`;
       assertSingleBlock(pairs, 'procedure', 'end');
     });
   });
+
+  suite('Bug fixes', () => {
+    test('Bug 1: null record should not create false block opener', () => {
+      const source = `procedure P is
+  type T is null record;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('Bug 1: tagged null record should not create false block opener', () => {
+      const source = `procedure P is
+  type T is tagged null record;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('Bug 1: abstract tagged null record should not create false block opener', () => {
+      const source = `procedure P is
+  type T is abstract tagged null record;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('Bug 5: for/while loop with loop more than 5 lines away', () => {
+      const source = `for I in
+  Very_Long_Range_Name
+  .Subrange_Name
+  .Another_Part
+  .Yet_Another
+  .Final_Part loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('Bug 6: access protected procedure should not create false block', () => {
+      const source = `declare
+  type P is access protected procedure;
+begin
+  null;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'declare', 'end');
+    });
+
+    test('Bug 6: access protected function should not create false block', () => {
+      const source = `declare
+  type F is access protected function return Integer;
+begin
+  null;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'declare', 'end');
+    });
+
+    test('Bug 7: simple end should close top of stack, not search for begin', () => {
+      const source = `task body Server is
+begin
+  accept Request do
+    null;
+  end;
+end Server;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const acceptPair = pairs.find((p) => p.openKeyword.value === 'accept');
+      assert.ok(acceptPair);
+      assert.strictEqual(acceptPair.closeKeyword.value, 'end');
+      assert.strictEqual(acceptPair.nestLevel, 1);
+      const taskPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'task');
+      assert.ok(taskPair);
+      assert.strictEqual(taskPair.nestLevel, 0);
+    });
+
+    test('Bug 7: simple end with multiple inner blocks should not skip them', () => {
+      const source = `procedure P is
+begin
+  select
+    accept A do
+      null;
+    end;
+  or
+    accept B do
+      null;
+    end;
+  end select;
+end P;`;
+      const pairs = parser.parse(source);
+      const acceptPairs = pairs.filter((p) => p.openKeyword.value === 'accept');
+      assert.strictEqual(acceptPairs.length, 2);
+      for (const ap of acceptPairs) {
+        assert.strictEqual(ap.closeKeyword.value, 'end');
+      }
+    });
+
+    test('Bug 8: for representation clause should not create false block opener', () => {
+      const source = `procedure P is
+  for T'Size use 32;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('Bug 8: for attribute alignment clause should not create false block opener', () => {
+      const source = `procedure P is
+  for My_Type'Alignment use 8;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Uncovered line coverage', () => {
+    // Covers lines 115-121: comment between is and abstract/separate in function/procedure scanner
+    test('should skip comment between is and abstract in procedure declaration', () => {
+      const source = `procedure Outer is
+  procedure Inner is -- this is a comment
+    abstract;
+begin
+  null;
+end Outer;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('should skip comment between is and separate in procedure declaration', () => {
+      const source = `procedure Outer is
+  procedure Inner is -- descriptive comment
+    separate;
+begin
+  null;
+end Outer;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('should skip multi-line comment between is and new in function declaration', () => {
+      const source = `package body Test is
+  function Inner is -- instantiation
+    new Generic_Func;
+begin
+  null;
+end Test;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end', 0);
+    });
+
+    // Covers lines 190-192: if inside parentheses (Ada 2012 conditional expression)
+    test('should reject if inside parentheses as conditional expression', () => {
+      const source = `procedure P is
+begin
+  X := (if Condition then 1 else 2);
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('should not reject if after function call parenthesis', () => {
+      // if after Put("...\n is on a new line, preceded by identifier+( so not conditional
+      const source = `Put("text");
+if Condition then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    // Covers lines 400-403: semicolon between type and is on same line
+    test('should treat is as intermediate when semicolon separates type and is on same line', () => {
+      const source = `procedure P is
+  type T; X is
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      // Both 'is' after procedure and the standalone 'is' should be intermediates
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 2);
+    });
+
+    // Covers lines 446-449: multi-line type/subtype with semicolon between type and is
+    test('should treat is as intermediate when semicolon found in multi-line type declaration', () => {
+      const source = `procedure P is
+  type
+    Foo; X
+    is new Integer;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      // The is after procedure + the standalone is (with semicolon before it) = 2
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 2);
+    });
+
+    // Covers line 543: then as valid intermediate for select block
+    test('should handle select with then abort pattern', () => {
+      const source = `select
+  delay 1.0;
+  then abort
+    Lengthy_Operation;
+end select;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('then'), 'then should be an intermediate of select');
+    });
+
+    // Covers lines 671-676: isInsideParens with excluded region before (
+    test('should handle excluded region before ( in isInsideParens check', () => {
+      // The excluded region (attribute tick) is between ( and if
+      const source = `X := ('a'(if Cond then A else B));
+procedure P is
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      // 'a' is a character literal (excluded region), followed by (
+      // ( is preceded by ) from character literal, not identifier, so would be inside parens
+      // But actually ) is not a-zA-Z0-9_ so the condition at line 672 is false -> return true
+      // So the if inside ('a'(if...)) should be rejected as conditional expression
+      assertSingleBlock(pairs, 'procedure', 'end', 0);
+    });
+
+    test('should not treat if as conditional when preceded by function call paren', () => {
+      // Func(if ...) - ( preceded by identifier char -> isInsideParens returns false
+      // The if is NOT rejected as conditional expression, so it becomes a block opener
+      // But it has no matching end if, so it remains unmatched
+      const source = `Func(if True then 1 else 0);
+if Cond then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      // First if: not rejected as conditional (function call paren), but has no end if -> unmatched
+      // Second if: matched with end if
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
 });

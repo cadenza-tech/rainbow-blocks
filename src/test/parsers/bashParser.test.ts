@@ -2711,4 +2711,166 @@ fi`;
       assertSingleBlock(pairs, '{', '}');
     });
   });
+
+  // Fix: <<< here-string should not be treated as << heredoc
+  suite('Here-string (<<<) handling', () => {
+    test('should not treat <<< as heredoc in gap scanning', () => {
+      const source = 'cat <<EOF <<<HERESTRING\nhello\nEOF\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle <<< followed by heredoc on same line', () => {
+      const source = 'cat <<<HERESTRING <<EOF\nhello\nEOF\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Edge case: $$# (double dollar + hash)', () => {
+    test('should treat $$# as comment start after $$', () => {
+      const source = 'echo $$# this is a comment\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Covers lines 207-209: isParameterExpansion length operator
+  suite('Coverage: isParameterExpansion length operator', () => {
+    test('should not treat # in parameter length expansion as comment start', () => {
+      const source = 'echo $' + '{#myvar}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle parameter length expansion at position 2 (minimal case)', () => {
+      const source = '$' + '{#x}\nfor i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  // Covers line 334: $$# comment detection inside command substitution
+  suite('Coverage: $$# comment inside command substitution', () => {
+    test('should treat $$# as comment start inside command substitution', () => {
+      const source = 'x=$(echo $$# comment\necho ok)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat $# as comment inside command substitution', () => {
+      const source = 'x=$(echo $#)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Covers line 529: $$# comment detection inside process substitution
+  suite('Coverage: $$# comment inside process substitution', () => {
+    test('should treat $$# as comment start inside process substitution', () => {
+      const source = 'diff <(echo $$# comment\necho ok) /dev/null\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle # as regular comment inside process substitution', () => {
+      const source = 'diff <(echo ok # comment\n) /dev/null\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Covers lines 715-717: backtick as command separator in isAtCommandPosition
+  suite('Coverage: backtick as command separator', () => {
+    test('should treat keyword after closing backtick as command position', () => {
+      const source = '`cmd`\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should treat keyword immediately after backtick on same line as command', () => {
+      const source = '`cmd`;if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Covers lines 797-813: POSIX (keyword) case pattern detection with backward ( scan
+  suite('Coverage: POSIX case pattern with backward paren scan', () => {
+    test('should detect POSIX case pattern with ( immediately before keyword', () => {
+      const source = 'case $x in\n  (for) echo match;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect POSIX case pattern (while) after ;; separator', () => {
+      const source = 'case $x in\n  a) echo 1;;\n  (while) echo 2;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect POSIX case pattern after ;& separator', () => {
+      const source = 'case $x in\n  a) echo 1;&\n  (if) echo 2;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not detect case pattern when ( is after non-separator text', () => {
+      const source = 'func(for x in 1 2; do\n  echo $x\ndone)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  // Covers line 826: ;;& fall-through case separator
+  suite('Coverage: ;;& fall-through separator in case pattern', () => {
+    test('should detect case pattern keyword after ;;& separator', () => {
+      const source = 'case $x in\n  a) echo 1;;&\n  for) echo loop;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect case pattern keyword after ;;& with spaces', () => {
+      const source = 'case $x in\n  a) echo 1 ;;&\n  while) echo loop ;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  // Covers lines 892-894: ${ inside brace group (not treated as command grouping)
+  suite('Coverage: ${ inside brace group not treated as command grouping', () => {
+    test('should not treat ${ as command grouping brace', () => {
+      const source = '{ echo $' + '{HOME}; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should skip ${ inside brace group with block keywords', () => {
+      const source = 'if true; then\n  { echo $' + '{PATH}; }\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, '{');
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 11: keyword after $() should be at command position', () => {
+      const source = '$(cmd)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('Bug 11: keyword on same line after $() should not be at command position', () => {
+      const source = 'echo $(cmd) if foo; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('Bug 12: properly quoted heredoc should still work', () => {
+      const source = "cat <<'EOF'\nif true; then\nfi\nEOF\nif test; then\n  echo ok\nfi";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });

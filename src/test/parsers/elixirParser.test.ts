@@ -1974,4 +1974,126 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  // Covers lines 468-470: isDoColonOneLiner rejects block open (do: one-liner)
+  suite('Coverage: isDoColonOneLiner rejection of block open', () => {
+    test('should reject block open when do: one-liner pattern detected', () => {
+      const source = 'def foo, do: :ok';
+      const pairs = parser.parse(source);
+      // def with do: is a one-liner, so no block pair is created
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject if with do: one-liner', () => {
+      const source = 'if true, do: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should accept block when do: is not present', () => {
+      const source = 'def foo do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers line 594: hasDoKeyword early stop when 'end' is reached
+  suite('Coverage: hasDoKeyword stops at end keyword', () => {
+    test('should not find do after an end keyword', () => {
+      const source = 'if true\n  x = 1\nend do';
+      const pairs = parser.parse(source);
+      // hasDoKeyword scans forward from 'if', finds 'end' before 'do', returns false
+      assertNoBlocks(pairs);
+    });
+
+    test('should stop at end before reaching do on next line', () => {
+      const source = 'if true\nend\ndef foo do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      // First 'if' has no do (stopped at end), second 'def' has do
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Covers lines 650-652: isDoColonOneLiner returns false for non-doColonKeyword (e.g., fn)
+  suite('Coverage: isDoColonOneLiner with non-doColonKeyword', () => {
+    test('should not check do: for fn keyword', () => {
+      const source = 'fn -> :ok end';
+      const pairs = parser.parse(source);
+      // fn is not in doColonKeywords, so isDoColonOneLiner returns false immediately
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+
+    test('should not check do: for receive keyword', () => {
+      const source = 'receive do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+    });
+  });
+
+  // Covers lines 716-719: do: tight syntax (no space between do and :)
+  suite('Coverage: do: tight syntax no space', () => {
+    test('should treat do: with no space as keyword syntax', () => {
+      const source = 'def bar(x), do: x * 2';
+      const pairs = parser.parse(source);
+      // do: (no space) is always keyword syntax -> one-liner
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat do: tight syntax for if', () => {
+      const source = 'if true, do::ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Bug fixes', () => {
+    test('Bug 3: do: inside parens should not trigger one-liner detection', () => {
+      const source = `def render(assigns, do: content) do
+  content
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('Bug 3: do: inside brackets should not trigger one-liner detection', () => {
+      const source = `if [for: 1, do: 2] do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('Bug 3: do: inside braces should not trigger one-liner detection', () => {
+      const source = `def handle_call(%{do: action}, state) do
+  action
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('Bug 4: hasDoKeyword should detect ,do (no space) pattern', () => {
+      const source = `if true,do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('Bug 5: do : 42 (space before colon) should not be detected as do:', () => {
+      const source = `if condition do
+  result = do : 42
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('Bug 6: lowercase sigil should not skip multi-char name', () => {
+      const source = `x = ~send
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });
