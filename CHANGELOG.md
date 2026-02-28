@@ -5,6 +5,86 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.8] - 2026-02-28
+
+### Fixed
+
+- Ada: Skip `null record` as block opener (empty record definition)
+- Ada: Skip `access protected procedure/function` (access subprogram type, not block)
+- Ada: Skip `if` inside parentheses (Ada 2012 conditional expressions)
+- Ada: Skip `for` representation clauses (`for X'Attribute use`)
+- Ada: Increase `loop` backward scan range from 5 to 20 lines for multi-line `for`/`while` statements
+- Ada: Validate `when` intermediate for `case`/`select`/`begin`/`entry` blocks only
+- Ada: Validate `then` intermediate for `if`/`select` blocks only
+- Ada: Fix `end` to always close top of stack instead of searching for `begin`
+- AppleScript: Require `script` to be at line start (like `on`/`to`)
+- AppleScript: Handle block comments before line-start keywords (`on`/`to`/`script`)
+- AppleScript: Skip `end` used as variable/property name (`set end to`, `end of`, `copy end to`)
+- AppleScript: Fix `on error` intermediate to only match when stack top is `try`
+- AppleScript: Simplify `<keyword> of` property access pattern to same-line only
+- Bash: Fix `<<<` here-string not treated as `<<` heredoc in gap scanning
+- Bash: Fix heredoc pattern to properly match quoted delimiters
+- Bash: Handle `$#` vs `$$#` in comment detection (allow `$$#` as comment start)
+- Bash: Skip excluded regions when scanning backward in `isAtCommandPosition`
+- COBOL: Support `D`/`d` debug indicator at column 7 as comment line
+- COBOL: Use visual column calculation with tab expansion for column 7 detection
+- COBOL: Optimize `isValidBlockOpen` with combined regex and lazy iteration for deep nesting
+- Crystal: Allow keywords after `..`/`...` range operators (not filtered as method calls)
+- Crystal: Distinguish `!=` and `=~` operators from `!`/`=` method suffixes after keywords
+- Crystal: Filter keywords in heredoc openers (`<<-end`, `<<-'do'`)
+- Crystal: Check excluded regions before filtering operator-preceded keywords (regex literal edge case)
+- Elixir: Handle `?` and `!` as identifier trailing chars in atom detection
+- Elixir: Restrict multi-char sigil names to uppercase sigils only
+- Elixir: Allow `#{}` interpolation in single-quoted charlists (not just double-quoted)
+- Elixir: Filter middle keywords followed by colon (keyword argument syntax like `else:`, `rescue:`)
+- Elixir: Handle `,do` (no space before `do`) in `hasDoKeyword` detection
+- Elixir: Track bracket/paren/brace depth in `isDoColonOneLiner`
+- Elixir: Fix `do :` (space before colon) not treated as `do:` one-liner syntax
+- Erlang: Allow `fun()` inside `-record` declarations (real anonymous functions)
+- Erlang: Skip `fun 'quoted-atom'/Arity` function references
+- Erlang: Reject keywords preceded by `.` (record field access like `Rec#state.end`)
+- Erlang: Reject preprocessor directives (`-if`, `-else`, `-end` at line start)
+- Fortran: Support compound end with continuation line (`end &\nfunction`)
+- Fortran: Skip `end%component` (derived type component access)
+- Fortran: Skip `end &\n%component` (derived type component across continuation)
+- Fortran: Recognize `type(name) function/subroutine` as type specifier
+- Fortran: Validate `else`/`elseif` intermediate for `if` blocks only
+- Fortran: Validate `contains` intermediate for `program`/`module`/`submodule`/`function`/`subroutine` only
+- Julia: Distinguish indexing brackets (`a[end]`) from array construction (`[begin...end]`) for `end`
+- Julia: Add `isInsideIndexingBrackets` to reject `end` only in indexing context
+- Julia: Handle `a[f(end)]` as indexing (not block close) via `hasBlockOpenerBetween` check
+- Julia: Apply indexing-vs-construction distinction in `isInsideSquareBrackets` for other keywords
+- Julia: Handle double transpose `A''` as excluded region
+- MATLAB: Apply `isValidBlockClose` to all close keywords (not just `end`)
+- MATLAB: Reject classdef section keywords inside parentheses or brackets
+- MATLAB: Require classdef section keywords to appear at line start
+- MATLAB: Handle double transpose `A''` as excluded region
+- Octave: Validate intermediate keywords against opener type (`else`/`elseif` for `if`, `case`/`otherwise` for `switch`, etc.)
+- Octave: Only check top of stack for generic `end` (not skip past unclosed `do` blocks)
+- Octave: Handle double transpose `A''` as excluded region
+- Octave: Handle CRLF in backslash escapes in double-quoted strings
+- Pascal: Handle `packed` keyword before `object` in record type detection
+- Pascal: Validate `of` intermediate for `case` blocks only
+- Pascal: Validate `except`/`finally` intermediate for `try` blocks only
+- Pascal: Validate `else` intermediate for `case`/`try` blocks only
+- Pascal: Only check top of stack in `findLastNonRepeatIndex` (not skip past unclosed `repeat` blocks)
+- Ruby: Check excluded regions before filtering operator-preceded keywords (regex literal edge case)
+- Ruby: Add character literal (`?x`, `?\C-x`, `?\uXXXX`, etc.) as excluded regions
+- Ruby: Fix symbol detection after `>` operator (allow `:symbol` after `>`)
+- Ruby: Allow multiline regex between bare `/` delimiters
+- Ruby: Allow bare heredoc after `)`, `]`, `}` (method call results)
+- Verilog: Handle escaped identifiers (`\name`) as excluded regions
+- Verilog: Handle SystemVerilog attributes (`(* ... *)`) as excluded regions (excluding `@(*)` sensitivity lists)
+- Verilog: Skip label colon separator but not `::` scope resolution in `isFollowedByBegin`
+- Verilog: Support escaped identifier labels in `isFollowedByBegin`
+- VHDL: Reject keywords preceded by `.` (library path like `work.process`)
+- VHDL: Handle `configuration` like `entity` for `use` prefix check
+- VHDL: Reject `loop` preceded by dot (record field access)
+- VHDL: Fix `stripTrailingComment` to verify excluded region starts at `--` position
+- VHDL: Support extended identifiers (`\keyword\`) as excluded regions
+- VHDL: Require `when` between `<=` and `else` for signal assignment detection
+- VHDL: Handle `when` intermediate in case-generate blocks
+
 ## [1.1.7] - 2026-02-26
 
 ### Fixed
@@ -345,6 +425,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.8]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.4...v1.1.5
