@@ -1,6 +1,6 @@
 // Elixir block parser: handles sigils, do: one-liners, keyword arguments, and atoms
 
-import type { ExcludedRegion, LanguageKeywords } from '../types';
+import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 
 export class ElixirBlockParser extends BaseBlockParser {
@@ -109,9 +109,10 @@ export class ElixirBlockParser extends BaseBlockParser {
 
     // Colon after identifier/number/closing bracket is not an atom (keyword list key)
     // Note: > is excluded from check because x>:atom is a valid comparison with atom
+    // Includes ? and ! since Elixir identifiers can end with them (e.g., ok?: true)
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}?!]/.test(prevChar)) {
         return false;
       }
     }
@@ -270,9 +271,12 @@ export class ElixirBlockParser extends BaseBlockParser {
     const isLowercase = /[a-z]/.test(sigilChar);
 
     // Skip past sigil letter(s) to find delimiter
+    // Only uppercase sigils (custom sigils) allow multi-character names
     let delimiterPos = pos + 2;
-    while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
-      delimiterPos++;
+    if (/[A-Z]/.test(sigilChar)) {
+      while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
+        delimiterPos++;
+      }
     }
 
     if (delimiterPos >= source.length) {
@@ -320,7 +324,7 @@ export class ElixirBlockParser extends BaseBlockParser {
         i += 2;
         continue;
       }
-      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{' && quote === '"') {
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
         i = this.skipInterpolation(source, i + 2);
         continue;
       }
@@ -341,10 +345,13 @@ export class ElixirBlockParser extends BaseBlockParser {
       return null;
     }
 
-    // Find delimiter position (skip additional letters for uppercase sigils)
+    // Find delimiter position (skip additional letters only for uppercase/custom sigils)
+    // Lowercase sigils are always single-letter (r, s, w, c, etc.)
     let delimiterPos = pos + 2;
-    while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
-      delimiterPos++;
+    if (/[A-Z]/.test(nextChar)) {
+      while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
+        delimiterPos++;
+      }
     }
 
     if (delimiterPos >= source.length) {
@@ -465,6 +472,17 @@ export class ElixirBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // Filter out middle keywords followed by colon (keyword argument syntax like else:, rescue:)
+  protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    const tokens = super.tokenize(source, excludedRegions);
+    return tokens.filter((token) => {
+      if (token.type === 'block_middle' && token.endOffset < source.length && source[token.endOffset] === ':') {
+        return false;
+      }
+      return true;
+    });
+  }
+
   // Validates block close keywords, rejecting keyword arguments (e.g., end:)
   protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
     if (this.isKeywordArgument(source, position + keyword.length)) {
@@ -551,7 +569,7 @@ export class ElixirBlockParser extends BaseBlockParser {
       // Only look for "do" outside all brackets
       if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
         // Check for "do" with word boundary
-        if (i > 0 && /\s/.test(source[i - 1]) && source.slice(i, i + 2) === 'do') {
+        if (i > 0 && (/\s/.test(source[i - 1]) || source[i - 1] === ',') && source.slice(i, i + 2) === 'do') {
           const afterDo = source[i + 2];
           if (afterDo === undefined || /[\s\n]/.test(afterDo)) {
             return true;
@@ -633,12 +651,30 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Find "do" on the same line
+    // Find "do" on the same line, tracking bracket/paren/brace depth
     let i = position + keyword.length;
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
 
     while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
       // Skip excluded regions (strings, comments, etc)
       if (this.isInExcludedRegion(i, excludedRegions)) {
+        i++;
+        continue;
+      }
+
+      // Track bracket depth
+      const ch = source[i];
+      if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+      else if (ch === '[') bracketDepth++;
+      else if (ch === ']') bracketDepth--;
+      else if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth--;
+
+      // Only look for "do" outside all brackets
+      if (parenDepth !== 0 || bracketDepth !== 0 || braceDepth !== 0) {
         i++;
         continue;
       }
@@ -681,10 +717,8 @@ export class ElixirBlockParser extends BaseBlockParser {
             // do: with no whitespace between do and colon = always keyword syntax
             return true;
           }
-          const afterColon = source[j + 1];
-          if (afterColon && afterColon !== '\n' && afterColon !== '\r' && !/[a-zA-Z_"']/.test(afterColon)) {
-            return true;
-          }
+          // do : (space before colon) is NOT do: syntax
+          return false;
         }
         // Bare 'do' found (not do:) - this is a block do, not a one-liner
         return false;

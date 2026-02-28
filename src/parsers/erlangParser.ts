@@ -23,9 +23,10 @@ export class ErlangBlockParser extends BaseBlockParser {
     }
 
     // 'fun' in -spec/-type/-callback/-opaque declarations is a type, not a block
+    // Note: -record is excluded because fun() inside records defines real anonymous functions
     const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
     const lineBefore = source.slice(lineStart, position).trimStart();
-    if (/^-\s*(spec|type|callback|opaque|record)\b/.test(lineBefore)) {
+    if (/^-\s*(spec|type|callback|opaque)\b/.test(lineBefore)) {
       return false;
     }
 
@@ -41,6 +42,11 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (/^\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\/\s*\d/.test(afterFun)) {
       return false;
     }
+    // fun 'quoted-atom'/Arity (function reference without module prefix)
+    const quotedFunRef = /^\s+'(?:[^'\\]|\\.)*'\s*\/\s*\d/;
+    if (quotedFunRef.test(afterFun)) {
+      return false;
+    }
 
     // fun() in type context (inside parentheses of -spec/-type)
     if (/^\s*\(/.test(afterFun)) {
@@ -48,7 +54,7 @@ export class ErlangBlockParser extends BaseBlockParser {
       // Must search for actual attribute pattern, not just '-'
       // (to avoid matching '-' in '->' operator)
       const textBefore = source.slice(0, position);
-      const attrPattern = /-\s*(?:spec|type|callback|opaque|record)\b/g;
+      const attrPattern = /-\s*(?:spec|type|callback|opaque)\b/g;
       let lastAttr = -1;
       for (const match of textBefore.matchAll(attrPattern)) {
         // Skip matches inside excluded regions (strings, comments)
@@ -77,13 +83,28 @@ export class ErlangBlockParser extends BaseBlockParser {
     return true;
   }
 
-  // Filter out keywords used as map keys (followed by =>)
+  // Filter out keywords used as map keys (followed by =>),
+  // record field access (preceded by .), and preprocessor directives (preceded by -)
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       const afterToken = source.slice(token.endOffset);
       if (/^\s*=>/.test(afterToken)) {
         return false;
+      }
+      // Reject keywords preceded by '.' (record field access like Rec#state.end)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
+      }
+      // Reject keywords preceded by '-' at line start (preprocessor directives like -if, -else)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '-') {
+        let j = token.startOffset - 2;
+        while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
+          j--;
+        }
+        if (j < 0 || source[j] === '\n' || source[j] === '\r') {
+          return false;
+        }
       }
       return true;
     });

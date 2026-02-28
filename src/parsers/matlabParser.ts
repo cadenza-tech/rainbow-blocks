@@ -5,14 +5,12 @@ import { BaseBlockParser } from './baseParser';
 
 export class MatlabBlockParser extends BaseBlockParser {
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
-  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (keyword !== 'end') {
-      return true;
-    }
+  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject end preceded by dot (struct field access like s.end)
     if (position > 0 && source[position - 1] === '.') {
       return false;
     }
+    // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
 
@@ -21,7 +19,7 @@ export class MatlabBlockParser extends BaseBlockParser {
 
   // Reject struct field access for block openers (s.if, s.for, etc)
   // Reject classdef section keywords used as function calls (properties(obj))
-  protected isValidBlockOpen(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+  protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (position > 0 && source[position - 1] === '.') {
       return false;
     }
@@ -35,6 +33,16 @@ export class MatlabBlockParser extends BaseBlockParser {
         afterPos++;
       }
       if (afterPos < source.length && source[afterPos] === '=' && source[afterPos + 1] !== '=') {
+        return false;
+      }
+      // Reject classdef section keywords inside parentheses or brackets
+      if (this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+        return false;
+      }
+      // Classdef section keywords must appear at line start (after whitespace only)
+      const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
+      const textBefore = source.slice(lineStart, position);
+      if (/\S/.test(textBefore)) {
         return false;
       }
     }
@@ -89,7 +97,7 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Checks if position is inside parentheses, square brackets, or curly braces
-  private isInsideParensOrBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  protected isInsideParensOrBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
@@ -262,7 +270,7 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Check if this is a transpose operator (after identifier, number, ], }, or .)
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar)) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         // If immediately followed by a letter, it's more likely a string
         if (/[0-9]/.test(prevChar)) {

@@ -71,15 +71,16 @@ export class JuliaBlockParser extends BaseBlockParser {
     return true;
   }
 
-  // Validates block close: 'end' inside brackets or parens is array indexing, not block close
+  // Validates block close: 'end' inside indexing brackets is array indexing, not block close
+  // 'end' inside array construction brackets IS a valid block close (e.g., [begin...end])
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (keyword === 'end') {
-      return !this.isInsideBrackets(source, position, excludedRegions);
+      return !this.isInsideIndexingBrackets(source, position, excludedRegions);
     }
     return true;
   }
 
-  // Checks if position is inside brackets (tracks parens to handle nested calls)
+  // Checks if position is inside any brackets (for for/if comprehension check)
   private isInsideBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
@@ -96,8 +97,83 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === ')') {
         parenDepth++;
       } else if (char === '(') {
-        if (parenDepth === 0 && bracketDepth === 0) return false;
-        parenDepth--;
+        if (parenDepth === 0 && bracketDepth === 0) {
+          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+            return false;
+          }
+          parenDepth--;
+        } else {
+          parenDepth--;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Checks if position is inside indexing brackets only (not array construction)
+  // Used for 'end' to distinguish a[end] (indexing) from [begin...end] (array construction)
+  private isInsideIndexingBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let bracketDepth = 0;
+    let parenDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      const char = source[i];
+      if (char === ']') {
+        bracketDepth++;
+      } else if (char === '[') {
+        if (bracketDepth === 0) {
+          return this.isIndexingBracket(source, i);
+        }
+        bracketDepth--;
+      } else if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0 && bracketDepth === 0) {
+          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+            return false;
+          }
+          parenDepth--;
+        } else {
+          parenDepth--;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Determines if a '[' at the given position is an indexing bracket (a[...]) vs array construction ([...])
+  private isIndexingBracket(source: string, bracketPos: number): boolean {
+    let i = bracketPos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 0) return false;
+    const prevChar = source[i];
+    // Identifiers, closing brackets/parens/braces, quotes -> indexing
+    if (/[a-zA-Z0-9_)\]}'"]/.test(prevChar)) return true;
+    // Everything else (operators, (, [, =, comma, newline, etc.) -> array construction
+    return false;
+  }
+
+  // Checks if there's a block-opening keyword between two positions (not in excluded regions)
+  // Used to distinguish a[f(end)] (lastindex) from [f(begin...end)] (block close)
+  private hasBlockOpenerBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    const blockOpeners = this.keywords.blockOpen;
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      for (const keyword of blockOpeners) {
+        if (i + keyword.length <= end && source.slice(i, i + keyword.length) === keyword) {
+          // Check word boundaries
+          const before = i > 0 ? source[i - 1] : ' ';
+          const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
+          if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+            return true;
+          }
+        }
       }
     }
     return false;
@@ -121,8 +197,8 @@ export class JuliaBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if position is inside square brackets only (for array comprehensions)
-  // Julia allows block expressions inside parentheses, so only [] excludes for/if
+  // Checks if position is inside square brackets only (for other block keywords)
+  // Julia allows block expressions inside parentheses, so only [] excludes them
   private isInsideSquareBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
@@ -134,7 +210,10 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (char === ']') {
         bracketDepth++;
       } else if (char === '[') {
-        if (bracketDepth === 0) return true;
+        if (bracketDepth === 0) {
+          // Only indexing brackets exclude block keywords, not array construction
+          return this.isIndexingBracket(source, i);
+        }
         bracketDepth--;
       } else if (char === ')') {
         parenDepth++;
@@ -405,6 +484,11 @@ export class JuliaBlockParser extends BaseBlockParser {
 
     // Transpose follows closing brackets
     if (prevChar === ')' || prevChar === ']' || prevChar === '}') {
+      return true;
+    }
+
+    // Double transpose: A'' (second ' is also transpose)
+    if (prevChar === "'") {
       return true;
     }
 

@@ -261,13 +261,23 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
           const type = this.getTokenType(keyword);
 
-          // 'to' and 'on' are block openers only at line start (handler defs)
-          if (type === 'block_open' && (keyword === 'to' || keyword === 'on')) {
+          // 'to', 'on', and 'script' are block openers only at line start
+          // Allow block comments before the keyword (e.g., (* comment *) on run)
+          if (type === 'block_open' && (keyword === 'to' || keyword === 'on' || keyword === 'script')) {
             let lineStart = i;
             while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
               lineStart--;
             }
-            if (!/^\s*$/.test(source.substring(lineStart, i))) {
+            // Strip excluded regions (block comments) from the text before the keyword
+            let beforeText = source.substring(lineStart, i);
+            for (const region of excludedRegions) {
+              if (region.start >= lineStart && region.end <= i) {
+                const regionLen = region.end - region.start;
+                const relStart = region.start - lineStart;
+                beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
+              }
+            }
+            if (!/^\s*$/.test(beforeText)) {
               i = endPos;
               matched = true;
               break;
@@ -276,6 +286,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
           // Validate block open keywords (e.g., single-line if)
           if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, i, excludedRegions)) {
+            i = endPos;
+            matched = true;
+            break;
+          }
+
+          // Check if 'end' is used as a variable/property name
+          // e.g., 'set end to 5', 'end of myList', 'copy end to x'
+          if (type === 'block_close' && keyword === 'end' && this.isKeywordAsVariableName(source, i, keyword)) {
             i = endPos;
             matched = true;
             break;
@@ -320,20 +338,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         case 'block_middle':
           // 'on error' outside a try block is a standalone handler (block_open)
           if (token.value === 'on error') {
-            // Search stack for 'try' (not just top), since other blocks may be nested inside try
-            let tryIndex = -1;
-            for (let si = stack.length - 1; si >= 0; si--) {
-              if (stack[si].token.value === 'try') {
-                tryIndex = si;
-                break;
-              }
-            }
-            if (tryIndex === -1) {
-              stack.push({ token, intermediates: [] });
+            // Only treat as intermediate if the stack top is 'try'
+            if (stack.length > 0 && stack[stack.length - 1].token.value === 'try') {
+              stack[stack.length - 1].intermediates.push(token);
               break;
             }
-            // Add as intermediate of the found try block
-            stack[tryIndex].intermediates.push(token);
+            // Otherwise, treat as standalone handler (block_open)
+            stack.push({ token, intermediates: [] });
             break;
           }
           if (stack.length > 0) {
@@ -424,9 +435,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
     }
 
-    // '<keyword> of' pattern (property access)
+    // '<keyword> of' pattern (property access, same line only)
     const afterKw = lowerSource.slice(position + keyword.length);
-    if (/^\s+of\b/.test(afterKw) && !/^\s*$/.test(lineBefore) && !/^(if|tell|repeat)\s/i.test(lineBefore.trimStart())) {
+    if (/^[ \t]+of\b/.test(afterKw)) {
       return true;
     }
 

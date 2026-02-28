@@ -336,8 +336,11 @@ export class CrystalBlockParser extends BaseBlockParser {
 
     return tokens.filter((token) => {
       // Filter out dot-preceded tokens (method calls like obj.end, obj.rescue)
+      // But NOT range operators (.., ...) - those end with '.' but are not method calls
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
-        return false;
+        if (token.startOffset < 2 || source[token.startOffset - 2] !== '.') {
+          return false;
+        }
       }
       // Filter out :: scope resolution (e.g., Module::Class::Begin)
       if (token.startOffset > 1 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
@@ -347,9 +350,27 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (source[token.endOffset] === ':') {
         return false;
       }
-      // Filter out keywords followed by ?, !, or = (method names like end?, begin!, do=)
+      // Filter out keywords in heredoc openers (<<-end, <<-'do', <<-"if" etc.)
+      if (token.startOffset >= 3 && source.slice(token.startOffset - 3, token.startOffset) === '<<-') {
+        return false;
+      }
+      if (token.startOffset >= 4 && /<<-['"]$/.test(source.slice(token.startOffset - 4, token.startOffset))) {
+        return false;
+      }
+      // Filter out keywords followed by ? or = (method names like end?, do=)
+      // But not != (not-equal) or == / === / =~ (comparison operators)
       const afterChar = source[token.endOffset];
-      if (afterChar === '?' || afterChar === '!' || afterChar === '=') {
+      if (afterChar === '?') {
+        return false;
+      }
+      if (afterChar === '=' && token.endOffset + 1 < source.length && source[token.endOffset + 1] !== '=' && source[token.endOffset + 1] !== '~') {
+        return false;
+      }
+      if (afterChar === '=' && token.endOffset + 1 >= source.length) {
+        return false;
+      }
+      // Filter out ! as method suffix but not != (not-equal operator)
+      if (afterChar === '!' && (token.endOffset + 1 >= source.length || source[token.endOffset + 1] !== '=')) {
         return false;
       }
       // Filter out postfix rescue modifier (e.g., risky rescue nil)
@@ -914,8 +935,11 @@ export class CrystalBlockParser extends BaseBlockParser {
   // Validates block open keywords, excluding postfix conditionals and loop do
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords preceded by dot (method calls like obj.class, obj.begin)
+    // But NOT range operators (.., ...) - those end with '.' but are not method calls
     if (position > 0 && source[position - 1] === '.') {
-      return false;
+      if (position < 2 || source[position - 2] !== '.') {
+        return false;
+      }
     }
 
     // 'do' as loop separator (while/until/for condition do) is not a block
@@ -1041,6 +1065,15 @@ export class CrystalBlockParser extends BaseBlockParser {
     // Operator expecting expression means not postfix
     // Includes: assignment, logical, comparison, arithmetic, range, and other operators
     if (/[=&|,([{:?+\-*/%<>^~!.]$/.test(beforeKeyword)) {
+      // If the last character before keyword is inside an excluded region
+      // (e.g., closing / of a regex literal), it's a complete expression, not an operator
+      let checkPos = position - 1;
+      while (checkPos >= lineStart && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
+        checkPos--;
+      }
+      if (checkPos >= lineStart && this.isInExcludedRegion(checkPos, excludedRegions)) {
+        return true;
+      }
       return false;
     }
 

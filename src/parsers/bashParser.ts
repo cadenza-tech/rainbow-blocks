@@ -29,7 +29,13 @@ export class BashBlockParser extends BaseBlockParser {
           let j = i + 1;
           while (j < result.start) {
             // Check for additional `<<` heredoc operators on the same line
-            if (source[j] === '<' && j + 1 < source.length && source[j + 1] === '<' && (j + 2 >= source.length || source[j + 2] !== '<')) {
+            if (
+              source[j] === '<' &&
+              j + 1 < source.length &&
+              source[j + 1] === '<' &&
+              (j + 2 >= source.length || source[j + 2] !== '<') &&
+              (j === 0 || source[j - 1] !== '<')
+            ) {
               // Try to parse the heredoc operator and delimiter
               const heredocInfo = this.parseHeredocOperator(source, j);
               if (heredocInfo) {
@@ -75,12 +81,12 @@ export class BashBlockParser extends BaseBlockParser {
   // Parses a heredoc operator at position and extracts delimiter info
   // Returns null if the position is not a valid heredoc operator
   private parseHeredocOperator(source: string, pos: number): { stripTabs: boolean; terminator: string; matchLength: number } | null {
-    const heredocPattern = /^<<(-)?[\t ]*\\?(['"])?([A-Za-z_][A-Za-z0-9_]*)\2?/;
+    const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\2|([A-Za-z_][A-Za-z0-9_]*))/;
     const match = source.slice(pos).match(heredocPattern);
     if (!match) return null;
     return {
       stripTabs: match[1] === '-',
-      terminator: match[3],
+      terminator: match[3] || match[4],
       matchLength: match[0].length
     };
   }
@@ -133,8 +139,9 @@ export class BashBlockParser extends BaseBlockParser {
   private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
-    // Single-line comment
-    if (char === '#' && !this.isParameterExpansion(source, pos)) {
+    // Single-line comment (not $# special variable or ${# parameter expansion)
+    // Allow $$# as comment: $$ is PID variable, # starts comment
+    if (char === '#' && !this.isParameterExpansion(source, pos) && !(pos > 0 && source[pos - 1] === '$' && !(pos >= 2 && source[pos - 2] === '$'))) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -323,8 +330,8 @@ export class BashBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Skip comments (# to end of line)
-      if (char === '#') {
+      // Skip comments (# to end of line, but not $# special variable; allow $$#)
+      if (char === '#' && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
@@ -518,8 +525,8 @@ export class BashBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Skip comments (# to end of line)
-      if (char === '#') {
+      // Skip comments (# to end of line, but not $# special variable; allow $$#)
+      if (char === '#' && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
@@ -572,13 +579,13 @@ export class BashBlockParser extends BaseBlockParser {
 
   // Matches heredoc: <<EOF, <<'EOF', <<"EOF", <<-EOF, <<-'EOF', <<-"EOF"
   private matchHeredoc(source: string, pos: number): ExcludedRegion | null {
-    const heredocPattern = /^<<(-)?[\t ]*\\?(['"])?([A-Za-z_][A-Za-z0-9_]*)\2?/;
+    const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\2|([A-Za-z_][A-Za-z0-9_]*))/;
     const match = source.slice(pos).match(heredocPattern);
 
     if (!match) return null;
 
     const stripTabs = match[1] === '-';
-    const terminator = match[3];
+    const terminator = match[3] || match[4];
     let i = pos + match[0].length;
 
     // Find the end of the current line (\n or \r)
@@ -671,11 +678,27 @@ export class BashBlockParser extends BaseBlockParser {
   // Tokenizes with additional { } matching for command grouping
 
   // Check if a keyword is at shell command position (start of a simple command)
-  private isAtCommandPosition(source: string, position: number): boolean {
+  private isAtCommandPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     // Skip whitespace (spaces, tabs) but not line endings
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
       i--;
+    }
+
+    // Skip excluded regions when scanning backward (e.g., $(...) closing paren)
+    let skippedRegion = true;
+    while (skippedRegion) {
+      skippedRegion = false;
+      for (const region of excludedRegions) {
+        if (i >= region.start && i < region.end) {
+          i = region.start - 1;
+          skippedRegion = true;
+          while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+            i--;
+          }
+          break;
+        }
+      }
     }
 
     // At start of file or after line ending (\n or \r)
@@ -822,7 +845,7 @@ export class BashBlockParser extends BaseBlockParser {
   }
 
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (!this.isAtCommandPosition(source, position)) {
+    if (!this.isAtCommandPosition(source, position, excludedRegions)) {
       return false;
     }
     if (this.isCasePattern(source, position, keyword, excludedRegions)) {
@@ -832,7 +855,7 @@ export class BashBlockParser extends BaseBlockParser {
   }
 
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (!this.isAtCommandPosition(source, position)) {
+    if (!this.isAtCommandPosition(source, position, excludedRegions)) {
       return false;
     }
     if (this.isCasePattern(source, position, keyword, excludedRegions)) {
@@ -847,7 +870,7 @@ export class BashBlockParser extends BaseBlockParser {
     // Validate block_middle keywords at command position (echo then, echo else, etc.)
     tokens = tokens.filter((token) => {
       if (token.type !== 'block_middle') return true;
-      if (!this.isAtCommandPosition(source, token.startOffset)) return false;
+      if (!this.isAtCommandPosition(source, token.startOffset, excludedRegions)) return false;
       if (this.isCasePattern(source, token.startOffset, token.value, excludedRegions)) return false;
       return true;
     });

@@ -160,7 +160,7 @@ export class VerilogBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Skip excluded regions
+      // Skip excluded regions (e.g., escaped identifiers \name)
       if (this.isInExcludedRegion(i, excludedRegions)) {
         i++;
         continue;
@@ -256,14 +256,31 @@ export class VerilogBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip label colon separator (e.g., after escaped identifier labels from excluded regions)
+      // But not :: (scope resolution operator)
+      if (source[i] === ':') {
+        if (i + 1 < source.length && source[i + 1] === ':') {
+          return false;
+        }
+        i++;
+        continue;
+      }
+
       // Skip labels: identifier followed by ':'
-      if (/[a-zA-Z_]/.test(source[i])) {
+      // Support both regular identifiers and escaped identifiers (\name)
+      if (/[a-zA-Z_]/.test(source[i]) || source[i] === '\\') {
         const labelStart = i;
-        while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+        if (source[i] === '\\') {
+          // Escaped identifier: \name terminated by whitespace
+          i++;
+          while (i < source.length && !/\s/.test(source[i])) i++;
+        } else {
+          while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+        }
         // Skip whitespace after identifier
         let afterIdent = i;
         while (afterIdent < source.length && /\s/.test(source[afterIdent])) afterIdent++;
-        if (afterIdent < source.length && source[afterIdent] === ':') {
+        if (afterIdent < source.length && source[afterIdent] === ':' && (afterIdent + 1 >= source.length || source[afterIdent + 1] !== ':')) {
           i = afterIdent + 1;
           continue;
         }
@@ -315,6 +332,24 @@ export class VerilogBlockParser extends BaseBlockParser {
       return this.matchVerilogString(source, pos);
     }
 
+    // SystemVerilog escaped identifier: \<chars> terminated by whitespace
+    if (char === '\\' && pos + 1 < source.length && /[^\s]/.test(source[pos + 1])) {
+      return this.matchEscapedIdentifier(source, pos);
+    }
+
+    // SystemVerilog attribute: (* ... *) but not sensitivity list @(*)
+    if (char === '(' && pos + 1 < source.length && source[pos + 1] === '*') {
+      // Check if preceded by '@' (possibly with whitespace including newlines)
+      let j = pos - 1;
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+        j--;
+      }
+      if (j >= 0 && source[j] === '@') {
+        return null;
+      }
+      return this.matchAttribute(source, pos);
+    }
+
     return null;
   }
 
@@ -336,6 +371,27 @@ export class VerilogBlockParser extends BaseBlockParser {
       // String cannot span multiple lines in Verilog
       if (source[i] === '\n' || source[i] === '\r') {
         return { start: pos, end: i };
+      }
+      i++;
+    }
+    return { start: pos, end: source.length };
+  }
+
+  // Matches escaped identifier: \<chars> terminated by whitespace
+  private matchEscapedIdentifier(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length && !/\s/.test(source[i])) {
+      i++;
+    }
+    return { start: pos, end: i };
+  }
+
+  // Matches SystemVerilog attribute: (* ... *)
+  private matchAttribute(source: string, pos: number): ExcludedRegion | null {
+    let i = pos + 2;
+    while (i < source.length) {
+      if (source[i] === '*' && i + 1 < source.length && source[i + 1] === ')') {
+        return { start: pos, end: i + 2 };
       }
       i++;
     }

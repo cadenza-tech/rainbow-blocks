@@ -160,6 +160,48 @@ export class AdaBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // 'null record' is an empty record definition, not a block opener
+    if (lowerKeyword === 'record') {
+      const textBefore = source.slice(0, position);
+      const nullMatch = textBefore.match(/\b(null)\s*$/i);
+      if (nullMatch) {
+        const nullPos = position - nullMatch[0].length + nullMatch[0].indexOf(nullMatch[1]);
+        if (!this.isInExcludedRegion(nullPos, excludedRegions)) {
+          return false;
+        }
+      }
+    }
+
+    // 'protected' after 'access' is an access type, not a block
+    // Also handles 'access all protected' and 'access constant protected'
+    if (lowerKeyword === 'protected') {
+      const textBefore = source.slice(0, position);
+      const accessMatch = textBefore.match(/\b(access)(\s+(all|constant))?\s*$/i);
+      if (accessMatch) {
+        const accessPos = position - accessMatch[0].length + accessMatch[0].indexOf(accessMatch[1]);
+        if (!this.isInExcludedRegion(accessPos, excludedRegions)) {
+          return false;
+        }
+      }
+    }
+
+    // Ada 2012 conditional expressions: (if X then A else B) - if inside parens is not a block
+    if (lowerKeyword === 'if') {
+      if (this.isInsideParens(source, position, excludedRegions)) {
+        return false;
+      }
+      return true;
+    }
+
+    // Representation clauses: for X'Attribute use ... (not a loop)
+    if (lowerKeyword === 'for') {
+      const afterFor = source.slice(position + 3);
+      if (/^\s+[a-zA-Z_]\w*\s*'/.test(afterFor)) {
+        return false;
+      }
+      return true;
+    }
+
     if (lowerKeyword !== 'loop') {
       return true;
     }
@@ -169,7 +211,7 @@ export class AdaBlockParser extends BaseBlockParser {
     const textBefore = source.slice(0, position);
     // Split on \r\n, \r, or \n to handle all line ending types
     const lineParts = textBefore.split(/\r\n|\r|\n/);
-    const maxLines = Math.min(lineParts.length, 5);
+    const maxLines = Math.min(lineParts.length, 20);
 
     // Calculate absolute offset for the start of each line by scanning backward
     // We use findLineStart to correctly handle any line ending type
@@ -484,9 +526,21 @@ export class AdaBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
+            const topOpener = stack[stack.length - 1].token.value.toLowerCase();
+            const middleKw = token.value.toLowerCase();
             // 'or' is only a valid intermediate for 'select' blocks
-            if (token.value.toLowerCase() === 'or') {
-              if (stack[stack.length - 1].token.value.toLowerCase() === 'select') {
+            if (middleKw === 'or') {
+              if (topOpener === 'select') {
+                stack[stack.length - 1].intermediates.push(token);
+              }
+            } else if (middleKw === 'when') {
+              // 'when' is valid for 'case', 'select', 'begin' (exception), and 'entry' (guard)
+              if (topOpener === 'case' || topOpener === 'select' || topOpener === 'begin' || topOpener === 'entry') {
+                stack[stack.length - 1].intermediates.push(token);
+              }
+            } else if (middleKw === 'then') {
+              // 'then' is valid for 'if' and 'select' (select...then abort)
+              if (topOpener === 'if' || topOpener === 'select') {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else {
@@ -526,11 +580,15 @@ export class AdaBlockParser extends BaseBlockParser {
               });
             }
           } else {
-            // Simple 'end' or 'end;' - closes begin and preceding context keyword
-            const beginIndex = this.findLastOpenerByType(stack, 'begin');
+            // Simple 'end' or 'end;' - always closes the top of the stack
+            if (stack.length === 0) break;
 
-            if (beginIndex >= 0) {
+            const top = stack[stack.length - 1];
+            const topValue = top.token.value.toLowerCase();
+
+            if (topValue === 'begin') {
               // Check for context keyword immediately before begin
+              const beginIndex = stack.length - 1;
               const contextIndex = beginIndex - 1;
 
               if (contextIndex >= 0 && BEGIN_CONTEXT_KEYWORDS.includes(stack[contextIndex].token.value.toLowerCase())) {
@@ -547,16 +605,18 @@ export class AdaBlockParser extends BaseBlockParser {
                 });
               } else {
                 // No context keyword, just close begin
-                const beginBlock = stack.splice(beginIndex, 1)[0];
-                pairs.push({
-                  openKeyword: beginBlock.token,
-                  closeKeyword: token,
-                  intermediates: beginBlock.intermediates,
-                  nestLevel: stack.length
-                });
+                const beginBlock = stack.pop();
+                if (beginBlock) {
+                  pairs.push({
+                    openKeyword: beginBlock.token,
+                    closeKeyword: token,
+                    intermediates: beginBlock.intermediates,
+                    nestLevel: stack.length
+                  });
+                }
               }
             } else {
-              // No begin found, close the last opener
+              // Top is not begin, just close it
               const openBlock = stack.pop();
               if (openBlock) {
                 pairs.push({
@@ -595,6 +655,28 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
     return 0;
+  }
+
+  // Checks if 'if' is directly preceded by '(' (Ada 2012 conditional expression)
+  // Only whitespace and excluded regions are allowed between '(' and 'if'
+  // Rejects function calls: '(' preceded by identifier (e.g., Put("...\nif)
+  private isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
+      if (ch === '(') {
+        // Reject if '(' is preceded by identifier char (function call, not conditional)
+        let j = i - 1;
+        while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) j--;
+        if (j >= 0 && /[a-zA-Z0-9_)]/.test(source[j])) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   // Find the last opener for 'end loop' (can be 'for', 'while', or 'loop')

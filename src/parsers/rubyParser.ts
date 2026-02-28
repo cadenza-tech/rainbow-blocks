@@ -183,6 +183,15 @@ export class RubyBlockParser extends BaseBlockParser {
     // Operator expecting expression means not postfix
     // Includes: assignment, logical, comparison, arithmetic, range, and other operators
     if (/[=&|,([{:?+\-*/%<>^~!.]$/.test(beforeKeyword)) {
+      // If the last character before keyword is inside an excluded region
+      // (e.g., closing / of a regex literal), it's a complete expression, not an operator
+      let checkPos = position - 1;
+      while (checkPos >= lineStart && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
+        checkPos--;
+      }
+      if (checkPos >= lineStart && this.isInExcludedRegion(checkPos, excludedRegions)) {
+        return true;
+      }
       return false;
     }
 
@@ -303,6 +312,53 @@ export class RubyBlockParser extends BaseBlockParser {
       }
     }
 
+    // Ruby character literal: ?x (must check before #, ", ' to prevent false matches)
+    if (char === '?' && pos + 1 < source.length) {
+      if (pos === 0 || !/[a-zA-Z0-9_)\]}]/.test(source[pos - 1])) {
+        const nextChar = source[pos + 1];
+        if (nextChar === '\\' && pos + 2 < source.length) {
+          const escChar = source[pos + 2];
+          // \C-x, \M-x (5 chars total: ?\C-x), \M-\C-x (8 chars total: ?\M-\C-x)
+          if ((escChar === 'C' || escChar === 'M') && pos + 3 < source.length && source[pos + 3] === '-') {
+            if (
+              escChar === 'M' &&
+              pos + 4 < source.length &&
+              source[pos + 4] === '\\' &&
+              pos + 5 < source.length &&
+              source[pos + 5] === 'C' &&
+              pos + 6 < source.length &&
+              source[pos + 6] === '-' &&
+              pos + 7 < source.length
+            ) {
+              return { start: pos, end: pos + 8 };
+            }
+            if (pos + 4 < source.length) {
+              return { start: pos, end: pos + 5 };
+            }
+          }
+          // \uXXXX (7 chars: ?\uXXXX) or \u{...} (variable)
+          if (escChar === 'u') {
+            if (pos + 3 < source.length && source[pos + 3] === '{') {
+              const closeIdx = source.indexOf('}', pos + 4);
+              return { start: pos, end: closeIdx >= 0 ? closeIdx + 1 : pos + 3 };
+            }
+            return { start: pos, end: Math.min(pos + 7, source.length) };
+          }
+          // \xNN (5 chars: ?\xNN)
+          if (escChar === 'x') {
+            return { start: pos, end: Math.min(pos + 5, source.length) };
+          }
+          return { start: pos, end: pos + 3 };
+        }
+        if (nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r') {
+          // Handle surrogate pairs (codepoints > U+FFFF use 2 UTF-16 code units)
+          const codePoint = source.codePointAt(pos + 1);
+          const charLen = codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+          return { start: pos, end: pos + 1 + charLen };
+        }
+      }
+    }
+
     // Single-line comment
     if (char === '#') {
       return this.matchSingleLineComment(source, pos);
@@ -406,7 +462,7 @@ export class RubyBlockParser extends BaseBlockParser {
     // Colon after identifier/number/bracket is ternary, not symbol
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}>]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}]/.test(prevChar)) {
         return false;
       }
     }
@@ -489,10 +545,7 @@ export class RubyBlockParser extends BaseBlockParser {
         }
         return { start: pos, end: i };
       }
-      if (source[i] === '\n' || source[i] === '\r') {
-        // Unterminated regex ends at newline
-        return { start: pos, end: i };
-      }
+      // Ruby allows multiline regex between bare / delimiters
       i++;
     }
     return { start: pos, end: i };
@@ -580,11 +633,14 @@ export class RubyBlockParser extends BaseBlockParser {
         i--;
       }
       if (i >= 0 && /[a-zA-Z0-9_)\]}]/.test(source[i])) {
-        // After identifier/number/bracket, only allow heredoc with flag (- or ~)
+        // After identifier/number, only allow heredoc with flag (- or ~)
         // Rejects ambiguous cases like x <<"EOF" (could be shift + string)
-        const afterLtLt = source.slice(pos + 2);
-        if (!/^[~-]/.test(afterLtLt)) {
-          return null;
+        // But after ), ], } allow bare heredoc (e.g., method() <<HEREDOC)
+        if (!/[)\]}]/.test(source[i])) {
+          const afterLtLt = source.slice(pos + 2);
+          if (!/^[~-]/.test(afterLtLt)) {
+            return null;
+          }
         }
       }
     }

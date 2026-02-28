@@ -103,6 +103,22 @@ export class PascalBlockParser extends BaseBlockParser {
       break;
     }
 
+    // If we found 'packed' keyword before 'object', scan further back for '='
+    if (i >= 5 && source.slice(i - 5, i + 1).toLowerCase() === 'packed') {
+      i -= 6;
+      while (i >= 0) {
+        if (this.isInExcludedRegion(i, excludedRegions)) {
+          i--;
+          continue;
+        }
+        if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+          i--;
+          continue;
+        }
+        break;
+      }
+    }
+
     return i >= 0 && source[i] === '=';
   }
 
@@ -379,6 +395,14 @@ export class PascalBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
+            const topValue = stack[stack.length - 1].token.value.toLowerCase();
+            const middleValue = token.value.toLowerCase();
+            // 'of' only applies to 'case' blocks
+            if (middleValue === 'of' && topValue !== 'case') break;
+            // 'except' and 'finally' only apply to 'try' blocks
+            if ((middleValue === 'except' || middleValue === 'finally') && topValue !== 'try') break;
+            // 'else' applies to 'case' and 'try' blocks (if/else is not block-level in Pascal)
+            if (middleValue === 'else' && topValue !== 'case' && topValue !== 'try') break;
             stack[stack.length - 1].intermediates.push(token);
           }
           break;
@@ -429,10 +453,10 @@ export class PascalBlockParser extends BaseBlockParser {
 
   // Finds the index of the last non-repeat block in the stack
   private findLastNonRepeatIndex(stack: OpenBlock[]): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value !== 'repeat') {
-        return i;
-      }
+    if (stack.length === 0) return -1;
+    // Only check top of stack - don't skip past unclosed repeat blocks
+    if (stack[stack.length - 1].token.value !== 'repeat') {
+      return stack.length - 1;
     }
     return -1;
   }

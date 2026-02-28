@@ -79,49 +79,33 @@ export class CobolBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'when']
   };
 
-  // Regex cache for isValidBlockOpen patterns
-  private readonly regexCache = new Map<string, { opener: RegExp; closer: RegExp }>();
+  // Regex cache for isValidBlockOpen combined patterns
+  private readonly regexCache = new Map<string, RegExp>();
 
   // Validates block open: only valid if a matching END-keyword exists at correct nesting depth
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerKeyword = keyword.toLowerCase();
     const endKeyword = `end-${lowerKeyword}`;
     const remaining = source.slice(position + keyword.length);
-    let cached = this.regexCache.get(lowerKeyword);
-    if (!cached) {
+    let combinedPattern = this.regexCache.get(lowerKeyword);
+    if (!combinedPattern) {
       const escaped = this.escapeRegex(lowerKeyword);
       const escapedEnd = this.escapeRegex(endKeyword);
-      cached = {
-        opener: new RegExp(`(?<![a-zA-Z0-9_\\-])${escaped}(?![a-zA-Z0-9_\\-])`, 'gi'),
-        closer: new RegExp(`(?<![a-zA-Z0-9_\\-])${escapedEnd}(?![a-zA-Z0-9_\\-])`, 'gi')
-      };
-      this.regexCache.set(lowerKeyword, cached);
+      // Place end keyword first in alternation so we can check closers before openers at same position
+      combinedPattern = new RegExp(`(?<![a-zA-Z0-9_\\-])(?:${escapedEnd}|${escaped})(?![a-zA-Z0-9_\\-])`, 'gi');
+      this.regexCache.set(lowerKeyword, combinedPattern);
     }
-    const endPattern = new RegExp(cached.closer.source, cached.closer.flags);
-    const openerPattern = new RegExp(cached.opener.source, cached.opener.flags);
+    const pattern = new RegExp(combinedPattern.source, combinedPattern.flags);
 
-    // Collect opener and closer positions for nesting-aware matching
-    const events: { pos: number; isClose: boolean }[] = [];
-
-    for (const match of remaining.matchAll(openerPattern)) {
-      const absolutePos = position + keyword.length + match.index;
-      if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
-        events.push({ pos: match.index, isClose: false });
-      }
-    }
-
-    for (const match of remaining.matchAll(endPattern)) {
-      const absolutePos = position + keyword.length + match.index;
-      if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
-        events.push({ pos: match.index, isClose: true });
-      }
-    }
-
-    events.sort((a, b) => a.pos - b.pos);
-
+    // Lazy iteration: process matches in order, early exit when depth 0 closer found
     let depth = 0;
-    for (const event of events) {
-      if (event.isClose) {
+    for (const match of remaining.matchAll(pattern)) {
+      const absolutePos = position + keyword.length + match.index;
+      if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
+        continue;
+      }
+      const isClose = match[0].length > keyword.length;
+      if (isClose) {
         if (depth === 0) {
           return true;
         }
@@ -230,16 +214,16 @@ export class CobolBlockParser extends BaseBlockParser {
       return this.matchSingleLineComment(source, pos);
     }
 
-    // Fixed-format column 7 comment indicator (* or /)
+    // Fixed-format column 7 comment indicator (*, /, D, d)
     // Only treat as comment if columns 1-6 look like fixed-format sequence area
-    if (char === '*' || char === '/') {
+    if (char === '*' || char === '/' || char === 'D' || char === 'd') {
       let lineStart = pos;
       while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
         lineStart--;
       }
-      if (pos - lineStart === 6) {
+      if (this.getVisualColumn(source, lineStart, pos) === 6) {
         const sequenceArea = source.slice(lineStart, pos);
-        if (/^[\d\s]*$/.test(sequenceArea)) {
+        if (/^[\d\s\t]*$/.test(sequenceArea)) {
           return this.matchSingleLineComment(source, pos);
         }
       }
@@ -256,6 +240,19 @@ export class CobolBlockParser extends BaseBlockParser {
     }
 
     return null;
+  }
+
+  // Calculates the visual column of a position, expanding tabs to 8-character stops
+  private getVisualColumn(source: string, lineStart: number, pos: number): number {
+    let visualCol = 0;
+    for (let i = lineStart; i < pos; i++) {
+      if (source[i] === '\t') {
+        visualCol = Math.floor(visualCol / 8 + 1) * 8;
+      } else {
+        visualCol++;
+      }
+    }
+    return visualCol;
   }
 
   // Matches COBOL string with specified quote character

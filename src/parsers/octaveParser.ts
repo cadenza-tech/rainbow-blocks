@@ -73,6 +73,18 @@ export class OctaveBlockParser extends MatlabBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
+            const middleValue = token.value.toLowerCase();
+            const topOpener = stack[stack.length - 1].token.value.toLowerCase();
+            // Validate intermediate keyword against opener type
+            if (middleValue === 'else' || middleValue === 'elseif') {
+              if (topOpener !== 'if') break;
+            } else if (middleValue === 'case' || middleValue === 'otherwise') {
+              if (topOpener !== 'switch') break;
+            } else if (middleValue === 'catch') {
+              if (topOpener !== 'try') break;
+            } else if (middleValue === 'unwind_protect_cleanup') {
+              if (topOpener !== 'unwind_protect') break;
+            }
             stack[stack.length - 1].intermediates.push(token);
           }
           break;
@@ -89,12 +101,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
 
           // If no specific match found, only fallback for generic 'end'
           // Generic 'end' should NOT close 'do' blocks (only 'until' can)
+          // Only check top of stack - don't skip past unclosed do blocks
           if (matchIndex < 0 && !validOpener && stack.length > 0) {
-            for (let si = stack.length - 1; si >= 0; si--) {
-              if (stack[si].token.value.toLowerCase() !== 'do') {
-                matchIndex = si;
-                break;
-              }
+            if (stack[stack.length - 1].token.value.toLowerCase() !== 'do') {
+              matchIndex = stack.length - 1;
             }
           }
 
@@ -295,7 +305,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Check if single quote is a transpose operator (after identifier, number, ], }, or .)
     if (quote === "'" && pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar)) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         if (/[0-9]/.test(prevChar)) {
           const nextChar = source[pos + 1];
@@ -315,7 +325,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (source[i] === '\\') {
         // Octave supports backslash escapes in double-quoted strings
         if (quote === '"' && i + 1 < source.length) {
-          i += 2;
+          // Handle CRLF: \<CR><LF> should skip both characters
+          if (source[i + 1] === '\r' && i + 2 < source.length && source[i + 2] === '\n') {
+            i += 3;
+          } else {
+            i += 2;
+          }
           continue;
         }
       }

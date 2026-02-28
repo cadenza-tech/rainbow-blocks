@@ -27,6 +27,12 @@ const COMPOUND_END_TYPES = [
 // Pattern to match compound end keywords (case insensitive)
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
+// Pattern to match compound end keywords with continuation line: end &\n[&]keyword
+const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
+  `\\bend[ \\t]*&[ \\t]*(?:\\r\\n|\\r|\\n)[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
+  'gi'
+);
+
 export class FortranBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
@@ -351,6 +357,10 @@ export class FortranBlockParser extends BaseBlockParser {
     while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
       i++;
     }
+    // end%component is derived type component access, not block close
+    if (i < source.length && source[i] === '%') {
+      return false;
+    }
     // Handle & continuation: end &\n  = ... (assignment across lines)
     if (i < source.length && source[i] === '&') {
       i++;
@@ -371,6 +381,10 @@ export class FortranBlockParser extends BaseBlockParser {
           i++;
         }
       }
+    }
+    // end &\n%component (derived type component access across continuation)
+    if (i < source.length && source[i] === '%') {
+      return false;
     }
     // end = ... (assignment) but not end == ... (comparison)
     if (i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
@@ -421,6 +435,7 @@ export class FortranBlockParser extends BaseBlockParser {
       return false;
     }
     // After closing paren, check for :: or , (indicating type specifier)
+    // or function/subroutine keywords (type(name) function foo)
     while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
       i++;
     }
@@ -428,6 +443,10 @@ export class FortranBlockParser extends BaseBlockParser {
       return true;
     }
     if (i < source.length && source[i] === ',') {
+      return true;
+    }
+    const afterParen = source.slice(i);
+    if (/^(recursive|pure|elemental|impure|function|subroutine)\b/i.test(afterParen)) {
       return true;
     }
     return false;
@@ -652,6 +671,28 @@ export class FortranBlockParser extends BaseBlockParser {
         });
       }
       match = COMPOUND_END_PATTERN.exec(source);
+    }
+
+    // Also detect compound end with continuation line: end &\n[&]keyword
+    CONTINUATION_COMPOUND_END_PATTERN.lastIndex = 0;
+    let contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
+    while (contMatch !== null) {
+      const pos = contMatch.index;
+      if (
+        !this.isInExcludedRegion(pos, excludedRegions) &&
+        !this.isAfterDoubleColon(source, pos, excludedRegions) &&
+        !compoundEndPositions.has(pos)
+      ) {
+        const fullMatch = contMatch[0];
+        const endType = contMatch[1].toLowerCase();
+        // Normalize keyword to "end <type>" for consistent matching in matchBlocks
+        compoundEndPositions.set(pos, {
+          keyword: `end ${contMatch[1]}`,
+          length: fullMatch.length,
+          endType
+        });
+      }
+      contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
     }
 
     // Tokenize with case-insensitive matching
@@ -902,6 +943,12 @@ export class FortranBlockParser extends BaseBlockParser {
               break;
             }
             if (middleValue === 'case' && openerValue !== 'select') {
+              break;
+            }
+            if ((middleValue === 'else' || middleValue === 'elseif' || /^else\s+if$/.test(middleValue)) && openerValue !== 'if') {
+              break;
+            }
+            if (middleValue === 'contains' && !['program', 'module', 'submodule', 'function', 'subroutine'].includes(openerValue)) {
               break;
             }
             topBlock.intermediates.push(token);

@@ -62,6 +62,11 @@ export class VhdlBlockParser extends BaseBlockParser {
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerKeyword = keyword.toLowerCase();
 
+    // Reject keywords preceded by '.' (library path like work.process)
+    if (position > 0 && source[position - 1] === '.') {
+      return false;
+    }
+
     // 'wait for' is a timing statement, not a for-loop block
     if (lowerKeyword === 'for') {
       const textBefore = source.slice(0, position).toLowerCase();
@@ -106,14 +111,14 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     // 'use entity' is direct instantiation/component configuration, not entity block
     // 'label: entity' is direct entity instantiation (VHDL-93+), not entity block
-    if (lowerKeyword === 'entity') {
+    if (lowerKeyword === 'entity' || lowerKeyword === 'configuration') {
       const textBefore = source.slice(0, position).toLowerCase();
       const lastNl = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
       const lineBefore = textBefore.slice(lastNl + 1);
       if (/\buse[ \t]+$/.test(lineBefore)) {
         return false;
       }
-      if (/:\s*$/.test(lineBefore)) {
+      if (lowerKeyword === 'entity' && /:\s*$/.test(lineBefore)) {
         return false;
       }
     }
@@ -147,6 +152,15 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     if (lowerKeyword !== 'loop') {
       return true;
+    }
+
+    // Reject 'loop' preceded by a dot (e.g., record.loop or record . loop)
+    let dotCheck = position - 1;
+    while (dotCheck >= 0 && (source[dotCheck] === ' ' || source[dotCheck] === '\t')) {
+      dotCheck--;
+    }
+    if (dotCheck >= 0 && source[dotCheck] === '.') {
+      return false;
     }
 
     // Look backwards across multiple lines to find if a prefix keyword precedes this
@@ -213,8 +227,14 @@ export class VhdlBlockParser extends BaseBlockParser {
   // textAbsOffset is the absolute offset where lineText starts in the source
   private stripTrailingComment(lineText: string, textAbsOffset: number, excludedRegions: ExcludedRegion[]): string {
     for (let ci = 0; ci < lineText.length - 1; ci++) {
-      if (lineText[ci] === '-' && lineText[ci + 1] === '-' && this.isInExcludedRegion(textAbsOffset + ci, excludedRegions)) {
-        return lineText.slice(0, ci).trimEnd();
+      if (lineText[ci] === '-' && lineText[ci + 1] === '-') {
+        const absPos = textAbsOffset + ci;
+        // Only strip if this is the start of a comment (excluded region starts here)
+        // not if we're inside a string (excluded region starts before here)
+        const region = this.findExcludedRegionAt(absPos, excludedRegions);
+        if (region && region.start === absPos) {
+          return lineText.slice(0, ci).trimEnd();
+        }
       }
     }
     return lineText;
@@ -273,6 +293,27 @@ export class VhdlBlockParser extends BaseBlockParser {
     // Character literal: 'x'
     if (char === "'") {
       return this.matchCharacterLiteral(source, pos);
+    }
+
+    // VHDL-93 extended identifier: \keyword\ (backslash-delimited)
+    if (char === '\\') {
+      let i = pos + 1;
+      while (i < source.length) {
+        if (source[i] === '\\') {
+          // Check for doubled backslash escape (\\) inside extended identifier
+          if (i + 1 < source.length && source[i + 1] === '\\') {
+            i += 2;
+            continue;
+          }
+          return { start: pos, end: i + 1 };
+        }
+        // Extended identifiers cannot span lines
+        if (source[i] === '\n' || source[i] === '\r') {
+          return { start: pos, end: i };
+        }
+        i++;
+      }
+      return { start: pos, end: source.length };
     }
 
     return null;
@@ -423,15 +464,17 @@ export class VhdlBlockParser extends BaseBlockParser {
       if (token.type !== 'block_middle') return true;
       const kw = token.value.toLowerCase();
       if (kw !== 'when' && kw !== 'else') return true;
-      return !this.isInSignalAssignment(source, token.startOffset, excludedRegions);
+      return !this.isInSignalAssignment(source, token.startOffset, excludedRegions, kw);
     });
   }
 
   // Checks if position is within a signal assignment (has <= before it in the same statement)
-  private isInSignalAssignment(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  // keyword parameter indicates which keyword ('when' or 'else') is being checked
+  private isInSignalAssignment(source: string, position: number, excludedRegions: ExcludedRegion[], keyword: string): boolean {
     // Search backwards for <= or statement/block boundaries
     const lowerSource = source.toLowerCase();
     let i = position - 1;
+    let foundWhen = false;
     while (i >= 0) {
       // Skip over excluded regions (comments, strings)
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -441,8 +484,21 @@ export class VhdlBlockParser extends BaseBlockParser {
       }
       const ch = source[i];
       if (ch === ';') return false;
+      // Track 'when' keyword presence (conditional signal assignments require when before else)
+      if (i >= 3) {
+        const whenSlice = lowerSource.slice(i - 3, i + 1);
+        if (
+          whenSlice === 'when' &&
+          (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
+          (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+        ) {
+          foundWhen = true;
+        }
+      }
       if (ch === '=' && i > 0 && source[i - 1] === '<') {
-        return true;
+        // For 'when': finding <= is sufficient (first when in conditional assignment)
+        // For 'else': require a 'when' between <= and else
+        return keyword === 'when' || foundWhen;
       }
       // Stop at block boundary keywords that start a new context
       // Note: 'else'/'elsif' are NOT boundaries here because chained conditional
@@ -493,9 +549,12 @@ export class VhdlBlockParser extends BaseBlockParser {
           if (stack.length > 0) {
             const topOpener = stack[stack.length - 1].token.value.toLowerCase();
             // 'when' is only valid as intermediate for 'case' blocks
+            // In case-generate, stack is [case, generate] - attach when to case
             if (token.value.toLowerCase() === 'when') {
               if (topOpener === 'case') {
                 stack[stack.length - 1].intermediates.push(token);
+              } else if (topOpener === 'generate' && stack.length >= 2 && stack[stack.length - 2].token.value.toLowerCase() === 'case') {
+                stack[stack.length - 2].intermediates.push(token);
               }
             } else {
               stack[stack.length - 1].intermediates.push(token);
