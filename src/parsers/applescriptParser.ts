@@ -435,6 +435,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
     }
 
+    // Possessive form: 'X's <keyword>' pattern (property access)
+    if (lineBefore.endsWith("'s ") || lineBefore.endsWith("'s\t")) {
+      return true;
+    }
+
     // '<keyword> of' pattern (property access, same line only)
     const afterKw = lowerSource.slice(position + keyword.length);
     if (/^[ \t]+of\b/.test(afterKw)) {

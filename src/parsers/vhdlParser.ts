@@ -528,6 +528,21 @@ export class VhdlBlockParser extends BaseBlockParser {
         // For 'else': require a 'when' between <= and else
         return keyword === 'when' || foundWhen;
       }
+      // Variable assignment :=
+      if (ch === '=' && i > 0 && source[i - 1] === ':') {
+        return keyword === 'when' || foundWhen;
+      }
+      // 'return' starts a conditional expression context (return X when C else Y)
+      if (i >= 5) {
+        const retSlice = lowerSource.slice(i - 5, i + 1);
+        if (
+          retSlice === 'return' &&
+          (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
+          (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+        ) {
+          return keyword === 'when' || foundWhen;
+        }
+      }
       // Stop at block boundary keywords that start a new context
       // Note: 'else'/'elsif' are NOT boundaries here because chained conditional
       // signal assignments use else (e.g., sig <= a when c1 else b when c2 else c;)
@@ -598,11 +613,12 @@ export class VhdlBlockParser extends BaseBlockParser {
           if (compoundMatch) {
             const endType = compoundMatch[1];
 
-            // Special case: 'end generate' closes both 'generate' and preceding control keyword
+            // Special case: 'end generate' closes all 'generate' blocks in the chain
+            // (for elsif/else generate chains, multiple generate blocks stack up)
             if (endType === 'generate') {
-              const generateIndex = this.findLastOpenerByType(stack, 'generate');
+              let generateIndex = this.findLastOpenerByType(stack, 'generate');
 
-              if (generateIndex >= 0) {
+              while (generateIndex >= 0) {
                 // Check for control keyword immediately before generate
                 const controlIndex = generateIndex - 1;
                 let controlBlock: OpenBlock | null = null;
@@ -611,7 +627,7 @@ export class VhdlBlockParser extends BaseBlockParser {
                   controlBlock = stack[controlIndex];
                 }
 
-                // Close the generate block first
+                // Close the generate block
                 const generateBlock = stack.splice(generateIndex, 1)[0];
                 pairs.push({
                   openKeyword: generateBlock.token,
@@ -629,7 +645,13 @@ export class VhdlBlockParser extends BaseBlockParser {
                     intermediates: controlBlock.intermediates,
                     nestLevel: stack.length
                   });
+                  // Stop after closing the root control keyword (if/for/while/case)
+                  // to avoid closing outer generate chains
+                  break;
                 }
+
+                // Continue: close more generate blocks in the elsif/else chain
+                generateIndex = this.findLastOpenerByType(stack, 'generate');
               }
             } else {
               let matchIndex = -1;

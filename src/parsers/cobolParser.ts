@@ -79,47 +79,98 @@ export class CobolBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'when']
   };
 
-  // Regex cache for isValidBlockOpen combined patterns
+  // Regex cache for combined patterns
   private readonly regexCache = new Map<string, RegExp>();
 
-  // Validates block open: only valid if a matching END-keyword exists at correct nesting depth
+  // Cache of valid opener positions per keyword type, computed once per parse
+  private validOpenPositions = new Map<string, Set<number>>();
+
+  // Validates block open: checks pre-computed valid positions (O(1) per call)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerKeyword = keyword.toLowerCase();
+    if (!this.validOpenPositions.has(lowerKeyword)) {
+      this.validOpenPositions.set(lowerKeyword, this.computeValidPositions(lowerKeyword, source, excludedRegions));
+    }
+    return this.validOpenPositions.get(lowerKeyword)?.has(position) ?? false;
+  }
+
+  // Single-pass computation of all valid opener positions for a keyword type
+  private computeValidPositions(lowerKeyword: string, source: string, excludedRegions: ExcludedRegion[]): Set<number> {
     const endKeyword = `end-${lowerKeyword}`;
-    const remaining = source.slice(position + keyword.length);
     let combinedPattern = this.regexCache.get(lowerKeyword);
     if (!combinedPattern) {
       const escaped = this.escapeRegex(lowerKeyword);
       const escapedEnd = this.escapeRegex(endKeyword);
-      // Place end keyword first in alternation so we can check closers before openers at same position
       combinedPattern = new RegExp(`(?<![a-zA-Z0-9_\\-])(?:${escapedEnd}|${escaped})(?![a-zA-Z0-9_\\-])`, 'gi');
       this.regexCache.set(lowerKeyword, combinedPattern);
     }
     const pattern = new RegExp(combinedPattern.source, combinedPattern.flags);
 
-    // Lazy iteration: process matches in order, early exit when depth 0 closer found
-    let depth = 0;
-    for (const match of remaining.matchAll(pattern)) {
-      const absolutePos = position + keyword.length + match.index;
-      if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
+    // Collect all openers and closers in source order
+    const openerPositions: number[] = [];
+    const closerPositions = new Set<number>();
+    for (const match of source.matchAll(pattern)) {
+      const pos = match.index;
+      if (this.isInExcludedRegion(pos, excludedRegions)) {
         continue;
       }
-      const isClose = match[0].length > keyword.length;
+      // Skip hyphenated identifiers
+      if (pos > 0 && source[pos - 1] === '-') {
+        continue;
+      }
+      const end = pos + match[0].length;
+      if (end < source.length && source[end] === '-') {
+        continue;
+      }
+      const isClose = match[0].length > lowerKeyword.length;
       if (isClose) {
-        if (depth === 0) {
-          return true;
-        }
-        depth--;
+        closerPositions.add(pos);
       } else {
-        depth++;
+        // For PERFORM, skip inline forms (PERFORM paragraph-name)
+        // Inline PERFORMs are followed by an identifier that is not a structured keyword
+        if (lowerKeyword === 'perform') {
+          const afterInner = source.slice(pos + match[0].length);
+          const nextWord = afterInner.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
+          if (nextWord) {
+            const word = nextWord[1].toLowerCase();
+            if (word !== 'until' && word !== 'varying' && word !== 'with' && word !== 'times') {
+              continue;
+            }
+          }
+        }
+        openerPositions.push(pos);
       }
     }
 
-    return false;
+    // Match openers to closers using a stack (forward pass, O(n))
+    const validPositions = new Set<number>();
+    const stack: number[] = [];
+    // Interleave openers and closers in position order
+    let oi = 0;
+    const closerList = [...closerPositions].sort((a, b) => a - b);
+    let ci = 0;
+    while (oi < openerPositions.length || ci < closerList.length) {
+      const openerPos = oi < openerPositions.length ? openerPositions[oi] : Number.MAX_SAFE_INTEGER;
+      const closerPos = ci < closerList.length ? closerList[ci] : Number.MAX_SAFE_INTEGER;
+      if (openerPos < closerPos) {
+        stack.push(openerPos);
+        oi++;
+      } else {
+        if (stack.length > 0) {
+          const pos = stack.pop();
+          if (pos !== undefined) {
+            validPositions.add(pos);
+          }
+        }
+        ci++;
+      }
+    }
+    return validPositions;
   }
 
   // Override tokenize for case-insensitive keyword matching
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    this.validOpenPositions.clear();
     const tokens: Token[] = [];
     const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
 

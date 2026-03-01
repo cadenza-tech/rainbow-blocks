@@ -499,7 +499,33 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
 
-    return result;
+    // Filter out 'or else' and 'and then' short-circuit operators
+    const filtered: Token[] = [];
+    for (let i = 0; i < result.length; i++) {
+      const token = result[i];
+      const lowerValue = token.value.toLowerCase();
+
+      // 'or else' short-circuit: remove both 'or' and 'else' tokens
+      if (lowerValue === 'else' && filtered.length > 0 && filtered[filtered.length - 1].value.toLowerCase() === 'or') {
+        filtered.pop();
+        continue;
+      }
+
+      // 'and then' short-circuit: 'and' is not a keyword, so check source before 'then'
+      if (lowerValue === 'then') {
+        const beforeThen = source.slice(0, token.startOffset).trimEnd().toLowerCase();
+        if (beforeThen.endsWith('and')) {
+          const andStart = beforeThen.length - 3;
+          if (andStart === 0 || !/[a-zA-Z0-9_]/.test(beforeThen[andStart - 1])) {
+            continue;
+          }
+        }
+      }
+
+      filtered.push(token);
+    }
+
+    return filtered;
   }
 
   // Returns the token type for a keyword (case-insensitive)

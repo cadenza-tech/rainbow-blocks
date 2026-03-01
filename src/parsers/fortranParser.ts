@@ -756,7 +756,7 @@ export class FortranBlockParser extends BaseBlockParser {
         // Same line: else if
         const isSameLine = /^\s+$/.test(textBetween) && !textBetween.includes('\n') && !textBetween.includes('\r');
         // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if
-        const isContinuation = /^\s*&\s*(?:![^\r\n]*)?\r?\n(?:\s*![^\r\n]*\r?\n)*\s*&?\s*$/.test(textBetween);
+        const isContinuation = /^\s*&\s*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?\s*$/.test(textBetween);
         if (isSameLine || isContinuation) {
           mergedTokens.push({
             type: 'block_middle',
@@ -854,7 +854,7 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // Current line before position must be just whitespace/continuation &
     const currentLineBefore = source.slice(currentLineStart, position).trimStart();
-    if (currentLineBefore !== '' && currentLineBefore !== '&') {
+    if (currentLineBefore !== '' && !/^&\s*$/.test(currentLineBefore)) {
       return false;
     }
 
@@ -951,7 +951,7 @@ export class FortranBlockParser extends BaseBlockParser {
             if ((middleValue === 'else' || middleValue === 'elseif' || /^else\s+if$/.test(middleValue)) && openerValue !== 'if') {
               break;
             }
-            if (middleValue === 'contains' && !['program', 'module', 'submodule', 'function', 'subroutine'].includes(openerValue)) {
+            if (middleValue === 'contains' && !['program', 'module', 'submodule', 'function', 'subroutine', 'type'].includes(openerValue)) {
               break;
             }
             topBlock.intermediates.push(token);

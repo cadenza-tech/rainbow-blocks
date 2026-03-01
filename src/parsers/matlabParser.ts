@@ -316,10 +316,19 @@ export class MatlabBlockParser extends BaseBlockParser {
     return { start: pos, end: source.length };
   }
 
-  // Matches double-quoted string: "..." with "" as escape
+  // Matches double-quoted string: "..." with "" and \" as escape
   private matchDoubleQuotedString(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
     while (i < source.length) {
+      // Handle backslash escapes
+      if (source[i] === '\\' && i + 1 < source.length) {
+        if (source[i + 1] === '\r' && i + 2 < source.length && source[i + 2] === '\n') {
+          i += 3;
+        } else {
+          i += 2;
+        }
+        continue;
+      }
       if (source[i] === '"') {
         // Check for escaped quote ""
         if (i + 1 < source.length && source[i + 1] === '"') {

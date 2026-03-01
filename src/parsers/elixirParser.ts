@@ -135,17 +135,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         }
         // Handle #{} interpolation in quoted atoms
         if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
-          let depth = 1;
           i += 2;
-          while (i < source.length && depth > 0) {
-            if (source[i] === '\\' && i + 1 < source.length) {
-              i += 2;
-              continue;
-            }
-            if (source[i] === '{') depth++;
-            else if (source[i] === '}') depth--;
-            i++;
-          }
+          i = this.skipInterpolation(source, i);
           continue;
         }
         if (source[i] === quote) {
@@ -253,15 +244,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         i = this.skipNestedString(source, i);
         continue;
       } else if (source[i] === '#') {
-        // Only treat # as nested interpolation when followed by {
-        if (i + 1 < source.length && source[i + 1] === '{') {
-          // Nested #{} inside interpolation code (e.g. in a nested string)
-          // is handled by skipNestedString, so this is a bare #{
-          i += 2;
-          depth++;
-          continue;
-        }
-        // Bare # starts a comment, skip to end of line
+        // # starts a comment in interpolation code, skip to end of line
+        // Nested #{} inside strings is handled by skipNestedString above
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
@@ -675,12 +659,14 @@ export class ElixirBlockParser extends BaseBlockParser {
     let bracketDepth = 0;
     let braceDepth = 0;
 
-    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-      // Skip excluded regions (strings, comments, etc)
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        i++;
+    while (i < source.length) {
+      // Skip excluded regions (strings, comments, etc) before checking for newline
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
         continue;
       }
+      if (source[i] === '\n' || source[i] === '\r') break;
 
       // Track bracket depth
       const ch = source[i];
