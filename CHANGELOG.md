@@ -5,6 +5,31 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.10] - 2026-03-02
+
+### Fixed
+
+- Ada: Filter `or else` short-circuit operator to not create false `else` intermediate
+- Ada: Filter `and then` short-circuit operator to not create duplicate `then` intermediate
+- AppleScript: Skip possessive form `X's <keyword>` pattern as variable name (e.g., `app's repeat`)
+- COBOL: Replace O(n^2) `isValidBlockOpen` with O(n) `computeValidPositions` single-pass approach for deep nesting performance
+- COBOL: Distinguish inline `PERFORM paragraph-name` from structured `PERFORM UNTIL/VARYING/WITH/TIMES` blocks
+- Elixir: Reuse `skipInterpolation` for `#{}` in quoted atoms instead of inline depth tracking
+- Elixir: Treat bare `#` inside interpolation code as comment start (not nested interpolation)
+- Elixir: Fix `isDoColonOneLiner` to skip excluded regions before checking for newline
+- Fortran: Handle CR-only (`\r`) line endings in `else if` continuation merging
+- Fortran: Accept leading `&` with trailing whitespace on continuation line in `isPrecedingContinuationKeyword`
+- Fortran: Add `type` to valid blocks for `contains` intermediate
+- MATLAB: Handle backslash-escaped quotes (`\"`) in double-quoted strings
+- VHDL: Handle `:=` variable assignment conditional (`x := a when cond else b`)
+- VHDL: Handle `return` conditional expression (`return a when cond else b`)
+- VHDL: Handle `elsif`/`else generate` chains by closing all stacked generate blocks with single `end generate`
+
+### Tests
+
+- Add 60+ tests across 10 parser test files for bug fix verification and branch coverage improvement
+- Improve branch coverage from 98.95% to 99.02%
+
 ## [1.1.9] - 2026-03-01
 
 ### Fixed
@@ -467,6 +492,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.10]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.6...v1.1.7
