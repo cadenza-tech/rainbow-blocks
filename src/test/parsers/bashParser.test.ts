@@ -2872,5 +2872,204 @@ fi`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });
+
+    test('Bug 2: # in word should not be treated as comment in command substitution', () => {
+      const pairs = parser.parse('if $(echo file#name); then\n  echo hello\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('Bug 5: # in word should not be treated as comment at top level', () => {
+      const pairs = parser.parse('echo C#; if true; then echo hello; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('Bug 5: # after space should still be a comment', () => {
+      const pairs = parser.parse('if true; then\n  echo hello # this is a comment\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('Bug 5: # after semicolon should be a comment', () => {
+      const pairs = parser.parse('echo hello;# comment\nif true; then\n  echo world\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('Bug 6: nested quotes in "$(...)" should not break string parsing', () => {
+      const pairs = parser.parse('x="$(\n  echo "\n  if true; then\n    echo hello\n  fi\n")"\nif true; then\n  echo world\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('Bug 6: simple nested quotes in command substitution inside double quotes', () => {
+      const pairs = parser.parse('x="$(echo "hello")"\nif true; then\n  echo world\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  suite('Coverage: new bug fix code paths', () => {
+    // Lines 277-280: Backslash escape in nested string inside parameter expansion within double quotes
+    test('should handle backslash escape in nested string inside param expansion within double quotes', () => {
+      const source = 'if true; then\n  echo "$' + '{foo:-"bar\\\\\\"baz"}"\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 322-325: Backtick command substitution inside param expansion within double quotes
+    test('should handle backtick command substitution inside param expansion within double quotes', () => {
+      const source = 'if true; then\n  echo "$' + '{foo:-`echo x`}"\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 316-319: Nested param expansion brace depth tracking within double-quoted string
+    test('should handle nested param expansion brace depth tracking within double quotes', () => {
+      const source = 'if true; then\n  echo "$' + '{foo:-$' + '{bar:-y}}"\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 440-449, 502-509: Heredoc body at newline + heredoc operator detection inside matchCommandSubstitution
+    test('should handle heredoc inside command substitution', () => {
+      const source = 'if true; then\n  x=$(cat <<EOF\nline with ) paren\nEOF\n)\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 653-662, 706-713: Heredoc inside process substitution
+    test('should handle heredoc inside process substitution', () => {
+      const source = 'if true; then\n  diff <(cat <<EOF\nline with ) paren\nEOF\n) file\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 691-695: Backtick command substitution inside process substitution
+    test('should handle backtick inside process substitution', () => {
+      const source = 'if true; then\n  cat <(`echo "hello)"`)\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 894-896: isAtCommandPosition after backtick
+    test('should recognize keyword at command position after backtick', () => {
+      const source = 'if true; then\n  `cmd` for x in 1; do echo; done\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'for');
+    });
+
+    // Lines 976-977: Paren depth tracking (closing paren) in isCasePattern backward scan
+    test('should handle paren depth tracking in case pattern backward scan', () => {
+      const source = 'if true; then\n  (echo hi)\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 986-992: isCasePattern check for (pattern) at line start
+    test('should parse case with POSIX (pattern) syntax', () => {
+      const source = 'case x in\n  (a) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // Lines 212-214: isParameterExpansion check for parameter length syntax
+    test('should not treat hash in parameter length expansion as comment start', () => {
+      const source = 'if true; then\n  $' + '{#var}\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: uncovered branch paths', () => {
+    // L212-214: isParameterExpansion - $$# where pos >= 2 && source[pos-1] === '{' && source[pos-2] === '$'
+    // $$# is $$ (PID) followed by # (comment), NOT parameter expansion
+    test('should treat $$# as comment start (not parameter expansion)', () => {
+      const source = 'if true; then\n  echo $$# this is a comment\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // L327-328: braceDepth++ in matchBashDoubleQuote for nested { inside ${...}
+    test('should handle nested braces inside parameter expansion within double quotes', () => {
+      const source = 'if true; then\n  echo "$' + '{foo:-{bar}}"\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // L339-343: Backtick inside double-quoted string (not inside ${...})
+    test('should handle backtick command substitution inside double-quoted string', () => {
+      const source = 'if true; then\n  echo "hello `echo world`"\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // L442-444: CRLF bodyStart++ in heredoc inside command substitution
+    test('should handle heredoc with CRLF inside command substitution', () => {
+      const source = 'if true; then\r\n  x=$(cat <<EOF\r\nhello\r\nEOF\r\n)\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // L655-657: CRLF bodyStart++ in heredoc inside process substitution
+    test('should handle heredoc with CRLF inside process substitution', () => {
+      const source = 'if true; then\r\n  diff <(cat <<EOF\r\nhello\r\nEOF\r\n) file\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // L447: body ? body.end : bodyStart - heredoc body returns null (unterminated)
+    test('should handle unterminated heredoc inside command substitution', () => {
+      const source = 'if true; then\n  x=$(cat <<EOF\nhello';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    // L660: body ? body.end : bodyStart - heredoc body returns null in process substitution
+    test('should handle unterminated heredoc inside process substitution', () => {
+      const source = 'if true; then\n  diff <(cat <<EOF\nhello';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    // L894-896: isAtCommandPosition backtick check - explicit backtick before keyword
+    test('should recognize keyword at command position immediately after backtick', () => {
+      const source = '`cmd`\nif true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // L976-977: parenDepth-- in isCasePattern backward scan with nested parens
+    test('should handle nested parentheses in case pattern backward scan', () => {
+      const source = 'case x in\n  (a|(b)) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // L986-992: (pattern) POSIX case syntax at line start after ;;
+    test('should parse POSIX case pattern with parenthesized keyword after ;;', () => {
+      const source = 'case x in\n  (a) echo;;\n  (for) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // L1005: ;; check in isCasePattern via ;;& terminator
+    test('should recognize keyword as case pattern after ;;&', () => {
+      const source = 'case x in\n  a) echo;;&\n  for) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  // Covers L212-214: isParameterExpansion returns true for ${#var} syntax
+  suite('Coverage: isParameterExpansion true branch', () => {
+    test('should not treat # in parameter length expansion as comment', () => {
+      const source = 'if [ $' + '{#var} -gt 0 ]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
   });
 });

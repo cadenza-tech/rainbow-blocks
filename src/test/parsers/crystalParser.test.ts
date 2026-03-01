@@ -2379,5 +2379,66 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('Bug 15: symbol with ? should not hide adjacent keyword', () => {
+      const pairs = parser.parse('x = :end?\nif true\n  y = 1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('Bug 15: symbol with ! should not hide adjacent keyword', () => {
+      const pairs = parser.parse('x = :save!\nif true\n  y = 1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should filter out :: scope resolution keywords', () => {
+      // Covers lines 351-353: :: scope resolution filter in tokenize
+      const source = 'Module::Class::Begin';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should filter out keyword in <<- heredoc opener', () => {
+      // Covers lines 359-361: heredoc opener keyword filter (<<-end)
+      const source = `x = <<-end
+hello
+end
+if true
+  1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should filter out keyword in <<- quoted heredoc opener', () => {
+      // Covers lines 362-364: heredoc opener keyword filter (<<-'do', <<-"if")
+      const source = `x = <<-'do'
+hello
+do
+if true
+  1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle regex inside string interpolation before block', () => {
+      // Covers break in isLoopDo when non-matching do is found
+      const source = `"#{/regex/}"
+if true
+  1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // L1014-1016: break in isLoopDo when first do found after loop keyword doesn't match position
+    test('should break in isLoopDo when do found after loop does not match current do position', () => {
+      const source = 'while true do\n  [1,2].each do |x|\n    puts x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'while');
+    });
   });
 });

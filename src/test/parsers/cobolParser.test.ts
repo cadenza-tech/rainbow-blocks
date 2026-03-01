@@ -652,6 +652,13 @@ END-IF`;
     });
   });
 
+  suite('Bug fixes', () => {
+    test('Bug 9: D/d keyword at column 7 should not be treated as debug line', () => {
+      const pairs = parser.parse('      DIVIDE A BY B\n      END-DIVIDE');
+      assertSingleBlock(pairs, 'DIVIDE', 'END-DIVIDE');
+    });
+  });
+
   suite('Performance', () => {
     test('should handle 200-level nesting within 5 seconds', () => {
       const depth = 200;
@@ -669,6 +676,17 @@ END-IF`;
       const elapsed = Date.now() - start;
       assert.strictEqual(pairs.length, depth);
       assert.ok(elapsed < 5000, `Took ${elapsed}ms, expected < 5000ms`);
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle D in column 7 at end of file with no following character', () => {
+      // Covers line 228: ternary false branch when D is at end of file
+      const source = 'IF COND\n      D';
+      const pairs = parser.parse(source);
+      // D at column 7 with no next char is treated as debug comment line
+      // IF has no matching END-IF, so no blocks
+      assertNoBlocks(pairs);
     });
   });
 });

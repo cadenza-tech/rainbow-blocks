@@ -1162,6 +1162,16 @@ end process;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'process', 'end process');
     });
+
+    test('Bug 3: wait on/until with for should not create block', () => {
+      const pairs = parser.parse('process begin\n  wait on sig\n  for 10 ns;\nend process;');
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('Bug 13: entity instantiation with colon on previous line', () => {
+      const pairs = parser.parse('architecture rtl of test is\nbegin\n  inst1 :\n  entity work.adder\n    port map (a => b);\nend architecture;');
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
   });
 
   suite('Coverage: extended identifier edge cases', () => {
@@ -1224,6 +1234,37 @@ end process;`;
 end loop;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle early break in blank line scanning near start of file', () => {
+      // Covers line 95: prevNl <= 0 break in blank-line scanning for wait...for
+      const source = `for i in 0 to 3 loop
+  wait;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should not break wait for when semicolon is inside excluded region', () => {
+      // Covers lines 269-274: semicolon in wait for expression inside excluded region
+      const source = `process
+begin
+  wait ";" for 10 ns;
+end process;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should handle qualified expression tick-paren as attribute tick', () => {
+      // Covers lines 388-390: type'( qualified expression detection
+      const source = `entity t is
+begin
+  x <= std_logic_vector'('0');
+end entity;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
     });
   });
 });

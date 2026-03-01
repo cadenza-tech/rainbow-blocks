@@ -964,6 +964,12 @@ end`;
       const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
       assert.ok(beginPair);
     });
+
+    test('Bug 12: default with colon on next line should be recognized as middle keyword', () => {
+      const pairs = parser.parse('case (sel)\n  0: x = a;\n  default\n  : x = b;\nendcase');
+      assertSingleBlock(pairs, 'case', 'endcase');
+      assertIntermediates(pairs[0], ['default']);
+    });
   });
 
   suite('Uncovered line coverage', () => {
@@ -1065,6 +1071,36 @@ end`;
       const source = 'always #(/* comment */ 10) begin\n  clk = ~clk;\nend';
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should reject control keyword when :: scope resolution follows', () => {
+      // Covers lines 262-264: double-colon :: scope resolution skip returns false
+      const source = `module m;
+  if (cond) :: begin
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      // 'if' is rejected (:: found), 'begin'/'end' is standalone, 'module'/'endmodule' is another
+      assertBlockCount(pairs, 2);
+      const modulePair = pairs.find((p) => p.openKeyword.value === 'module');
+      assert.ok(modulePair);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair);
+    });
+
+    test('should handle escaped identifier label before begin', () => {
+      // Covers lines 273-276: escaped identifier \name in label detection
+      // always + begin + module = 3 pairs (always and begin both close with same end)
+      const source = `module m;
+  always \\my_label : begin
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair);
     });
   });
 });

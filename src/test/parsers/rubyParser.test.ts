@@ -1758,7 +1758,7 @@ end`;
     test('should scan gap for excluded regions between heredoc opener and content', () => {
       // Lines 341-342: gap scanning when result.start > i
       // The heredoc opener line has a comment after the heredoc start
-      const source = "x = <<~HEREDOC # comment with end\n  body text\nHEREDOC\ndef foo\nend";
+      const source = 'x = <<~HEREDOC # comment with end\n  body text\nHEREDOC\ndef foo\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
@@ -2073,6 +2073,26 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('Bug 4: heredoc identifier matching block keyword should not be treated as keyword', () => {
+      const pairs = parser.parse('def foo\n  x = <<end\n  content\nend\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('Bug 4: heredoc with tilde flag and block keyword identifier', () => {
+      const pairs = parser.parse('def foo\n  x = <<~do\n  content\ndo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('Bug 15: symbol with ? should not hide adjacent keyword', () => {
+      const pairs = parser.parse('x = :end?\nif true\n  y = 1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('Bug 15: symbol with ! should not hide adjacent keyword', () => {
+      const pairs = parser.parse('x = :save!\nif true\n  y = 1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Multibyte character literals', () => {
@@ -2124,6 +2144,15 @@ end`;
       const source = 'x = ?\\x41\ndef foo\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle \\r stripping in heredoc content lines', () => {
+      // Covers lines 713-715: \r stripping in heredoc content
+      const source = 'x = <<HEREDOC\r\nline1\r\nHEREDOC\r\nif true\r\n  1\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 });

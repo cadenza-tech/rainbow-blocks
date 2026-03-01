@@ -923,4 +923,16 @@ end`;
       assertSingleBlock(pairs, 'function', 'end');
     });
   });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle block comment %} with trailing whitespace before newline', () => {
+      // Covers lines 261-263: lineEnd scanning past whitespace after %} closing
+      const source = `%{
+comment
+%}   \nif true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });

@@ -1131,4 +1131,13 @@ end.`;
       assertSingleBlock(pairs, 'begin', 'end');
     });
   });
+
+  suite('Coverage: new bug fix code paths', () => {
+    test('should parse try-catch-end with catch as intermediate', () => {
+      const source = 'try X catch _:_ -> ok end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
 });

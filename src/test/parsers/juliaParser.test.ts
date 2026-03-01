@@ -2179,6 +2179,47 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
     });
+
+    test('Bug 14: string macro suffix containing block keyword should not be detected', () => {
+      const pairs = parser.parse('x = custom"content"end\nfunction foo()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('Bug 14: triple-quoted string macro suffix should not be detected', () => {
+      const pairs = parser.parse('x = custom"""content"""end\nfunction foo()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Coverage: new bug fix code paths', () => {
+    // Covers isInsideParentheses: for inside parentheses is rejected as generator expression
+    test('should reject for inside parentheses as generator expression', () => {
+      const source = 'result = (x^2 for x in 1:10)\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    // Covers isInsideBrackets excluded region: "end" in string inside brackets
+    test('should skip keywords in strings when scanning brackets', () => {
+      const source = 'x = ["end", begin\n  1\nend]';
+      const pairs = parser.parse(source);
+      // "end" is in a string, begin is a real block opener -> array construction
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    // Covers $() interpolation in triple-quoted strings excluding block keywords
+    test('should exclude keywords inside $() interpolation in triple-quoted string', () => {
+      const source = 'x = """\nhello $(if true 1 end)\n"""\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Covers $() interpolation in regular strings excluding block keywords
+    test('should exclude keywords inside $() interpolation in regular string', () => {
+      const source = 'x = "hello $(if true 1 end)"\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Array construction vs indexing', () => {
@@ -2212,6 +2253,22 @@ end`;
       const source = '[x for x in 1:10]';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: uncovered branch paths', () => {
+    // L165-167: isInExcludedRegion in hasBlockOpenerBetween - string in range between ( and for
+    test('should skip excluded regions in hasBlockOpenerBetween', () => {
+      const source = '(f("begin") for x in 1:10)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    // L171-172: boundary checks in hasBlockOpenerBetween - keyword at end of source
+    test('should handle block opener at end boundary in hasBlockOpenerBetween', () => {
+      const source = '(begin\n  1\nend)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 });

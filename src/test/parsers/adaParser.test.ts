@@ -166,8 +166,10 @@ begin
 end;
 end My_Entry;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'accept', 'end');
-      assertIntermediates(pairs[0], ['begin']);
+      // accept and begin are separate blocks (accept uses do...end, not begin...end)
+      assert.strictEqual(pairs.length, 2);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'begin');
+      assert.strictEqual(pairs[1].openKeyword.value.toLowerCase(), 'accept');
     });
   });
 
@@ -1147,6 +1149,11 @@ end P;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end');
     });
+
+    test('Bug 10: qualified expression if should not be detected as block', () => {
+      const pairs = parser.parse("procedure Main is\nbegin\n  X := Integer'(if A > 0 then A else 0);\nend Main;");
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
   });
 
   suite('Uncovered line coverage', () => {
@@ -1274,6 +1281,31 @@ end if;`;
       const pairs = parser.parse(source);
       // First if: not rejected as conditional (function call paren), but has no end if -> unmatched
       // Second if: matched with end if
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should not skip is when semicolon separates type declarations on same line', () => {
+      // Covers lines 447-450: semicolon found between type decl start and standalone is
+      // "type T is (A, B);" completes the first type, so the standalone "is" is not skipped
+      const source = `type T is (A, B); type U
+is (C, D);
+if Cond then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle excluded region before paren in isInsideParens', () => {
+      // Covers line 674: excluded region scan before ( in isInsideParens
+      // "op" is a string literal (excluded region) immediately before (
+      const source = `X := "op"(if True then 1 else 0);
+if Cond then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
   });

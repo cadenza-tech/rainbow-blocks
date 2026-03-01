@@ -2095,5 +2095,94 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('Bug 1: dot-preceded keyword should not be detected', () => {
+      const pairs = parser.parse('defmodule Foo do\n  x = map.end\nend');
+      assertSingleBlock(pairs, 'defmodule', 'end');
+    });
+  });
+
+  suite('Coverage: new bug fix code paths', () => {
+    test('should exclude #{} interpolation inside double-quoted atom', () => {
+      const source = ':"hello #{if true do 1 end} world"\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude #{} interpolation inside single-quoted atom', () => {
+      const source = ":'hello #{1 + 2} world'\nif true do\n  1\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude nested braces in #{} interpolation inside quoted atom', () => {
+      const source = ':"nested #{%{a: 1}} atom"\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle unterminated quoted atom with interpolation', () => {
+      const source = ':"unterminated #{if true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat escaped interpolation in quoted atom as interpolation', () => {
+      const source = ':"escaped \\#{} not interpolation"\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect do: one-liner as no block', () => {
+      const source = 'if true, do: 1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat fn as do: keyword', () => {
+      const source = 'fn -> 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+
+    test('should detect do: one-liner with no space after colon', () => {
+      const source = 'if true, do:1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect defmodule at start of file with hasDoKeyword', () => {
+      const source = 'defmodule M do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmodule', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered branch paths', () => {
+    // L141-144: Backslash escape inside #{} interpolation in quoted atom
+    test('should handle backslash escape inside interpolation in quoted atom', () => {
+      const source = ':"hello #{\\\\end} world"\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // L612: i > 0 ternary in hasDoKeyword - end at start of source (i === 0)
+    // When hasDoKeyword scans from position 0 and encounters "end", the `i > 0` check triggers false branch
+    test('should handle end keyword found at i=0 in hasDoKeyword scan', () => {
+      const source = 'end\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Covers L483-485: isDoColonOneLiner returns true causing isValidBlockOpen to reject
+  // and L734-737: do: with no whitespace between do and colon in isDoColonOneLiner
+  suite('Coverage: isDoColonOneLiner rejection from isValidBlockOpen', () => {
+    test('should reject block open when do: found on same line as standalone do', () => {
+      // hasDoKeyword finds standalone do (at end), isDoColonOneLiner finds do: on same line
+      const source = 'if true, do: :ok do\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 });

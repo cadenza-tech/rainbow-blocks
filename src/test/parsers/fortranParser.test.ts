@@ -1927,6 +1927,28 @@ end if`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
+
+    test('Bug 7: continuation compound end with inline comment', () => {
+      const pairs = parser.parse('program test\n  print *, "hello"\nend & ! This is a comment\n  program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('Bug 8: isContinuationBlockForm should skip comment lines', () => {
+      const pairs = parser.parse('do i = 1, 10\n  where (mask) &\n    a(i) = b(i)\n  ! This is just a comment\nend do');
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('Bug 11: else if should be merged as intermediate keyword', () => {
+      const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse if (x < 0) then\n  a = -1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else if', 'then']);
+    });
+
+    test('Bug 11: else if with continuation should be merged', () => {
+      const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse &\n  if (x < 0) then\n  a = -1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else &\n  if', 'then']);
+    });
   });
 
   suite('Uncovered line coverage - isValidBlockClose', () => {
@@ -2031,6 +2053,57 @@ end if`;
       const source = 'if (x > 0) then\r\n  y = 1\r\nelse &\r\n  if (x < 0) then\r\n  y = -1\r\nend if';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: new bug fix code paths', () => {
+    // Covers lines 344-346: isValidBlockClose returns true for non-'end' compound keywords
+    test('should parse function closed by endfunction', () => {
+      const source = 'function foo()\n  x = 1\nendfunction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    // Covers lines 414-416: isTypeSpecifier missing '(' after function/subroutine keyword
+    test('should parse function without parentheses', () => {
+      const source = 'function foo\n  x = 1\nend function';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    // Covers lines 544-558: findInlineCommentIndex string handling via where continuation
+    test('should handle string containing ! in where continuation line', () => {
+      const source = 'where (a > 0) &\n  b = "hello ! world" ! set b\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    // Covers lines 546-548: findInlineCommentIndex escaped quotes in string with !
+    test('should handle escaped quotes in string with ! in where continuation', () => {
+      const source = "where (a > 0) &\n  b = 'it''s ! here' ! comment\nend where";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    // Covers lines 870-872: \r stripping from previous line during continuation scanning
+    test('should strip \\r from previous line in continuation scanning', () => {
+      const source = 'select &\r\n  type(var)\r\n  end select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    // Covers lines 899-901: word boundary check in isPrecedingContinuationKeyword
+    test('should not match keyword as part of longer identifier in continuation', () => {
+      const source = 'x = myselect &\n  type(var)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    // Covers lines 905-907: final return false in isPrecedingContinuationKeyword
+    test('should return false when no keyword before continuation', () => {
+      const source = 'x &\n  = 1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 });
