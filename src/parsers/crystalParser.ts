@@ -320,9 +320,14 @@ export class CrystalBlockParser extends BaseBlockParser {
     let i = pos + 1;
     while (i < source.length) {
       const char = source[i];
-      if (/[a-zA-Z0-9_!?]/.test(char)) {
+      if (/[a-zA-Z0-9_]/.test(char)) {
         i++;
         continue;
+      }
+      // ? and ! can only appear at the end of a symbol name
+      if (char === '?' || char === '!') {
+        i++;
+        break;
       }
       break;
     }
@@ -763,7 +768,7 @@ export class CrystalBlockParser extends BaseBlockParser {
       j--;
     }
     if (j < interpStart) return true;
-    return /[(,=!~|&{[:]/.test(source[j]);
+    return /[(,=!~|&{[:;]/.test(source[j]);
   }
 
   // Skips a regex literal inside interpolation

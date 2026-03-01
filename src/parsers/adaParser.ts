@@ -13,7 +13,7 @@ const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
 const IS_NON_BODY_KEYWORDS = ['abstract', 'separate', 'new', 'null'];
 
 // Keywords that can precede 'begin' and are closed together with it
-const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry', 'accept'];
+const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
 
 // Pattern to match compound end keywords (case insensitive)
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
@@ -185,8 +185,9 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
 
-    // Ada 2012 conditional expressions: (if X then A else B) - if inside parens is not a block
-    if (lowerKeyword === 'if') {
+    // Ada 2012 conditional/case expressions: (if X then A else B) or (case X is when ...)
+    // if/case inside parens is not a block
+    if (lowerKeyword === 'if' || lowerKeyword === 'case') {
       if (this.isInsideParens(source, position, excludedRegions)) {
         return false;
       }
@@ -666,7 +667,9 @@ export class AdaBlockParser extends BaseBlockParser {
       const ch = source[i];
       if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
       if (ch === '(') {
-        // Reject if '(' is preceded by identifier char (function call, not conditional)
+        if (i > 0 && source[i - 1] === "'") {
+          return true;
+        }
         let j = i - 1;
         while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) j--;
         if (j >= 0 && /[a-zA-Z0-9_)]/.test(source[j])) {

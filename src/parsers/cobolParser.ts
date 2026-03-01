@@ -224,6 +224,12 @@ export class CobolBlockParser extends BaseBlockParser {
       if (this.getVisualColumn(source, lineStart, pos) === 6) {
         const sequenceArea = source.slice(lineStart, pos);
         if (/^[\d\s\t]*$/.test(sequenceArea)) {
+          if (char === 'D' || char === 'd') {
+            const nextChar = pos + 1 < source.length ? source[pos + 1] : '';
+            if (/[a-zA-Z0-9_-]/.test(nextChar)) {
+              return null;
+            }
+          }
           return this.matchSingleLineComment(source, pos);
         }
       }

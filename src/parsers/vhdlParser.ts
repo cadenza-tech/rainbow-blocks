@@ -118,8 +118,17 @@ export class VhdlBlockParser extends BaseBlockParser {
       if (/\buse[ \t]+$/.test(lineBefore)) {
         return false;
       }
-      if (lowerKeyword === 'entity' && /:\s*$/.test(lineBefore)) {
-        return false;
+      if (lowerKeyword === 'entity') {
+        if (/:\s*$/.test(lineBefore)) {
+          return false;
+        }
+        if (/^\s*$/.test(lineBefore.trimEnd()) && lastNl > 0) {
+          const prevNl = Math.max(textBefore.lastIndexOf('\n', lastNl - 1), textBefore.lastIndexOf('\r', lastNl - 1));
+          const prevLine = textBefore.slice(prevNl + 1, lastNl);
+          if (/:\s*$/.test(prevLine)) {
+            return false;
+          }
+        }
       }
     }
 
@@ -243,14 +252,28 @@ export class VhdlBlockParser extends BaseBlockParser {
   // Checks if 'wait' at the end of line text is a real wait statement
   // (not inside an excluded region like a string or comment)
   private isWaitBeforeFor(trimmedLineText: string, lineAbsOffset: number, rawLineText: string, excludedRegions: ExcludedRegion[]): boolean {
-    const match = /\bwait[ \t\r]*$/.exec(trimmedLineText);
+    const match = /\bwait\b/.exec(trimmedLineText);
     if (!match) {
       return false;
     }
     // Compute absolute position of 'wait' by accounting for trimmed whitespace
     const trimOffset = rawLineText.length - rawLineText.trimStart().length;
     const waitAbsPos = lineAbsOffset + trimOffset + match.index;
-    return !this.isInExcludedRegion(waitAbsPos, excludedRegions);
+    if (this.isInExcludedRegion(waitAbsPos, excludedRegions)) {
+      return false;
+    }
+    // Check if wait statement is terminated by semicolon (completed statement)
+    // e.g., "wait; for ..." means the wait is complete, for is a real loop
+    const afterWait = trimmedLineText.slice(match.index + 4);
+    for (let ci = 0; ci < afterWait.length; ci++) {
+      if (afterWait[ci] === ';') {
+        const semiAbsPos = waitAbsPos + 4 + ci;
+        if (!this.isInExcludedRegion(semiAbsPos, excludedRegions)) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   // Finds excluded regions: comments and strings
@@ -360,6 +383,11 @@ export class VhdlBlockParser extends BaseBlockParser {
     // Character literal is 'x' where x is a single character
     // It could also be an attribute tick, so we need to be careful
     if (pos + 2 < source.length && source[pos + 2] === "'") {
+      // Qualified expression: type_name'(expr) — tick before '(' preceded by identifier
+      // is not a character literal, treat as attribute tick
+      if (source[pos + 1] === '(' && pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
+        return { start: pos, end: pos + 1 };
+      }
       return { start: pos, end: pos + 3 };
     }
     // Attribute tick: skip the attribute name to avoid matching keywords

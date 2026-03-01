@@ -362,7 +362,11 @@ export class JuliaBlockParser extends BaseBlockParser {
           return this.matchPrefixedTripleQuotedString(source, pos, prefixLength, interp);
         }
         // Regular prefixed string
-        const stringEnd = this.findStringEnd(source, prefixEnd + 1, '"', interp);
+        let stringEnd = this.findStringEnd(source, prefixEnd + 1, '"', interp);
+        // Consume string macro suffix characters (e.g., custom"content"end)
+        while (stringEnd < source.length && /[a-zA-Z0-9_]/.test(source[stringEnd])) {
+          stringEnd++;
+        }
         return { start: pos, end: stringEnd };
       }
     }
@@ -390,7 +394,12 @@ export class JuliaBlockParser extends BaseBlockParser {
         continue;
       }
       if (source.slice(i, i + 3) === '"""') {
-        return { start: pos, end: i + 3 };
+        let end = i + 3;
+        // Consume string macro suffix characters
+        while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) {
+          end++;
+        }
+        return { start: pos, end };
       }
       i++;
     }

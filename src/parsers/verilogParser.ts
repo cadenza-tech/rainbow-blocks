@@ -127,7 +127,7 @@ export class VerilogBlockParser extends BaseBlockParser {
     const filtered = tokens.filter((token) => {
       if (token.value === 'default' && token.type === 'block_middle') {
         let j = token.endOffset;
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
           j++;
         }
         return j < source.length && source[j] === ':';

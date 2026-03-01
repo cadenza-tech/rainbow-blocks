@@ -6,8 +6,8 @@ import { BaseBlockParser } from './baseParser';
 export class MatlabBlockParser extends BaseBlockParser {
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
   protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Reject end preceded by dot (struct field access like s.end)
-    if (position > 0 && source[position - 1] === '.') {
+    // Reject end preceded by dot (struct field access like s.end or s . end)
+    if (this.isPrecededByDot(source, position)) {
       return false;
     }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
@@ -17,10 +17,10 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Classdef section keywords that can also be used as function calls
   private static readonly CLASSDEF_SECTION_KEYWORDS = new Set(['properties', 'methods', 'events', 'enumeration', 'arguments']);
 
-  // Reject struct field access for block openers (s.if, s.for, etc)
+  // Reject struct field access for block openers (s.if, s.for, s . if, etc)
   // Reject classdef section keywords used as function calls (properties(obj))
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (position > 0 && source[position - 1] === '.') {
+    if (this.isPrecededByDot(source, position)) {
       return false;
     }
     if (MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(keyword)) {
@@ -85,15 +85,24 @@ export class MatlabBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Filter out block_middle keywords that are struct field access (s.else, s.case)
+  // Filter out block_middle keywords that are struct field access (s.else, s . case)
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
-      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+      if (this.isPrecededByDot(source, token.startOffset)) {
         return false;
       }
       return true;
     });
+  }
+
+  // Checks if position is preceded by dot (possibly with whitespace: s . end)
+  protected isPrecededByDot(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    return i >= 0 && source[i] === '.';
   }
 
   // Checks if position is inside parentheses, square brackets, or curly braces

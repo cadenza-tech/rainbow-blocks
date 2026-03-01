@@ -141,7 +141,12 @@ export class BashBlockParser extends BaseBlockParser {
 
     // Single-line comment (not $# special variable or ${# parameter expansion)
     // Allow $$# as comment: $$ is PID variable, # starts comment
-    if (char === '#' && !this.isParameterExpansion(source, pos) && !(pos > 0 && source[pos - 1] === '$' && !(pos >= 2 && source[pos - 2] === '$'))) {
+    if (
+      char === '#' &&
+      this.isCommentStart(source, pos) &&
+      !this.isParameterExpansion(source, pos) &&
+      !(pos > 0 && source[pos - 1] === '$' && !(pos >= 2 && source[pos - 2] === '$'))
+    ) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -176,9 +181,9 @@ export class BashBlockParser extends BaseBlockParser {
       return this.matchSingleQuotedString(source, pos);
     }
 
-    // Double-quoted string
+    // Double-quoted string (Bash-specific: handles $(…), ${…}, backticks inside)
     if (char === '"') {
-      return this.matchQuotedString(source, pos, '"');
+      return this.matchBashDoubleQuote(source, pos);
     }
 
     // Backtick command substitution
@@ -210,6 +215,16 @@ export class BashBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Checks if '#' at position is a comment start (at word boundary, not mid-word)
+  private isCommentStart(source: string, pos: number): boolean {
+    if (pos === 0) return true;
+    const prev = source[pos - 1];
+    // $ before # is handled separately (for $#, ${#, $$# special cases)
+    if (prev === '$') return true;
+    // # after shell metacharacters or whitespace starts a comment
+    return /[\s;|&(){}<>]/.test(prev);
+  }
+
   // Matches $'...' ANSI-C quoting
   private matchDollarSingleQuote(source: string, pos: number): ExcludedRegion {
     let i = pos + 2;
@@ -221,6 +236,117 @@ export class BashBlockParser extends BaseBlockParser {
       if (source[i] === "'") {
         return { start: pos, end: i + 1 };
       }
+      i++;
+    }
+    return { start: pos, end: source.length };
+  }
+
+  // Matches double-quoted string with Bash-specific handling for $(), ${}, and backticks
+  private matchBashDoubleQuote(source: string, pos: number): ExcludedRegion {
+    let i = pos + 1;
+    while (i < source.length) {
+      const char = source[i];
+
+      // Escape sequence
+      if (char === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+
+      // Command substitution $(...)
+      if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
+        const nested = this.matchCommandSubstitution(source, i);
+        i = nested.end;
+        continue;
+      }
+
+      // Parameter expansion ${...} - handle nested strings inside double-quoted context
+      // In bash, ${var:-"default"} has nested double-quoted strings
+      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
+        let j = i + 2;
+        let braceDepth = 1;
+        while (j < source.length && braceDepth > 0) {
+          if (source[j] === '\\' && j + 1 < source.length) {
+            j += 2;
+            continue;
+          }
+          // Nested double-quoted string: look for matching close quote
+          if (source[j] === '"') {
+            let k = j + 1;
+            while (k < source.length) {
+              if (source[k] === '\\' && k + 1 < source.length) {
+                k += 2;
+                continue;
+              }
+              if (source[k] === '"') {
+                break;
+              }
+              k++;
+            }
+            if (k < source.length) {
+              // Found matching close quote, skip the nested string
+              j = k + 1;
+              continue;
+            }
+            // No matching close quote — this " likely ends the outer string
+            break;
+          }
+          // Single-quoted string (no escapes in bash single quotes)
+          if (source[j] === "'") {
+            j++;
+            while (j < source.length && source[j] !== "'") {
+              j++;
+            }
+            if (j < source.length) j++;
+            continue;
+          }
+          // $'...' ANSI-C quoting
+          if (source[j] === '$' && j + 1 < source.length && source[j + 1] === "'") {
+            const region = this.matchDollarSingleQuote(source, j);
+            j = region.end;
+            continue;
+          }
+          // Nested command substitution $(...)
+          if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '(') {
+            const nested = this.matchCommandSubstitution(source, j);
+            j = nested.end;
+            continue;
+          }
+          // Nested parameter expansion ${...}
+          if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '{') {
+            j += 2;
+            braceDepth++;
+            continue;
+          }
+          // Backtick command substitution
+          if (source[j] === '`') {
+            const region = this.matchBacktickCommand(source, j);
+            j = region.end;
+            continue;
+          }
+          if (source[j] === '{') {
+            braceDepth++;
+          } else if (source[j] === '}') {
+            braceDepth--;
+          }
+          j++;
+        }
+        i = j;
+        continue;
+      }
+
+      // Backtick command substitution
+      if (char === '`') {
+        const region = this.matchBacktickCommand(source, i);
+        i = region.end;
+        continue;
+      }
+
+      // End of string
+      if (char === '"') {
+        return { start: pos, end: i + 1 };
+      }
+
       i++;
     }
     return { start: pos, end: source.length };
@@ -305,9 +431,22 @@ export class BashBlockParser extends BaseBlockParser {
 
     let depth = 1;
     let caseDepth = 0;
+    let pendingHeredoc: { stripTabs: boolean; terminator: string } | null = null;
 
     while (i < source.length && depth > 0) {
       const char = source[i];
+
+      // At newline, skip pending heredoc body
+      if ((char === '\n' || char === '\r') && pendingHeredoc) {
+        let bodyStart = i + 1;
+        if (char === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
+          bodyStart++;
+        }
+        const body = this.matchHeredocBody(source, bodyStart, pendingHeredoc.stripTabs, pendingHeredoc.terminator);
+        pendingHeredoc = null;
+        i = body ? body.end : bodyStart;
+        continue;
+      }
 
       // Skip double-quoted strings
       if (char === '"') {
@@ -331,7 +470,7 @@ export class BashBlockParser extends BaseBlockParser {
       }
 
       // Skip comments (# to end of line, but not $# special variable; allow $$#)
-      if (char === '#' && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
+      if (char === '#' && this.isCommentStart(source, i) && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
@@ -357,6 +496,16 @@ export class BashBlockParser extends BaseBlockParser {
         const region = this.matchBacktickCommand(source, i);
         i = region.end;
         continue;
+      }
+
+      // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
+      if (char === '<' && i + 1 < source.length && source[i + 1] === '<' && (i + 2 >= source.length || source[i + 2] !== '<')) {
+        const heredoc = this.parseHeredocOperator(source, i);
+        if (heredoc) {
+          pendingHeredoc = { stripTabs: heredoc.stripTabs, terminator: heredoc.terminator };
+          i += heredoc.matchLength;
+          continue;
+        }
       }
 
       // Track case/esac nesting to avoid `)` in case patterns closing `$(...)`
@@ -495,9 +644,22 @@ export class BashBlockParser extends BaseBlockParser {
   private matchProcessSubstitution(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
     let depth = 1;
+    let pendingHeredoc: { stripTabs: boolean; terminator: string } | null = null;
 
     while (i < source.length && depth > 0) {
       const char = source[i];
+
+      // At newline, skip pending heredoc body
+      if ((char === '\n' || char === '\r') && pendingHeredoc) {
+        let bodyStart = i + 1;
+        if (char === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
+          bodyStart++;
+        }
+        const body = this.matchHeredocBody(source, bodyStart, pendingHeredoc.stripTabs, pendingHeredoc.terminator);
+        pendingHeredoc = null;
+        i = body ? body.end : bodyStart;
+        continue;
+      }
 
       // Skip strings
       if (char === '"') {
@@ -525,12 +687,29 @@ export class BashBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip backtick command substitution
+      if (char === '`') {
+        const region = this.matchBacktickCommand(source, i);
+        i = region.end;
+        continue;
+      }
+
       // Skip comments (# to end of line, but not $# special variable; allow $$#)
-      if (char === '#' && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
+      if (char === '#' && this.isCommentStart(source, i) && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         continue;
+      }
+
+      // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
+      if (char === '<' && i + 1 < source.length && source[i + 1] === '<' && (i + 2 >= source.length || source[i + 2] !== '<')) {
+        const heredoc = this.parseHeredocOperator(source, i);
+        if (heredoc) {
+          pendingHeredoc = { stripTabs: heredoc.stripTabs, terminator: heredoc.terminator };
+          i += heredoc.matchLength;
+          continue;
+        }
       }
 
       if (char === '(') {

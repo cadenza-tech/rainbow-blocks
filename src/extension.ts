@@ -88,13 +88,13 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Updates decorations after debounce delay to avoid excessive updates
-  function updateDecorationsDebounced(editor: vscode.TextEditor | undefined): void {
+  function updateDecorationsDebounced(): void {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
 
     debounceTimer = setTimeout(() => {
-      updateDecorations(editor);
+      updateDecorations(vscode.window.activeTextEditor);
     }, currentConfig.debounceMs);
   }
 
@@ -130,7 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeTextDocument((event) => {
       const editor = vscode.window.activeTextEditor;
       if (editor && event.document === editor.document) {
-        updateDecorationsDebounced(editor);
+        updateDecorationsDebounced();
       }
     })
   );
@@ -145,13 +145,17 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         currentConfig = loadConfig();
         decorator.updateConfig(currentConfig);
-        updateDecorations(vscode.window.activeTextEditor);
+        for (const editor of vscode.window.visibleTextEditors) {
+          updateDecorations(editor);
+        }
       }
     })
   );
 
-  // Apply decorations to the initially active editor
-  updateDecorations(vscode.window.activeTextEditor);
+  // Apply decorations to all initially visible editors
+  for (const editor of vscode.window.visibleTextEditors) {
+    updateDecorations(editor);
+  }
 }
 
 // Deactivates the extension (cleanup handled via subscriptions)

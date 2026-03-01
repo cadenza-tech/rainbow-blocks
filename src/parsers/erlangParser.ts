@@ -12,9 +12,9 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   // Validates block open: 'fun' references and spec context are not blocks
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Reject keywords followed by => (map key: #{begin => 1})
+    // Reject keywords followed by => or := (map key/update: #{begin => 1, end := 2})
     const afterKeyword = source.slice(position + keyword.length);
-    if (/^\s*=>/.test(afterKeyword)) {
+    if (/^\s*(?:=>|:=)/.test(afterKeyword)) {
       return false;
     }
 
@@ -89,7 +89,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       const afterToken = source.slice(token.endOffset);
-      if (/^\s*=>/.test(afterToken)) {
+      if (/^\s*(?:=>|:=)/.test(afterToken)) {
         return false;
       }
       // Reject keywords preceded by '.' (record field access like Rec#state.end)

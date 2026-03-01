@@ -133,6 +133,21 @@ export class ElixirBlockParser extends BaseBlockParser {
           i += 2;
           continue;
         }
+        // Handle #{} interpolation in quoted atoms
+        if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          let depth = 1;
+          i += 2;
+          while (i < source.length && depth > 0) {
+            if (source[i] === '\\' && i + 1 < source.length) {
+              i += 2;
+              continue;
+            }
+            if (source[i] === '{') depth++;
+            else if (source[i] === '}') depth--;
+            i++;
+          }
+          continue;
+        }
         if (source[i] === quote) {
           return { start: pos, end: i + 1 };
         }
@@ -476,6 +491,9 @@ export class ElixirBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
+      }
       if (token.type === 'block_middle' && token.endOffset < source.length && source[token.endOffset] === ':') {
         return false;
       }

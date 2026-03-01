@@ -56,7 +56,8 @@ export class RubyBlockParser extends BaseBlockParser {
   // Validates block open keywords, excluding postfix conditionals
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords preceded by dot (method calls like obj.class, obj.begin)
-    if (position > 0 && source[position - 1] === '.') {
+    // But allow range operator (..) — x..end is valid
+    if (position > 0 && source[position - 1] === '.' && !(position > 1 && source[position - 2] === '.')) {
       return false;
     }
 
@@ -78,8 +79,17 @@ export class RubyBlockParser extends BaseBlockParser {
     const tokens = super.tokenize(source, excludedRegions);
 
     return tokens.filter((token) => {
+      // Filter out keywords in heredoc identifiers (<<end, <<-do, <<~if, <<'end', <<"do", etc.)
+      if (token.startOffset >= 2) {
+        const prefixStart = Math.max(0, token.startOffset - 4);
+        const prefix = source.slice(prefixStart, token.startOffset);
+        if (/<<[~-]?\\?['"`]?$/.test(prefix)) {
+          return false;
+        }
+      }
       // Filter out dot-preceded tokens (method calls like obj.end, obj.class)
-      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+      // But allow range operator (..) — x..end is valid
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '.' && !(token.startOffset > 1 && source[token.startOffset - 2] === '.')) {
         return false;
       }
       // Filter out :: scope resolution (e.g., Module::Class::Begin)
@@ -514,9 +524,14 @@ export class RubyBlockParser extends BaseBlockParser {
     let i = pos + 1;
     while (i < source.length) {
       const char = source[i];
-      if (/[a-zA-Z0-9_!?]/.test(char)) {
+      if (/[a-zA-Z0-9_]/.test(char)) {
         i++;
         continue;
+      }
+      // ? and ! can only appear at the end of a symbol name
+      if (char === '?' || char === '!') {
+        i++;
+        break;
       }
       break;
     }
@@ -887,7 +902,7 @@ export class RubyBlockParser extends BaseBlockParser {
       j--;
     }
     if (j < interpStart) return true;
-    return /[(,=!~|&{[:]/.test(source[j]);
+    return /[(,=!~|&{[:;]/.test(source[j]);
   }
 
   // Skips a regex literal inside interpolation

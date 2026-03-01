@@ -29,7 +29,7 @@ const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]*(${COMPOUND_END_TYPES.join
 
 // Pattern to match compound end keywords with continuation line: end &\n[&]keyword
 const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
-  `\\bend[ \\t]*&[ \\t]*(?:\\r\\n|\\r|\\n)[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
 
@@ -161,16 +161,7 @@ export class FortranBlockParser extends BaseBlockParser {
       return true;
     }
 
-    // Check if 'if' is preceded by 'else' (making it 'else if', not a new block)
-    const ifLineStart = this.findLineStart(source, position);
-    const lineBeforeIf = source.slice(ifLineStart, position).toLowerCase().trimEnd();
-    if (lineBeforeIf.endsWith('else')) {
-      return false;
-    }
-    // Check continuation: else &\n  if
-    if (this.isPrecedingContinuationKeyword(source, position, 'else')) {
-      return false;
-    }
+    // 'else if' merger in tokenize() handles combining else + if into a single block_middle
 
     // Check if 'then' exists after the 'if', handling & continuation lines
     let i = position + keyword.length;
@@ -509,14 +500,23 @@ export class FortranBlockParser extends BaseBlockParser {
       return false;
     }
     // Look at next line to see if it's end where/forall or more statements
-    // Skip past line break (\r\n, \n, or standalone \r)
-    if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
-      i += 2;
-    } else {
-      i++;
-    }
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
+    // Skip past line break and comment-only lines
+    while (i < source.length) {
+      // Skip past line break (\r\n, \n, or standalone \r)
+      if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+        i += 2;
+      } else {
+        i++;
+      }
+      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+        i++;
+      }
+      // Skip comment-only lines
+      if (i < source.length && source[i] === '!') {
+        i = this.findLineEnd(source, i);
+        continue;
+      }
+      break;
     }
     // If next line starts with 'end where' or 'end forall', it's block form
     if (i < source.length && /^end\s*(where|forall)\b/i.test(source.slice(i))) {
@@ -752,9 +752,12 @@ export class FortranBlockParser extends BaseBlockParser {
         tokens[ti + 1].value.toLowerCase() === 'if' &&
         tokens[ti + 1].type === 'block_open'
       ) {
-        // Check they are on the same line
         const textBetween = source.slice(current.endOffset, tokens[ti + 1].startOffset);
-        if (/^\s+$/.test(textBetween) && !textBetween.includes('\n') && !textBetween.includes('\r')) {
+        // Same line: else if
+        const isSameLine = /^\s+$/.test(textBetween) && !textBetween.includes('\n') && !textBetween.includes('\r');
+        // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if
+        const isContinuation = /^\s*&\s*(?:![^\r\n]*)?\r?\n(?:\s*![^\r\n]*\r?\n)*\s*&?\s*$/.test(textBetween);
+        if (isSameLine || isContinuation) {
           mergedTokens.push({
             type: 'block_middle',
             value: source.slice(current.startOffset, tokens[ti + 1].endOffset),
