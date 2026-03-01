@@ -5,6 +5,48 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.9] - 2026-03-01
+
+### Fixed
+
+- Ada: Skip `case` inside parentheses (Ada 2012 case expressions, like `(case X is when ...)`)
+- Ada: Handle qualified expression `type'(expr)` in parenthesis detection (not treated as function call)
+- Ada: Remove `accept` from `begin` context keywords (`accept` uses `do`/`end`, not `begin`/`end`)
+- Bash: Fix `#` mid-word incorrectly treated as comment start (e.g., `file#name`, `C#`)
+- Bash: Handle `$()`, `${}`, and backtick command substitution inside double-quoted strings
+- Bash: Handle heredoc bodies inside command substitution `$(...)`
+- Bash: Handle heredoc bodies inside process substitution `<(...)` and `>(...)`
+- Bash: Handle backtick command substitution inside process substitution
+- COBOL: Fix `D`/`d` at column 7 followed by identifier chars not treated as debug comment line (e.g., `DIVIDE`)
+- Crystal: Fix symbol names with `?`/`!` consuming adjacent keyword (`:end?` should not hide following keyword)
+- Crystal: Add `;` as valid operator before regex in string interpolation
+- Elixir: Handle `#{}` interpolation inside quoted atoms (`:"hello #{expr}"`)
+- Elixir: Filter out dot-preceded keywords (method calls like `map.end`)
+- Erlang: Reject keywords followed by `:=` map update operator (in addition to `=>`)
+- Fortran: Handle inline comments in continuation compound end (`end &! comment\nprogram`)
+- Fortran: Handle `else if` with continuation line as merged intermediate (`else &\n  if`)
+- Fortran: Skip comment-only lines when checking next line in `where`/`forall` block form detection
+- Julia: Consume string macro suffix characters after closing quote (e.g., `custom"content"end`)
+- MATLAB: Handle whitespace between dot and keyword in struct field access (e.g., `s . end`)
+- Ruby: Allow block keywords after range operator `..` (not treated as method call)
+- Ruby: Filter out keywords in heredoc identifiers (`<<end`, `<<-do`, `<<~if`)
+- Ruby: Fix symbol names with `?`/`!` consuming adjacent keyword (`:end?` should not hide following keyword)
+- Ruby: Add `;` as valid operator before regex in string interpolation
+- Verilog: Allow newlines between `default` keyword and `:` separator
+- VHDL: Handle `wait on`/`wait until` followed by `for` (completed wait statement does not affect `for` detection)
+- VHDL: Detect entity instantiation with colon on previous line
+- VHDL: Handle qualified expression `type'(expr)` (not treated as character literal)
+- Extension: Fix stale editor reference in debounced decoration update
+- Extension: Apply decorations to all visible editors on activation and configuration change
+
+### Changed
+
+- Update test configuration to `tests` array format and `exclude`-based coverage config
+
+### Tests
+
+- Add 88+ tests across 12 parser test files for bug fix verification and branch coverage
+
 ## [1.1.8] - 2026-02-28
 
 ### Fixed
@@ -425,6 +467,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.9]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.5...v1.1.6
