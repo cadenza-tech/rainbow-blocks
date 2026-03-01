@@ -875,6 +875,22 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'to', 'end');
     });
+
+    test("Bug 9: possessive form app's repeat should not start a block", () => {
+      const source = `set x to app's repeat
+tell application "Finder"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test("Bug 9: possessive form set X's end should not close a block", () => {
+      const source = `set myObj's end to 5
+repeat 3 times
+end repeat`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
   });
 
   suite('on error in non-try blocks', () => {

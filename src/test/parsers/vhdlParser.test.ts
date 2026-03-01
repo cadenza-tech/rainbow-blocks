@@ -1172,6 +1172,97 @@ end process;`;
       const pairs = parser.parse('architecture rtl of test is\nbegin\n  inst1 :\n  entity work.adder\n    port map (a => b);\nend architecture;');
       assertSingleBlock(pairs, 'architecture', 'end architecture');
     });
+
+    suite('Bug 6: elsif/else generate chain', () => {
+      test('should handle if-elsif generate chain', () => {
+        const source = `gen1: if condition1 generate
+  signal s1 : std_logic;
+elsif condition2 generate
+  signal s2 : std_logic;
+end generate gen1;`;
+        const pairs = parser.parse(source);
+        // Should produce block pairs for the generate chain
+        assert.ok(pairs.length >= 1, 'Should have at least one block pair');
+        const generateBlocks = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'generate');
+        assert.ok(generateBlocks.length >= 1, 'Should have generate block(s)');
+        // elsif should appear as intermediate or separate block
+        const allKeywords = pairs.flatMap((p) => [
+          p.openKeyword.value.toLowerCase(),
+          ...p.intermediates.map((i) => i.value.toLowerCase()),
+          p.closeKeyword.value.toLowerCase()
+        ]);
+        assert.ok(
+          allKeywords.some((k) => k === 'elsif'),
+          'elsif should be present in block structure'
+        );
+      });
+
+      test('should handle if-elsif-else generate chain', () => {
+        const source = `gen1: if condition1 generate
+  signal s1 : std_logic;
+elsif condition2 generate
+  signal s2 : std_logic;
+else generate
+  signal s3 : std_logic;
+end generate gen1;`;
+        const pairs = parser.parse(source);
+        assert.ok(pairs.length >= 1, 'Should have at least one block pair');
+        const allKeywords = pairs.flatMap((p) => [
+          p.openKeyword.value.toLowerCase(),
+          ...p.intermediates.map((i) => i.value.toLowerCase()),
+          p.closeKeyword.value.toLowerCase()
+        ]);
+        assert.ok(
+          allKeywords.some((k) => k === 'elsif'),
+          'elsif should be present'
+        );
+        assert.ok(
+          allKeywords.some((k) => k === 'else'),
+          'else should be present'
+        );
+      });
+
+      test('should handle nested generate with inner elsif chain', () => {
+        const source = `gen_outer: for i in 0 to 7 generate
+  gen_inner: if i = 0 generate
+    signal s1 : std_logic;
+  elsif i = 7 generate
+    signal s2 : std_logic;
+  end generate gen_inner;
+end generate gen_outer;`;
+        const pairs = parser.parse(source);
+        // Should have outer for + outer generate + inner generate chain blocks
+        assert.ok(pairs.length >= 3, 'Should have at least 3 block pairs for nested generate');
+        // Inner end generate should not close outer generate
+        const forBlock = findBlock(pairs, 'for');
+        assert.ok(forBlock, 'for block should exist');
+        assert.strictEqual(forBlock.closeKeyword.value.toLowerCase(), 'end generate', 'Outer for should close with end generate');
+      });
+    });
+
+    suite('Bug 7: variable assignment/return conditional else', () => {
+      test('should not treat else in variable assignment conditional as intermediate', () => {
+        const source = `process (clk)
+begin
+  x := a when sel = '1' else b;
+end process;`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'process', 'end process');
+        const nonBeginIntermediates = pairs[0].intermediates.filter((i) => i.value !== 'begin');
+        assert.strictEqual(nonBeginIntermediates.length, 0, 'else after when in variable assignment should not be intermediate');
+      });
+
+      test('should not treat else in return conditional as intermediate', () => {
+        const source = `function max(a, b : integer) return integer is
+begin
+  return a when a > b else b;
+end function;`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'function', 'end function');
+        const elseIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'else');
+        assert.strictEqual(elseIntermediates.length, 0, 'else after when in return conditional should not be intermediate');
+      });
+    });
   });
 
   suite('Coverage: extended identifier edge cases', () => {

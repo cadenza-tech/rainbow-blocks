@@ -1154,6 +1154,49 @@ end P;`;
       const pairs = parser.parse("procedure Main is\nbegin\n  X := Integer'(if A > 0 then A else 0);\nend Main;");
       assertSingleBlock(pairs, 'procedure', 'end');
     });
+
+    test('Bug 4: or else short-circuit operator should not create false intermediate', () => {
+      const source = `if A or else B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
+
+    test('Bug 4: or else with real else branch', () => {
+      const source = `if A or else B then
+  null;
+else
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 2);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+      assert.strictEqual(pairs[0].intermediates[1].value.toLowerCase(), 'else');
+    });
+
+    test('Bug 5: and then short-circuit operator should not create duplicate intermediate', () => {
+      const source = `if A and then B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
+
+    test('Bug 5: combined and then and or else should have only one then intermediate', () => {
+      const source = `if A and then B or else C then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
   });
 
   suite('Uncovered line coverage', () => {

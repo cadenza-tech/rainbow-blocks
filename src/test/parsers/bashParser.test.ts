@@ -3072,4 +3072,40 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  // Covers L895-896: backtick at command position check in isAtCommandPosition
+  suite('Coverage: backtick command substitution position', () => {
+    test('should treat keyword after backtick as command position', () => {
+      const source = 'result=`echo hello`\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Covers L1072-1073: ${ parameter expansion skip in brace scanning
+  suite('Coverage: parameter expansion in brace scanning', () => {
+    test('should not treat ${ as command grouping brace', () => {
+      const source = '{\n  echo $' + '{var}\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  // Covers L976-977: parenDepth-- for nested parens in isCasePattern
+  suite('Coverage: nested parentheses in case patterns', () => {
+    test('should handle nested parentheses before ) in case pattern', () => {
+      const source = 'case $x in\n  $((1+2)) ) echo match;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  // Covers L987-992: POSIX case pattern with ( prefix
+  suite('Coverage: POSIX case pattern with opening paren', () => {
+    test('should not treat keyword in POSIX (keyword) case pattern as block', () => {
+      const source = 'case $x in\n  (for) echo match;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
 });

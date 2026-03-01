@@ -922,6 +922,14 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('Bug 8: backslash-escaped quotes in double-quoted strings should not end string prematurely', () => {
+      const source = `x = "hello \\"end\\" world";
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
@@ -931,6 +939,13 @@ end`;
 comment
 %}   \nif true
 end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle backslash-escaped CRLF in double-quoted string', () => {
+      // Covers line 326: \r\n after backslash escape in matchDoubleQuotedString
+      const source = 'x = "line1\\\r\nline2"\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });

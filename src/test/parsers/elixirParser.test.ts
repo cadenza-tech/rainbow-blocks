@@ -577,6 +577,15 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should handle interpolation with string containing } inside quoted atom', () => {
+      // matchAtomLiteral should handle strings inside interpolation in quoted atoms
+      const source = `x = :"atom_#{"}value"}"
+if x do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Keyword list syntax (keyword:)', () => {
@@ -1691,6 +1700,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle comment with #{ inside multi-line interpolation', () => {
+      // #{ in a comment inside interpolation code should NOT increment depth
+      const source = `x = "value is #{
+  # comment with #{
+  compute()
+}"
+if x do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Sigil edge cases in interpolation', () => {
@@ -1800,20 +1821,25 @@ end`;
 
   // Coverage: lines 242-247
   suite('Bare interpolation inside interpolation', () => {
-    test('should handle bare #{} not followed by nested string', () => {
+    test('should treat bare # in interpolation as comment start', () => {
+      // In Elixir code, # always starts a comment. Inside interpolation code,
+      // #{x} is actually # (comment) followed by {x} (consumed by comment).
+      // The interpolation never closes, making the string unterminated.
       const source = `x = "outer #{y = 1; #{x} = 2} outer"
 if true do
 end`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      // String is unterminated (} consumed by comment), so if/do/end is inside excluded region
+      assertNoBlocks(pairs);
     });
 
-    test('should handle multiple bare #{} in interpolation', () => {
+    test('should treat multiple bare # in interpolation as comment', () => {
       const source = `x = "outer #{#{a}} outer"
 if true do
 end`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      // # starts comment, consuming {a}} outer" - string unterminated
+      assertNoBlocks(pairs);
     });
   });
 
@@ -1901,6 +1927,22 @@ end`;
       const source = 'if true, do::ok';
       const pairs = parser.parse(source);
       // do: followed immediately by atom :ok
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: one-liner with multi-line string containing newline in arguments', () => {
+      // isDoColonOneLiner should not early-exit at \n inside excluded region (string)
+      const source = 'foo("hello\\nworld", do: :ok)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect do: one-liner with heredoc in arguments', () => {
+      // Keyword with heredoc in arguments containing \n should correctly recognize do:
+      const source = `if func(~s"""
+heredoc
+""", :test), do: :ok`;
+      const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
   });

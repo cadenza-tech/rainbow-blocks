@@ -2271,4 +2271,22 @@ end`;
       assertSingleBlock(pairs, 'begin', 'end');
     });
   });
+
+  // L393-395: $() interpolation inside prefixed triple-quoted string
+  suite('Coverage: interpolation in prefixed triple-quoted strings', () => {
+    test('should handle $() interpolation inside triple-quoted string', () => {
+      const source = 'x = """before $(if true\n  1\nend) after"""\nfor i in 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  // L420-422: $() interpolation inside regular strings via findStringEnd
+  suite('Coverage: interpolation in regular strings', () => {
+    test('should handle $() interpolation inside regular string', () => {
+      const source = 'x = "value is $(if true\n  1\nend)"\nfor i in 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
 });

@@ -657,6 +657,32 @@ END-IF`;
       const pairs = parser.parse('      DIVIDE A BY B\n      END-DIVIDE');
       assertSingleBlock(pairs, 'DIVIDE', 'END-DIVIDE');
     });
+
+    test('Bug 13: inline PERFORM inside structured PERFORM should not cause false depth', () => {
+      const source = `PERFORM UNTIL X > 10
+  PERFORM PARAGRAPH-A
+  PERFORM PARAGRAPH-B
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug 13: nested structured PERFORMs with inline PERFORMs should be detected', () => {
+      const source = `PERFORM UNTIL X > 10
+  PERFORM PARAGRAPH-A
+  PERFORM UNTIL Y > 5
+    DISPLAY "INNER"
+  END-PERFORM
+  PERFORM PARAGRAPH-B
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outerPerform = pairs.find((p) => p.nestLevel === 0);
+      assert.ok(outerPerform, 'should have outer PERFORM at nestLevel 0');
+      assert.strictEqual(outerPerform.openKeyword.value, 'PERFORM');
+      const innerPerform = pairs.find((p) => p.nestLevel === 1);
+      assert.ok(innerPerform, 'should have inner PERFORM at nestLevel 1');
+    });
   });
 
   suite('Performance', () => {
@@ -687,6 +713,20 @@ END-IF`;
       // D at column 7 with no next char is treated as debug comment line
       // IF has no matching END-IF, so no blocks
       assertNoBlocks(pairs);
+    });
+
+    test('should skip hyphenated identifiers before keyword in computeValidPositions', () => {
+      // Covers lines 119-120: pos > 0 && source[pos - 1] === '-' skip in computeValidPositions
+      const source = 'MY-PERFORM SOMETHING\nPERFORM UNTIL X > 0\n  DISPLAY "OK"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should skip hyphenated identifiers after keyword in computeValidPositions', () => {
+      // Covers lines 123-124: source[end] === '-' skip in computeValidPositions
+      const source = 'PERFORM-COUNT = 5\nPERFORM UNTIL X > 0\n  DISPLAY "OK"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
   });
 });

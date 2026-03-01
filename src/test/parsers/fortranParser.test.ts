@@ -1168,6 +1168,15 @@ end select`;
       assertSingleBlock(pairs, 'if', 'end if');
     });
 
+    test('Bug 10: else if continuation across &\\r should merge with CR-only line endings', () => {
+      const source = 'if (.true.) then\r  x = 1\relse &\rif (.false.) then\r  x = 2\rend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('then'), 'should have then intermediate');
+      assert.strictEqual(pairs[0].intermediates.length, 3, 'should have 3 intermediates: then, else &\\rif, then');
+    });
+
     test('Bug 13: select continuation with intermediate comment-only lines', () => {
       const source = `select &
 ! comment line
@@ -1862,6 +1871,17 @@ end module`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
     });
+
+    test('Bug 12: contains should be valid intermediate for type block', () => {
+      const source = `type :: my_type
+  integer :: x
+contains
+  procedure :: get_x
+end type`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'type', 'end type');
+      assertIntermediates(pairs[0], ['contains']);
+    });
   });
 
   suite('Continuation line compound end', () => {
@@ -1948,6 +1968,14 @@ end if`;
       const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse &\n  if (x < 0) then\n  a = -1\nend if');
       assertSingleBlock(pairs, 'if', 'end if');
       assertIntermediates(pairs[0], ['then', 'else &\n  if', 'then']);
+    });
+
+    test('Bug 11: isPrecedingContinuationKeyword with leading & on continuation line', () => {
+      const source = 'if (.true.) then\n  x = 1\nelse &\n&  if (.false.) then\n  x = 2\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('then'), 'should have then intermediate');
     });
   });
 
