@@ -13,8 +13,10 @@ export class ErlangBlockParser extends BaseBlockParser {
   // Validates block open: 'fun' references and spec context are not blocks
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords followed by => or := (map key/update: #{begin => 1, end := 2})
+    // Allow at most one line break to handle multi-line map expressions
+    // Also skip trailing comments (% ...) before line break
     const afterKeyword = source.slice(position + keyword.length);
-    if (/^\s*(?:=>|:=)/.test(afterKeyword)) {
+    if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterKeyword)) {
       return false;
     }
 
@@ -48,6 +50,26 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // fun() in type annotation context (after ::)
+    // Handles: handler :: fun((atom()) -> ok) in -record declarations
+    if (/^\s*\(/.test(afterFun)) {
+      let j = position - 1;
+      while (j >= 0) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          j--;
+          continue;
+        }
+        if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+          j--;
+          continue;
+        }
+        break;
+      }
+      if (j > 0 && source[j] === ':' && source[j - 1] === ':' && !this.isInExcludedRegion(j - 1, excludedRegions)) {
+        return false;
+      }
+    }
+
     // fun() in type context (inside parentheses of -spec/-type)
     if (/^\s*\(/.test(afterFun)) {
       // Check if in a -spec/-type context by scanning back for attribute
@@ -67,9 +89,22 @@ export class ErlangBlockParser extends BaseBlockParser {
         // Only reject if no period between the attribute and this fun
         // (period separates Erlang declarations)
         // Verify the period is not inside an excluded region
+        // Skip periods in float literals (digit.digit) and range operators (..)
         let foundPeriod = false;
         for (let j = lastAttr; j < position; j++) {
           if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
+            // Skip range operator (..)
+            if (j + 1 < source.length && source[j + 1] === '.') {
+              j++;
+              continue;
+            }
+            if (j > 0 && source[j - 1] === '.') {
+              continue;
+            }
+            // Skip float literals (digit.digit)
+            if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
+              continue;
+            }
             foundPeriod = true;
             break;
           }
@@ -89,11 +124,21 @@ export class ErlangBlockParser extends BaseBlockParser {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       const afterToken = source.slice(token.endOffset);
-      if (/^\s*(?:=>|:=)/.test(afterToken)) {
+      // Allow at most one line break to handle multi-line map expressions
+      // Also skip trailing comments (% ...) before line break
+      if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
         return false;
       }
       // Reject keywords preceded by '.' (record field access like Rec#state.end)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
+      }
+      // Reject keywords preceded by '?' (macro invocations like ?begin, ?end)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {
+        return false;
+      }
+      // Reject keywords preceded by '#' (record names like #begin, #end)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '#') {
         return false;
       }
       // Reject keywords preceded by '-' at line start (preprocessor directives like -if, -else)
@@ -110,26 +155,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     });
   }
 
-  // Finds excluded regions: comments, strings, atoms
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
-    return regions;
-  }
-
-  // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // Character literal: $x (must check before %, ", ' to avoid false matches)
@@ -142,9 +168,19 @@ export class ErlangBlockParser extends BaseBlockParser {
       return this.matchSingleLineComment(source, pos);
     }
 
-    // Triple-quoted string (OTP 27+)
+    // Triple-quoted string (OTP 27+): """ must be followed by a newline
     if (char === '"' && source.slice(pos, pos + 3) === '"""') {
-      return this.matchTripleQuotedString(source, pos);
+      // Check if next non-horizontal-whitespace char on the same line is newline or EOF
+      let k = pos + 3;
+      while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
+        k++;
+      }
+      if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+        return this.matchTripleQuotedString(source, pos);
+      }
+      // Not a valid triple-quoted string: treat as "" (empty string) + " (regular string start)
+      // Return the empty string "" as excluded region; the " will be matched on the next iteration
+      return { start: pos, end: pos + 2 };
     }
 
     // Double-quoted string
@@ -350,6 +386,10 @@ export class ErlangBlockParser extends BaseBlockParser {
       }
       if (source[i] === "'") {
         return { start: pos, end: i + 1 };
+      }
+      // Atoms cannot span multiple lines - unterminated atom ends at newline
+      if (source[i] === '\n' || source[i] === '\r') {
+        return { start: pos, end: i };
       }
       i++;
     }

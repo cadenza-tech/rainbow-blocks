@@ -1,13 +1,13 @@
 // MATLAB block parser: function, if, for, while, switch, try with end termination
 
-import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 
 export class MatlabBlockParser extends BaseBlockParser {
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
   protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject end preceded by dot (struct field access like s.end or s . end)
-    if (this.isPrecededByDot(source, position)) {
+    if (this.isPrecededByDot(source, position, excludedRegions)) {
       return false;
     }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
@@ -20,7 +20,7 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Reject struct field access for block openers (s.if, s.for, s . if, etc)
   // Reject classdef section keywords used as function calls (properties(obj))
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (this.isPrecededByDot(source, position)) {
+    if (this.isPrecededByDot(source, position, excludedRegions)) {
       return false;
     }
     if (MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(keyword)) {
@@ -89,18 +89,91 @@ export class MatlabBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
-      if (this.isPrecededByDot(source, token.startOffset)) {
+      if (this.isPrecededByDot(source, token.startOffset, excludedRegions)) {
         return false;
       }
       return true;
     });
   }
 
+  // Validates intermediate keywords against their opener type
+  protected matchBlocks(tokens: Token[]): BlockPair[] {
+    const pairs: BlockPair[] = [];
+    const stack: OpenBlock[] = [];
+
+    for (const token of tokens) {
+      switch (token.type) {
+        case 'block_open':
+          stack.push({ token, intermediates: [] });
+          break;
+
+        case 'block_middle':
+          if (stack.length > 0) {
+            const middleValue = token.value.toLowerCase();
+            const topOpener = stack[stack.length - 1].token.value.toLowerCase();
+            if (middleValue === 'else' || middleValue === 'elseif') {
+              if (topOpener !== 'if') break;
+            } else if (middleValue === 'case' || middleValue === 'otherwise') {
+              if (topOpener !== 'switch') break;
+            } else if (middleValue === 'catch') {
+              if (topOpener !== 'try') break;
+            }
+            stack[stack.length - 1].intermediates.push(token);
+          }
+          break;
+
+        case 'block_close': {
+          const openBlock = stack.pop();
+          if (openBlock) {
+            pairs.push({
+              openKeyword: openBlock.token,
+              closeKeyword: token,
+              intermediates: openBlock.intermediates,
+              nestLevel: stack.length
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    return pairs;
+  }
+
   // Checks if position is preceded by dot (possibly with whitespace: s . end)
-  protected isPrecededByDot(source: string, position: number): boolean {
+  // Handles ... line continuation: obj. ...\n    end is struct field access
+  protected isPrecededByDot(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
-      i--;
+    while (i >= 0) {
+      // Skip excluded regions backward (handles ... line continuations)
+      if (excludedRegions) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      // Skip newlines that are immediately after an excluded region (e.g., ... continuation)
+      // matchSingleLineComment sets region.end to the newline position, so check if any
+      // excluded region ends exactly at this newline position
+      if ((source[i] === '\n' || source[i] === '\r') && excludedRegions) {
+        let nlStart = i;
+        if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') {
+          nlStart = i - 1;
+        }
+        if (
+          this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions)?.end === nlStart ||
+          this.findExcludedRegionAt(i > 0 ? i - 1 : 0, excludedRegions)?.end === i
+        ) {
+          i = nlStart - 1;
+          continue;
+        }
+      }
+      break;
     }
     return i >= 0 && source[i] === '.';
   }
@@ -152,24 +225,6 @@ export class MatlabBlockParser extends BaseBlockParser {
     blockClose: ['end'],
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch']
   };
-
-  // Finds excluded regions: comments and strings
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
-    return regions;
-  }
 
   // Checks if position is at line start allowing leading whitespace
   protected isAtLineStartWithWhitespace(source: string, pos: number): boolean {
@@ -316,19 +371,10 @@ export class MatlabBlockParser extends BaseBlockParser {
     return { start: pos, end: source.length };
   }
 
-  // Matches double-quoted string: "..." with "" and \" as escape
+  // Matches double-quoted string: "..." with "" as escape (MATLAB does not support backslash escapes)
   private matchDoubleQuotedString(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
     while (i < source.length) {
-      // Handle backslash escapes
-      if (source[i] === '\\' && i + 1 < source.length) {
-        if (source[i + 1] === '\r' && i + 2 < source.length && source[i + 2] === '\n') {
-          i += 3;
-        } else {
-          i += 2;
-        }
-        continue;
-      }
       if (source[i] === '"') {
         // Check for escaped quote ""
         if (i + 1 < source.length && source[i + 1] === '"') {

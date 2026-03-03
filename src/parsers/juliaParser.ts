@@ -1,6 +1,6 @@
 // Julia block parser: handles nested multi-line comments #= =#, prefixed strings, and transpose operator
 
-import type { ExcludedRegion, LanguageKeywords } from '../types';
+import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 
 export class JuliaBlockParser extends BaseBlockParser {
@@ -27,22 +27,16 @@ export class JuliaBlockParser extends BaseBlockParser {
     blockMiddle: ['elseif', 'else', 'catch', 'finally']
   };
 
-  // Finds excluded regions: comments, strings, symbols, command strings
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
+  // Filters out keywords preceded by dot (struct field access like obj.end, range.begin)
+  protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    const tokens = super.tokenize(source, excludedRegions);
+    return tokens.filter((token) => {
+      // Skip keywords preceded by dot (struct field access like obj.end, range.begin)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
       }
-    }
-
-    return regions;
+      return true;
+    });
   }
 
   // Validates block open keywords
@@ -50,12 +44,22 @@ export class JuliaBlockParser extends BaseBlockParser {
     // abstract/primitive must be followed by 'type' keyword
     if (keyword === 'abstract' || keyword === 'primitive') {
       const afterKeyword = source.slice(position + keyword.length);
-      return /^\s+type\b/.test(afterKeyword);
+      return /^[ \t]+type\b/.test(afterKeyword);
     }
 
-    // for/if inside brackets or parentheses are array comprehensions/generators
-    if (keyword === 'for' || keyword === 'if') {
+    // for inside brackets or parentheses are array comprehensions/generators
+    if (keyword === 'for') {
       if (this.isInsideBrackets(source, position, excludedRegions) || this.isInsideParentheses(source, position, excludedRegions)) {
+        return false;
+      }
+    }
+
+    // if inside brackets are comprehension filters; inside parentheses only if generator filter (for...if)
+    if (keyword === 'if') {
+      if (this.isInsideBrackets(source, position, excludedRegions)) {
+        return false;
+      }
+      if (this.isGeneratorFilterIf(source, position, excludedRegions)) {
         return false;
       }
     }
@@ -73,11 +77,8 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Validates block close: 'end' inside indexing brackets is array indexing, not block close
   // 'end' inside array construction brackets IS a valid block close (e.g., [begin...end])
-  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (keyword === 'end') {
-      return !this.isInsideIndexingBrackets(source, position, excludedRegions);
-    }
-    return true;
+  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    return !this.isInsideIndexingBrackets(source, position, excludedRegions);
   }
 
   // Checks if position is inside any brackets (for for/if comprehension check)
@@ -151,8 +152,8 @@ export class JuliaBlockParser extends BaseBlockParser {
     }
     if (i < 0) return false;
     const prevChar = source[i];
-    // Identifiers, closing brackets/parens/braces, quotes -> indexing
-    if (/[a-zA-Z0-9_)\]}'"]/.test(prevChar)) return true;
+    // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing
+    if (/[a-zA-Z0-9_)\]}'"]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
     // Everything else (operators, (, [, =, comma, newline, etc.) -> array construction
     return false;
   }
@@ -160,7 +161,9 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if there's a block-opening keyword between two positions (not in excluded regions)
   // Used to distinguish a[f(end)] (lastindex) from [f(begin...end)] (block close)
   private hasBlockOpenerBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
-    const blockOpeners = this.keywords.blockOpen;
+    // Exclude 'for' and 'if' since they are themselves subject to parenthesis rejection
+    // Only count block openers like begin, function, struct, etc.
+    const blockOpeners = this.keywords.blockOpen.filter((kw) => kw !== 'for' && kw !== 'if');
     for (let i = start; i < end; i++) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
@@ -179,7 +182,48 @@ export class JuliaBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Checks if 'if' is a generator filter inside parentheses (for...if pattern)
+  private isGeneratorFilterIf(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let parenDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const char = source[i];
+      if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) {
+          return this.hasForBetween(source, i + 1, position, excludedRegions);
+        }
+        parenDepth--;
+      }
+    }
+    return false;
+  }
+
+  // Checks if there's a 'for' keyword at depth 0 between start and end positions
+  private hasForBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === '(' || ch === '[') {
+        depth++;
+      } else if (ch === ')' || ch === ']') {
+        depth--;
+      } else if (depth === 0 && i + 3 <= end && source.slice(i, i + 3) === 'for') {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + 3 < source.length ? source[i + 3] : ' ';
+        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Checks if a position is inside unmatched parentheses (for generator expressions)
+  // Returns false if there's a block opener between the unmatched '(' and position
+  // (which indicates a block expression like f(if x > 0 x else -x end))
   private isInsideParentheses(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -190,7 +234,9 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (char === ')') {
         parenDepth++;
       } else if (char === '(') {
-        if (parenDepth === 0) return true;
+        if (parenDepth === 0) {
+          return !this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions);
+        }
         parenDepth--;
       }
     }
@@ -226,7 +272,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // Multi-line comment: #= ... =# (nestable)
@@ -282,11 +328,8 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Matches multi-line comment with nesting support: #= ... =#
-  private matchMultiLineComment(source: string, pos: number): ExcludedRegion | null {
-    if (source.slice(pos, pos + 2) !== '#=') {
-      return null;
-    }
-
+  // Caller guarantees source[pos..pos+2] === '#='
+  private matchMultiLineComment(source: string, pos: number): ExcludedRegion {
     let i = pos + 2;
     let depth = 1;
 
@@ -355,14 +398,12 @@ export class JuliaBlockParser extends BaseBlockParser {
           return null;
         }
         const prefixLength = prefixEnd - pos;
-        // All prefixed strings receive raw content without interpolation
-        const interp = false;
         // Check for triple-quoted prefixed string
         if (source.slice(prefixEnd, prefixEnd + 3) === '"""') {
-          return this.matchPrefixedTripleQuotedString(source, pos, prefixLength, interp);
+          return this.matchPrefixedTripleQuotedString(source, pos, prefixLength);
         }
-        // Regular prefixed string
-        let stringEnd = this.findStringEnd(source, prefixEnd + 1, '"', interp);
+        // Regular prefixed string (no interpolation, raw content)
+        let stringEnd = this.findPrefixedStringEnd(source, prefixEnd + 1, '"');
         // Consume string macro suffix characters (e.g., custom"content"end)
         while (stringEnd < source.length && /[a-zA-Z0-9_]/.test(source[stringEnd])) {
           stringEnd++;
@@ -379,18 +420,13 @@ export class JuliaBlockParser extends BaseBlockParser {
     return this.keywords.blockOpen.includes(word) || this.keywords.blockClose.includes(word) || this.keywords.blockMiddle.includes(word);
   }
 
-  // Matches prefixed triple-quoted string with optional $() interpolation
-  private matchPrefixedTripleQuotedString(source: string, pos: number, prefixLength: number, interpolating = true): ExcludedRegion {
+  // Matches prefixed triple-quoted string (no interpolation, raw content)
+  private matchPrefixedTripleQuotedString(source: string, pos: number, prefixLength: number): ExcludedRegion {
     let i = pos + prefixLength + 3;
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
         i += 2;
-        continue;
-      }
-      // Handle $(...) interpolation
-      if (interpolating && source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        i = this.skipJuliaInterpolation(source, i + 2);
         continue;
       }
       if (source.slice(i, i + 3) === '"""') {
@@ -407,17 +443,12 @@ export class JuliaBlockParser extends BaseBlockParser {
     return { start: pos, end: source.length };
   }
 
-  // Finds the end of a string with escape sequence and interpolation handling
-  private findStringEnd(source: string, start: number, quote: string, interpolating = true): number {
+  // Finds the end of a prefixed string (no interpolation, raw content)
+  private findPrefixedStringEnd(source: string, start: number, quote: string): number {
     let i = start;
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
         i += 2;
-        continue;
-      }
-      // Handle $(...) interpolation (quotes inside don't end the string)
-      if (interpolating && source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        i = this.skipJuliaInterpolation(source, i + 2);
         continue;
       }
       if (source[i] === quote) {
@@ -444,7 +475,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // :: (type annotation) second colon is not a symbol start
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (prevChar === ':' || /[\w)\]}>]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
+      if (prevChar === ':' || /[\w)\]}]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
         return false;
       }
     }
@@ -474,6 +505,14 @@ export class JuliaBlockParser extends BaseBlockParser {
         const char = source[i];
         if (/[!%&*+\-/<=>?\\^|~@]/.test(char)) {
           i++;
+          // If @ was consumed and next char starts an identifier, consume the full identifier
+          // This handles :@macro_name patterns where @ is the macro prefix
+          if (char === '@' && i < source.length && (/[\w]/.test(source[i]) || source[i].charCodeAt(0) > 127)) {
+            while (i < source.length && (/[\w!]/.test(source[i]) || source[i].charCodeAt(0) > 127)) {
+              i++;
+            }
+            break;
+          }
           continue;
         }
         break;

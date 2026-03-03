@@ -34,7 +34,29 @@ export abstract class BaseBlockParser {
 
   // Finds regions to exclude from keyword detection (comments, strings, etc)
   // Must return regions sorted by start position for binary search
-  protected abstract findExcludedRegions(source: string): ExcludedRegion[];
+  // Override findExcludedRegions for custom scanning, or override tryMatchExcludedRegion for simple dispatch
+  protected findExcludedRegions(source: string): ExcludedRegion[] {
+    const regions: ExcludedRegion[] = [];
+    let i = 0;
+
+    while (i < source.length) {
+      const result = this.tryMatchExcludedRegion(source, i);
+      if (result) {
+        regions.push(result);
+        i = result.end;
+      } else {
+        i++;
+      }
+    }
+
+    return regions;
+  }
+
+  // Tries to match an excluded region at the given position
+  // Override to dispatch to string/comment matchers
+  protected tryMatchExcludedRegion(_source: string, _pos: number): ExcludedRegion | null {
+    return null;
+  }
 
   // Validates if a block open keyword is valid at the given position
   // Override to handle postfix conditions, one-liners, etc
@@ -135,26 +157,9 @@ export abstract class BaseBlockParser {
   }
 
   // Checks if a position is within an excluded region using binary search
-  // Assumes regions are sorted by start position in ascending order
+  // See also standalone isInExcludedRegion in parserUtils.ts for use outside class context
   protected isInExcludedRegion(pos: number, regions: ExcludedRegion[]): boolean {
-    let left = 0;
-    let right = regions.length - 1;
-
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const region = regions[mid];
-
-      if (pos >= region.start && pos < region.end) {
-        return true;
-      }
-      if (pos < region.start) {
-        right = mid - 1;
-      } else {
-        left = mid + 1;
-      }
-    }
-
-    return false;
+    return this.findExcludedRegionAt(pos, regions) !== null;
   }
 
   // Finds the excluded region containing the given position using binary search
@@ -264,6 +269,7 @@ export abstract class BaseBlockParser {
   }
 
   // Returns all tokens for testing purposes
+
   getTokens(source: string): Token[] {
     const excludedRegions = this.findExcludedRegions(source);
     return this.tokenize(source, excludedRegions);

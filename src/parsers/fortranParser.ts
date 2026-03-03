@@ -2,6 +2,18 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import {
+  collapseContinuationLines,
+  findInlineCommentIndex,
+  findLineEnd,
+  isAfterDoubleColon,
+  isBlockWhereOrForall,
+  isPrecedingContinuationKeyword,
+  isTypeSpecifier,
+  matchElseWhere,
+  matchFortranString
+} from './fortranHelpers';
+import { findLastOpenerByType, findLineStart, getTokenTypeCaseInsensitive } from './parserUtils';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = [
@@ -28,8 +40,9 @@ const COMPOUND_END_TYPES = [
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 // Pattern to match compound end keywords with continuation line: end &\n[&]keyword
+// Also handles comment-only lines between end & and keyword
 const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
-  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*![^\\r\\n]*(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
 
@@ -55,7 +68,7 @@ export class FortranBlockParser extends BaseBlockParser {
       'enum'
     ],
     blockClose: ['end'],
-    blockMiddle: ['else', 'elseif', 'case', 'then', 'contains']
+    blockMiddle: ['else', 'elseif', 'elsewhere', 'case', 'then', 'contains']
   };
 
   // Finds excluded regions: comments and strings
@@ -66,38 +79,16 @@ export class FortranBlockParser extends BaseBlockParser {
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerKeyword = keyword.toLowerCase();
 
-    // 'type' that's part of 'select type', or 'type is(...)' guard inside select type
     if (lowerKeyword === 'type') {
-      const typeLineStart = this.findLineStart(source, position);
-      const lineBeforeType = source.slice(typeLineStart, position).toLowerCase().trimEnd();
-      if (lineBeforeType.endsWith('select')) {
-        return false;
-      }
-      // Check continuation: select &\n  type
-      if (this.isPrecedingContinuationKeyword(source, position, 'select')) {
-        return false;
-      }
-      // 'type is(...)' or 'type is (...)' is a guard in select type, not a block
-      const afterKeyword = source.slice(position + keyword.length);
-      if (/^\s+is\s*\(/i.test(afterKeyword)) {
-        return false;
-      }
-      // type(name) as type specifier: type(identifier) followed by :: or ,
-      if (/^\s*\(/i.test(afterKeyword)) {
-        if (this.isTypeSpecifier(source, position + keyword.length)) {
-          return false;
-        }
-      }
+      return this.isValidTypeOpen(keyword, source, position, excludedRegions);
     }
 
     // 'select' must be followed by 'type' or 'case' to be a block opener
     // Handles line continuation with &, including comment-only lines between
     if (lowerKeyword === 'select') {
       let afterSelect = source.slice(position + keyword.length);
-      // Collapse & continuation: remove & and trailing content, newline, optional leading &
-      // Also collapse any comment-only lines that follow a continuation
-      afterSelect = afterSelect.replace(/&[^\r\n]*(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?/g, ' ');
-      if (!/^\s+(type|case)\b/i.test(afterSelect)) {
+      afterSelect = collapseContinuationLines(afterSelect);
+      if (!/^[ \t]+(type|case|rank)\b/i.test(afterSelect)) {
         return false;
       }
     }
@@ -105,65 +96,103 @@ export class FortranBlockParser extends BaseBlockParser {
     // 'module procedure' inside submodule is not a new module block
     if (lowerKeyword === 'module') {
       let afterModule = source.slice(position + keyword.length);
-      // Handle continuation lines, including comment-only lines between continuations
-      afterModule = afterModule.replace(/&[^\r\n]*(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?/g, ' ');
-      if (/^\s+procedure\b/i.test(afterModule)) {
+      afterModule = collapseContinuationLines(afterModule);
+      if (/^[ \t]+procedure\b/i.test(afterModule)) {
         return false;
       }
     }
 
-    // Type-bound procedure declaration: procedure :: name or procedure, attr :: name
-    // Also handles line continuation with &
     if (lowerKeyword === 'procedure') {
-      let j = position + keyword.length;
-      while (j < source.length) {
-        const lineEnd = this.findLineEnd(source, j);
-        const lineContent = source.slice(j, lineEnd);
-        // Strip inline comment before checking for continuation & and ::
-        let trimmedLine = lineContent.trimEnd();
-        const commentPos = this.findInlineCommentIndex(trimmedLine);
-        if (commentPos >= 0) {
-          trimmedLine = trimmedLine.slice(0, commentPos).trimEnd();
-        }
-        // Skip comment-only lines (empty after stripping comment)
-        if (trimmedLine.trimStart().length === 0 && commentPos >= 0) {
-          j = lineEnd;
-          if (j < source.length && source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
-            j += 2;
-          } else if (j < source.length) {
-            j++;
-          }
-          continue;
-        }
-        const colonIdx = lineContent.indexOf('::');
-        if (colonIdx >= 0 && !this.isInExcludedRegion(j + colonIdx, excludedRegions)) {
-          return false;
-        }
-        if (!trimmedLine.endsWith('&')) {
-          break;
-        }
-        // Skip past line break (\r\n, \n, or standalone \r)
+      return this.isValidProcedureOpen(keyword, source, position, excludedRegions);
+    }
+
+    // Single-line where/forall: has (condition) followed by statement on same line
+    if (lowerKeyword === 'where' || lowerKeyword === 'forall') {
+      return isBlockWhereOrForall(source, position, keyword);
+    }
+
+    if (lowerKeyword === 'if') {
+      return this.isValidIfOpen(keyword, source, position, excludedRegions);
+    }
+
+    return true;
+  }
+
+  // Validates 'type': rejects select type guards, type specifiers, continuation patterns
+  private isValidTypeOpen(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    const typeLineStart = findLineStart(source, position);
+    const lineBeforeType = source.slice(typeLineStart, position).toLowerCase().trimEnd();
+    if (lineBeforeType.endsWith('select')) {
+      return false;
+    }
+    // Check continuation: select &\n  type
+    if (isPrecedingContinuationKeyword(source, position, 'select')) {
+      return false;
+    }
+    // 'type is(...)' or 'type is (...)' is a guard in select type, not a block
+    // Also handles continuation: type &\n  is (integer)
+    let afterKeyword = source.slice(position + keyword.length);
+    afterKeyword = collapseContinuationLines(afterKeyword);
+    if (/^[ \t]+is\s*\(/i.test(afterKeyword)) {
+      return false;
+    }
+    // type(name) as type specifier: type(identifier) followed by :: or ,
+    // Use collapsed text to handle continuation lines between type and (
+    if (/^\s*\(/i.test(afterKeyword)) {
+      if (isTypeSpecifier(afterKeyword, 0)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Validates 'procedure': rejects type-bound procedure declarations (with ::)
+  private isValidProcedureOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position + keyword.length;
+    while (j < source.length) {
+      const lineEnd = findLineEnd(source, j);
+      const lineContent = source.slice(j, lineEnd);
+      // Strip inline comment before checking for continuation & and ::
+      let trimmedLine = lineContent.trimEnd();
+      const commentPos = findInlineCommentIndex(trimmedLine);
+      if (commentPos >= 0) {
+        trimmedLine = trimmedLine.slice(0, commentPos).trimEnd();
+      }
+      // Skip comment-only lines (empty after stripping comment)
+      if (trimmedLine.trimStart().length === 0 && commentPos >= 0) {
         j = lineEnd;
         if (j < source.length && source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
           j += 2;
         } else if (j < source.length) {
           j++;
         }
+        continue;
+      }
+      let colonSearchIdx = 0;
+      while (colonSearchIdx < lineContent.length - 1) {
+        const colonIdx = lineContent.indexOf('::', colonSearchIdx);
+        if (colonIdx < 0) break;
+        if (!this.isInExcludedRegion(j + colonIdx, excludedRegions)) {
+          return false;
+        }
+        colonSearchIdx = colonIdx + 2;
+      }
+      if (!trimmedLine.endsWith('&')) {
+        break;
+      }
+      // Skip past line break (\r\n, \n, or standalone \r)
+      j = lineEnd;
+      if (j < source.length && source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
+        j += 2;
+      } else if (j < source.length) {
+        j++;
       }
     }
+    return true;
+  }
 
-    // Single-line where/forall: has (condition) followed by statement on same line
-    if (lowerKeyword === 'where' || lowerKeyword === 'forall') {
-      return this.isBlockWhereOrForall(source, position, keyword);
-    }
-
-    if (lowerKeyword !== 'if') {
-      return true;
-    }
-
-    // 'else if' merger in tokenize() handles combining else + if into a single block_middle
-
-    // Check if 'then' exists after the 'if', handling & continuation lines
+  // Validates 'if': checks for 'then' keyword handling & continuation lines
+  private isValidIfOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position + keyword.length;
     while (i < source.length) {
       // Skip excluded regions
@@ -214,7 +243,7 @@ export class FortranBlockParser extends BaseBlockParser {
             }
             // If line starts with !, it's a comment-only continuation
             if (i < source.length && source[i] === '!') {
-              const commentEnd = this.findLineEnd(source, i);
+              const commentEnd = findLineEnd(source, i);
               i = commentEnd;
               // Skip past the line break
               if (i < source.length) {
@@ -237,105 +266,6 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     return false;
-  }
-
-  // Check if where/forall is a block form (not single-line)
-  // Single-line: where (condition) assignment or forall (spec) assignment
-  // Block: where (condition)\n or forall (spec)\n (with optional & continuation)
-  private isBlockWhereOrForall(source: string, position: number, keyword: string): boolean {
-    let i = position + keyword.length;
-
-    // Skip whitespace before opening paren
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
-    }
-
-    // Must have opening parenthesis
-    if (i >= source.length || source[i] !== '(') {
-      return false;
-    }
-
-    // Find matching closing parenthesis, skipping strings and comments
-    let depth = 1;
-    i++;
-    while (i < source.length && depth > 0) {
-      if (source[i] === "'" || source[i] === '"') {
-        const quote = source[i];
-        i++;
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          if (source[i] === quote) {
-            if (i + 1 < source.length && source[i + 1] === quote) {
-              i += 2;
-              continue;
-            }
-            break;
-          }
-          i++;
-        }
-        if (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      }
-      // Skip ! inline comments (to end of line)
-      if (source[i] === '!') {
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      }
-      if (source[i] === '(') depth++;
-      else if (source[i] === ')') depth--;
-      i++;
-    }
-
-    // If no closing paren found, not valid
-    if (depth > 0) {
-      return false;
-    }
-
-    // After the closing paren, check rest of the line
-    // If there's non-whitespace content (excluding comments and continuations),
-    // it's a single-line form
-    while (i < source.length) {
-      const ch = source[i];
-
-      // Newline means block form
-      if (ch === '\n') {
-        return true;
-      }
-
-      // Carriage return: standalone \r (not followed by \n) is a line break
-      if (ch === '\r') {
-        if (i + 1 >= source.length || source[i + 1] !== '\n') {
-          return true;
-        }
-        i++;
-        continue;
-      }
-
-      // Comment means block form (rest of line is comment)
-      if (ch === '!') {
-        return true;
-      }
-
-      // Line continuation: check what follows on the next line
-      if (ch === '&') {
-        return this.isContinuationBlockForm(source, i);
-      }
-
-      // Whitespace, keep scanning
-      if (ch === ' ' || ch === '\t') {
-        i++;
-        continue;
-      }
-
-      // Non-whitespace content after condition = single-line form
-      return false;
-    }
-
-    // End of source after condition = block form (no assignment follows)
-    return true;
   }
 
   // Validates block close keywords
@@ -361,6 +291,25 @@ export class FortranBlockParser extends BaseBlockParser {
       }
       if (i < source.length && source[i] === '\r') i++;
       if (i < source.length && source[i] === '\n') i++;
+      // Skip comment-only lines between end & and continuation content
+      while (i < source.length) {
+        let lineContentStart = i;
+        while (lineContentStart < source.length && (source[lineContentStart] === ' ' || source[lineContentStart] === '\t')) {
+          lineContentStart++;
+        }
+        if (lineContentStart < source.length && source[lineContentStart] === '!') {
+          // Comment-only line: skip to end of line
+          let lineEnd = lineContentStart;
+          while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+            lineEnd++;
+          }
+          if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
+          if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
+          i = lineEnd;
+          continue;
+        }
+        break;
+      }
       // Skip whitespace on next line
       while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
         i++;
@@ -397,170 +346,29 @@ export class FortranBlockParser extends BaseBlockParser {
           j++;
         }
       }
+      // Handle & continuation after paren: end(1) &\n  = value
+      if (j < source.length && source[j] === '&') {
+        j++;
+        while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
+          j++;
+        }
+        if (j < source.length && source[j] === '\r') j++;
+        if (j < source.length && source[j] === '\n') j++;
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+          j++;
+        }
+        if (j < source.length && source[j] === '&') {
+          j++;
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+            j++;
+          }
+        }
+      }
       if (j < source.length && source[j] === '=' && (j + 1 >= source.length || source[j + 1] !== '=')) {
         return false;
       }
     }
     return true;
-  }
-
-  // Checks if type(name) is a type specifier (variable declaration)
-  private isTypeSpecifier(source: string, parenStart: number): boolean {
-    let i = parenStart;
-    // Skip whitespace before (
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
-    }
-    if (i >= source.length || source[i] !== '(') {
-      return false;
-    }
-    // Find matching closing paren
-    let depth = 1;
-    i++;
-    while (i < source.length && depth > 0) {
-      if (source[i] === '(') depth++;
-      else if (source[i] === ')') depth--;
-      i++;
-    }
-    if (depth > 0) {
-      return false;
-    }
-    // After closing paren, check for :: or , (indicating type specifier)
-    // or function/subroutine keywords (type(name) function foo)
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
-    }
-    if (i < source.length && source[i] === ':' && i + 1 < source.length && source[i + 1] === ':') {
-      return true;
-    }
-    if (i < source.length && source[i] === ',') {
-      return true;
-    }
-    const afterParen = source.slice(i);
-    if (/^(recursive|pure|elemental|impure|function|subroutine)\b/i.test(afterParen)) {
-      return true;
-    }
-    return false;
-  }
-
-  // Checks if a continuation after where/forall paren is block form
-  // Single-line spread across lines: where (mask) &\n  a = b
-  // Block form: where (mask) &\n  a = b\n  c = d\nend where
-  private isContinuationBlockForm(source: string, ampPos: number): boolean {
-    let i = ampPos + 1;
-
-    // Follow the chain of continuation lines
-    while (true) {
-      // Skip to next line break
-      i = this.findLineEnd(source, i);
-      if (i >= source.length) {
-        return true;
-      }
-      // Skip past line break (\r\n, \n, or standalone \r)
-      if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
-        i += 2;
-      } else {
-        i++;
-      }
-      // Skip whitespace on continuation line
-      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-        i++;
-      }
-      // Skip leading & on continuation line
-      if (i < source.length && source[i] === '&') {
-        i++;
-      }
-      // Find the end of this continuation line
-      const lineStart = i;
-      i = this.findLineEnd(source, i);
-      let lineContent = source.slice(lineStart, i).trim();
-      // If the continuation line is empty, treat as block form
-      if (lineContent.length === 0) {
-        return true;
-      }
-      // Strip inline comment before checking for continuation &
-      const commentIdx = this.findInlineCommentIndex(lineContent);
-      if (commentIdx >= 0) {
-        lineContent = lineContent.slice(0, commentIdx).trimEnd();
-      }
-      // Skip comment-only lines (empty after stripping comment)
-      if (lineContent.length === 0 && commentIdx >= 0) {
-        continue;
-      }
-      // If this line ends with &, it's another continuation - keep following
-      if (lineContent.endsWith('&')) {
-        continue;
-      }
-      break;
-    }
-
-    // Check if there is a newline after this last continuation line
-    // and then more content before end where/forall
-    if (i >= source.length) {
-      return false;
-    }
-    // Look at next line to see if it's end where/forall or more statements
-    // Skip past line break and comment-only lines
-    while (i < source.length) {
-      // Skip past line break (\r\n, \n, or standalone \r)
-      if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
-        i += 2;
-      } else {
-        i++;
-      }
-      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-        i++;
-      }
-      // Skip comment-only lines
-      if (i < source.length && source[i] === '!') {
-        i = this.findLineEnd(source, i);
-        continue;
-      }
-      break;
-    }
-    // If next line starts with 'end where' or 'end forall', it's block form
-    if (i < source.length && /^end\s*(where|forall)\b/i.test(source.slice(i))) {
-      return true;
-    }
-    // If next line starts with 'end' (other), this was single-line spread
-    // Match both separated (end do) and concatenated (enddo) forms
-    if (
-      i < source.length &&
-      /^end(do|if|where|forall|program|module|submodule|function|subroutine|block|blockdata|type|select|associate|critical|team|change|enum|interface|procedure|subprogram)?\b/i.test(
-        source.slice(i)
-      )
-    ) {
-      return false;
-    }
-    // More statements follow, it's block form
-    return true;
-  }
-
-  // Finds the index of '!' inline comment in a line, skipping '!' inside strings
-  private findInlineCommentIndex(line: string): number {
-    let inString = false;
-    let quote = '';
-    for (let i = 0; i < line.length; i++) {
-      if (inString) {
-        if (line[i] === quote) {
-          if (i + 1 < line.length && line[i + 1] === quote) {
-            i++;
-            continue;
-          }
-          inString = false;
-        }
-        continue;
-      }
-      if (line[i] === "'" || line[i] === '"') {
-        inString = true;
-        quote = line[i];
-        continue;
-      }
-      if (line[i] === '!') {
-        return i;
-      }
-    }
-    return -1;
   }
 
   // Checks if position is at line start allowing leading whitespace (for # preprocessor)
@@ -573,25 +381,7 @@ export class FortranBlockParser extends BaseBlockParser {
     return i < 0 || source[i] === '\n' || source[i] === '\r';
   }
 
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
-    return regions;
-  }
-
-  // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // C preprocessor directive: # at line start (after optional whitespace)
@@ -619,37 +409,15 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // Single-quoted string
     if (char === "'") {
-      return this.matchFortranString(source, pos, "'");
+      return matchFortranString(source, pos, "'");
     }
 
     // Double-quoted string
     if (char === '"') {
-      return this.matchFortranString(source, pos, '"');
+      return matchFortranString(source, pos, '"');
     }
 
     return null;
-  }
-
-  // Matches Fortran string with specified quote character
-  private matchFortranString(source: string, pos: number, quote: string): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === quote) {
-        // Check for doubled quote escape
-        if (i + 1 < source.length && source[i + 1] === quote) {
-          i += 2;
-          continue;
-        }
-        return { start: pos, end: i + 1 };
-      }
-      // String cannot span multiple lines in standard Fortran
-      if (source[i] === '\n' || source[i] === '\r') {
-        return { start: pos, end: i };
-      }
-      i++;
-    }
-
-    return { start: pos, end: source.length };
   }
 
   // Override tokenize to handle compound end keywords and case insensitivity
@@ -661,7 +429,7 @@ export class FortranBlockParser extends BaseBlockParser {
     let match = COMPOUND_END_PATTERN.exec(source);
     while (match !== null) {
       const pos = match.index;
-      if (!this.isInExcludedRegion(pos, excludedRegions) && !this.isAfterDoubleColon(source, pos, excludedRegions)) {
+      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
         const fullMatch = match[0];
         const endType = match[1].toLowerCase();
         compoundEndPositions.set(pos, {
@@ -678,11 +446,7 @@ export class FortranBlockParser extends BaseBlockParser {
     let contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
     while (contMatch !== null) {
       const pos = contMatch.index;
-      if (
-        !this.isInExcludedRegion(pos, excludedRegions) &&
-        !this.isAfterDoubleColon(source, pos, excludedRegions) &&
-        !compoundEndPositions.has(pos)
-      ) {
+      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions) && !compoundEndPositions.has(pos)) {
         const fullMatch = contMatch[0];
         const endType = contMatch[1].toLowerCase();
         // Normalize keyword to "end <type>" for consistent matching in matchBlocks
@@ -712,10 +476,10 @@ export class FortranBlockParser extends BaseBlockParser {
       }
 
       const keyword = keywordMatch[1];
-      const type = this.getTokenTypeCaseInsensitive(keyword);
+      const type = getTokenTypeCaseInsensitive(keyword, this.keywords);
 
       // Skip keywords on variable declaration lines (after ::)
-      if (this.isAfterDoubleColon(source, startOffset, excludedRegions)) {
+      if (isAfterDoubleColon(source, startOffset, excludedRegions)) {
         continue;
       }
 
@@ -741,32 +505,56 @@ export class FortranBlockParser extends BaseBlockParser {
       });
     }
 
-    // Merge 'else' + 'if' into a single 'else if' blockMiddle token
+    // Merge 'else' + 'if' into a single blockMiddle token (token-based merge)
+    // Also merge 'else' + 'where' by scanning source text (where may be absent
+    // from token list when it failed isValidBlockOpen without a condition)
     const mergedTokens: Token[] = [];
     for (let ti = 0; ti < tokens.length; ti++) {
       const current = tokens[ti];
-      if (
-        current.value.toLowerCase() === 'else' &&
-        current.type === 'block_middle' &&
-        ti + 1 < tokens.length &&
-        tokens[ti + 1].value.toLowerCase() === 'if' &&
-        tokens[ti + 1].type === 'block_open'
-      ) {
-        const textBetween = source.slice(current.endOffset, tokens[ti + 1].startOffset);
-        // Same line: else if
-        const isSameLine = /^\s+$/.test(textBetween) && !textBetween.includes('\n') && !textBetween.includes('\r');
-        // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if
-        const isContinuation = /^\s*&\s*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?\s*$/.test(textBetween);
-        if (isSameLine || isContinuation) {
+      if (current.value.toLowerCase() === 'else' && current.type === 'block_middle') {
+        // Try token-based merge for else + if or else + where (when where is tokenized)
+        if (ti + 1 < tokens.length) {
+          const nextValue = tokens[ti + 1].value.toLowerCase();
+          const isMergeTarget =
+            (nextValue === 'if' && tokens[ti + 1].type === 'block_open') || (nextValue === 'where' && tokens[ti + 1].type === 'block_open');
+          if (isMergeTarget) {
+            const textBetween = source.slice(current.endOffset, tokens[ti + 1].startOffset);
+            // Same line: else if / else where
+            const isSameLine = /^\s+$/.test(textBetween) && !textBetween.includes('\n') && !textBetween.includes('\r');
+            // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if/where
+            const isContinuation = /^\s*&\s*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?\s*$/.test(textBetween);
+            if (isSameLine || isContinuation) {
+              mergedTokens.push({
+                type: 'block_middle',
+                value: source.slice(current.startOffset, tokens[ti + 1].endOffset),
+                startOffset: current.startOffset,
+                endOffset: tokens[ti + 1].endOffset,
+                line: current.line,
+                column: current.column
+              });
+              ti++;
+              continue;
+            }
+          }
+        }
+        // Source-based merge for else + where (when where was not tokenized)
+        const elseWhereMatch = matchElseWhere(source, current.endOffset, excludedRegions);
+        if (elseWhereMatch) {
+          // Check that no other token starts between else and where
+          const nextTokenStart = ti + 1 < tokens.length ? tokens[ti + 1].startOffset : source.length;
+          if (elseWhereMatch.whereStart >= nextTokenStart) {
+            // Another token exists between; don't merge
+            mergedTokens.push(current);
+            continue;
+          }
           mergedTokens.push({
             type: 'block_middle',
-            value: source.slice(current.startOffset, tokens[ti + 1].endOffset),
+            value: source.slice(current.startOffset, elseWhereMatch.end),
             startOffset: current.startOffset,
-            endOffset: tokens[ti + 1].endOffset,
+            endOffset: elseWhereMatch.end,
             line: current.line,
             column: current.column
           });
-          ti++;
           continue;
         }
       }
@@ -830,94 +618,6 @@ export class FortranBlockParser extends BaseBlockParser {
     return result;
   }
 
-  // Checks if position is after :: on the same line (variable declaration)
-  private isAfterDoubleColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const lineStart = this.findLineStart(source, position);
-    const lineBefore = source.slice(lineStart, position);
-    let searchFrom = 0;
-    while (searchFrom < lineBefore.length) {
-      const idx = lineBefore.indexOf('::', searchFrom);
-      if (idx < 0) return false;
-      if (!this.isInExcludedRegion(lineStart + idx, excludedRegions)) {
-        return true;
-      }
-      searchFrom = idx + 2;
-    }
-    return false;
-  }
-
-  // Checks if the previous continuation line ends with the given keyword
-  // e.g. for `select &\n  type`, checks if 'select' precedes via &
-  private isPrecedingContinuationKeyword(source: string, position: number, keyword: string): boolean {
-    const currentLineStart = this.findLineStart(source, position);
-    if (currentLineStart === 0) return false;
-
-    // Current line before position must be just whitespace/continuation &
-    const currentLineBefore = source.slice(currentLineStart, position).trimStart();
-    if (currentLineBefore !== '' && !/^&\s*$/.test(currentLineBefore)) {
-      return false;
-    }
-
-    // Scan backward, skipping comment-only lines
-    let prevLineEnd = currentLineStart - 1;
-    if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
-      prevLineEnd--;
-    }
-
-    while (prevLineEnd >= 0) {
-      const prevLineStart = this.findLineStart(source, prevLineEnd);
-      let prevLine = source.slice(prevLineStart, prevLineEnd);
-      if (prevLine.endsWith('\r')) {
-        prevLine = prevLine.slice(0, -1);
-      }
-      prevLine = prevLine.trimEnd();
-
-      // Strip inline comment
-      const commentIdx = this.findInlineCommentIndex(prevLine);
-      if (commentIdx >= 0) {
-        prevLine = prevLine.slice(0, commentIdx).trimEnd();
-      }
-
-      // Skip comment-only lines (empty after stripping comment)
-      if (prevLine.length === 0) {
-        prevLineEnd = prevLineStart - 1;
-        if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
-          prevLineEnd--;
-        }
-        continue;
-      }
-
-      // Must end with &
-      if (!prevLine.endsWith('&')) return false;
-
-      // Check if the content before & ends with the keyword
-      const beforeAmp = prevLine.slice(0, -1).trimEnd().toLowerCase();
-      if (!beforeAmp.endsWith(keyword)) return false;
-
-      // Ensure it's a whole word
-      const keywordStart = beforeAmp.length - keyword.length;
-      if (keywordStart > 0 && /[a-zA-Z0-9_]/.test(beforeAmp[keywordStart - 1])) {
-        return false;
-      }
-
-      return true;
-    }
-
-    return false;
-  }
-
-  // Returns the token type for a keyword (case-insensitive)
-  private getTokenTypeCaseInsensitive(keyword: string): 'block_open' | 'block_close' | 'block_middle' {
-    const lowerKeyword = keyword.toLowerCase();
-    if (this.keywords.blockClose.some((k) => k.toLowerCase() === lowerKeyword)) {
-      return 'block_close';
-    }
-    if (this.keywords.blockMiddle.some((k) => k.toLowerCase() === lowerKeyword)) {
-      return 'block_middle';
-    }
-    return 'block_open';
-  }
-
   // Custom matching to handle compound end keywords
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
@@ -948,10 +648,21 @@ export class FortranBlockParser extends BaseBlockParser {
             if (middleValue === 'case' && openerValue !== 'select') {
               break;
             }
-            if ((middleValue === 'else' || middleValue === 'elseif' || /^else\s+if$/.test(middleValue)) && openerValue !== 'if') {
+            // Check if this is an else-where variant (elsewhere, else where, else &\n where)
+            // The merged token value may include &, comments (!...), and newlines between else and where
+            const isElseWhereVariant = /^else(?:where$|\b[\s\S]*\bwhere$)/i.test(middleValue);
+            // elsewhere / else where -> only for where blocks
+            if (isElseWhereVariant && openerValue !== 'where') {
               break;
             }
-            if (middleValue === 'contains' && !['program', 'module', 'submodule', 'function', 'subroutine', 'type'].includes(openerValue)) {
+            // else / elseif / else if (but not elsewhere/else where) -> only for if blocks
+            if (!isElseWhereVariant && (middleValue === 'elseif' || /^else\b/i.test(middleValue)) && openerValue !== 'if') {
+              break;
+            }
+            if (
+              middleValue === 'contains' &&
+              !['program', 'module', 'submodule', 'function', 'subroutine', 'procedure', 'type'].includes(openerValue)
+            ) {
               break;
             }
             topBlock.intermediates.push(token);
@@ -966,7 +677,7 @@ export class FortranBlockParser extends BaseBlockParser {
           const compoundMatch = closeValue.match(/^end\s*(.+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
-            matchIndex = this.findLastOpenerByType(stack, endType);
+            matchIndex = findLastOpenerByType(stack, endType, true);
           }
 
           // If no compound match found, only fallback for simple 'end' (not compound end keywords)
@@ -989,42 +700,5 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     return pairs;
-  }
-
-  // Finds the start of the line containing `position`, handling \n, \r\n, and standalone \r
-  private findLineStart(source: string, position: number): number {
-    for (let i = position - 1; i >= 0; i--) {
-      if (source[i] === '\n') {
-        return i + 1;
-      }
-      if (source[i] === '\r') {
-        return i + 1;
-      }
-    }
-    return 0;
-  }
-
-  // Finds the end of line from `position`, handling \n, \r\n, and standalone \r
-  // Returns the index of the line break character (or source.length if none found)
-  private findLineEnd(source: string, position: number): number {
-    for (let i = position; i < source.length; i++) {
-      if (source[i] === '\n') {
-        return i;
-      }
-      if (source[i] === '\r') {
-        return i;
-      }
-    }
-    return source.length;
-  }
-
-  // Find the last opener that matches the given type
-  private findLastOpenerByType(stack: OpenBlock[], endType: string): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value.toLowerCase() === endType) {
-        return i;
-      }
-    }
-    return -1;
   }
 }

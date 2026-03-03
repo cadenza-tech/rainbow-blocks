@@ -40,17 +40,37 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     // 'class of' is a class reference type, not a block
-    // 'class;' and 'class(TParent);' are forward declarations, not blocks
     if (keyword === 'class') {
       const afterClass = source.slice(position + keyword.length);
       if (/^\s+of\b/i.test(afterClass)) {
         return false;
       }
-      if (/^\s*;/.test(afterClass)) {
+    }
+
+    // Forward declarations: keyword followed by ';' (e.g. class;, interface;, object;)
+    // Applies to class, interface, and object
+    {
+      let j = position + keyword.length;
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          j++;
+          continue;
+        }
+        if (source[j] === ' ' || source[j] === '\t' || source[j] === '\r' || source[j] === '\n') {
+          j++;
+          continue;
+        }
+        break;
+      }
+      if (j < source.length && source[j] === ';') {
         return false;
       }
-      // Forward declaration with parent: class(TParent);
-      // Handle nested parentheses like class(TBase(TParam))
+    }
+
+    // Forward declaration with parent: class(TParent);
+    // Handle nested parentheses like class(TBase(TParam))
+    if (keyword === 'class') {
+      const afterClass = source.slice(position + keyword.length);
       if (/^\s*\(/.test(afterClass)) {
         let j = position + keyword.length;
         // Skip leading whitespace (including newlines) to find '('
@@ -104,7 +124,7 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     // If we found 'packed' keyword before 'object', scan further back for '='
-    if (i >= 5 && source.slice(i - 5, i + 1).toLowerCase() === 'packed') {
+    if (i >= 5 && source.slice(i - 5, i + 1).toLowerCase() === 'packed' && (i < 6 || !/[a-zA-Z0-9_]/.test(source[i - 6]))) {
       i -= 6;
       while (i >= 0) {
         if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -122,26 +142,14 @@ export class PascalBlockParser extends BaseBlockParser {
     return i >= 0 && source[i] === '=';
   }
 
-  // Finds excluded regions: comments (3 styles), strings
+  // Extends base to add ASM block excluded regions
   protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
+    const regions = super.findExcludedRegions(source);
+    this.addAsmExcludedRegions(source, regions);
     return regions;
   }
 
-  // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // Single-line comment: // to end of line
@@ -165,6 +173,62 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     return null;
+  }
+
+  // Exclude the interior of asm...end blocks so assembly labels (begin:, case:) are not treated as keywords
+  private addAsmExcludedRegions(source: string, regions: ExcludedRegion[]): void {
+    const asmPattern = /\basm\b/gi;
+    const asmRegions: ExcludedRegion[] = [];
+
+    for (let match = asmPattern.exec(source); match !== null; match = asmPattern.exec(source)) {
+      const asmStart = match.index;
+
+      // Skip asm found inside existing excluded regions
+      if (this.isInExcludedRegion(asmStart, regions)) {
+        continue;
+      }
+
+      // Search for matching 'end' after asm
+      const contentStart = asmStart + 3;
+      const endPattern = /\bend\b/gi;
+      endPattern.lastIndex = contentStart;
+
+      let foundEnd = false;
+
+      for (let endMatch = endPattern.exec(source); endMatch !== null; endMatch = endPattern.exec(source)) {
+        const endPos = endMatch.index;
+
+        // Skip end inside existing excluded regions
+        if (this.isInExcludedRegion(endPos, regions)) {
+          continue;
+        }
+
+        // Skip end: (assembly label) - check if followed by colon
+        let checkPos = endPos + 3;
+        while (checkPos < source.length && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
+          checkPos++;
+        }
+        if (checkPos < source.length && source[checkPos] === ':') {
+          continue;
+        }
+
+        // This is the real closing 'end' - exclude from asm keyword end to end keyword start
+        asmRegions.push({ start: contentStart, end: endPos });
+        foundEnd = true;
+        break;
+      }
+
+      // Unterminated asm - exclude to end of source
+      if (!foundEnd) {
+        asmRegions.push({ start: contentStart, end: source.length });
+      }
+    }
+
+    // Merge asm regions into the main regions array and re-sort
+    if (asmRegions.length > 0) {
+      regions.push(...asmRegions);
+      regions.sort((a, b) => a.start - b.start);
+    }
   }
 
   // Matches brace comment: { ... }
@@ -283,17 +347,10 @@ export class PascalBlockParser extends BaseBlockParser {
         i -= 3;
         continue;
       }
-      // 'case' closes an 'end'
-      if (
-        i >= 3 &&
-        lowerSource.slice(i - 3, i + 1) === 'case' &&
-        (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
-        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-      ) {
-        if (depth > 0) depth--;
-        i -= 4;
-        continue;
-      }
+      // Note: 'case' is NOT tracked here because variant case (inside record/object)
+      // has no matching 'end', while standalone case does. Treating both the same
+      // causes incorrect depth tracking when a standalone case follows a record
+      // that contains a variant case.
       // 'asm' closes an 'end'
       if (
         i >= 2 &&
@@ -452,11 +509,12 @@ export class PascalBlockParser extends BaseBlockParser {
   }
 
   // Finds the index of the last non-repeat block in the stack
+  // Scans backward, skipping repeat blocks (which can only be closed by until)
   private findLastNonRepeatIndex(stack: OpenBlock[]): number {
-    if (stack.length === 0) return -1;
-    // Only check top of stack - don't skip past unclosed repeat blocks
-    if (stack[stack.length - 1].token.value !== 'repeat') {
-      return stack.length - 1;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].token.value !== 'repeat') {
+        return i;
+      }
     }
     return -1;
   }

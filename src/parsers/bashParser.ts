@@ -2,6 +2,22 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import {
+  isCommentStart,
+  matchArithmeticBracket,
+  matchBacktickCommand,
+  matchBareArithmeticEvaluation,
+  matchBashDoubleQuote,
+  matchCommandSubstitution,
+  matchDollarSingleQuote,
+  matchHeredoc,
+  matchHeredocBody,
+  matchParameterExpansion,
+  matchProcessSubstitution,
+  matchSingleQuotedString,
+  parseHeredocOperator
+} from './bashStringHelpers';
+import { findLastOpenerByType, findLineStart } from './parserUtils';
 
 // Keywords that are closed by `done`
 const DONE_OPENERS = new Set(['for', 'while', 'until', 'select']);
@@ -37,7 +53,7 @@ export class BashBlockParser extends BaseBlockParser {
               (j === 0 || source[j - 1] !== '<')
             ) {
               // Try to parse the heredoc operator and delimiter
-              const heredocInfo = this.parseHeredocOperator(source, j);
+              const heredocInfo = parseHeredocOperator(source, j);
               if (heredocInfo) {
                 additionalHeredocs.push(heredocInfo);
                 j += heredocInfo.matchLength;
@@ -64,7 +80,7 @@ export class BashBlockParser extends BaseBlockParser {
 
         // Process additional heredoc bodies that follow the first one
         for (const heredocInfo of additionalHeredocs) {
-          const bodyRegion = this.matchHeredocBody(source, i, heredocInfo.stripTabs, heredocInfo.terminator);
+          const bodyRegion = matchHeredocBody(source, i, heredocInfo.stripTabs, heredocInfo.terminator);
           if (bodyRegion) {
             regions.push(bodyRegion);
             i = bodyRegion.end;
@@ -78,72 +94,15 @@ export class BashBlockParser extends BaseBlockParser {
     return regions;
   }
 
-  // Parses a heredoc operator at position and extracts delimiter info
-  // Returns null if the position is not a valid heredoc operator
-  private parseHeredocOperator(source: string, pos: number): { stripTabs: boolean; terminator: string; matchLength: number } | null {
-    const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\2|([A-Za-z_][A-Za-z0-9_]*))/;
-    const match = source.slice(pos).match(heredocPattern);
-    if (!match) return null;
-    return {
-      stripTabs: match[1] === '-',
-      terminator: match[3] || match[4],
-      matchLength: match[0].length
-    };
-  }
-
-  // Matches a heredoc body starting from a given position (after a previous heredoc body)
-  private matchHeredocBody(source: string, bodyStart: number, stripTabs: boolean, terminator: string): ExcludedRegion | null {
-    let i = bodyStart;
-
-    while (i < source.length) {
-      const lineStart = i;
-      let lineEnd = i;
-      while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-        lineEnd++;
-      }
-
-      const line = source.slice(lineStart, lineEnd);
-      const trimmedLine = stripTabs ? line.replace(/^\t*/, '') : line;
-
-      if (trimmedLine === terminator) {
-        let regionEnd = lineEnd;
-        if (regionEnd < source.length) {
-          if (source[regionEnd] === '\r' && regionEnd + 1 < source.length && source[regionEnd + 1] === '\n') {
-            regionEnd += 2;
-          } else {
-            regionEnd += 1;
-          }
-        }
-        return {
-          start: bodyStart,
-          end: regionEnd
-        };
-      }
-
-      // Skip past line ending
-      if (lineEnd < source.length) {
-        if (source[lineEnd] === '\r' && lineEnd + 1 < source.length && source[lineEnd + 1] === '\n') {
-          i = lineEnd + 2;
-        } else {
-          i = lineEnd + 1;
-        }
-      } else {
-        i = lineEnd;
-      }
-    }
-
-    return { start: bodyStart, end: source.length };
-  }
-
   // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // Single-line comment (not $# special variable or ${# parameter expansion)
     // Allow $$# as comment: $$ is PID variable, # starts comment
     if (
       char === '#' &&
-      this.isCommentStart(source, pos) &&
+      isCommentStart(source, pos) &&
       !this.isParameterExpansion(source, pos) &&
       !(pos > 0 && source[pos - 1] === '$' && !(pos >= 2 && source[pos - 2] === '$'))
     ) {
@@ -152,56 +111,60 @@ export class BashBlockParser extends BaseBlockParser {
 
     // $'...' ANSI-C quoting (must check before single quote)
     if (char === '$' && pos + 1 < source.length && source[pos + 1] === "'") {
-      return this.matchDollarSingleQuote(source, pos);
+      return matchDollarSingleQuote(source, pos);
     }
 
     // Parameter expansion ${...}
     if (char === '$' && pos + 1 < source.length && source[pos + 1] === '{') {
-      return this.matchParameterExpansion(source, pos);
+      return matchParameterExpansion(source, pos);
     }
 
     // Command substitution $(...), also handles arithmetic expansion $((...))
     if (char === '$' && pos + 1 < source.length && source[pos + 1] === '(') {
-      return this.matchCommandSubstitution(source, pos);
+      return matchCommandSubstitution(source, pos);
     }
 
     // Arithmetic expansion $[...] (deprecated but still used)
     if (char === '$' && pos + 1 < source.length && source[pos + 1] === '[') {
-      return this.matchArithmeticBracket(source, pos);
+      return matchArithmeticBracket(source, pos);
     }
 
     // Heredoc detection: <<WORD, <<-WORD, <<'WORD', <<"WORD" (not here-string <<<)
     if (char === '<' && pos + 2 < source.length && source[pos + 1] === '<' && source[pos + 2] !== '<' && (pos === 0 || source[pos - 1] !== '<')) {
-      const result = this.matchHeredoc(source, pos);
+      const result = matchHeredoc(source, pos);
       if (result) return result;
     }
 
     // Single-quoted string (no escape sequences)
     if (char === "'") {
-      return this.matchSingleQuotedString(source, pos);
+      return matchSingleQuotedString(source, pos);
     }
 
-    // Double-quoted string (Bash-specific: handles $(…), ${…}, backticks inside)
+    // Double-quoted string (Bash-specific: handles $(), ${}, backticks inside)
     if (char === '"') {
-      return this.matchBashDoubleQuote(source, pos);
+      return matchBashDoubleQuote(source, pos);
     }
 
     // Backtick command substitution
     if (char === '`') {
-      return this.matchBacktickCommand(source, pos);
+      return matchBacktickCommand(source, pos);
     }
 
     // Process substitution <(...) and >(...)
     if (char === '(' && pos > 0 && (source[pos - 1] === '<' || source[pos - 1] === '>')) {
       // Make sure it's not <<( which would be heredoc-related
-      if (source[pos - 1] !== '<' || pos < 2 || source[pos - 2] !== '<') {
-        return this.matchProcessSubstitution(source, pos);
+      if (source[pos - 1] === '<' && pos >= 2 && source[pos - 2] === '<') {
+        // <<( is heredoc-related, not process substitution
+      } else if (source[pos - 1] === '>' && pos >= 2 && source[pos - 2] === '>') {
+        // >>( is append redirect + subshell, not process substitution
+      } else {
+        return matchProcessSubstitution(source, pos);
       }
     }
 
     // Arithmetic evaluation (( ... )) - not preceded by $
     if (char === '(' && pos + 1 < source.length && source[pos + 1] === '(' && (pos === 0 || source[pos - 1] !== '$')) {
-      return this.matchBareArithmeticEvaluation(source, pos);
+      return matchBareArithmeticEvaluation(source, pos);
     }
 
     return null;
@@ -214,647 +177,6 @@ export class BashBlockParser extends BaseBlockParser {
     }
     return false;
   }
-
-  // Checks if '#' at position is a comment start (at word boundary, not mid-word)
-  private isCommentStart(source: string, pos: number): boolean {
-    if (pos === 0) return true;
-    const prev = source[pos - 1];
-    // $ before # is handled separately (for $#, ${#, $$# special cases)
-    if (prev === '$') return true;
-    // # after shell metacharacters or whitespace starts a comment
-    return /[\s;|&(){}<>]/.test(prev);
-  }
-
-  // Matches $'...' ANSI-C quoting
-  private matchDollarSingleQuote(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-    while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      if (source[i] === "'") {
-        return { start: pos, end: i + 1 };
-      }
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches double-quoted string with Bash-specific handling for $(), ${}, and backticks
-  private matchBashDoubleQuote(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length) {
-      const char = source[i];
-
-      // Escape sequence
-      if (char === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-
-      // Command substitution $(...)
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        const nested = this.matchCommandSubstitution(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Parameter expansion ${...} - handle nested strings inside double-quoted context
-      // In bash, ${var:-"default"} has nested double-quoted strings
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-        let j = i + 2;
-        let braceDepth = 1;
-        while (j < source.length && braceDepth > 0) {
-          if (source[j] === '\\' && j + 1 < source.length) {
-            j += 2;
-            continue;
-          }
-          // Nested double-quoted string: look for matching close quote
-          if (source[j] === '"') {
-            let k = j + 1;
-            while (k < source.length) {
-              if (source[k] === '\\' && k + 1 < source.length) {
-                k += 2;
-                continue;
-              }
-              if (source[k] === '"') {
-                break;
-              }
-              k++;
-            }
-            if (k < source.length) {
-              // Found matching close quote, skip the nested string
-              j = k + 1;
-              continue;
-            }
-            // No matching close quote — this " likely ends the outer string
-            break;
-          }
-          // Single-quoted string (no escapes in bash single quotes)
-          if (source[j] === "'") {
-            j++;
-            while (j < source.length && source[j] !== "'") {
-              j++;
-            }
-            if (j < source.length) j++;
-            continue;
-          }
-          // $'...' ANSI-C quoting
-          if (source[j] === '$' && j + 1 < source.length && source[j + 1] === "'") {
-            const region = this.matchDollarSingleQuote(source, j);
-            j = region.end;
-            continue;
-          }
-          // Nested command substitution $(...)
-          if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '(') {
-            const nested = this.matchCommandSubstitution(source, j);
-            j = nested.end;
-            continue;
-          }
-          // Nested parameter expansion ${...}
-          if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '{') {
-            j += 2;
-            braceDepth++;
-            continue;
-          }
-          // Backtick command substitution
-          if (source[j] === '`') {
-            const region = this.matchBacktickCommand(source, j);
-            j = region.end;
-            continue;
-          }
-          if (source[j] === '{') {
-            braceDepth++;
-          } else if (source[j] === '}') {
-            braceDepth--;
-          }
-          j++;
-        }
-        i = j;
-        continue;
-      }
-
-      // Backtick command substitution
-      if (char === '`') {
-        const region = this.matchBacktickCommand(source, i);
-        i = region.end;
-        continue;
-      }
-
-      // End of string
-      if (char === '"') {
-        return { start: pos, end: i + 1 };
-      }
-
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches parameter expansion ${...} with nested braces
-  private matchParameterExpansion(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-    let depth = 1;
-
-    while (i < source.length && depth > 0) {
-      const char = source[i];
-
-      // Skip escaped characters (handles \{ and \} among others)
-      if (char === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-
-      // Skip ANSI-C quoted strings $'...'
-      if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
-        const region = this.matchDollarSingleQuote(source, i);
-        i = region.end;
-        continue;
-      }
-
-      // Skip double-quoted strings
-      if (char === '"') {
-        const stringEnd = this.findStringEnd(source, i, '"');
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip single-quoted strings
-      if (char === "'") {
-        const stringEnd = this.findSingleQuoteEnd(source, i);
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip nested command substitution $(...)
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        const nested = this.matchCommandSubstitution(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Skip nested parameter expansion ${...}
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-        const nested = this.matchParameterExpansion(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Skip backtick command substitution
-      if (char === '`') {
-        const region = this.matchBacktickCommand(source, i);
-        i = region.end;
-        continue;
-      }
-
-      if (char === '{') {
-        depth++;
-      } else if (char === '}') {
-        depth--;
-      }
-      i++;
-    }
-
-    return { start: pos, end: i };
-  }
-
-  // Matches command substitution $(...) with nested parentheses
-  // Tracks case/esac nesting so `)` in case patterns doesn't close prematurely
-  private matchCommandSubstitution(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-
-    // Check for arithmetic expansion $((...))
-    if (source[i] === '(') {
-      return this.matchArithmeticExpansion(source, pos);
-    }
-
-    let depth = 1;
-    let caseDepth = 0;
-    let pendingHeredoc: { stripTabs: boolean; terminator: string } | null = null;
-
-    while (i < source.length && depth > 0) {
-      const char = source[i];
-
-      // At newline, skip pending heredoc body
-      if ((char === '\n' || char === '\r') && pendingHeredoc) {
-        let bodyStart = i + 1;
-        if (char === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
-          bodyStart++;
-        }
-        const body = this.matchHeredocBody(source, bodyStart, pendingHeredoc.stripTabs, pendingHeredoc.terminator);
-        pendingHeredoc = null;
-        i = body ? body.end : bodyStart;
-        continue;
-      }
-
-      // Skip double-quoted strings
-      if (char === '"') {
-        const stringEnd = this.findStringEnd(source, i, '"');
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip $'...' ANSI-C quoting (must check before single quote)
-      if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
-        const region = this.matchDollarSingleQuote(source, i);
-        i = region.end;
-        continue;
-      }
-
-      // Skip single-quoted strings
-      if (char === "'") {
-        const stringEnd = this.findSingleQuoteEnd(source, i);
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip comments (# to end of line, but not $# special variable; allow $$#)
-      if (char === '#' && this.isCommentStart(source, i) && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      }
-
-      // Skip nested command substitution
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        const nested = this.matchCommandSubstitution(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Skip parameter expansion ${...}
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-        const nested = this.matchParameterExpansion(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Skip backtick command substitution
-      if (char === '`') {
-        const region = this.matchBacktickCommand(source, i);
-        i = region.end;
-        continue;
-      }
-
-      // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
-      if (char === '<' && i + 1 < source.length && source[i + 1] === '<' && (i + 2 >= source.length || source[i + 2] !== '<')) {
-        const heredoc = this.parseHeredocOperator(source, i);
-        if (heredoc) {
-          pendingHeredoc = { stripTabs: heredoc.stripTabs, terminator: heredoc.terminator };
-          i += heredoc.matchLength;
-          continue;
-        }
-      }
-
-      // Track case/esac nesting to avoid `)` in case patterns closing `$(...)`
-      if (this.matchesWord(source, i, 'case')) {
-        caseDepth++;
-        i += 4;
-        continue;
-      }
-      if (this.matchesWord(source, i, 'esac')) {
-        if (caseDepth > 0) caseDepth--;
-        i += 4;
-        continue;
-      }
-
-      if (char === '(') {
-        depth++;
-      } else if (char === ')') {
-        // Inside a case block, `)` that doesn't reduce paren depth below
-        // the command substitution boundary is a case pattern terminator
-        if (caseDepth > 0 && depth === 1) {
-          i++;
-          continue;
-        }
-        depth--;
-      }
-      i++;
-    }
-
-    return { start: pos, end: i };
-  }
-
-  // Checks if source has a whole word match at position
-  private matchesWord(source: string, pos: number, word: string): boolean {
-    if (pos + word.length > source.length) return false;
-    if (source.slice(pos, pos + word.length) !== word) return false;
-    if (pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) return false;
-    const after = pos + word.length;
-    if (after < source.length && /[a-zA-Z0-9_]/.test(source[after])) return false;
-    return true;
-  }
-
-  // Matches arithmetic expansion $((...)) with string skipping
-  private matchArithmeticExpansion(source: string, pos: number): ExcludedRegion {
-    let i = pos + 3;
-    let depth = 2;
-
-    while (i < source.length && depth > 0) {
-      const char = source[i];
-
-      // Skip strings inside arithmetic expansion
-      if (char === '"') {
-        const stringEnd = this.findStringEnd(source, i, '"');
-        i = stringEnd;
-        continue;
-      }
-      if (char === "'") {
-        const stringEnd = this.findSingleQuoteEnd(source, i);
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip parameter expansion ${...}
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-        const nested = this.matchParameterExpansion(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      if (char === '(') {
-        depth++;
-      } else if (char === ')') {
-        depth--;
-      }
-      i++;
-    }
-
-    return { start: pos, end: i };
-  }
-
-  // Matches arithmetic bracket $[...] (deprecated syntax)
-  private matchArithmeticBracket(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-    let depth = 1;
-
-    while (i < source.length && depth > 0) {
-      if (source[i] === '[') {
-        depth++;
-      } else if (source[i] === ']') {
-        depth--;
-      }
-      i++;
-    }
-
-    return { start: pos, end: i };
-  }
-
-  // Matches bare arithmetic evaluation (( ... )) (not preceded by $)
-  private matchBareArithmeticEvaluation(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-    let depth = 2;
-
-    while (i < source.length && depth > 0) {
-      const char = source[i];
-
-      // Skip strings inside arithmetic evaluation
-      if (char === '"') {
-        const stringEnd = this.findStringEnd(source, i, '"');
-        i = stringEnd;
-        continue;
-      }
-      if (char === "'") {
-        const stringEnd = this.findSingleQuoteEnd(source, i);
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip parameter expansion ${...}
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-        const nested = this.matchParameterExpansion(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      if (char === '(') {
-        depth++;
-      } else if (char === ')') {
-        depth--;
-      }
-      i++;
-    }
-
-    return { start: pos, end: i };
-  }
-
-  // Matches process substitution <(...) or >(...) with nested parens
-  private matchProcessSubstitution(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    let depth = 1;
-    let pendingHeredoc: { stripTabs: boolean; terminator: string } | null = null;
-
-    while (i < source.length && depth > 0) {
-      const char = source[i];
-
-      // At newline, skip pending heredoc body
-      if ((char === '\n' || char === '\r') && pendingHeredoc) {
-        let bodyStart = i + 1;
-        if (char === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
-          bodyStart++;
-        }
-        const body = this.matchHeredocBody(source, bodyStart, pendingHeredoc.stripTabs, pendingHeredoc.terminator);
-        pendingHeredoc = null;
-        i = body ? body.end : bodyStart;
-        continue;
-      }
-
-      // Skip strings
-      if (char === '"') {
-        const stringEnd = this.findStringEnd(source, i, '"');
-        i = stringEnd;
-        continue;
-      }
-      if (char === "'") {
-        const stringEnd = this.findSingleQuoteEnd(source, i);
-        i = stringEnd;
-        continue;
-      }
-
-      // Skip nested command substitution
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        const nested = this.matchCommandSubstitution(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Skip parameter expansion ${...}
-      if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-        const nested = this.matchParameterExpansion(source, i);
-        i = nested.end;
-        continue;
-      }
-
-      // Skip backtick command substitution
-      if (char === '`') {
-        const region = this.matchBacktickCommand(source, i);
-        i = region.end;
-        continue;
-      }
-
-      // Skip comments (# to end of line, but not $# special variable; allow $$#)
-      if (char === '#' && this.isCommentStart(source, i) && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      }
-
-      // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
-      if (char === '<' && i + 1 < source.length && source[i + 1] === '<' && (i + 2 >= source.length || source[i + 2] !== '<')) {
-        const heredoc = this.parseHeredocOperator(source, i);
-        if (heredoc) {
-          pendingHeredoc = { stripTabs: heredoc.stripTabs, terminator: heredoc.terminator };
-          i += heredoc.matchLength;
-          continue;
-        }
-      }
-
-      if (char === '(') {
-        depth++;
-      } else if (char === ')') {
-        depth--;
-      }
-      i++;
-    }
-
-    // Include the preceding < or > in the excluded region
-    return { start: pos - 1, end: i };
-  }
-
-  // Matches single-quoted string (no escape sequences in bash single quotes)
-  private matchSingleQuotedString(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === "'") {
-        return { start: pos, end: i + 1 };
-      }
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches backtick command substitution with limited escape handling
-  private matchBacktickCommand(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        // In backticks, only \`, \\, \$, and \newline are escape sequences
-        const nextChar = source[i + 1];
-        if (nextChar === '`' || nextChar === '\\' || nextChar === '$') {
-          i += 2;
-          continue;
-        }
-      }
-      if (source[i] === '`') {
-        return { start: pos, end: i + 1 };
-      }
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches heredoc: <<EOF, <<'EOF', <<"EOF", <<-EOF, <<-'EOF', <<-"EOF"
-  private matchHeredoc(source: string, pos: number): ExcludedRegion | null {
-    const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\2|([A-Za-z_][A-Za-z0-9_]*))/;
-    const match = source.slice(pos).match(heredocPattern);
-
-    if (!match) return null;
-
-    const stripTabs = match[1] === '-';
-    const terminator = match[3] || match[4];
-    let i = pos + match[0].length;
-
-    // Find the end of the current line (\n or \r)
-    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-      i++;
-    }
-
-    // If no line ending found, heredoc has no body
-    if (i >= source.length) return null;
-
-    // Skip past line ending (\r\n counts as one)
-    let contentStart: number;
-    if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
-      contentStart = i + 2;
-    } else {
-      contentStart = i + 1;
-    }
-    i = contentStart;
-
-    // Find the terminator line
-    while (i < source.length) {
-      const lineStart = i;
-      let lineEnd = i;
-      while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-        lineEnd++;
-      }
-
-      const line = source.slice(lineStart, lineEnd);
-      const trimmedLine = stripTabs ? line.replace(/^\t*/, '') : line;
-
-      if (trimmedLine === terminator) {
-        // Skip past the line ending after the terminator
-        let regionEnd = lineEnd;
-        if (regionEnd < source.length) {
-          if (source[regionEnd] === '\r' && regionEnd + 1 < source.length && source[regionEnd + 1] === '\n') {
-            regionEnd += 2;
-          } else {
-            regionEnd += 1;
-          }
-        }
-        return {
-          start: contentStart,
-          end: regionEnd
-        };
-      }
-
-      // Skip past line ending
-      if (lineEnd < source.length) {
-        if (source[lineEnd] === '\r' && lineEnd + 1 < source.length && source[lineEnd + 1] === '\n') {
-          i = lineEnd + 2;
-        } else {
-          i = lineEnd + 1;
-        }
-      } else {
-        i = lineEnd;
-      }
-    }
-
-    return { start: contentStart, end: source.length };
-  }
-
-  // Finds end of double-quoted string with escape sequence handling
-  private findStringEnd(source: string, pos: number, quote: string): number {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      if (source[i] === quote) {
-        return i + 1;
-      }
-      i++;
-    }
-    return source.length;
-  }
-
-  // Finds end of single-quoted string (no escapes)
-  private findSingleQuoteEnd(source: string, pos: number): number {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === "'") {
-        return i + 1;
-      }
-      i++;
-    }
-    return source.length;
-  }
-
-  // Tokenizes with additional { } matching for command grouping
 
   // Check if a keyword is at shell command position (start of a simple command)
   private isAtCommandPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -885,9 +207,37 @@ export class BashBlockParser extends BaseBlockParser {
       return true;
     }
 
-    // After command separators: ; | & ( { )
-    if (';|&({)'.includes(source[i])) {
+    // After command separators: ; | & ( )
+    if (';|&()'.includes(source[i])) {
       return true;
+    }
+
+    // After { only when it stands alone as a reserved word (not part of brace expansion like {for})
+    // { is a reserved word when preceded by whitespace, line start, or command separator
+    if (source[i] === '{') {
+      let k = i - 1;
+      while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+        k--;
+      }
+      // Skip excluded regions when scanning backward from {
+      let skippedExcl = true;
+      while (skippedExcl) {
+        skippedExcl = false;
+        for (const region of excludedRegions) {
+          if (k >= region.start && k < region.end) {
+            k = region.start - 1;
+            skippedExcl = true;
+            while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+              k--;
+            }
+            break;
+          }
+        }
+      }
+      if (k < 0 || source[k] === '\n' || source[k] === '\r' || ';|&(){}`'.includes(source[k])) {
+        return true;
+      }
+      return false;
     }
 
     // After backtick (end of command substitution)
@@ -906,7 +256,7 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     // After shell keywords that introduce a new command context
-    const commandStarters = ['then', 'do', 'else', 'elif', 'time'];
+    const commandStarters = ['then', 'do', 'else', 'elif', 'time', 'coproc'];
     for (const kw of commandStarters) {
       const kwStart = i - kw.length + 1;
       if (kwStart >= 0 && source.slice(kwStart, i + 1) === kw) {
@@ -940,9 +290,23 @@ export class BashBlockParser extends BaseBlockParser {
     if (j >= source.length) return false;
 
     // Handle pipe-separated alternatives: if|then), for|while|until)
+    // Pipe at end of line continues the pattern on the next line
     if (source[j] === '|') {
-      while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
+      while (j < source.length) {
         if (source[j] === ')') break;
+        if (source[j] === '\n' || source[j] === '\r') {
+          // Skip line ending
+          if (source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
+            j += 2;
+          } else {
+            j++;
+          }
+          // Skip whitespace on the next line
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+            j++;
+          }
+          continue;
+        }
         j++;
       }
       if (j >= source.length || source[j] !== ')') {
@@ -962,11 +326,20 @@ export class BashBlockParser extends BaseBlockParser {
           // Check if ( is a POSIX case pattern opening vs subshell
           // Case pattern: (pattern) has no semicolons/newlines between ( and keyword
           // Subshell: (commands; ...) has semicolons/newlines between ( and keyword
-          const contentBetween = source.slice(k + 1, position);
-          if (contentBetween.includes(';') || contentBetween.includes('\n') || contentBetween.includes('\r')) {
+          // Only consider separators outside excluded regions (strings, comments)
+          let hasUnexcludedSeparator = false;
+          for (let m = k + 1; m < position; m++) {
+            if (source[m] === ';' || source[m] === '\n' || source[m] === '\r') {
+              if (!this.isInExcludedRegion(m, excludedRegions)) {
+                hasUnexcludedSeparator = true;
+                break;
+              }
+            }
+          }
+          if (hasUnexcludedSeparator) {
             return false;
           }
-          const lineStart = this.findLineStart(source, k);
+          const lineStart = findLineStart(source, k);
           const textBefore = source.slice(lineStart, k);
           if (/^\s*$/.test(textBefore) || /;;\s*$|;&\s*$|;;&\s*$/.test(textBefore)) {
             return true;
@@ -984,7 +357,7 @@ export class BashBlockParser extends BaseBlockParser {
       k--;
     }
     if (k >= 0 && source[k] === '(') {
-      const lineStart = this.findLineStart(source, k);
+      const lineStart = findLineStart(source, k);
       const textBefore = source.slice(lineStart, k);
       if (/^\s*$/.test(textBefore) || /;;\s*$|;&\s*$|;;&\s*$/.test(textBefore)) {
         return true;
@@ -1000,9 +373,8 @@ export class BashBlockParser extends BaseBlockParser {
     if (s >= 1 && source[s] === ';' && source[s - 1] === ';') {
       return true;
     }
-    if (s >= 1 && source[s] === '&') {
-      if (source[s - 1] === ';') return true;
-      if (s >= 2 && source[s - 1] === ';' && source[s - 2] === ';') return true;
+    if (s >= 1 && source[s] === '&' && source[s - 1] === ';') {
+      return true;
     }
     if (s >= 1 && source[s] === 'n' && source[s - 1] === 'i' && (s < 2 || !/[a-zA-Z0-9_]/.test(source[s - 2]))) {
       return true;
@@ -1012,15 +384,6 @@ export class BashBlockParser extends BaseBlockParser {
       return true;
     }
     return false;
-  }
-
-  private findLineStart(source: string, pos: number): number {
-    for (let i = pos - 1; i >= 0; i--) {
-      if (source[i] === '\n' || source[i] === '\r') {
-        return i + 1;
-      }
-    }
-    return 0;
   }
 
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -1144,13 +507,13 @@ export class BashBlockParser extends BaseBlockParser {
 
           // Find the matching opener based on the close keyword
           if (closeValue === 'fi') {
-            matchIndex = this.findLastOpenerIndex(stack, 'if');
+            matchIndex = findLastOpenerByType(stack, 'if');
           } else if (closeValue === 'esac') {
-            matchIndex = this.findLastOpenerIndex(stack, 'case');
+            matchIndex = findLastOpenerByType(stack, 'case');
           } else if (closeValue === 'done') {
             matchIndex = this.findLastDoneOpenerIndex(stack);
           } else if (closeValue === '}') {
-            matchIndex = this.findLastOpenerIndex(stack, '{');
+            matchIndex = findLastOpenerByType(stack, '{');
           }
 
           if (matchIndex >= 0) {
@@ -1168,16 +531,6 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     return pairs;
-  }
-
-  // Finds the index of the last opener with the given value
-  private findLastOpenerIndex(stack: OpenBlock[], opener: string): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value === opener) {
-        return i;
-      }
-    }
-    return -1;
   }
 
   // Finds the index of the last opener that can be closed by `done`

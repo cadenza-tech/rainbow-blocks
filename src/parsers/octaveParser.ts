@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { MatlabBlockParser } from './matlabParser';
+import { findLastOpenerByType } from './parserUtils';
 
 // Mapping of Octave-specific close keywords to their valid openers
 const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
@@ -60,6 +61,58 @@ export class OctaveBlockParser extends MatlabBlockParser {
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch', 'unwind_protect_cleanup']
   };
 
+  // Reject 'do' used as a variable name (do = 1, do += 1, but not do == 1)
+  protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (keyword === 'do') {
+      if (this.isFollowedByAssignment(source, position + keyword.length)) {
+        return false;
+      }
+    }
+    return super.isValidBlockOpen(keyword, source, position, excludedRegions);
+  }
+
+  // Reject block close keywords used as variable names (end = 5, endif = 1, etc.)
+  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.isFollowedByAssignment(source, position + keyword.length)) {
+      return false;
+    }
+    return super.isValidBlockClose(keyword, source, position, excludedRegions);
+  }
+
+  // Checks if position is followed by = or compound assignment (+=, -=, *=, /=, ^=, .+=, .-=, .*=, ./=, .^=)
+  // but not == (comparison)
+  private isFollowedByAssignment(source: string, afterPos: number): boolean {
+    let i = afterPos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    if (i >= source.length) {
+      return false;
+    }
+    // Simple assignment: = (but not ==)
+    if (source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
+      return true;
+    }
+    // Compound assignment: +=, -=, *=, /=, ^=
+    if (
+      (source[i] === '+' || source[i] === '-' || source[i] === '*' || source[i] === '/' || source[i] === '^') &&
+      i + 1 < source.length &&
+      source[i + 1] === '='
+    ) {
+      return true;
+    }
+    // Element-wise compound assignment: .+=, .-=, .*=, ./=, .^=
+    if (
+      source[i] === '.' &&
+      i + 2 < source.length &&
+      (source[i + 1] === '+' || source[i + 1] === '-' || source[i + 1] === '*' || source[i + 1] === '/' || source[i + 1] === '^') &&
+      source[i + 2] === '='
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   // Custom block matching for Octave-specific end keywords
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
@@ -96,7 +149,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
           // Check if it's an Octave-specific end keyword
           const validOpener = OCTAVE_CLOSE_TO_OPEN[closeValue];
           if (validOpener) {
-            matchIndex = this.findLastOpenerByType(stack, validOpener);
+            matchIndex = findLastOpenerByType(stack, validOpener, true);
           }
 
           // If no specific match found, only fallback for generic 'end'
@@ -123,33 +176,6 @@ export class OctaveBlockParser extends MatlabBlockParser {
     }
 
     return pairs;
-  }
-
-  // Finds the last opener that matches the given type
-  private findLastOpenerByType(stack: OpenBlock[], openerType: string): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value.toLowerCase() === openerType) {
-        return i;
-      }
-    }
-    return -1;
-  }
-  // Finds excluded regions: adds Octave-specific # comments to MATLAB regions
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
-    return regions;
   }
 
   // Tries to match an excluded region at the given position (overrides parent)

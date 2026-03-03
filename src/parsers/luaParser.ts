@@ -35,49 +35,49 @@ export class LuaBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Find the first 'do' after this loop keyword, skipping excluded regions
+      // Find the matching 'do' for this loop keyword, accounting for nested loops
+      // Each nested for/while consumes one do, so we track nesting
       const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
       const searchRange = source.slice(afterLoopStart, position + 2);
-      const doMatches = [...searchRange.matchAll(/\bdo\b/g)];
+      const doAndLoopPattern = /\b(do|for|while)\b/g;
+      const matches = [...searchRange.matchAll(doAndLoopPattern)];
 
-      for (const doMatch of doMatches) {
-        const doAbsolutePos = afterLoopStart + doMatch.index;
-        // Skip 'do' in excluded regions (strings, comments)
-        if (this.isInExcludedRegion(doAbsolutePos, excludedRegions)) {
+      let nestedLoopDepth = 0;
+      let foundOurDo = false;
+
+      for (const innerMatch of matches) {
+        const absolutePos = afterLoopStart + innerMatch.index;
+        if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
           continue;
         }
-        // This is the first valid 'do' after the loop keyword
-        if (doAbsolutePos === position) {
-          return true;
+        const word = innerMatch[1];
+        if (word === 'for' || word === 'while') {
+          // Nested loop found; its do will be consumed by this nested loop
+          nestedLoopDepth++;
+        } else if (word === 'do') {
+          if (nestedLoopDepth > 0) {
+            // This do belongs to a nested loop
+            nestedLoopDepth--;
+          } else if (absolutePos === position) {
+            // This is our do, and it belongs to this loop
+            foundOurDo = true;
+            break;
+          } else {
+            // A different do at depth 0 before our position - this loop already has a do
+            break;
+          }
         }
-        // Found a different valid 'do' before our position - this loop already has a do
-        break;
+      }
+
+      if (foundOurDo) {
+        return true;
       }
     }
 
     return false;
   }
 
-  // Finds excluded regions: comments, long strings, quoted strings
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
-    return regions;
-  }
-
-  // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // Comment (-- single line or --[[ multi-line)

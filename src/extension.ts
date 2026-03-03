@@ -73,7 +73,7 @@ function getParser(languageId: string): BaseBlockParser | undefined {
 export function activate(context: vscode.ExtensionContext): void {
   let currentConfig = loadConfig();
   const decorator = new BlockDecorator(currentConfig);
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  const debounceTimers = new Map<vscode.TextDocument, ReturnType<typeof setTimeout>>();
 
   // Register decorator for automatic disposal
   context.subscriptions.push(decorator);
@@ -81,21 +81,31 @@ export function activate(context: vscode.ExtensionContext): void {
   // Register debounce timer cleanup
   context.subscriptions.push({
     dispose: () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
+      for (const timer of debounceTimers.values()) {
+        clearTimeout(timer);
       }
+      debounceTimers.clear();
     }
   });
 
-  // Updates decorations after debounce delay to avoid excessive updates
-  function updateDecorationsDebounced(): void {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
+  // Updates decorations after debounce delay for all visible editors showing the given document
+  function updateDecorationsDebounced(document: vscode.TextDocument): void {
+    const existing = debounceTimers.get(document);
+    if (existing) {
+      clearTimeout(existing);
     }
 
-    debounceTimer = setTimeout(() => {
-      updateDecorations(vscode.window.activeTextEditor);
-    }, currentConfig.debounceMs);
+    debounceTimers.set(
+      document,
+      setTimeout(() => {
+        debounceTimers.delete(document);
+        for (const editor of vscode.window.visibleTextEditors) {
+          if (editor.document === document) {
+            updateDecorations(editor);
+          }
+        }
+      }, currentConfig.debounceMs)
+    );
   }
 
   // Updates decorations immediately for the given editor
@@ -125,12 +135,47 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // Listen for document changes (with debounce)
+  // Listen for document changes in any visible editor (with debounce)
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor && event.document === editor.document) {
-        updateDecorationsDebounced();
+      const hasVisibleEditor = vscode.window.visibleTextEditors.some((editor) => editor.document === event.document);
+      if (hasVisibleEditor) {
+        updateDecorationsDebounced(event.document);
+      }
+    })
+  );
+
+  // Listen for document open events (handles language mode changes and newly opened files)
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      for (const editor of vscode.window.visibleTextEditors) {
+        if (editor.document === document) {
+          updateDecorations(editor);
+        }
+      }
+    })
+  );
+
+  // Listen for document close events (clean up pending debounce timers)
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      const timer = debounceTimers.get(document);
+      if (timer) {
+        clearTimeout(timer);
+        debounceTimers.delete(document);
+      }
+    })
+  );
+
+  // Listen for visible editor changes (split/unsplit)
+  // Skip the active editor since onDidChangeActiveTextEditor already handles it
+  context.subscriptions.push(
+    vscode.window.onDidChangeVisibleTextEditors((editors) => {
+      const activeEditor = vscode.window.activeTextEditor;
+      for (const editor of editors) {
+        if (editor !== activeEditor) {
+          updateDecorations(editor);
+        }
       }
     })
   );
@@ -139,10 +184,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration(CONFIG_SECTION)) {
-        if (debounceTimer) {
-          clearTimeout(debounceTimer);
-          debounceTimer = undefined;
+        for (const timer of debounceTimers.values()) {
+          clearTimeout(timer);
         }
+        debounceTimers.clear();
         currentConfig = loadConfig();
         decorator.updateConfig(currentConfig);
         for (const editor of vscode.window.visibleTextEditors) {

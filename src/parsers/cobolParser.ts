@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token, TokenType } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { findLastOpenerByType } from './parserUtils';
 
 // Mapping of close keywords to their valid openers (case insensitive comparison)
 const CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
@@ -126,15 +127,35 @@ export class CobolBlockParser extends BaseBlockParser {
       if (isClose) {
         closerPositions.add(pos);
       } else {
-        // For PERFORM, skip inline forms (PERFORM paragraph-name)
-        // Inline PERFORMs are followed by an identifier that is not a structured keyword
+        // For PERFORM, skip paragraph calls (PERFORM paragraph-name)
+        // Structured forms: PERFORM UNTIL, PERFORM VARYING, PERFORM WITH, PERFORM <expr> TIMES
+        // Paragraph calls: PERFORM name (single identifier + newline/period/EOF)
+        // Paragraph ranges: PERFORM name THRU/THROUGH name
+        // Block forms: PERFORM DISPLAY ..., PERFORM COMPUTE ... (statement on same line)
         if (lowerKeyword === 'perform') {
           const afterInner = source.slice(pos + match[0].length);
-          const nextWord = afterInner.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
+          const nextWord = afterInner.match(/^[ \t]+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
           if (nextWord) {
             const word = nextWord[1].toLowerCase();
             if (word !== 'until' && word !== 'varying' && word !== 'with' && word !== 'times') {
-              continue;
+              const afterNextWord = afterInner.slice(nextWord[0].length);
+              // Check for PERFORM <variable> TIMES pattern
+              const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
+              if (secondWord && secondWord[1].toLowerCase() === 'times') {
+                // PERFORM <variable> TIMES → structured block, accept
+              } else if (secondWord && (secondWord[1].toLowerCase() === 'thru' || secondWord[1].toLowerCase() === 'through')) {
+                // PERFORM para THRU para → paragraph range call, reject
+                continue;
+              } else {
+                // Check if only whitespace/newline/period follows the first word (paragraph call)
+                // If there's more content on the same line, it's likely a block PERFORM with inline statements
+                // Strip inline COBOL comments (*>) before checking
+                const afterNextWordNoComment = afterNextWord.replace(/\*>.*/, '');
+                const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
+                if (!hasMoreContent) {
+                  continue;
+                }
+              }
             }
           }
         }
@@ -238,26 +259,7 @@ export class CobolBlockParser extends BaseBlockParser {
     return 'block_open';
   }
 
-  // Finds excluded regions: comments and strings
-  protected findExcludedRegions(source: string): ExcludedRegion[] {
-    const regions: ExcludedRegion[] = [];
-    let i = 0;
-
-    while (i < source.length) {
-      const result = this.tryMatchExcludedRegion(source, i);
-      if (result) {
-        regions.push(result);
-        i = result.end;
-      } else {
-        i++;
-      }
-    }
-
-    return regions;
-  }
-
-  // Tries to match an excluded region at the given position
-  private tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // Inline comment: *>
@@ -284,6 +286,24 @@ export class CobolBlockParser extends BaseBlockParser {
           return this.matchSingleLineComment(source, pos);
         }
       }
+    }
+
+    // >> compiler directives (>>IF, >>ELSE, >>END-IF, >>EVALUATE, etc.)
+    if (char === '>' && pos + 1 < source.length && source[pos + 1] === '>') {
+      return this.matchSingleLineComment(source, pos);
+    }
+
+    // EXEC/EXECUTE ... END-EXEC block
+    if (char === 'E' || char === 'e') {
+      const execRegion = this.matchExecBlock(source, pos);
+      if (execRegion) {
+        return execRegion;
+      }
+    }
+
+    // Pseudo-text delimiter ==...==
+    if (char === '=' && pos + 1 < source.length && source[pos + 1] === '=') {
+      return this.matchPseudoText(source, pos);
     }
 
     // Single-quoted string
@@ -334,6 +354,76 @@ export class CobolBlockParser extends BaseBlockParser {
     return { start: pos, end: source.length };
   }
 
+  // Match EXEC/EXECUTE ... END-EXEC block
+  private matchExecBlock(source: string, pos: number): ExcludedRegion | null {
+    const upper = source.slice(pos, pos + 7).toUpperCase();
+    const isExec = upper.startsWith('EXEC') && (source.length <= pos + 4 || !/[a-zA-Z0-9_-]/.test(source[pos + 4]));
+    const isExecute = upper.startsWith('EXECUTE') && (source.length <= pos + 7 || !/[a-zA-Z0-9_-]/.test(source[pos + 7]));
+
+    if (!isExec && !isExecute) {
+      return null;
+    }
+
+    // Check word boundary before
+    if (pos > 0 && /[a-zA-Z0-9_-]/.test(source[pos - 1])) {
+      return null;
+    }
+
+    // Search for END-EXEC (case-insensitive), skipping string literals
+    const startWord = isExecute ? 'EXECUTE' : 'EXEC';
+    let i = pos + startWord.length;
+    while (i < source.length) {
+      const ch = source[i];
+      // Skip single/double-quoted strings inside EXEC block
+      if (ch === "'" || ch === '"') {
+        i++;
+        while (i < source.length) {
+          if (source[i] === ch) {
+            if (i + 1 < source.length && source[i + 1] === ch) {
+              i += 2;
+              continue;
+            }
+            i++;
+            break;
+          }
+          if (source[i] === '\n' || source[i] === '\r') {
+            break;
+          }
+          i++;
+        }
+        continue;
+      }
+      // Check for END-EXEC keyword
+      if ((ch === 'E' || ch === 'e') && i + 7 < source.length) {
+        const candidate = source.slice(i, i + 8).toUpperCase();
+        if (candidate === 'END-EXEC') {
+          // Check word boundaries
+          const beforeOk = i === 0 || !/[a-zA-Z0-9_-]/.test(source[i - 1]);
+          const afterOk = i + 8 >= source.length || !/[a-zA-Z0-9_-]/.test(source[i + 8]);
+          if (beforeOk && afterOk) {
+            return { start: pos, end: i + 8 };
+          }
+        }
+      }
+      i++;
+    }
+
+    return { start: pos, end: source.length };
+  }
+
+  // Match pseudo-text delimiters ==...==
+  private matchPseudoText(source: string, pos: number): ExcludedRegion | null {
+    // Look for closing ==
+    let i = pos + 2;
+    while (i + 1 < source.length) {
+      if (source[i] === '=' && source[i + 1] === '=') {
+        return { start: pos, end: i + 2 };
+      }
+      i++;
+    }
+    return { start: pos, end: source.length };
+  }
+
   // Custom block matching for COBOL-specific pairing rules
   protected matchBlocks(tokens: import('../types').Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
@@ -367,7 +457,7 @@ export class CobolBlockParser extends BaseBlockParser {
           const validOpener = CLOSE_TO_OPEN[closeValue];
 
           if (validOpener) {
-            const matchIndex = this.findLastOpenerByType(stack, validOpener);
+            const matchIndex = findLastOpenerByType(stack, validOpener, true);
 
             if (matchIndex >= 0) {
               const openBlock = stack.splice(matchIndex, 1)[0];
@@ -385,15 +475,5 @@ export class CobolBlockParser extends BaseBlockParser {
     }
 
     return pairs;
-  }
-
-  // Find the last opener that matches the given type (case insensitive)
-  private findLastOpenerByType(stack: OpenBlock[], openerType: string): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value.toLowerCase() === openerType) {
-        return i;
-      }
-    }
-    return -1;
   }
 }
