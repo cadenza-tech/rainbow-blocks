@@ -1164,13 +1164,11 @@ end`;
     });
   });
 
-  // Coverage: isInsideRecord - case with depth > 0 (line 277)
-  suite('isInsideRecord with case-end at depth > 0', () => {
-    test('should suppress variant case when inner case-end pair is consumed at depth > 0', () => {
-      // The inner case X of is also a variant case inside the record (suppressed).
-      // Scanning backward from the tagless variant case Integer of:
-      // end (from inner case) -> depth=1, case (inner) -> depth>0 so depth=0,
-      // record -> depth=0 -> return true
+  // Coverage: isInsideRecord - variant case does not have its own end
+  suite('isInsideRecord with variant case depth tracking', () => {
+    test('should detect variant case inside record with end after it', () => {
+      // In Pascal, variant case inside record does not have its own end.
+      // The first end; closes the record, making the second case standalone.
       const source = `TRec = record
   case X: Integer of
     1: (A: Integer);
@@ -1179,12 +1177,10 @@ end`;
     0: (IntVal: Integer);
 end`;
       const pairs = parser.parse(source);
-      // Only 1 block: record...end
-      // Both variant cases are suppressed (inside record context)
-      // The inner case X: Integer of -> tagged variant, suppressed
-      // The outer case Integer of -> tagless variant, isInsideRecord returns true
-      // During isInsideRecord backward scan, end->depth=1, case->depth>0 decrements to 0
-      assertSingleBlock(pairs, 'record', 'end');
+      // 2 blocks: record...end; and case...end
+      // The first end; closes the record (variant case has no own end)
+      // The second case Integer of is standalone after the record
+      assertBlockCount(pairs, 2);
     });
   });
 
@@ -1213,12 +1209,12 @@ end`;
 
   // Fix: end should not skip past unclosed repeat blocks on the stack
   suite('end should not skip past repeat', () => {
-    test('should not let end close outer block past unclosed repeat', () => {
+    test('should let end skip past unclosed repeat to close outer block', () => {
       const source = 'case x of\n  repeat\n  end\nuntil y';
       const pairs = parser.parse(source);
-      // end cannot close case because repeat is on top of stack
-      // only repeat..until should pair
-      assertSingleBlock(pairs, 'repeat', 'until');
+      // end skips repeat (which can only be closed by until) and closes case
+      // then until closes repeat
+      assertBlockCount(pairs, 2);
     });
 
     test('should still close repeat..until inside begin..end normally', () => {
@@ -1316,6 +1312,230 @@ end`;
   TMyObj = object
     field1: Integer;
   end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+  });
+
+  suite('Bug 1: asm block excluded regions', () => {
+    test('should not detect begin label inside asm block', () => {
+      const source = `program Test;
+asm
+  begin:
+    mov ax, 1
+end;
+begin
+  WriteLn;
+end.`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should not detect case label inside asm block', () => {
+      const source = `asm
+  case:
+    jmp case
+end;
+if true then
+begin
+  x := 1;
+end;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle case-insensitive asm', () => {
+      const source = `ASM
+  begin:
+    nop
+END;
+begin
+  x := 1;
+end.`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle empty asm block', () => {
+      const source = `asm end;
+begin
+  x := 1;
+end.`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle unterminated asm block', () => {
+      const source = `asm
+  begin:
+    mov ax, 1`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle asm inside string (not excluded)', () => {
+      const source = `s := 'asm begin end';
+begin
+  x := 1;
+end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip asm label with comment after colon', () => {
+      const source = `asm
+  begin: { comment after label }
+    mov ax, 1
+end;
+begin
+  WriteLn;
+end.`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin' && p.closeKeyword.value === 'end'));
+    });
+  });
+
+  suite('Bug 2: class forward declaration with comment', () => {
+    test('should not treat class with brace comment before semicolon as block', () => {
+      const pairs = parser.parse('type\n  TFoo = class { forward declaration };');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat class with paren-star comment before semicolon as block', () => {
+      const pairs = parser.parse('type\n  TFoo = class (* forward *);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat class with line comment and newline before semicolon as block', () => {
+      const pairs = parser.parse('type\n  TFoo = class // comment\n;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat class with body as block', () => {
+      const source = `TFoo = class { this is a real class }
+  FValue: Integer;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should skip asm end that is inside a string excluded region (lines 211-213)', () => {
+      // asm region scan: the inner 'end' is inside a Pascal string excluded region
+      // String '{comment}' won't help since it's a comment; use (* *) to enclose 'end'
+      // The asm body contains 'end' inside a (* *) comment - should be skipped
+      const source = 'begin\n  asm\n    (* end *)\n  end\nend;';
+      const pairs = parser.parse(source);
+      // 'begin'/'end' is one pair, 'asm'/'end' is another
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should skip asm end: label (assembly label with colon, lines 218-222)', () => {
+      // asm region scan: 'end:' is an assembly label, should be skipped; real end follows
+      const source = 'begin\n  asm\n    end:\n    nop\n  end\nend;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const asmPair = pairs.find((p) => p.openKeyword.value === 'asm');
+      assert.ok(asmPair, 'should find asm block');
+    });
+
+    test('should skip asm end: label with spaces before colon', () => {
+      // asm region scan: 'end   :' with spaces before colon - whitespace scanning (lines 217-219)
+      const source = 'begin\n  asm\n    end   :\n    nop\n  end\nend;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: variant case in record followed by standalone case', () => {
+    test('should detect standalone case after record with variant case', () => {
+      const source = "type\n  TRec = record\n    case Integer of\n      0: (A: Integer);\n  end;\n\ncase Value of\n  1: WriteLn('One');\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'record');
+      assert.strictEqual(pairs[1].openKeyword.value.toLowerCase(), 'case');
+    });
+
+    test('should still detect variant case inside record', () => {
+      const source = 'type\n  TRec = record\n    case Integer of\n      0: (A: Integer);\n  end;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'record');
+    });
+  });
+
+  suite('Regression: interface and object forward declarations', () => {
+    test('should not detect interface; forward declaration as block opener', () => {
+      const source = `type
+  IMyInterface = interface;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect object; forward declaration as block opener', () => {
+      const source = `type
+  TMyObject = object;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect interface with body as block opener', () => {
+      const source = `type
+  IMyInterface = interface
+    procedure DoSomething;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+  });
+
+  suite('Regression: end closing blocks past unterminated repeat', () => {
+    test('should close begin when repeat is unterminated on top of stack', () => {
+      const source = `begin
+  repeat
+    x := 1;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should close both begin blocks with inner and outer end', () => {
+      const source = `begin
+  repeat
+    begin
+      x := 1;
+    end;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still pair repeat-until correctly', () => {
+      const source = `begin
+  repeat
+    x := x + 1;
+  until x > 10;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: packed word boundary check', () => {
+    test('should not match identifier ending in packed as packed keyword', () => {
+      const source = 'type\n  X = record end;\nvar\n  mypacked: object;';
+      const pairs = parser.parse(source);
+      // record/end is one pair; "object" after "mypacked:" should not be a block open (no = before it)
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should still match packed object after =', () => {
+      const source = 'type\n  T = packed object\n    x: Integer;\n  end;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'object', 'end');
     });

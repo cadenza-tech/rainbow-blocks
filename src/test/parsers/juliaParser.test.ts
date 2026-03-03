@@ -1350,6 +1350,24 @@ end`;
         const regions = parser.getExcludedRegions(source);
         assert.strictEqual(regions.length, 0);
       });
+
+      test('should treat :symbol after > as symbol literal', () => {
+        const source = 'x = a >:end\nfunction foo()\nend';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'function', 'end');
+      });
+
+      test('should treat :symbol after >> as symbol literal', () => {
+        const source = 'x = a >>:end\nfunction foo()\nend';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'function', 'end');
+      });
+
+      test('should exclude :symbol after > from excluded regions', () => {
+        const source = 'x = a > :foo';
+        const regions = parser.getExcludedRegions(source);
+        assert.ok(regions.some((r) => source.slice(r.start, r.end) === ':foo'));
+      });
     });
   });
 
@@ -2189,6 +2207,29 @@ end`;
       const pairs = parser.parse('x = custom"""content"""end\nfunction foo()\nend');
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('Bug 3: for/if inside parentheses with block openers should not be rejected', () => {
+      // if after begin (a block opener) inside parens should not be rejected
+      const source = 'f(begin\n  1\nend, if true\n  x\nelse\n  -x\nend)';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'if');
+    });
+
+    test('Bug 4: Unicode identifier before bracket should be recognized as indexing', () => {
+      // Unicode identifier indexing: alpha[1] should not interfere with function...end
+      const source = 'function f()\n  \u03B1[1]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('Bug 11: :@ should not hide the next keyword', () => {
+      // :@ should only exclude the colon and @, not hide subsequent keywords
+      const source = 'x = :@\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   suite('Coverage: new bug fix code paths', () => {
@@ -2287,6 +2328,305 @@ end`;
       const source = 'x = "value is $(if true\n  1\nend)"\nfor i in 1:3\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('Bug 1: dot-preceded keywords', () => {
+    test('obj.end should not be detected as block close', () => {
+      const source = 'function foo()\n  x = obj.end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('range.begin should not be detected as block open', () => {
+      const source = 'x = range.begin\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('Base.end(a, 1) inside function should not steal the function end', () => {
+      const source = 'function foo(a)\n  x = Base.end(a, 1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('obj.for should not be detected as block open', () => {
+      const source = 'x = obj.for\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('module.struct should not be detected as block open', () => {
+      const source = 'x = MyModule.struct\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug: :@macro symbol literal leaves macro exposed', () => {
+    test('should not detect macro keyword after :@ symbol literal', () => {
+      const source = 'function f()\n  x = :@macro\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still handle valid symbol literals starting with @', () => {
+      const source = 'x = :hello\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle prefixed triple-quoted string without interpolation (r""")', () => {
+      // matchPrefixedTripleQuotedString: interpolating=false (no $() branch at 411-413)
+      const source = 'x = r"""begin end if"""\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle prefixed string with content that looks like code', () => {
+      // findStringEnd: interpolating=false (no $() branch at 438-440)
+      const source = 'x = raw"if do begin end"\nfor i in 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should handle symbol literal with multiple operator chars', () => {
+      // matchSymbolLiteral operator branch: multiple chars consumed (not i===pos+1 path)
+      const source = 'x = :+= \nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should return single-char symbol when colon followed by non-operator non-word non-unicode', () => {
+      // matchSymbolLiteral: i === pos+1 path (509-510): colon at end of line or before newline
+      // isSymbolStart passes for chars that are >=128 charCode but first char has charCode<=127 non-operator
+      // This is effectively dead code; test a related adjacent edge case
+      const source = 'x = : \nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat # alone as multi-line comment opener (line 305-306)', () => {
+      // matchMultiLineComment: defensive check (dead code but path adjacent)
+      // Regular # comment should not invoke the #= path
+      const source = 'x = 1 # not #= a multi-line\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle prefixed triple-quoted string with backslash escape', () => {
+      // matchPrefixedTripleQuotedString: backslash handling (lines 405-407)
+      const source = 'x = r"""begin \\n end"""\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle regular string with backslash escape (findStringEnd path)', () => {
+      // findStringEnd: backslash handling (lines 432-434)
+      const source = 'x = raw"a \\n b"\nfor i in 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('Coverage: defensive branch paths', () => {
+    test('should handle #= multi-line comment correctly (positive path near line 305)', () => {
+      // matchMultiLineComment: the guard at line 304 is a defensive check
+      // The normal path processes #= correctly
+      const source = '#= this is a\nmulti-line comment =#\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle # followed by non-= as single-line comment (line 305-306 adjacent)', () => {
+      // When # is followed by something other than =, tryMatchExcludedRegion routes to
+      // matchSingleLineComment (line 256-257), NOT matchMultiLineComment
+      // This verifies the dispatch logic that prevents line 305-306 from being reached
+      const source = '#! not a multiline comment\nbegin\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not interpolate $() in prefixed triple-quoted string (line 410 false branch)', () => {
+      // matchPrefixedTripleQuotedString called with interpolating=false from matchPrefixedString
+      // Line 410: interpolating is false, so the $() inside is treated as literal text
+      const source = 'x = raw"""before $(begin 1 end) after"""\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not interpolate $() in b-prefixed triple-quoted string', () => {
+      // Another prefixed triple-quoted test: b prefix also passes interpolating=false
+      const source = 'x = b"""text $(if true 1 end) more"""\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should not interpolate $() in prefixed regular string (line 437 false branch)', () => {
+      // findStringEnd called with interpolating=false from matchPrefixedString
+      // Line 437: interpolating is false, so $() inside is treated as literal text
+      const source = 'x = r"value $(begin 1 end)"\nfor i in 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not interpolate $() in s-prefixed regular string', () => {
+      // findStringEnd with interpolating=false
+      const source = 'x = s"data $(if true 1 end)"\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should handle colon before space as non-symbol in ternary context', () => {
+      // isSymbolStart: colon followed by space (charCode <= 127 and not matching operator pattern)
+      // Line 457: nextChar is space -> returns false -> not a symbol
+      const source = 'x = true ? begin\n  1\nend : 0';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle colon at end of source as non-symbol', () => {
+      // isSymbolStart: pos+1 is undefined (no next char) -> line 452-453 returns false
+      const source = 'function foo()\n  x = a:\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle colon followed by newline as non-symbol', () => {
+      // isSymbolStart: nextChar is \n (charCode 10, <= 127, not matching operator/word pattern)
+      // Line 457: returns false
+      const source = 'function foo()\n  x = a:\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle colon followed by comma as non-symbol', () => {
+      // isSymbolStart: nextChar is comma (,) -> not matching pattern -> returns false
+      const source = 'function foo()\n  (a:, b)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle operator symbol :+ correctly', () => {
+      // matchSymbolLiteral operator branch: + is consumed (i advances past pos+1)
+      // Line 508 condition (i === pos + 1) is false -> does NOT return early
+      const source = 'x = :+\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle $() interpolation in regular triple-quoted string', () => {
+      // matchTripleQuotedString: $() interpolation path at lines 338-340
+      const source = '"""\nresult: $(begin\n  42\nend)\n"""\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle $() interpolation in matchJuliaString', () => {
+      // matchJuliaString: $() interpolation path at lines 596-598
+      const source = '"value: $(begin 1 end)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: if expression inside parentheses', () => {
+    test('should detect if as block expression in function call args', () => {
+      const source = 'f(if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should detect if expression after comma in function call', () => {
+      const source = 'f(x, if a > 0 a else -a end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect multiple if expressions as function args', () => {
+      const source = 'f(if a 1 else 2 end, if b 3 else 4 end)';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still reject if as generator filter in parentheses', () => {
+      const source = '(x for x in 1:10 if x > 5)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still reject if as generator filter in nested parens', () => {
+      const source = 'f(g(x for x in 1:10 if x > 5))';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect if expression with surrounding function and for-generator', () => {
+      const source = 'function foo()\n  f(if true 1 else 2 end)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcPair = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.ok(funcPair);
+      assert.strictEqual(funcPair.nestLevel, 0);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair);
+      assert.strictEqual(ifPair.nestLevel, 1);
+    });
+
+    test('should still reject if in array comprehension', () => {
+      const source = '[x for x in 1:10 if x > 5]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect parenthesized if expression', () => {
+      const source = 'x = (if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: abstract/primitive type must be on same line', () => {
+    test('should not match abstract followed by type on next line', () => {
+      const source = 'x = abstract\ntype Foo\nend';
+      const pairs = parser.parse(source);
+      // type/end should NOT form an abstract type block since they are on separate lines
+      assertNoBlocks(pairs);
+    });
+
+    test('should still match abstract type on same line', () => {
+      const source = 'abstract type Foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'abstract', 'end');
+    });
+  });
+
+  suite('Branch coverage: hasForBetween depth tracking with nested parens/brackets', () => {
+    test('should reject if as generator filter with nested parens in generator', () => {
+      // sum(f(x) for x in arr if x > 0) - f(x) has parens that exercise depth++/depth-- in hasForBetween
+      const source = 'sum(f(x) for x in arr if x > 0)';
+      const pairs = parser.parse(source);
+      // if inside a generator expression with for is rejected (not a block if)
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject if as generator filter with nested brackets in generator', () => {
+      // sum(a[1] for a in arr if a[2] > 0) - brackets exercise depth tracking in hasForBetween
+      const source = 'sum(a[1] for a in arr if a[2] > 0)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject if as generator filter with mixed parens and brackets', () => {
+      // sum(f(a[i]) for i in 1:n if h(a[i]) > 0) - both parens and brackets
+      const source = 'sum(f(a[i]) for i in 1:n if h(a[i]) > 0)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 });

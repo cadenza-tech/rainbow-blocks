@@ -763,4 +763,44 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
+
+  suite('Bug 1: isDoPartOfLoop nested for...do', () => {
+    test('should handle nested for...do inside expression', () => {
+      // Outer for has a nested for...do...end inside its iterator expression
+      const source = 'for i in (for j in t do end) do\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // Both blocks should be for...end
+      const forBlocks = pairs.filter((p) => p.openKeyword.value === 'for');
+      assert.strictEqual(forBlocks.length, 2, 'should have two for blocks');
+    });
+
+    test('should handle nested while...do inside for loop expression', () => {
+      const source = 'for i in (while cond do end) do\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle double-nested for...do', () => {
+      const source = 'for a in (for b in (for c in t do end) do end) do\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should still treat standalone do as block opener with nested loops', () => {
+      const source = 'do\n  for i in t do\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doBlock = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.ok(doBlock, 'standalone do block should exist');
+      const forBlock = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forBlock, 'for loop block should exist');
+    });
+
+    test('should handle for...do after another for...do on separate lines', () => {
+      const source = 'for i in a do\nend\nfor j in b do\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
 });

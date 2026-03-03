@@ -419,8 +419,8 @@ end`;
   A = 'unterminated atom
 end`;
       const pairs = parser.parse(source);
-      // Unterminated atom extends to EOF, so no pairs detected
-      assertNoBlocks(pairs);
+      // Unterminated atom stops at newline, so begin/end pairs detected
+      assertSingleBlock(pairs, 'begin', 'end');
     });
 
     test('should handle keyword-like identifiers', () => {
@@ -1132,12 +1132,415 @@ end.`;
     });
   });
 
+  suite('Period in float literal / range operator in spec context', () => {
+    test('should not treat float literal period as declaration terminator', () => {
+      // -spec with float literal 1.5 between -spec and fun()
+      // The period in 1.5 should NOT end the spec context
+      const source = '-spec foo(float()) -> {1.5, fun(() -> ok)}.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat range operator (..) as declaration terminator', () => {
+      // Range operator .. should not end the spec context
+      const source = '-type range() :: {1..10, fun(() -> ok)}.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat real period as declaration terminator', () => {
+      // A real declaration-ending period should still break the spec context
+      const source = `-spec foo() -> ok.
+bar() -> fun() -> ok end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should handle float literal with multiple digits around period', () => {
+      const source = '-spec calc(float()) -> {3.14, fun(() -> ok)}.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle range operator in type spec with fun', () => {
+      const source = '-type my_type() :: {0..255, fun((byte()) -> ok)}.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Macro invocations with ? prefix', () => {
+    test('should not treat ?begin as block keyword', () => {
+      const source = 'X = ?begin,\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat ?end as block keyword', () => {
+      const source = 'begin\n  X = ?end,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat ?if as block keyword', () => {
+      const source = 'X = ?if,\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat ?case as block keyword', () => {
+      const source = 'X = ?case,\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Record names with # prefix', () => {
+    test('should not treat #begin as block keyword', () => {
+      const source = 'X = #begin{field = 1},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat #end as block keyword', () => {
+      const source = 'begin\n  X = #end{field = 1},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat #case as block keyword', () => {
+      const source = 'X = #case{field = 1},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat #try as block keyword', () => {
+      const source = 'X = #try{field = 1},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Triple-quoted string without newline', () => {
+    test('should not treat """ followed by content as triple-quoted string', () => {
+      // """hello" should be "" (empty string) + "hello" (regular string)
+      const source = 'begin\n  X = """hello",\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still handle valid triple-quoted string with newline', () => {
+      const source = 'begin\n  X = """\n  content\n  """,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle """ followed by content containing keywords', () => {
+      // """begin" should be "" + "begin" (keyword in string, not code)
+      const source = '"""begin end"';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle """ with spaces before content on same line', () => {
+      // """  hello" - spaces after """ but content on same line
+      const source = 'begin\n  X = """  hello",\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle """ at end of source', () => {
+      const regions = parser.getExcludedRegions('"""');
+      // At EOF, """ is valid (no content follows)
+      assert.strictEqual(regions.length, 1);
+    });
+
+    test('should handle """ followed by newline as valid triple-quoted string', () => {
+      const regions = parser.getExcludedRegions('"""\ncontent\n"""');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 15);
+    });
+  });
+
+  suite('Map key/update across newlines', () => {
+    test('should reject keyword as map key when => is on next line', () => {
+      // #{begin\n  => true} - keyword used as map key with => on next line
+      const source = '#{begin\n  => true}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject keyword as map key when := is on next line', () => {
+      // #{begin\n  := true} - keyword used as map key with := on next line
+      const source = '#{begin\n  := true}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not reject keyword when => is two lines away', () => {
+      // begin followed by a blank line then => is not a map key
+      const source = 'begin\n\n=> value\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still reject keyword when => is on same line', () => {
+      const source = '#{begin => 1}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still reject keyword when := is on same line with spaces', () => {
+      const source = '#{begin   := 1}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject keyword in isValidBlockOpen when => is on next line', () => {
+      // Specifically test the isValidBlockOpen path (for block_open keywords)
+      const source = '#{case\n  => value}\ncase X of\n  1 -> ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not reject normal block keyword followed by unrelated =>', () => {
+      // begin block where => appears later (not immediately after keyword)
+      const source = 'begin\n  X = #{key => val},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject end keyword as map key with => on next line (tokenize filter)', () => {
+      // end used as map key in multi-line map
+      const source = '#{end\n  => done}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject keyword as map key with CRLF before =>', () => {
+      const source = '#{begin\r\n  => true}\r\nbegin\r\n  ok\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject block_open keyword as map key with CR-only before =>', () => {
+      // isValidBlockOpen path: begin followed by \r then => on next line
+      const source = '#{begin\r  => true}\rbegin\r  ok\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject block_open keyword as map key with CR-only before :=', () => {
+      // isValidBlockOpen path: case followed by \r then := on next line
+      const source = '#{case\r  := value}\rcase X of\r  1 -> ok\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should reject block_close keyword as map key with CR-only before =>', () => {
+      // tokenize filter path: end followed by \r then => on next line
+      const source = '#{end\r  => done}\rbegin\r  ok\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject block_close keyword as map key with CR-only before :=', () => {
+      // tokenize filter path: end followed by \r then := on next line
+      const source = '#{end\r  := done}\rbegin\r  ok\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Coverage: new bug fix code paths', () => {
     test('should parse try-catch-end with catch as intermediate', () => {
       const source = 'try X catch _:_ -> ok end.';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'try', 'end');
       assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
+  suite('Bug 15: map key with trailing comment before => on next line', () => {
+    test('should reject begin as map key when comment precedes => on next line', () => {
+      const source = '#{begin % comment\n  => value}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should not treat fun() as block when -spec contains range operator ..', () => {
+      // Lines 77-80: range operator (..) encountered in period scan: j++ then continue
+      const source = '-spec foo(1..10) -> fun() -> ok end.\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      // fun() in spec context is not a block; begin/end is the only pair
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat fun() as block when -spec contains float literal', () => {
+      // Lines 85-87: float literal (digit.digit) encountered in period scan: continue
+      const source = '-spec foo(float()) -> fun() -> ok end.\nbegin\n  3.14\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat fun() as block when .. range appears before it in -type', () => {
+      // Line 81-83: second dot of .. (source[j-1] === '.') encountered: continue
+      const source = '-type t() :: 1..100 | fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should parse maybe-else block', () => {
+      // Lines 303-307: else intermediate for maybe block
+      const source = 'maybe\n  ok\nelse\n  error\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'maybe', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
+  suite('Coverage: period scan branches in isValidFunOpen', () => {
+    test('should skip range operator first dot and advance past second dot', () => {
+      // Lines 77-80: first dot of .. detected, j incremented past second dot, continue
+      // The fun() after the range should still be rejected (no period separator from -spec)
+      const source = '-spec foo(1..10) -> fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      // fun() in -spec context is not a block (range does not act as separator)
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip float literal period between -spec and fun', () => {
+      // Lines 85-87: digit.digit detected as float literal, period is not declaration terminator
+      const source = '-spec baz(3.14) -> fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      // Float period doesn't terminate spec context -> fun() still rejected
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip range operator when it appears right after attribute', () => {
+      // Lines 77-80: range operator directly in the spec definition
+      const source = '-type byte_range() :: 0..255 | fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle multiple range operators before fun in spec', () => {
+      // Multiple .. operators in the same -type, all should be skipped
+      const source = '-type t() :: {1..10, 20..30, fun(() -> ok)}.\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle mixed float and range in same spec before fun', () => {
+      // Both float literal (3.14) and range operator (..) in same spec
+      const source = '-spec foo(3.14, 1..10) -> fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat real period as declaration terminator even with ranges and floats before it', () => {
+      // A real period (end of declaration) should still be recognized
+      const source = '-type t() :: 1..10.\nfoo() -> fun() -> ok end.';
+      const pairs = parser.parse(source);
+      // Period after 10 terminates the spec -> fun() is a real block
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should handle range with second dot preceded by another dot', () => {
+      // Lines 81-83: second dot of range operator check
+      // In a scenario where we have consecutive dots: if the first dot is consumed by
+      // lines 77-80, the for-loop j++ moves past the second dot. But with ...
+      // (three dots, which is invalid Erlang but tests the branch), the middle dot
+      // has source[j-1] === '.' triggering lines 81-83
+      const source = '-type t() :: 1...10 | fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      // First dot: lines 77-80 skip (j++ past second dot, continue, for j++ past third dot)
+      // Actually with three dots: first dot matches source[j+1]==='.' -> j++, continue, for j++
+      // Now j is at third dot. source[j-1] is second dot -> '.' -> line 81-83 fires: continue
+      // Then for j++ moves past third dot. No period found -> fun rejected.
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip consecutive dots in multi-line type with fun on next line', () => {
+      // Lines 82-83: fun() on a DIFFERENT line from -type, so the line-start check (line 31)
+      // does not short-circuit. The period scan encounters '...' where the third dot
+      // has source[j-1] === '.' triggering lines 81-83 continue.
+      const source = '-type t() :: 1...10 |\n  fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      // fun() is in type context (no period separator) -> rejected
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip float literal period in multi-line spec with fun on next line', () => {
+      // Lines 86-87: fun() on a DIFFERENT line from -spec, so the line-start check (line 31)
+      // does not short-circuit. The period scan encounters '.' in '1.5' where
+      // source[j-1]='1' (digit) and source[j+1]='5' (digit), triggering lines 85-87 continue.
+      const source = '-spec foo(1.5) ->\n  fun(() -> ok).\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      // fun() is in spec context (float period is not declaration terminator) -> rejected
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: fun() after :: in -record type annotations', () => {
+    test('should not detect fun() in -record type annotation as block opener', () => {
+      const source = `-record(state, {
+  handler :: fun((atom()) -> ok)
+}).`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect fun() in -record default value as block opener', () => {
+      const source = `-record(state, {
+  handler = fun() -> ok end
+}).`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+  });
+
+  suite('Regression: unterminated atom stops at newline', () => {
+    test('should not let unterminated atom consume subsequent lines', () => {
+      const source = "X = 'unterminated\nbegin\n  ok\nend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not let unterminated atom consume lines with CRLF', () => {
+      const source = "X = 'unterminated\r\nbegin\r\n  ok\r\nend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not let unterminated atom consume lines with CR-only', () => {
+      const source = "X = 'unterminated\rbegin\r  ok\rend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still handle properly terminated atoms', () => {
+      const source = "X = 'begin',\nbegin\n  ok\nend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Branch coverage: unterminated atom at end of source', () => {
+    test('should handle unterminated quoted atom at end of source (matchAtom lines 397-398)', () => {
+      // Unterminated atom at the very end with no trailing newline
+      const source = "begin\n  ok\nend,\nX = 'unterminated";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle unterminated atom with escape at end of source', () => {
+      const source = "begin\n  ok\nend,\nX = 'test\\'more";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 });

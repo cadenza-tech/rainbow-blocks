@@ -605,6 +605,45 @@ end`;
     });
   });
 
+  suite('Bug 1: isPrecededByDot with line continuation', () => {
+    test('should not treat end after dot with line continuation as block close', () => {
+      const source = `function f
+  x = obj. ...
+    end;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end after dot with continuation and indentation as block close', () => {
+      const source = `for i = 1:10
+  result = data. ...
+      end;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not treat end after dot with multiple continuations as block close', () => {
+      const source = `function f
+  x = obj. ...
+    ... more continuation
+    end;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat end without dot as block close after continuation', () => {
+      const source = `function f
+  x = value ...
+    + 1;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Classdef section keywords as variables', () => {
     test('should not treat properties = as block open', () => {
       const source = `properties = 5;
@@ -923,11 +962,25 @@ end`;
       assertSingleBlock(pairs, 'function', 'end');
     });
 
-    test('Bug 8: backslash-escaped quotes in double-quoted strings should not end string prematurely', () => {
-      const source = `x = "hello \\"end\\" world";
-if true
-end`;
+    test('Bug 8: MATLAB does not support backslash escapes in double-quoted strings', () => {
+      // MATLAB only supports "" as escape in double-quoted strings, not backslash
+      const source = 'x = "hello \\";\nif true\nend';
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat backslash as literal character in double-quoted string', () => {
+      // "path\\to" should be a complete string (backslash is literal, "" is the only escape)
+      const source = 'x = "path\\\\to";\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat backslash-quote as escape in double-quoted string', () => {
+      // In MATLAB, \" does not escape the quote; the string ends at the first unescaped "
+      const source = 'x = "test\\";\nif true\nend';
+      const pairs = parser.parse(source);
+      // "test\" ends at the first " (backslash is literal), then ;\nif true\nend is code
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
@@ -942,12 +995,165 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+  });
 
-    test('should handle backslash-escaped CRLF in double-quoted string', () => {
-      // Covers line 326: \r\n after backslash escape in matchDoubleQuotedString
-      const source = 'x = "line1\\\r\nline2"\nif true\nend';
+  suite('Bug 2: isPrecededByDot should not cross newlines', () => {
+    test('should not treat newline between dot and keyword as preceded by dot', () => {
+      const source = '1.\nend';
+      const pairs = parser.parse(source);
+      // Newline without ... continuation means end is NOT preceded by dot
+      assertNoBlocks(pairs);
+    });
+
+    test('should still recognize dot continuation with ... across newlines', () => {
+      const source = `function f
+  x = obj. ...
+    end;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Intermediate keyword validation', () => {
+    test('should reject catch on if block', () => {
+      const source = `if condition
+  catch
+end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject case on for block', () => {
+      const source = `for i = 1:10
+  case 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject otherwise on if block', () => {
+      const source = `if condition
+  otherwise
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject else on switch block', () => {
+      const source = `switch value
+  else
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject elseif on try block', () => {
+      const source = `try
+  elseif condition
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should reject catch on while block', () => {
+      const source = `while condition
+  catch
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should accept else on if block', () => {
+      const source = `if condition
+  x = 1;
+else
+  x = 2;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should accept case on switch block', () => {
+      const source = `switch value
+  case 1
+    x = 1;
+  otherwise
+    x = 0;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case', 'otherwise']);
+    });
+
+    test('should accept catch on try block', () => {
+      const source = `try
+  x = 1;
+catch e
+  x = 2;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
+  suite('Bug 2: isPrecededByDot with line continuation crossing newline', () => {
+    test('should filter end after dot with line continuation (verify correct end matched)', () => {
+      const source = 'function f\n  x = obj. ...\n    end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The matched end should be the last one (line 3), not the struct field end (line 2)
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should filter end after dot with CRLF line continuation', () => {
+      const source = 'function f\r\n  x = obj. ...\r\n    end;\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should filter middle keyword after dot with line continuation', () => {
+      const source = 'switch x\n  case 1\n    y = s. ...\n      else;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      // else after s. ... should be filtered, only case should be intermediate
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should not cross newline without line continuation (no false positive)', () => {
+      const source = 'function f\n  x = obj.\nend';
+      const pairs = parser.parse(source);
+      // obj.\n  end - no ... continuation, so end is NOT preceded by dot
+      // end on the next line IS a block close (matches function)
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Coverage: isPrecededByDot with block comment before newline', () => {
+    test('should skip newline after block comment when checking dot precedence', () => {
+      // Covers lines 169-170: block comment %{ %} ending right before a newline
+      // The block comment is between the dot and keyword, acting like a continuation
+      const source = 'function f\n  x = obj. %{ comment\n%}\nend;\nend';
+      const pairs = parser.parse(source);
+      // obj. followed by block comment then end on next line
+      // The block comment region ends at the newline position after %}
+      // isPrecededByDot should skip the newline after the block comment
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle CRLF line ending in dot continuation', () => {
+      const source = 'function f\n  x = obj. ...\r\n  end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 });

@@ -404,6 +404,13 @@ end Hello;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end');
     });
+
+    test('should merge begin with compound end procedure', () => {
+      const source = 'procedure Foo is\nbegin\n  null;\nend procedure;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end procedure');
+      assert.strictEqual(pairs[0].intermediates.length, 2); // is, begin
+    });
   });
 
   suite('Entry declarations', () => {
@@ -443,6 +450,16 @@ end Read;`;
 
     test('should not treat access procedure as block open', () => {
       const pairs = parser.parse('declare\n  type Proc_Ptr is access procedure (X : Integer);\nbegin\n  null;\nend;');
+      assertSingleBlock(pairs, 'declare', 'end', 0);
+    });
+
+    test('should not treat access function with comment as block open', () => {
+      const pairs = parser.parse('declare\n  type Func_Ptr is access -- callback\n    function (X : Integer) return Integer;\nbegin\n  null;\nend;');
+      assertSingleBlock(pairs, 'declare', 'end', 0);
+    });
+
+    test('should not treat access procedure with comment as block open', () => {
+      const pairs = parser.parse('declare\n  type Proc_Ptr is access -- handler\n    procedure (X : Integer);\nbegin\n  null;\nend;');
       assertSingleBlock(pairs, 'declare', 'end', 0);
     });
   });
@@ -1197,6 +1214,299 @@ end if;`;
       assert.strictEqual(pairs[0].intermediates.length, 1);
       assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
     });
+
+    test('should not treat then as and-then when and is inside a comment', () => {
+      const source = `if True -- and
+then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
+
+    test('should not treat then as and-then when and is in a string', () => {
+      const source = `if X = "and"
+then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
+  });
+
+  suite('Task forward declarations', () => {
+    test('should not treat task forward declaration as block opener', () => {
+      const source = `procedure P is
+  task Worker;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat task type forward declaration as block opener', () => {
+      const source = `procedure P is
+  task type Worker;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should still treat task with is as block opener', () => {
+      const source = `task Worker is
+  entry Start;
+end Worker;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'task', 'end');
+    });
+
+    test('should still treat task body with is and begin as block', () => {
+      const source = `task body Worker is
+begin
+  null;
+end Worker;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'task', 'end');
+    });
+
+    test('should not treat incomplete task at EOF as block', () => {
+      const pairs = parser.parse('task Worker');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Package renames and instantiations', () => {
+    test('should not treat package renames as block opener', () => {
+      const source = `package P renames Q;
+procedure Main is
+begin
+  null;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat package is new (generic instantiation) as block opener', () => {
+      const source = `package P is new Generic_Pkg;
+procedure Main is
+begin
+  null;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat package is new with arguments as block opener', () => {
+      const source = `package P is new Generic_Pkg(Item => Integer);
+procedure Main is
+begin
+  null;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat package without is as block opener', () => {
+      const pairs = parser.parse('package P;');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat package with is (spec) as block opener', () => {
+      const source = `package My_Pkg is
+  X : Integer;
+end My_Pkg;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+    });
+
+    test('should still treat package body with is as block opener', () => {
+      const source = `package body My_Pkg is
+begin
+  null;
+end My_Pkg;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+    });
+  });
+
+  suite('Protected forward declarations', () => {
+    test('should not treat protected type forward declaration as block opener', () => {
+      const source = `procedure P is
+  protected type Obj;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat protected forward declaration without type as block opener', () => {
+      const source = `procedure P is
+  protected Obj;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should still treat protected type with is as block opener', () => {
+      const source = `protected type Semaphore is
+  entry Acquire;
+end Semaphore;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+
+    test('should still treat protected body with is as block opener', () => {
+      const source = `protected body Semaphore is
+  entry Acquire when Open is
+  begin
+    Open := False;
+  end Acquire;
+end Semaphore;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('For representation clauses', () => {
+    test('should not treat for-use record representation as block opener', () => {
+      const source = `procedure P is
+  for T use record
+    X at 0 range 0 .. 7;
+  end record;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      // Only procedure and record blocks should be detected, not for
+      const procBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'procedure');
+      assert.ok(procBlock);
+      const forBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'for');
+      assert.strictEqual(forBlock, undefined, 'for-use record should not be a block opener');
+    });
+
+    test('should not treat for-use enumeration representation as block opener', () => {
+      const source = `procedure P is
+  for Color use (Red => 0, Green => 1, Blue => 2);
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat for-use size clause as block opener', () => {
+      const source = `procedure P is
+  for T use 32;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should still treat normal for loop as block opener', () => {
+      const source = `for I in 1 .. 10 loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  suite('For in quantified expressions', () => {
+    test('should not treat for inside parens as block opener (quantified expression)', () => {
+      const source = `if (for all I in S => I > 0) then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat for some inside parens as block opener', () => {
+      const source = `if (for some I in S => I > 0) then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still treat for outside parens as block opener', () => {
+      const source = `for I in 1 .. 10 loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  suite('Or else in selective accept', () => {
+    test('should not remove or and else in selective accept with or else alternative', () => {
+      const source = `select
+  accept Entry_Name;
+or
+  delay 1.0;
+else
+  null;
+end select;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('or'), 'or should be an intermediate of select');
+      assert.ok(intermediates.includes('else'), 'else should be an intermediate of select');
+    });
+
+    test('should still filter or else in if condition', () => {
+      const source = `if A or else B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
+    });
+
+    test('should handle select with or and else separated by inner blocks', () => {
+      const source = `select
+  accept A do
+    null;
+  end;
+or
+  accept B do
+    null;
+  end;
+else
+  null;
+end select;`;
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(selectBlock);
+      const intermediates = selectBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('or'), 'or should be an intermediate of select');
+      assert.ok(intermediates.includes('else'), 'else should be an intermediate of select');
+    });
+  });
+
+  suite('When as intermediate for accept', () => {
+    test('should treat when as intermediate for accept block (entry guard)', () => {
+      const source = `accept Read(V : out Integer)
+  when Count > 0 do
+  V := Value;
+end Read;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'accept', 'end');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('when'), 'when should be an intermediate of accept');
+    });
   });
 
   suite('Uncovered line coverage', () => {
@@ -1341,6 +1651,57 @@ end if;`;
       assertSingleBlock(pairs, 'if', 'end if');
     });
 
+    test('should not treat for with qualified name attribute as block opener', () => {
+      const source = `procedure P is
+  for Pkg.Type'Size use 32;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat package body stub (is separate) as block opener', () => {
+      const source = `procedure Main is
+  package body My_Pkg is separate;
+begin
+  null;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat task body stub (is separate) as block opener', () => {
+      const source = `procedure Main is
+  task body Worker is separate;
+begin
+  null;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat protected body stub (is separate) as block opener', () => {
+      const source = `procedure Main is
+  protected body Obj is separate;
+begin
+  null;
+end Main;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat package is new with comment between is and new as block opener', () => {
+      const source = `procedure P is
+  package My_Pkg is -- instantiation
+    new Generic_Pkg;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
     test('should handle excluded region before paren in isInsideParens', () => {
       // Covers line 674: excluded region scan before ( in isInsideParens
       // "op" is a string literal (excluded region) immediately before (
@@ -1350,6 +1711,220 @@ if Cond then
 end if;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Bug 14: surrogate pair character literal handling', () => {
+    test('should handle surrogate pair character literal without breaking parsing', () => {
+      // U+1D11E (musical symbol G clef) is 2 UTF-16 code units
+      const source = "if '\uD834\uDD1E' = X then\n  null;\nend if;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle or else inside nested block in select (lines 710, 713)', () => {
+      // isOrPrecededBySelect: depth++ when block_close before or, depth-- for matching open
+      const source = `select
+  accept Do_Work;
+  loop
+    delay 1.0;
+  end loop;
+  or
+  else
+    null;
+end select;`;
+      const pairs = parser.parse(source);
+      // 'select' block should be found; 'or else' should be recognized as intermediate
+      const selectPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(selectPair, 'should find select block');
+    });
+
+    test('should treat or else as short-circuit when not preceded by select (lines 719-720)', () => {
+      // isOrPrecededBySelect: returns false when no select found → or/else removed as short-circuit
+      const source = 'if (A or else B) then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat or as select intermediate when not preceded by select', () => {
+      // Covers isPrecedingSelect return false (lines 734-735)
+      const source = 'if a or b then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  // Regression: compound end keywords should merge begin from stack
+  suite('Regression: compound end keywords with begin', () => {
+    test('should merge begin into pair when end procedure closes procedure+begin', () => {
+      const source = 'procedure Foo is\nbegin\n  null;\nend procedure Foo;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'procedure');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end procedure');
+      // begin should be in intermediates
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), 'begin should be in intermediates');
+    });
+
+    test('should merge begin into pair when end function closes function+begin', () => {
+      const source = 'function Bar return Integer is\nbegin\n  return 42;\nend function Bar;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'function');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end function');
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), 'begin should be in intermediates');
+    });
+  });
+
+  suite('Regression: conditional expression inside function call arguments', () => {
+    test('should not treat if inside function call parens as block opener', () => {
+      const source = 'procedure Main is\nbegin\n  Put_Line(if X > 0 then "Pos" else "Neg");\n  if Real then\n    null;\n  end if;\nend Main;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const procPair = findBlock(pairs, 'procedure');
+      assert.ok(procPair, 'procedure pair should exist');
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(ifPair, 'if pair should exist');
+    });
+
+    test('should not treat case inside function call parens as block opener', () => {
+      const source = 'procedure Main is\nbegin\n  Put(case X is when 1 => "A", when 2 => "B");\nend Main;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const procPair = findBlock(pairs, 'procedure');
+      assert.ok(procPair, 'procedure pair should exist');
+    });
+
+    test('should still detect if as block opener outside function call', () => {
+      const source = 'procedure Main is\nbegin\n  if X > 0 then\n    null;\n  end if;\nend Main;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: isInsideParens multi-line conditional expressions', () => {
+    test('should not detect if inside multi-line parens as block opener', () => {
+      const source = `X := (
+  if A > 0 then A else -A);`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect outer if but not inner if inside multi-line parens', () => {
+      const source = `if Condition then
+  X := (
+    if A > 0 then A else -A);
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Regression: isInsideParens with commas', () => {
+    test('should detect if after comma as inside parens', () => {
+      const source = `procedure M is
+begin
+  F(X, if A > 0 then B else C);
+end M;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should detect case after comma as inside parens', () => {
+      const source = `procedure M is
+begin
+  F(X, case Y is when 1 => A, when 2 => B);
+end M;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should detect if after nested function call args as inside parens', () => {
+      const source = `procedure M is
+begin
+  F(G(X), if A > 0 then B else C);
+end M;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should detect if after string arg on different line as inside parens', () => {
+      const source = `procedure M is
+begin
+  Func("hello",
+    if X > 0 then "Y" else "N");
+end M;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Regression: and then with comments', () => {
+    test('should detect and then with comment between and and then', () => {
+      const source = `if X > 0 and --comment
+  then Y > 0 then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should still detect normal and then without comment', () => {
+      const source = `if X > 0 and then Y > 0 then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  suite('Regression: null record with comment between null and record', () => {
+    test('should reject record when null is before it with comment in between', () => {
+      const source = 'type T is\n  null -- this is a null record\n  record;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still reject null record on same line', () => {
+      const source = 'type T is null record;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still accept record without null before it', () => {
+      const source = 'type T is record\n  X : Integer;\nend record;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end record');
+    });
+  });
+
+  suite('Branch coverage: isAdaWordAt boundary checks and isOrPrecededBySelect', () => {
+    test('should reject is inside identifier (preceding boundary check, adaHelpers line 52)', () => {
+      // 'this_value' contains 'is' substring; isAdaWordAt should reject it due to preceding char
+      const source = 'function this_value is\nbegin\n  return 0;\nend this_value;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject is as prefix of identifier (following boundary check, adaHelpers line 53)', () => {
+      // 'island' starts with 'is'; isAdaWordAt should reject it due to following char
+      const source = 'procedure island is\nbegin\n  null;\nend island;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should handle or else with no preceding block_open (isOrPrecededBySelect line 730)', () => {
+      // 'or else' without any preceding block_open keyword in the token stream
+      const source = 'X := A or else B;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 });

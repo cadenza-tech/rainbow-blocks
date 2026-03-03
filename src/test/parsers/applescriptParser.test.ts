@@ -891,6 +891,159 @@ end repeat`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'repeat', 'end repeat');
     });
+
+    test('possessive form with multiple spaces should not start a block', () => {
+      const source = `set x to app's  repeat
+tell application "Finder"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('possessive form with tab should not start a block', () => {
+      const source = `set x to app's\trepeat
+tell application "Finder"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('possessive form with mixed whitespace should not close a block', () => {
+      const source = `set myObj's \t end to 5
+repeat 3 times
+end repeat`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('compound close keyword in set-to should not be treated as block closer', () => {
+      // Bug: 'end tell' in 'set end tell to x' bypasses isKeywordAsVariableName
+      const source = `tell application "Finder"
+  set end tell to x
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('compound close keyword end if in set-to should not be treated as block closer', () => {
+      const source = `if true then
+  set end if to 5
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('compound close keyword end repeat in copy-to should not be treated as block closer', () => {
+      const source = `repeat 3 times
+  copy end repeat to x
+end repeat`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('compound open keyword with timeout in set-to should not be treated as block opener', () => {
+      // Bug: 'with timeout' in 'set with timeout to x' bypasses isValidBlockOpen
+      const source = `tell application "Finder"
+  set with timeout to 30
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('compound open keyword using terms from in set-to should not be treated as block opener', () => {
+      const source = `tell application "Finder"
+  set using terms from to "test"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('compound close keyword with possessive form should not be treated as block closer', () => {
+      const source = `tell application "Finder"
+  get app's end tell
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('compound close keyword followed by of should not be treated as block closer', () => {
+      const source = `tell application "Finder"
+  get end tell of myList
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('compound middle keyword on error in set-to should not be treated as intermediate', () => {
+      const source = `try
+  set on error to myHandler
+on error errMsg
+  display dialog errMsg
+end try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('compound middle keyword else if in set-to should not be treated as intermediate', () => {
+      const source = `if true then
+  set else if to 5
+else
+  beep
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('compound middle keyword on error with possessive should not be treated as intermediate', () => {
+      const source = `try
+  get app's on error
+on error errMsg
+  display dialog errMsg
+end try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('compound middle keyword on error followed by of should not be treated as intermediate', () => {
+      const source = `try
+  get on error of myList
+on error errMsg
+  display dialog errMsg
+end try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('single middle keyword else in set-to should not be treated as intermediate', () => {
+      const source = `if true then
+  set else to 5
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('single middle keyword else with possessive should not be treated as intermediate', () => {
+      const source = `if true then
+  get app's else
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('single middle keyword else followed by of should not be treated as intermediate', () => {
+      const source = `if true then
+  get else of myList
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
   });
 
   suite('on error in non-try blocks', () => {
@@ -926,6 +1079,462 @@ end try`;
       assertSingleBlock(pairs, 'try', 'end try');
       assert.strictEqual(pairs[0].intermediates.length, 1);
       assert.strictEqual(pairs[0].intermediates[0].value, 'on error');
+    });
+  });
+
+  suite('Bug 1: line continuation character ¬', () => {
+    test('should treat tell ¬ to as one-liner across continuation', () => {
+      const source = `tell application "Finder" \u00AC\nto activate`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect then on continuation line for if block', () => {
+      const source = 'if x > 0 \u00AC\nthen\n  log x\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect single-line if with then and action across continuation', () => {
+      const source = 'if x > 0 \u00AC\nthen return 1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect set keyword as variable name across continuation', () => {
+      const source = 'set \u00AC\nrepeat to 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle normal tell block without continuation', () => {
+      const source = `tell application "Finder"\n  activate\nend tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip \\n in whitespace after then across continuation line', () => {
+      // Bug 1: \\n was not in the whitespace skip set after 'then'
+      // When if...then spans a continuation, the \\n in ¬\\n should be treated as whitespace
+      const source = 'if x > 0 then \u00AC\n\n  log x\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect set/copy pattern across continuation for isKeywordAsVariableName', () => {
+      // Bug 2: regexes in isKeywordAsVariableName fail when ¬\\n is in the joined text
+      const source = 'set \u00AC\n  tell to 5\nrepeat 3 times\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should detect set pattern across continuation for compound middle keyword', () => {
+      // Bug 3: compound keyword set/copy check uses simple line scan without ¬ continuations
+      const source = 'try\n  set \u00AC\n  on error to myHandler\non error errMsg\n  display dialog errMsg\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('should detect set pattern across continuation for compound open keyword', () => {
+      // Bug 3: compound keyword set/copy check uses simple line scan without ¬ continuations
+      const source = 'tell application "Finder"\n  set \u00AC\n  with timeout to 30\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Bug 7: isKeywordAsVariableName with \u00AC continuation', () => {
+    test('should treat end as variable name when set end \u00AC to pattern spans continuation', () => {
+      const source = 'set end \u00AC\n  to 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Bug 8: on/to/script after \u00AC continuation should not be block opener', () => {
+    test('should not treat on as block opener on a continuation line', () => {
+      const source = 'set x to \u00AC\non run';
+      const pairs = parser.parse(source);
+      // 'on' is on a continuation line so should not be treated as block opener
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Bug 2: multi-line block comment before on/to/script', () => {
+    test('should recognize on handler after multi-line block comment spanning previous line', () => {
+      // Bug 4: multi-line block comment starting on previous line has region.start < lineStart
+      const source = '(* multi-line\ncomment *) on run\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should recognize to handler after multi-line block comment spanning previous line', () => {
+      const source = '(* multi-line\ncomment *) to doSomething()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+
+    test('should recognize script after multi-line block comment spanning previous line', () => {
+      const source = '(* multi-line\ncomment *) script myScript\n  property x : 1\nend script';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'script', 'end script');
+    });
+  });
+
+  suite('Bug 15: compound keywords with \u00AC continuation between words', () => {
+    test('should match end \u00AC tell as end tell', () => {
+      const source = 'tell application "Finder"\n  activate\nend \u00AC\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should match end \u00AC if as end if', () => {
+      const source = 'if true then\n  beep\nend \u00AC\nif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should match else \u00AC if as else if', () => {
+      const source = 'if x = 1 then\n  beep\nelse \u00AC\nif x = 2 then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if']);
+    });
+
+    test('should match on \u00AC error as on error', () => {
+      const source = 'try\n  beep\non \u00AC\nerror errMsg\n  log errMsg\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('should match with \u00AC timeout as with timeout', () => {
+      const source = 'with \u00AC\ntimeout of 30 seconds\n  beep\nend timeout';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with timeout', 'end timeout');
+    });
+
+    test('should match using \u00AC terms \u00AC from as using terms from', () => {
+      const source = 'using \u00AC\nterms \u00AC\nfrom application "Mail"\n  beep\nend using terms from';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+    });
+
+    test('should match end \u00AC tell with CRLF continuation', () => {
+      const source = 'tell application "Finder"\n  activate\nend \u00AC\r\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should match end \u00AC tell with spaces before continuation', () => {
+      const source = 'tell application "Finder"\n  activate\nend  \u00AC\n  tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should recognize compound keyword with block comment between words', () => {
+      const source = 'tell application "Finder"\n  beep\nend (* comment *) tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Bug 15: false tell inside if condition', () => {
+    test('should not treat tell in if-then condition as block opener', () => {
+      const source = 'tell application "Finder"\n  if tell then\n    beep\n  end if\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'tell');
+      findBlock(pairs, 'if');
+    });
+
+    test('should not treat tell in standalone if-then condition as block opener', () => {
+      const source = 'if tell then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat tell in if not tell then as block opener', () => {
+      const source = 'if not tell then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still treat normal tell as block opener', () => {
+      const source = 'tell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Bug: isInsideIfCondition with excluded regions', () => {
+    test('should detect tell as condition value when comment appears between if and tell', () => {
+      const source = 'if (* comment *) tell then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect tell as condition value when string appears between if and tell', () => {
+      const source = 'if "test" & tell then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should follow logical line start across continuation with leading whitespace before not-sign', () => {
+      // findLogicalLineStart: contentEnd hits whitespace before ¬, then contentEnd < 0 or source[contentEnd] !== ¬ branch
+      // Build a continuation where previous line has trailing whitespace then ¬
+      const source = 'if true \u00AC\n  tell then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      // Should detect that tell is inside if-then condition
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle isInsideIfCondition when excluded region appears after tell keyword', () => {
+      // isInsideIfCondition: lines 566-568, excluded region scanning inside the forward scan for 'then'
+      const source = 'if tell (* comment *) then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle isInsideIfCondition when tell is followed by string then then', () => {
+      // isInsideIfCondition: lines 574-575 fallthrough (then not found) — tell becomes block opener
+      // 'if' pattern on same line, but 'then' is missing: tell becomes a real block opener
+      const source = 'if something\ntell application "Finder"\n  activate\nend tell\nend if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle matchCompoundKeyword with continuation character CRLF (lines 647-650)', () => {
+      // matchCompoundKeyword continuation: ¬\r\n between words of compound keyword
+      // 'end repeat' split across a line continuation with CRLF
+      const source = 'repeat 3 times\n  beep\nend \u00AC\r\n  repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should handle matchCompoundKeyword with continuation character CR-only (line 647)', () => {
+      // matchCompoundKeyword continuation: ¬\r between words
+      const source = 'repeat 3 times\n  beep\nend \u00AC\r  repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Coverage: branch coverage for findLogicalLineEnd and findLogicalLineStart', () => {
+    test('should handle CR-only line ending in findLogicalLineEnd continuation', () => {
+      // Lines 472-474: findLogicalLineEnd encounters \r (without \n) after continuation character
+      // The if block uses findLogicalLineEnd to scan for then across continuation lines
+      const source = 'if x > 0 \u00AC\rthen\r  log x\rend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle CR-only continuation in tell-to one-liner check', () => {
+      // Lines 472-474: \r-only after continuation in findLogicalLineEnd called from isTellToOneLiner
+      const source = 'tell application "Finder" \u00AC\rto activate';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle CRLF continuation in findLogicalLineEnd for if block', () => {
+      // Lines 472-474: \r\n after continuation character in findLogicalLineEnd
+      const source = 'if x > 0 \u00AC\r\nthen\r\n  log x\r\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle findLogicalLineStart when continuation is at very start of file', () => {
+      // Lines 504-505: contentEnd becomes < 0 when scanning backward past all whitespace
+      // at the start of file. The continuation char at position 0 means contentEnd goes to -1
+      const source = '\u00AC\nrepeat 3 times\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should handle findLogicalLineStart with only whitespace before continuation', () => {
+      // Lines 504-505: backward scan reaches contentEnd < 0
+      // When the previous line content before \u00AC is empty (just the continuation at col 0)
+      const source = '\u00AC\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Coverage: isInsideIfCondition return false (no then found)', () => {
+    test('should not reject tell as condition when no then follows on logical line', () => {
+      // Line 574: isInsideIfCondition scans forward for then after tell but reaches lineEnd
+      // This means tell is not in an if-condition, so it is treated as a real block opener
+      const source = 'if tell\n  activate\nend tell\nend if';
+      const pairs = parser.parse(source);
+      // if has no then -> treated as multi-line if block
+      // tell is NOT rejected by isInsideIfCondition (no then found) -> treated as block opener
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'tell');
+    });
+
+    test('should not reject tell when if-tell line has no then keyword at all', () => {
+      // Line 574: isInsideIfCondition returns false when forward scan finds no then
+      const source = 'if tell application "Finder"\n  activate\nend tell\nend if';
+      const pairs = parser.parse(source);
+      // isInsideIfCondition: finds 'if' before 'tell', scans forward past 'tell'
+      // on the logical line. '"Finder"' is an excluded region. No 'then' found -> returns false
+      // tell is treated as real block opener
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Coverage: matchCompoundKeyword whitespace after continuation char', () => {
+    test('should handle whitespace after continuation char before CRLF in compound keyword', () => {
+      // Lines 644-646: spaces/tabs consumed after \u00AC before \r\n in matchCompoundKeyword
+      const source = 'tell application "Finder"\n  activate\nend \u00AC \t\r\n  tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should handle whitespace after continuation char before LF in compound keyword', () => {
+      // Lines 644-646: spaces consumed after \u00AC before \n in matchCompoundKeyword
+      const source = 'repeat 3 times\n  beep\nend \u00AC  \n  repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should handle tab after continuation char before CR-only in compound keyword', () => {
+      // Lines 644-646: tab consumed after \u00AC, then CR-only line ending
+      const source = 'repeat 3 times\n  beep\nend \u00AC\t\r  repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Coverage: isAtLogicalLineStart with whitespace before continuation on previous line', () => {
+    test('should not treat on as block opener when previous line ends with whitespace then continuation', () => {
+      // Covers lines 379-380: scanning backward over whitespace before finding continuation char
+      // Previous line ends with spaces/tabs then \u00AC, then newline
+      const source = 'set x to   \u00AC\non run';
+      const pairs = parser.parse(source);
+      // 'on' is on a continuation line so should not be treated as block opener
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: findLogicalLineEnd with whitespace before continuation on line', () => {
+    test('should detect single-line if when then has action after continuation with trailing whitespace', () => {
+      // Covers lines 468-469: scanning backward over whitespace before finding continuation char on the line
+      // The line containing 'if' ends with spaces then \u00AC
+      const source = 'if x > 0   \u00AC\nthen return 1';
+      const pairs = parser.parse(source);
+      // then + action on continuation line makes it a single-line if
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: findLogicalLineStart with whitespace before continuation on previous line', () => {
+    test('should follow logical line start across multi-line continuation with whitespace before continuation', () => {
+      // Covers lines 504-505: backward scan encounters whitespace before \u00AC on previous line
+      // Three lines connected by \u00AC: line1 has whitespace before \u00AC, then line2 with \u00AC, then line3 with keyword
+      const source = 'set   \u00AC\nx   \u00AC\nto 5\nif true then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: nested block comments in compound keyword matching', () => {
+    test('should handle nested block comments between words in compound keyword', () => {
+      // Covers lines 650-651: nested block comment (* (* *) *) between words
+      const source = 'tell application "Finder"\n  beep\nend (* outer (* inner *) *) tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Regression: set/copy keyword cross-line to matching', () => {
+    test('should not reject keyword when to is on next line without continuation', () => {
+      const source = 'set end\nto doSomething()\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should still reject keyword when to follows on same line', () => {
+      const source = 'set repeat to 5\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should still reject keyword when to follows after continuation', () => {
+      const source = 'set repeat \u00AC\n  to 5\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should not reject copy keyword when to is on next line without continuation', () => {
+      const source = 'copy end\nto doSomething()\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Branch coverage: variable name check and tell-to one-liner', () => {
+    test('should skip block_open keyword after set (variable name pattern)', () => {
+      const source = 'set repeat to 5\nrepeat 3 times\n  display dialog "X"\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should handle tell-to one-liner with string between tell and to', () => {
+      const source = 'tell "app" to activate\nrepeat 3 times\n  display dialog "X"\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should handle continuation character reaching end of file', () => {
+      const source = 'repeat 3 times\n  display dialog "X" \u00AC\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Branch coverage: block_middle after set/copy and continuation whitespace', () => {
+    test('should skip block_middle compound keyword after set (lines 268-270)', () => {
+      // 'on error' is a block_middle compound keyword; after 'set ' it should be treated as variable name
+      const source = 'set on error to "default"\ntry\n  error "test"\non error\n  display dialog "err"\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+    });
+
+    test('should skip block_middle compound keyword after copy (lines 268-270)', () => {
+      const source = 'copy on error to myVar\ntry\n  error "test"\non error\n  display dialog "err"\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+    });
+
+    test('should handle continuation with trailing whitespace in isAtLogicalLineStart (lines 359-361)', () => {
+      // Previous line ends with continuation character followed by spaces before newline
+      const source = 'set x to \u00AC   \n  repeat 3 times\n  display dialog "X"\nend repeat';
+      const pairs = parser.parse(source);
+      // 'repeat' is not at logical line start because previous line ends with continuation
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should handle continuation with trailing whitespace in findLogicalLineEnd (lines 448-450)', () => {
+      // tell line ends with continuation character followed by whitespace before newline
+      const source = 'tell application "Finder" \u00AC   \n  to activate\nrepeat 3 times\n  display dialog "X"\nend repeat';
+      const pairs = parser.parse(source);
+      // tell...to one-liner should NOT create a block for tell
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should handle continuation with trailing whitespace in findLogicalLineStart (lines 484-486)', () => {
+      // Multi-line continuation where previous lines end with continuation character followed by whitespace
+      const source = 'set \u00AC   \nrepeat to 5\nrepeat 3 times\n  display dialog "X"\nend repeat';
+      const pairs = parser.parse(source);
+      // 'repeat' on the continuation line is a variable name after 'set'
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
     });
   });
 });

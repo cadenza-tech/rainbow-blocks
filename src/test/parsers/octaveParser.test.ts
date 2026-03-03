@@ -925,4 +925,157 @@ end`;
       assertIntermediates(pairs[0], ['case', 'otherwise']);
     });
   });
+
+  suite('do as variable name', () => {
+    test('should not treat do = 1 as block open', () => {
+      const source = `do = 1;
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat do = expr as block open', () => {
+      const source = `do = getValue();
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not treat do  =  1 (with spaces) as block open', () => {
+      const source = `do  =  1;
+while true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should still treat do as block open when followed by newline', () => {
+      const source = `do
+  x++;
+until (x > 10)`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should still treat do as block open when followed by semicolon', () => {
+      const source = `do;
+  x++;
+until (x > 10)`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should not treat do == 1 as assignment (comparison is valid)', () => {
+      // do == 1 is a comparison, not an assignment, so do should still be block open
+      const source = `do
+  x = do == 1;
+until (x > 10)`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should not treat do += 1 as block open (compound assignment)', () => {
+      const source = `do += 1;
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat do -= 1 as block open (compound assignment)', () => {
+      const source = `do -= 1;
+while true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should not treat do *= 2 as block open (compound assignment)', () => {
+      const source = `do *= 2;
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not treat do .+= 1 as block open (element-wise compound assignment)', () => {
+      const source = `do .+= 1;
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('end as variable name', () => {
+    test('should not treat end = 5 as block close', () => {
+      const source = `end = 5;
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat endif as block close when followed by assignment', () => {
+      const source = 'endif = 5;\nif true\n  x = 1;\nendif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should not treat end += 1 as block close (compound assignment)', () => {
+      const source = `end += 1;
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should still treat end == 5 as block close (comparison, not assignment)', () => {
+      const source = `if true
+  x = end == 5;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat end .+= 1 as block close (element-wise compound assignment, line 110)', () => {
+      // isFollowedByAssignment: .+= is element-wise compound assignment -> not a block close
+      const source = `end .+= 1;
+for i = 1:10
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not treat end .-= 1 as block close (element-wise subtraction assignment)', () => {
+      const source = `end .-= 1;
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat end .*= 2 as block close (element-wise multiplication assignment)', () => {
+      // Covers line 108: source[i + 1] === '*' branch in element-wise compound assignment
+      const source = 'end .*= 2;\nfor i = 1:10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not treat end ./= 2 as block close (element-wise division assignment)', () => {
+      // Covers line 108: source[i + 1] === '/' branch in element-wise compound assignment
+      const source = 'end ./= 2;\nwhile true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should not treat end .^= 2 as block close (element-wise power assignment)', () => {
+      // Covers line 108: source[i + 1] === '^' branch in element-wise compound assignment
+      const source = 'end .^= 2;\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });

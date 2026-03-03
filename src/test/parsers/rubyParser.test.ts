@@ -469,7 +469,7 @@ EOF`;
     });
   });
 
-  suite('Division after ? and ! method names', () => {
+  suite('Division and regex after ? and ! characters', () => {
     test('should treat / after method ending with ? as division', () => {
       const source = `x = foo? / 2
 if true
@@ -477,6 +477,63 @@ if true
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat / after method ending with ! as division', () => {
+      const source = `x = save! / 2
+if true
+  y = 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat / after ternary ? operator as regex start', () => {
+      const source = `x = condition ? /pattern/ : /other/
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after logical not ! operator as regex start', () => {
+      const source = `x = !/pattern/
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after standalone ! with space as regex start', () => {
+      const source = `x = ! /pattern/
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after valid? method as division (not regex)', () => {
+      const source = `result = valid? / divisor
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ternary with keyword in regex', () => {
+      const source = `x = cond ? /if end/ : nil
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ! before regex with keyword inside', () => {
+      const source = `x = !/do end/
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
     });
   });
 
@@ -1605,10 +1662,11 @@ end`;
     });
 
     test('should handle unterminated nested regex with \\r in skipNestedRegex', () => {
-      // Nested regex inside interpolation terminated by \r should not consume past line
+      // With multiline regex support, unterminated regex inside interpolation
+      // consumes past \r (Ruby regexes can be multiline), so the entire string is excluded
       const source = '"#{x = /unterminated\r}"\rif true\rend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      assertNoBlocks(pairs);
     });
   });
 
@@ -1643,6 +1701,26 @@ end`;
 
     test('should handle percent literal inside regex interpolation', () => {
       const source = '/#{%w(a b)}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Coverage: nested regex inside regex interpolation', () => {
+    test('should handle regex containing } inside regex interpolation', () => {
+      const source = '/#{/wor}ld/}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle regex with flags inside regex interpolation', () => {
+      const source = '/#{/test/i}/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle regex after operator inside regex interpolation', () => {
+      const source = '/#{x = /pat}/}/\ndef foo\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
@@ -1701,6 +1779,30 @@ end`;
 
     test('should handle bare heredoc without dash or tilde', () => {
       const source = 'x = <<EOF\ncontent\nEOF\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not collect false terminator from comment on heredoc opener line', () => {
+      const source = 'x = <<END # <<END is a heredoc\nhello\nEND\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not collect false terminator from string on heredoc opener line', () => {
+      const source = 'x = <<END, "<<OTHER"\nhello\nEND\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not collect false terminator from comment with different term', () => {
+      const source = 'x = <<END # see <<HERE for reference\nhello\nEND\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still handle real multiple heredocs on same line', () => {
+      const source = 'x = <<A + <<B\nfirst\nA\nsecond\nB\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
@@ -2153,6 +2255,388 @@ end`;
       const source = 'x = <<HEREDOC\r\nline1\r\nHEREDOC\r\nif true\r\n  1\r\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug 1: backslash line continuation', () => {
+    test('should treat if after backslash continuation as postfix', () => {
+      const source = 'result = foo \\\nif condition';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat unless after backslash continuation as postfix', () => {
+      const source = 'result = bar \\\nunless done';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat rescue after backslash continuation as postfix', () => {
+      const source = 'value = dangerous_call \\\nrescue fallback';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat do after loop keyword with backslash continuation as loop do', () => {
+      const source = 'while condition \\\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should not affect normal line without continuation', () => {
+      const source = 'if true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug 2: findLogicalLineStart should not follow backslash in comments', () => {
+    test('should not treat comment ending with backslash as line continuation for if', () => {
+      // A comment like "# see C:\" ends with \, but it is in an excluded region
+      const source = '# see C:\\\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat comment ending with backslash as line continuation for rescue', () => {
+      const source = '# path: C:\\\nbegin\n  risky\nrescue\n  safe\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should not treat comment ending with backslash as line continuation for loop do', () => {
+      const source = '# backslash \\\nwhile true do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  suite('Bug 3: backslash continuation characters in beforeKeyword text', () => {
+    test('should strip continuation in postfix conditional check', () => {
+      // "do \\\n" joins to become "do " after stripping, so if is not postfix
+      const source = 'items.each do \\\nif cond\n  x\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should strip continuation in postfix rescue check', () => {
+      // "begin \\\n" joins to become "begin " after stripping, so rescue is not postfix
+      const source = 'begin \\\nrescue\n  nil\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+  });
+
+  suite('Bug 6: heredoc inside string interpolation', () => {
+    test('should handle heredoc inside #{} interpolation where body contains }', () => {
+      // Heredoc inside interpolation with } in body should not break brace tracking
+      const source = '"#{<<~HEREDOC}\n  content with }\nHEREDOC\n"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug 12: unterminated ?\\u{ char literal scan', () => {
+    test('should not scan entire source for } on unterminated ?\\u{', () => {
+      // Unterminated ?\u{ should stop at line break, not consume everything until }
+      const source = '?\\u{\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug 4: keywords in $, @, @@ variable names', () => {
+    test('should not detect end in $end variable', () => {
+      const source = '$end = 1\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not detect if in @if instance variable', () => {
+      const source = '@if = true\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not detect do in @@do class variable', () => {
+      const source = '@@do = nil\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not detect begin in $begin global variable', () => {
+      const source = '$begin = Time.now\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Bug: backslash continuation index mapping in postfix detection', () => {
+    test('should detect block if after semicolon with backslash continuation before it', () => {
+      const source = 'x = \\\n";"; if condition\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect block rescue after semicolon with backslash continuation', () => {
+      const source = 'x = \\\n";"; begin\n  risky\nrescue\n  handle\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should handle heredoc with CR-only line endings in terminator scan', () => {
+      // rubyExcluded.ts: heredoc terminator matching with CR line endings
+      const source = 'x = <<~HEREDOC\r  content with if end\rHEREDOC\rif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle two-terminator heredoc (squiggly) with CRLF', () => {
+      // rubyExcluded.ts: multi-terminator heredoc with CRLF
+      const source = 'x = <<~HEREDOC\r\n  begin\r\nHEREDOC\r\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside #{} interpolation with CRLF line endings (lines 651-652)', () => {
+      // rubyParser.ts skipInterpolation: heredocSkipEnd > i && source[i] === '\r' && next === '\n'
+      // CRLF line ending inside #{} where there's a heredoc: i += 2 path
+      const source = '"#{<<-HEREDOC}\r\n  content with }\r\nHEREDOC\r\n"\r\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside #{} interpolation with CR-only line endings (lines 653-655)', () => {
+      // rubyParser.ts skipInterpolation: heredocSkipEnd > i && source[i] === '\r' without '\n'
+      // CR-only path: i++ then jump to heredocSkipEnd
+      const source = '"#{<<-HEREDOC}\r  content with }\rHEREDOC\r"\rif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc opener line with string containing backslash escape (parserUtils line 70)', () => {
+      // findLineCommentAndStringRegions: string with \" escape triggers backslash skip path
+      // The heredoc opener line has a string with escaped quote before <<HEREDOC
+      // The 'if true' inside heredoc is excluded, so no block pair is formed
+      const source = 'foo("say \\"hi\\"", <<HEREDOC)\nif true\nHEREDOC\nif false\nend';
+      const pairs = parser.parse(source);
+      // 'if false' after HEREDOC is the real block opener
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside interpolation where body is skipped at newline (lines 651-659)', () => {
+      // Covers lines 650-659: heredoc skip during skipInterpolation
+      // The heredoc opener is inside #{}, and the } closing brace is AFTER the heredoc body
+      // so the heredoc body skip logic at line break is actually triggered
+      const source = '"#{<<HEREDOC\ncontent\nHEREDOC\n}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  // Regression: isRegexInInterpolation should recognize +, -, *, %, <, >, ^, ? as operators
+  suite('Regression: regex after arithmetic/comparison operators in interpolation', () => {
+    test('should treat / as regex after + in interpolation', () => {
+      const source = '"#{x + /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after - in interpolation', () => {
+      const source = '"#{x - /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after * in interpolation', () => {
+      const source = '"#{x * /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after % in interpolation', () => {
+      const source = '"#{x % /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after < in interpolation', () => {
+      const source = '"#{x < /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after > in interpolation', () => {
+      const source = '"#{x > /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after ^ in interpolation', () => {
+      const source = '"#{x ^ /pattern/}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / as regex after ? in interpolation (ternary)', () => {
+      const source = '"#{cond ? /pattern/ : nil}"; def foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: keyword followed by == != === =~', () => {
+    test('should detect end followed by == as block close', () => {
+      const source = 'result = if condition\n  value\nend == expected';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect end followed by != as block close', () => {
+      const source = 'result = if condition\n  value\nend != other';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect end followed by === as block close', () => {
+      const source = 'result = if condition\n  value\nend === expected';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect end followed by =~ as block close', () => {
+      const source = 'result = if condition\n  value\nend =~ /pattern/';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still filter out method names with = suffix', () => {
+      const source = 'def foo\n  obj.end = 42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should detect end followed by != without spaces', () => {
+      const source = 'result = if condition\n  value\nend!=other';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still filter out method names with ! suffix', () => {
+      const source = 'def foo\n  end!\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should detect end followed by => as block close', () => {
+      const source = 'result = if condition\n  value\nend => variable';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: multiline regex inside interpolation', () => {
+    test('should handle multiline regex with braces inside interpolation', () => {
+      const source = '"#{/pattern{\nmatch}/}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle multiline regex inside interpolation without braces', () => {
+      const source = '"#{/foo\nbar/}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: ?\\xN single hex digit char literal', () => {
+    test('should handle single hex digit char literal followed by keyword', () => {
+      const source = '?\\x1\nif true\n  puts "hello"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle single hex digit char literal immediately before keyword', () => {
+      const source = 'x = ?\\x1\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still handle two hex digit char literal', () => {
+      const source = '?\\xFF\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: percent literals after identifiers', () => {
+    test('should exclude keywords inside %w[] after identifier', () => {
+      const source = 'puts %w[if do end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should exclude keywords inside %q{} after identifier', () => {
+      const source = 'raise %q{if then end do}';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Branch coverage: heredoc with escaped quotes in strings on indent line', () => {
+    test('should handle backslash escape in string on heredoc start line', () => {
+      const source = 'x = <<~HEREDOC, "hello \\"world\\""\n  content\nHEREDOC\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: keyword= method names (not block keywords)', () => {
+    test('should not treat do= as block keyword when not preceded by dot', () => {
+      // self.do= would be caught by dot check; use bare method definition context
+      const source = 'def foo\n  do=5\nend';
+      const pairs = parser.parse(source);
+      // do= is a method name assignment, not a block keyword; only def/end matched
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat end= as block keyword when not preceded by dot', () => {
+      const source = 'def foo\n  end=3\n  x\nend';
+      const pairs = parser.parse(source);
+      // end= is a method name, not block close; def/end is the only pair
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat do== as block keyword followed by ==', () => {
+      const source = 'items.each do==nil\nend';
+      const pairs = parser.parse(source);
+      // do== means do followed by ==, so do is still a block keyword
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still treat do=~ as block keyword followed by =~', () => {
+      const source = 'items.each do=~/pattern/\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still treat do=> as block keyword followed by =>', () => {
+      const source = 'items.each do=>:value\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
+  suite('Branch coverage: heredoc CRLF line endings in interpolation', () => {
+    test('should handle heredoc body skip with CRLF in interpolation', () => {
+      const source = '"#{<<~HEREDOC\r\nbody\r\nHEREDOC\r\n}"';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 });

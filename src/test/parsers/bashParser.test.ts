@@ -2087,6 +2087,23 @@ esac`;
     });
   });
 
+  suite('Regression tests: $case/$esac and case/esac in process substitution', () => {
+    test('should not treat $case variable as case keyword in command substitution', () => {
+      // Bug: matchCommandSubstitution falsely detected $case/$esac as case/esac keywords
+      const source = 'x=$(echo $case)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle case/esac inside process substitution', () => {
+      // Bug: Process substitution did not track case/esac nesting, causing ) in case patterns
+      // to prematurely close the substitution
+      const source = 'diff <(case "$x" in\n  a) echo hello;;\n  *) echo world;;\nesac) file\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   suite('isCasePattern subshell detection with CR-only line endings', () => {
     test('should not treat keyword in subshell as case pattern with CR-only line endings', () => {
       // Bug 3: isCasePattern subshell detection does not handle \r-only
@@ -3106,6 +3123,813 @@ fi`;
       const source = 'case $x in\n  (for) echo match;;\nesac';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  // Bug 1: Multi-line case patterns with pipe at end of line
+  suite('Multi-line case patterns with pipe continuation', () => {
+    test('should handle pipe at end of line in case pattern', () => {
+      const source = `case $action in
+  start|
+  stop)
+    echo "matched"
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle keyword on next line after pipe in case pattern', () => {
+      const source = `if true; then
+  case $x in
+    for|
+    while)
+      echo "loop keyword"
+      ;;
+  esac
+fi`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'case');
+    });
+
+    test('should handle multiple pipe continuations across lines', () => {
+      const source = `case $x in
+  a|
+  b|
+  c)
+    echo "matched"
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle pipe continuation with CRLF line endings', () => {
+      const source = 'case $x in\r\n  start|\r\n  stop)\r\n    echo matched\r\n    ;;\r\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle pipe continuation with CR-only line endings', () => {
+      const source = 'case $x in\r  start|\r  stop)\r    echo matched\r    ;;\resac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not treat keyword after multi-line pipe pattern as block open', () => {
+      const source = `case $cmd in
+  if|
+  for|
+  while)
+    echo "keyword matched"
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  // Bug 2: findBashDoubleQuoteEnd in matchCommandSubstitution
+  suite('Nested single-quoted strings with double quotes in command substitution', () => {
+    test('should handle single-quoted string with double quote inside $() inside double quote', () => {
+      const source = `if true; then
+  result=$(echo "got 'a "b" c' value")
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle nested $() with single-quoted string containing double quote', () => {
+      const source = 'if true; then\n  x=$(cmd "$(inner \'"quoted"\' arg)")\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle double-quoted string with $() containing single-quoted double quote in command sub', () => {
+      const source = 'if true; then\n  x=$(echo "hello $(echo \'"world"\') end")\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Bug 3: Same fix in matchProcessSubstitution
+  suite('Nested single-quoted strings with double quotes in process substitution', () => {
+    test('should handle single-quoted string with double quote inside <() inside double quote', () => {
+      const source = 'while read line; do\n  echo "$line"\ndone < <(cmd "got \'a \\"b\\" c\' value")';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should handle nested $() with single-quoted double quote in process substitution', () => {
+      const source = 'while read line; do\n  echo "$line"\ndone < <(cmd "$(echo \'"hi"\' done)")';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+  });
+
+  // Bug 4: Heredoc delimiter with hyphens, dots, etc.
+  suite('Heredoc with special delimiter characters', () => {
+    test('should match heredoc with hyphenated delimiter', () => {
+      const source = `cat <<END-MARKER
+if true; then echo 1; fi
+END-MARKER
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with dotted delimiter', () => {
+      const source = `cat <<END.DATA
+if true; then echo 1; fi
+END.DATA
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with hyphen-dot combined delimiter', () => {
+      const source = `cat <<MY-END.BLOCK
+for i in 1 2 3; do echo done; done
+MY-END.BLOCK
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with quoted hyphenated delimiter', () => {
+      const source = `cat <<'END-MARKER'
+if true; then echo 1; fi
+END-MARKER
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with double-quoted hyphenated delimiter', () => {
+      const source = `cat <<"END-MARKER"
+if true; then echo 1; fi
+END-MARKER
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match tab-stripping heredoc with hyphenated delimiter', () => {
+      const source = `cat <<-END-MARKER
+\t\tif true; then echo 1; fi
+\t\tEND-MARKER
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle chained heredocs with hyphenated delimiter', () => {
+      const source = `cmd <<END-A <<END-B
+body A
+END-A
+body B
+END-B
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle heredoc with hyphenated delimiter inside command substitution', () => {
+      const source = 'if true; then\n  x=$(cat <<END-DATA\nhello\nEND-DATA\n)\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with quoted delimiter containing special characters', () => {
+      const source = `cat <<'MY DELIM'
+if true; then echo 1; fi
+MY DELIM
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Bug 5: >>( incorrectly treated as process substitution
+  suite('Append redirect with subshell vs process substitution', () => {
+    test('should not treat >>( as process substitution', () => {
+      const source = `if true; then
+  echo "data" >>(cat)
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still treat >( as process substitution', () => {
+      const source = `while read line; do
+  echo "$line"
+done > >(tee log)`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should not treat >>( as process substitution with keywords inside', () => {
+      const source = `if true; then
+  echo test >>(while read x; do echo $x; done)
+fi`;
+      const pairs = parser.parse(source);
+      // >>( is not process substitution, so while/done inside are visible as blocks
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'while');
+    });
+
+    test('should still exclude <<( from process substitution', () => {
+      const source = `cat <<EOF
+if true; then echo hi; fi
+EOF
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('ANSI-C quoting in process substitution', () => {
+    test('should handle ANSI-C quoting inside process substitution', () => {
+      const source = "while read line; do\n  echo \"$line\"\ndone < <(echo $'it\\'s')";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should not consume subsequent code after ANSI-C quote in process substitution', () => {
+      const source = "if true; then\n  diff <(echo $'it\\'s') file\nfi";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite("Bug: $' inside double-quoted string is not ANSI-C quoting", () => {
+    test("should treat $' as literal characters inside double-quoted string", () => {
+      // Inside "...", $' is NOT ANSI-C quoting; it is just $ followed by literal '
+      const source = `if true; then
+  echo "hello $'world'"
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not skip over single quote after $ inside double-quoted string', () => {
+      // $'...' ANSI-C quoting is only recognized at shell word-splitting level
+      // Inside double quotes, the ' after $ should not start ANSI-C quoting
+      const source = `{
+  x="value is $'not ansi-c' end"
+}`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test("should handle $' followed by block keywords inside double-quoted string", () => {
+      // If $' were incorrectly treated as ANSI-C quoting, the parser might
+      // skip over the closing " and misparse the block keywords
+      const source = `if true; then
+  echo "prefix $' suffix"
+  echo "more text"
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Bug 1: empty heredoc delimiter', () => {
+    test('should handle empty single-quoted heredoc delimiter', () => {
+      // <<'' produces an empty terminator; match[3] is '' (empty string, falsy)
+      // With || this would fall through to match[4] (undefined); with ?? it preserves ''
+      const source = "cat <<''\n\n\nif true; then\n  echo ok\nfi";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle empty double-quoted heredoc delimiter', () => {
+      // <<"" produces an empty terminator via match[3] = ''
+      const source = 'cat <<""\n\n\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('coproc as command starter', () => {
+    test('should recognize block keyword after coproc', () => {
+      const source = 'coproc while true; do\n  break\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should recognize if keyword after coproc', () => {
+      const source = 'coproc if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Bug: brace expansion context', () => {
+    test('should not treat for inside brace expansion {for} as block opener', () => {
+      const source = 'for i in 1 2; do\n  echo {for}\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assertIntermediates(pairs[0], ['do']);
+    });
+
+    test('should not treat if inside brace expansion {if} as block opener', () => {
+      const source = 'for i in 1; do\n  echo {if}\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assertIntermediates(pairs[0], ['do']);
+    });
+
+    test('should still recognize keyword after standalone { at line start', () => {
+      const source = '{ if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'should find if block');
+      assertIntermediates(ifPair, ['then']);
+    });
+  });
+
+  suite('Coverage: findBashDoubleQuoteEnd nested constructs', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+    test('should handle ${} parameter expansion inside double-quoted string inside $()', () => {
+      // Lines 522-526: findBashDoubleQuoteEnd: nested ${} parameter expansion
+      // "$(echo "${HOME}/file")" - double-quoted string inside $() contains ${}
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'x=$(echo "${HOME}/file")\nif [ -n "$x" ]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should handle backtick command substitution inside double-quoted string inside $()', () => {
+      // Lines 529-533: findBashDoubleQuoteEnd: nested backtick command
+      // "$(echo "result is `date`")" - double-quoted string inside $() contains backtick
+      const source = 'x=$(echo "result is `date`")\nif [ -n "$x" ]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should handle unterminated double-quoted string inside $() (line 542-543)', () => {
+      // Lines 542-543: findBashDoubleQuoteEnd: unterminated string → return source.length
+      // Unterminated "... means the rest is consumed as a string, preventing keyword detection
+      const source = 'x=$(echo "unterminated\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      // Everything is inside the excluded region, so no blocks found
+      assert.ok(Array.isArray(pairs));
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    // Line 199: whitespace skip after jumping over excluded region in isAtCommandPosition
+    // The inner while at line 197-199 runs when there is whitespace just before the excluded region
+    test('should recognize keyword after command substitution with spaces before it', () => {
+      // Scanning backward from `if`: skip space, land on ) of $(cmd) (in excluded region),
+      // jump to region.start-1 (which is a space), then the inner while (line 197-199) runs
+      const source = '   $(cmd) if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Line 218: { as reserved word in isAtCommandPosition
+    // Fires when backward scan lands on { that is preceded by whitespace
+    test('should recognize keyword after standalone { preceded by spaces', () => {
+      // Backward from `if`: skip whitespace, land on }. Wait - we need { before `if`.
+      // Semicolons/newlines then { then spaces then `if`
+      const source = 'echo x;  { if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assert.ok(pairs.length >= 2);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'should find if block');
+    });
+
+    // Line 231: backtick branch in isAtCommandPosition
+    // Fires when backward scan lands on a backtick that is outside any excluded region
+    test('should recognize keyword at command position after backtick on previous line', () => {
+      // After a backtick substitution on a previous line, keyword is in command position
+      const source = 'result=`echo hello`\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Line 285: CRLF line ending inside pipe-separated case pattern alternatives
+    // The isCasePattern pipe loop: source[j]='\r' && source[j+1]='\n' → j += 2 (line 285)
+    test('should handle CRLF line ending in pipe-separated case keyword alternative', () => {
+      // if|\\r\\nthen) - the keyword `if` is followed by | then CRLF then `then)`
+      const source = 'case $x in\r\n  if|\r\n  then)\r\n    echo matched\r\n    ;;\r\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // Lines 325-326: parenDepth-- in isCasePattern backward scan
+    // Occurs when scanning backward finds ) at depth > 0, then ( decrements
+    test('should handle nested parens before case keyword in backward scan', () => {
+      // Backward from `for` in `(a|(b)) ;;\n  for)` scans through nested parens
+      // The ) of (b) increments parenDepth, then ( of (b) decrements (lines 325-326)
+      const source = 'case $x in\n  (a|(b)) ;;\n  for) echo loop;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // Lines 336-341: POSIX (keyword) case pattern - direct ( before keyword check
+    // Runs after the backward scan loop completes without finding unmatched ( at depth 0
+    test('should detect POSIX (keyword) case pattern via direct paren check', () => {
+      // After the ;; separator, (for) should be recognized as a POSIX case pattern
+      // The ( is checked directly at lines 336-341 after the backward scan loop
+      const source = 'case $cmd in\n  a) echo;;\n  (for) echo loop;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect POSIX (while) case pattern via direct paren check after ;&', () => {
+      // ;& fall-through separator before (while) - direct ( check at lines 336-341
+      const source = 'case $cmd in\n  a) echo;& \n  (while) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // Lines 421-422: ${ in tokenize brace scanning - skip parameter expansion brace
+    test('should not treat ${ as command grouping brace', () => {
+      // The ${var} brace is preceded by $, so it is skipped at line 420-422
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'x=${HOME}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should correctly parse block while ${ appears in source', () => {
+      // Multiple ${} expansions should not interfere with { } block detection
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'echo ${PATH} ${HOME}\n{\n  echo test\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Coverage: uncovered branches - targeted', () => {
+    // Lines 176-177: isParameterExpansion returns true
+    // This is defensive code: ${ is always caught by matchParameterExpansion first,
+    // so isParameterExpansion (guarding # as comment) is never reached for # inside ${#...}.
+    // Test exercises the closest reachable path with parameter length syntax.
+    test('should handle parameter length expansion without treating # as comment', () => {
+      // Parameter expansion excluded region covers the # character
+      const source = 'len=$' + '{#arr[@]}\nfor i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    // Lines 230-231: isAtCommandPosition after backtick
+    // Backticks are always covered by matchBacktickCommand excluded regions,
+    // so the backtick check in isAtCommandPosition is defensive code.
+    // Test exercises backtick-related command position detection.
+    test('should handle keyword on same line after backtick substitution result', () => {
+      // Backtick substitution creates excluded region; after it, keyword is at command position
+      // via the ;|&() or newline check, not the backtick check itself
+      const source = 'x=`echo test`; if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // Lines 336-341: isCasePattern - ( before keyword with only whitespace/;; before on line
+    // After the backward paren scan loop completes without finding unmatched ( at depth 0,
+    // lines 331-341 check for ( immediately before keyword (skipping whitespace).
+    test('should detect case pattern with keyword after ;; separator', () => {
+      // for) after ;; is a case pattern detected by the default separator check
+      const source = 'case $x in\n  ;;\n  for) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    // Lines 421-422: tokenize skips { preceded by $ (parameter expansion)
+    // ${ is always covered by excluded region first, so this check is defensive.
+    // Test verifies parameter expansion inside { } block is handled correctly.
+    test('should handle parameter expansion brace not treated as command grouping', () => {
+      // Parameter expansion creates excluded region; the { inside is skipped first
+      const source = '{\n  echo $' + '{USER}\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    // Line 156: <<( should not be treated as process substitution
+    // When matchHeredoc fails for <<( (invalid delimiter), the ( is checked
+    // for process substitution. The <<( guard prevents false matching.
+    test('should not treat <<( as process substitution', () => {
+      const source = 'for i in 1; do\n  echo <<(\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat ${# as comment start (isParameterExpansion)', () => {
+      // Covers lines 176-177: isParameterExpansion returns true for ${#
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = '${#array[@]}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should treat keyword after backtick as command position', () => {
+      // Covers lines 230-231: isAtCommandPosition after backtick
+      const source = '`echo`\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should treat keyword inside explicit case pattern with paren as case pattern', () => {
+      // Covers lines 336-341: isCasePattern finds ( before keyword
+      const source = 'case x in\n  (for) echo ;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should skip ${ parameter expansion brace in tokenize', () => {
+      // Covers lines 420-421: skip { preceded by $
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'echo ${var}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: $[...] arithmetic bracket with strings', () => {
+    test('should handle ] inside quoted string in $[...]', () => {
+      const source = 'x=$[ "a]b" ]\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle single-quoted string inside $[...]', () => {
+      const source = "x=$[ ']' ]\nif true; then\n  echo ok\nfi";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: isCasePattern with strings containing separators', () => {
+    test('should treat keyword in POSIX case pattern with semicolon in string as case pattern', () => {
+      const source = 'case "$x" in\n  ("foo;bar" | for)\n    echo matched\n    ;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should still detect subshell with real semicolons', () => {
+      const source = '(echo hello; for x in a b; do echo $x; done)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Regression: nested double-quoted string in parameter expansion with command substitution', () => {
+    test('should handle command substitution with quotes inside nested string in parameter expansion', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash source code
+      const source = 'echo "${x:-"$(echo \'"\')"}"  \nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle backtick with quotes inside nested string in parameter expansion', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash source code
+      const source = 'echo "${x:-"`echo \'"\'`"}"  \nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: nested brace groups should detect inner block keywords', () => {
+    test('should detect all blocks in nested { { ... }; }', () => {
+      const source = '{ { if true; then echo ok; fi; }; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should detect blocks in } && { pattern', () => {
+      const source = '{ echo a; } && { if true; then echo ok; fi; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+  });
+
+  suite('Regression: redirect before hash', () => {
+    test('should not treat hash after > as comment', () => {
+      const source = 'echo >#file; if true; then echo hello; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat hash after < as comment', () => {
+      const source = 'echo <#input; if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still treat hash after space as comment', () => {
+      const source = 'echo > #this is a comment\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: multiple heredocs in command substitution', () => {
+    test('should exclude multiple heredoc bodies inside $()', () => {
+      const source = 'result=$(cat <<EOF1 <<EOF2\nfirst if body\nEOF1\nsecond for body\nEOF2\n)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should exclude multiple heredoc bodies inside process substitution', () => {
+      const source = 'diff <(cat <<EOF1 <<EOF2\nfirst if body\nEOF1\nsecond for body\nEOF2\n) file\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: parameter expansion nested double-quoted strings', () => {
+    test('should handle $() inside double-quoted string inside $' + '{}', () => {
+      const source = 'echo $' + '{var:-"$(echo "inner")"}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: arithmetic expansion with nested command substitution in double quote', () => {
+    test('should handle $() inside double-quoted string in $(( ))', () => {
+      const source = 'x=$(( "$(echo ")")" + 1 ))\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle $() inside double-quoted string in (( ))', () => {
+      const source = '(( "$(echo ")")" + 1 ))\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: { reserved word after backtick command substitution', () => {
+    test('should recognize keyword inside { after backtick command on same line', () => {
+      const source = '`cmd` { if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.ok(ifBlock, 'if block should be recognized');
+    });
+  });
+
+  suite('Branch coverage: isAtCommandPosition and isCasePattern edge cases', () => {
+    test('should handle { after excluded region with trailing whitespace', () => {
+      const source = '"hello"   { if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should treat { as block opener after backtick end', () => {
+      const source = '`cmd`\n{ if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should recognize (for) as case pattern after ;;', () => {
+      const source = 'case $x in\n  a) echo a;;\n  (for) echo for;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should recognize (if) as case pattern at line start', () => {
+      const source = 'case $x in\n(if) echo yes;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should skip { not followed by whitespace in findExcludedRegions', () => {
+      const source = '{nospace}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Branch coverage: bashStringHelpers edge cases', () => {
+    test('should handle escaped quote in double-quoted string via findStringEnd', () => {
+      const source = 'x=[[ "hello \\"world\\"" ]]\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle unterminated double-quoted string in bracket expression', () => {
+      const source = '[[ "unterminated ]]\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      // Unterminated string inside [[ ]] consumes the rest, so no blocks parsed
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle $' + '{var} inside bracket expression', () => {
+      const source = 'x=[[ $' + '{var} == "test" ]]\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Branch coverage: isAtCommandPosition { with excluded region and whitespace', () => {
+    test('should recognize keyword after { preceded by string with leading whitespace', () => {
+      // Triggers lines 230-232: backward scan from { finds excluded region ("str"),
+      // then skips whitespace before the excluded region
+      const source = ';  "str"  { if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.ok(ifBlock, 'if block should be recognized inside { }');
+    });
+
+    test('should recognize keyword after { preceded by comment with whitespace', () => {
+      // Similar to above but with a comment as the excluded region
+      const source = 'echo ok # comment\n  "str"  { if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Branch coverage: isCasePattern POSIX (keyword) at line start without matched parens', () => {
+    test('should treat POSIX (do) as case pattern at line start', () => {
+      // Triggers lines 360-365: keyword preceded by ( with only whitespace before it on the line
+      const source = 'case $x in\n(do) echo do;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should treat POSIX (done) as case pattern after ;; separator', () => {
+      const source = 'case $x in\n  a) echo a;;\n  ;; (done) echo done;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Branch coverage: ${ skip in brace tokenization', () => {
+    test('should not treat ${ as command grouping when not in excluded region', () => {
+      // Triggers lines 435-436: { preceded by $ that is not already in excluded region
+      // This uses ${ directly in the source where the parser may encounter it
+      const source = 'echo $' + '{var}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Branch coverage: findStringEnd in matchArithmeticBracket', () => {
+    test('should handle escaped quote in double-quoted string inside $[...]', () => {
+      // Triggers findStringEnd lines 137-139: escape sequence inside deprecated arithmetic bracket
+      const source = 'x=$["test\\"value"]\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle unterminated string in $[...]', () => {
+      // Triggers findStringEnd lines 145-146: unterminated string extends to end of source
+      const source = 'x=$["unterminated';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle $' + '{var} inside deprecated arithmetic bracket $[...]', () => {
+      // Triggers matchArithmeticBracket lines 180-183: parameter expansion inside $[...]
+      const source = 'x=$[$' + '{var} + 1]\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Branch coverage: findBashDoubleQuoteEnd with $' + '{} inside double quote', () => {
+    test('should handle $' + '{var} inside double-quoted string in parameter expansion', () => {
+      // Triggers findBashDoubleQuoteEnd lines 528-532: ${...} inside double-quoted string
+      // Path: matchParameterExpansion -> encounters " -> findBashDoubleQuoteEnd -> encounters ${
+      const source = 'x=$' + '{foo:-"$' + '{bar}"}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle nested $' + '{} in double-quoted string inside command substitution', () => {
+      // Another path to findBashDoubleQuoteEnd with ${} inside
+      const source = 'x=$(echo "$' + '{HOME}/path")\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
     });
   });
 });

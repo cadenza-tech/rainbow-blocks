@@ -970,6 +970,15 @@ end`;
       assertSingleBlock(pairs, 'case', 'endcase');
       assertIntermediates(pairs[0], ['default']);
     });
+
+    test('Bug 9: always should span entire if-else chain, not consumed by first end', () => {
+      const source = 'always @(posedge clk)\n  if (cond) begin\n    a <= 1;\n  end else begin\n    a <= 0;\n  end';
+      const pairs = parser.parse(source);
+      // always should pair with the last end, not the first
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'should find always block');
+      assert.strictEqual(alwaysPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Uncovered line coverage', () => {
@@ -1101,6 +1110,464 @@ endmodule`;
       assertBlockCount(pairs, 3);
       const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
       assert.ok(alwaysPair);
+    });
+
+    test('should handle sensitivity list @identifier (implicit sensitivity, no parens)', () => {
+      // Lines 331-332: skipSensitivityList returns i when neither ( nor * follows @
+      // e.g., always @clk begin - where @clk has no parens
+      // The identifier 'clk' after @ causes trySkipLabel to fail (no colon) → returns false
+      // So only begin-end pair is created (always is rejected)
+      const source = 'always @clk begin\n  q <= d;\nend';
+      const pairs = parser.parse(source);
+      assert.ok(Array.isArray(pairs));
+      // begin/end pair is still parsed; always may or may not be paired
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'should find begin block');
+    });
+
+    test('should handle delay with no numeric or identifier after # (lines 367-368)', () => {
+      // skipDelayExpression: fallthrough return i when # followed by unexpected char
+      // always #;begin - # followed by ; which is not (, digit, or letter
+      const source = 'always #;begin\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      // Result depends on parser behavior; mainly ensure no crash
+      assert.ok(Array.isArray(pairs));
+    });
+
+    test('should handle escaped identifier label before begin with non-word chars in name', () => {
+      // Lines 374-376: trySkipLabel escaped path: i++ then while not-whitespace loop
+      const source = 'always \\label-with-hyphen : begin\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle #define directive with string literal in body (lines 543-556)', () => {
+      // matchDefineDirective: string handling inside #define body
+      const source = '`define MY_MSG "hello begin end world"\nbegin\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle #define directive with string containing backslash escape', () => {
+      // matchDefineDirective: backslash escape inside string in define body
+      const source = '`define MSG "say \\"hello\\" and begin"\nbegin\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Bug 1: Backtick-prefixed non-control keywords', () => {
+    test('should not treat `begin as block open', () => {
+      const source = 'module test;\n  `begin\n  `end\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat `module as block open', () => {
+      const source = '`module\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat `fork as block open', () => {
+      const source = 'module test;\n  `fork\n  `join\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat `end as block close', () => {
+      const source = 'begin\n  `end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `endmodule as block close', () => {
+      const source = 'module test;\n  `endmodule\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat `class as block open', () => {
+      const source = '`class\nclass MyClass;\nendclass';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should not treat `endclass as block close', () => {
+      const source = 'class MyClass;\n  `endclass\nendclass';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+  });
+
+  suite('Bug 2: Dollar sign in identifiers', () => {
+    test('should not treat $end as block close keyword', () => {
+      const source = 'begin\n  $end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat $fork as block open keyword', () => {
+      const source = '$fork;\nfork\n  #10 a = 1;\njoin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+
+    test('should not treat fork$sig as block open keyword', () => {
+      const source = 'wire fork$sig;\nfork\n  #10 a = 1;\njoin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+
+    test('should not treat end$suffix as block close keyword', () => {
+      const source = 'begin\n  wire end$signal;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat $module as block open', () => {
+      const source = '$module;\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat module$x as block open', () => {
+      const source = 'wire module$x;\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Bug 3: `define macro content excluded', () => {
+    test('should not tokenize keywords inside `define directive', () => {
+      const source = '`define MY_MACRO module test; endmodule\nmodule real;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not tokenize begin/end inside `define', () => {
+      const source = '`define BLOCK begin x = 1; end\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle `define with backslash continuation', () => {
+      const source = '`define MY_MACRO \\\n  module test; \\\n  endmodule\nmodule real;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle `define with multiple continuation lines', () => {
+      const source = '`define COMPLEX \\\n  begin \\\n  x = 1; \\\n  end\nbegin\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle `define at end of file', () => {
+      const source = 'module test;\nendmodule\n`define TAIL begin end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle `define with CRLF continuation', () => {
+      const source = '`define MY_MACRO \\\r\n  module test; \\\r\n  endmodule\r\nmodule real;\r\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle `define with CR-only continuation', () => {
+      const source = '`define MY_MACRO \\\r  begin end\rmodule test;\rendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should exclude `define regions from excluded region list', () => {
+      const source = '`define FOO fork join\nfork\n  #10 a = 1;\njoin';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      const defineRegion = regions.find((r) => source.slice(r.start, r.start + 7) === '`define');
+      assert.ok(defineRegion, '`define should create an excluded region');
+    });
+  });
+
+  suite('Bug 9: `define backslash count', () => {
+    test('should not continue `define when line ends with even backslashes (escaped backslash)', () => {
+      const source = '`define MY_MACRO value\\\\\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should continue `define when line ends with odd backslashes', () => {
+      const source = '`define MY_MACRO \\\n  module test; \\\n  endmodule\nmodule real;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not continue `define when line ends with four backslashes', () => {
+      const source = '`define MY_MACRO value\\\\\\\\\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should continue `define when line ends with three backslashes', () => {
+      const source = '`define MY_MACRO \\\\\\\n  module extra;\n  endmodule\nmodule real;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle even backslashes with CRLF', () => {
+      const source = '`define MY_MACRO value\\\\\r\nmodule test;\r\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle even backslashes with CR-only', () => {
+      const source = '`define MY_MACRO value\\\\\rmodule test;\rendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Bug 4: disable fork statement', () => {
+    test('should not treat fork in "disable fork" as block open', () => {
+      const source = 'module test;\n  disable fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork in "disable  fork" (extra space) as block open', () => {
+      const source = 'module test;\n  disable  fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork in "disable\\tfork" as block open', () => {
+      const source = 'module test;\n  disable\tfork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still treat standalone fork as block open', () => {
+      const source = 'fork\n  #10 a = 1;\njoin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+
+    test('should not confuse x_disable with disable', () => {
+      // x_disable is an identifier, not the keyword "disable"
+      const source = 'x_disable fork\n  #10 a = 1;\njoin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+  });
+
+  suite('Bug 5: wait fork statement', () => {
+    test('should not treat fork in "wait fork" as block open', () => {
+      const source = 'module test;\n  wait fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork in "wait  fork" (extra space) as block open', () => {
+      const source = 'module test;\n  wait  fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not confuse x_wait with wait', () => {
+      // x_wait is an identifier, not the keyword "wait"
+      const source = 'x_wait fork\n  #10 a = 1;\njoin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+  });
+
+  suite('Bug 6: backtick-prefixed `default not rejected as block_middle', () => {
+    test('should not treat `default as block_middle in case block', () => {
+      const source = 'case (sel)\n  1: a = 1;\n  `default: a = 0;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still treat default: as block_middle in case block', () => {
+      const source = 'case (sel)\n  1: a = 1;\n  default: a = 0;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      assertIntermediates(pairs[0], ['default']);
+    });
+  });
+
+  suite('Bug 7: disable/wait + comment/newline + fork not rejected', () => {
+    test('should not treat fork in "disable /* comment */ fork" as block open', () => {
+      const source = 'module test;\n  disable /* comment */ fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork in "disable\\nfork" as block open', () => {
+      const source = 'module test;\n  disable\n  fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork in "wait // comment\\nfork" as block open', () => {
+      const source = 'module test;\n  wait // comment\n  fork;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork in "disable\\r\\nfork" (CRLF) as block open', () => {
+      const source = 'module test;\r\n  disable\r\n  fork;\r\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Bug 10: dot-preceded keywords', () => {
+    test('.begin(signal) in port connection should not be block open', () => {
+      const source = 'module test(\n  .begin(sig_begin)\n);\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('inst.end hierarchical reference should not be block close', () => {
+      const source = 'module test;\n  wire x = inst.end;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('.module(value) in port connection should not be block open', () => {
+      const source = 'module top;\n  sub u1(\n    .module(val)\n  );\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('.endmodule should not be block close', () => {
+      const source = 'module test;\n  wire x = inst.endmodule;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('.fork in port connection should not be block open', () => {
+      const source = 'module test(\n  .fork(sig)\n);\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Bug 8: `undef directive not excluded', () => {
+    test('should not tokenize keywords after `undef', () => {
+      const source = '`undef module\nmodule real;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not tokenize begin/end after `undef', () => {
+      const source = '`undef begin\nbegin\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should exclude `undef regions from excluded region list', () => {
+      const source = '`undef fork\nfork\n  #10 a = 1;\njoin';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      const undefRegion = regions.find((r) => source.slice(r.start, r.start + 6) === '`undef');
+      assert.ok(undefRegion, '`undef should create an excluded region');
+    });
+
+    test('should handle `undef at end of file', () => {
+      const source = 'module test;\nendmodule\n`undef begin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Bug: default keyword filtered when comment before colon', () => {
+    test('should recognize default when block comment appears before colon', () => {
+      const source = 'case (sel)\n  default /* comment */ : out = b;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      assertIntermediates(pairs[0], ['default']);
+    });
+
+    test('should recognize default when line comment appears before colon on next line', () => {
+      const source = 'case (sel)\n  default // comment\n    : out = b;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      assertIntermediates(pairs[0], ['default']);
+    });
+  });
+
+  suite('Regression: `define/`undef word boundary', () => {
+    test('should not treat `defined macro as `define directive', () => {
+      const source = '`defined(FEATURE) begin\n  assign a = b;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `define_WIDTH macro as `define directive', () => {
+      const source = '`define_WIDTH begin\n  assign a = b;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `undefine macro as `undef directive', () => {
+      const source = '`undefine(OLD) begin\n  assign a = b;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still exclude real `define directive', () => {
+      const source = '`define FOO begin\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: attribute with @ in preceding comment/string', () => {
+    test('should treat (* *) as attribute when @ is inside preceding comment', () => {
+      const source = '// @\n(* synthesis, keep *) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should treat (* *) as attribute when @ is inside preceding string', () => {
+      const source = 'wire x = "@";\n(* full_case *) case (sel)\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should still treat @(*) as sensitivity list not attribute', () => {
+      const source = 'always @(*) begin\n  a = b;\nend';
+      const pairs = parser.parse(source);
+      // always + begin both paired with end (Verilog matchBlocks chains control keywords)
+      assertBlockCount(pairs, 2);
+      const beginBlock = findBlock(pairs, 'begin');
+      assert.ok(beginBlock, 'begin block should exist');
+    });
+
+    test('should still treat @ (*) with whitespace as sensitivity list', () => {
+      const source = 'always @ (*) begin\n  a = b;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginBlock = findBlock(pairs, 'begin');
+      assert.ok(beginBlock, 'begin block should exist');
+    });
+  });
+
+  suite('Regression: attribute with string containing *)', () => {
+    test('should handle string with *) inside attribute', () => {
+      const source = '(* message = "test*)" *)\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle escaped quote in string inside attribute', () => {
+      const source = '(* msg = "a\\"*)" *)\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
     });
   });
 });

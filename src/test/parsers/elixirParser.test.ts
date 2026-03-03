@@ -2227,4 +2227,580 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  suite('Bug 1: @-prefixed keywords (module attributes)', () => {
+    test('should not treat @end as block close keyword', () => {
+      const source = `defmodule MyModule do
+  @end "value"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmodule', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat @else as block middle keyword', () => {
+      const source = `defmodule MyModule do
+  @else :default
+  if true do
+    :ok
+  else
+    :error
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assertIntermediates(ifBlock, ['else']);
+    });
+
+    test('should not treat @rescue as block middle keyword', () => {
+      const source = `defmodule MyModule do
+  @rescue false
+  try do
+    risky()
+  rescue
+    e -> e
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['rescue']);
+    });
+
+    test('should not treat @catch as block middle keyword', () => {
+      const source = `defmodule MyModule do
+  @catch true
+  try do
+    throw(:val)
+  catch
+    :throw, val -> val
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should not treat @after as block middle keyword', () => {
+      const source = `defmodule MyModule do
+  @after 5000
+  receive do
+    msg -> msg
+  after
+    5000 -> :timeout
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const receiveBlock = findBlock(pairs, 'receive');
+      assertIntermediates(receiveBlock, ['after']);
+    });
+
+    test('should not treat @if as block open keyword', () => {
+      const source = `defmodule MyModule do
+  @if :condition
+  def foo do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat @def as block open keyword', () => {
+      const source = `defmodule MyModule do
+  @def "macro_attr"
+  def foo do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat @fn as block open keyword', () => {
+      const source = `defmodule MyModule do
+  @fn :anonymous
+  def foo do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle multiple @-prefixed keywords', () => {
+      const source = `defmodule MyModule do
+  @end "terminus"
+  @else :fallback
+  @after 1000
+  def foo do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Bug 2: skipInterpolation triple-quoted strings (heredocs)', () => {
+    test('should handle triple-quoted string inside interpolation with odd quotes', () => {
+      // """ inside #{} should be matched as triple-quoted string, not three individual quotes
+      const source = `x = "result: #{"""
+content with " quote
+"""}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle triple single-quoted charlist inside interpolation', () => {
+      const source = `x = "result: #{'''
+content with ' quote
+'''}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle triple-quoted string with interpolation inside interpolation', () => {
+      const source = `x = "outer #{"""
+inner #{val}
+"""}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle triple-quoted string with escape inside interpolation', () => {
+      const source = `x = "outer #{"""
+escaped \\"\\"\\" still inside
+"""}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle unterminated triple-quoted string inside interpolation', () => {
+      const source = `x = "outer #{"""
+never terminated`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle triple-quoted string with block keywords inside interpolation', () => {
+      const source = `x = "result: #{"""
+if condition do
+  action()
+end
+"""}"
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Bug 3: skipNestedSigil string and interpolation handling', () => {
+    test('should handle interpolation inside lowercase nested sigil with closing delimiter', () => {
+      // ~s( ... #{expr with )} ... ) - interpolation containing ) inside the sigil
+      const source = `x = "outer #{~s(prefix #{func(")")} suffix)}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle string inside uppercase nested sigil', () => {
+      // Uppercase sigils are raw - quotes inside don't affect paired delimiter tracking
+      const source = `x = "outer #{~S(prefix "content" suffix)}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle string with non-paired delimiter inside nested sigil', () => {
+      // For non-paired delimiters like /, string handling prevents false close
+      const source = `x = "outer #{~s/prefix "\\/" suffix/}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug 4: hasDoKeyword does not recognize do;', () => {
+    test('should parse if true do; body; end', () => {
+      const source = 'if true do; IO.puts("yes"); end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should parse def foo do; body; end', () => {
+      const source = 'def foo do; :ok; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should parse case with do;', () => {
+      const source = 'case x do; 1 -> :one; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
+  suite('Bug 5: skipNestedSigil heredoc-style sigil in interpolation', () => {
+    test('should handle ~s""" inside interpolation', () => {
+      const source = `x = "outer #{~s"""
+inner content
+"""}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test("should handle ~s''' inside interpolation", () => {
+      const source = `x = "outer #{~s'''
+inner content
+'''}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ~s""" with block keywords inside interpolation', () => {
+      const source = `x = "result: #{~s"""
+if condition do
+  action()
+end
+"""}"
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Bug 6: skipNestedSigil uppercase sigil string handling', () => {
+    test('should handle uppercase sigil with quotes not treated as string delimiters', () => {
+      // Uppercase sigils are raw, so " inside should not be treated as string delimiter
+      const source = `x = "outer #{~S(he said "hello" ok)}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle uppercase sigil with single quotes not treated as string delimiters', () => {
+      const source = `x = "outer #{~S(it's raw content)}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle uppercase sigil with unbalanced quotes', () => {
+      // Uppercase sigil is raw so unbalanced " should not cause issues
+      const source = `x = "outer #{~S(one " two)}"
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug 10: hasDoKeyword should not stop at do: one-liner inside expression', () => {
+    test('should find outer do when inner block keyword has its own do...end', () => {
+      // for with an inner if...do...end block before the outer do
+      // Without the fix, hasDoKeyword stops at inner if and returns false
+      const source = `for x <- list, if true do :ok end do
+  x * 2
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Bug 7: hasDoKeyword fn-end nesting', () => {
+    test('should handle fn...end inside block expression arguments', () => {
+      const source = `if func(fn x -> x end) do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fn' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should handle nested fn...end pairs', () => {
+      const source = `if func(fn x -> fn y -> y end end) do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should still stop at unmatched end', () => {
+      // end without fn should still stop the search
+      const source = `def foo do
+  :ok
+end
+if true do
+  :bar
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle fn in the middle of expression with do', () => {
+      const source = `case Enum.map(fn x -> x end) do
+  _ -> :ok
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'case' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fn' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should handle fn preceded by = without space in hasDoKeyword scan', () => {
+      // fn preceded by = (no space) should still be recognized as fn keyword
+      const source = `if x =fn -> x end do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fn' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should handle end followed by , at depth 0 in hasDoKeyword scan', () => {
+      // end followed by , should still be recognized as end keyword
+      const source = `if fn -> :ok end, do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fn' && p.closeKeyword.value === 'end'));
+    });
+  });
+
+  suite('Bug: hasDoKeyword double-processing of , do: pattern', () => {
+    test('should correctly skip comma-do-colon one-liner without double decrement', () => {
+      const source = 'if a do\n  if b, do: val\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle nested comma-do-colon one-liners', () => {
+      const source = 'if a, do: if b, do: val';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: uncovered code paths in skipNestedSigil', () => {
+    // Lines 237-239: escape sequence inside triple-quoted heredoc sigil inside interpolation
+    test('should handle escape sequence inside triple-quoted heredoc sigil in interpolation', () => {
+      // ~s"""...\n...""" inside #{} - backslash escape must be consumed
+      const source = `x = "#{~s"""\nhello\\nworld\n"""}"
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // Lines 241-243: #{} interpolation inside triple-quoted heredoc sigil inside interpolation
+    test('should handle nested #{} inside triple-quoted heredoc sigil inside interpolation', () => {
+      // ~s"""...#{name}...""" inside #{} - nested interpolation must be consumed
+      const source = `x = "#{~s"""\nhello #{name} world\n"""}"
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // Lines 247-249: modifier skip after triple-quoted heredoc sigil terminates inside interpolation
+    test('should skip modifiers after triple-quoted sigil terminator inside interpolation', () => {
+      // ~s"""..."""iup has modifiers after the closing triple-quote
+      // The sigil is inside #{} interpolation
+      const source = `x = "#{~s"""\nhello\n"""iup}"
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // Lines 253-254: EOF reached inside triple-quoted sigil (return j, not closed)
+    test('should handle unterminated triple-quoted sigil inside interpolation reaching EOF', () => {
+      // ~s"""... is unterminated inside #{} interpolation - the sigil never closes
+      const source = `x = "#{~s"""\nunterminated`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    // Lines 274-276: triple-quoted """ inside lowercase sigil content with paired delimiters
+    test('should skip triple-quoted double-quote string inside sigil content in interpolation', () => {
+      // ~s{...} with """ inside - triple-quoted string must be consumed so } inside """ is not closing
+      const source = `x = "#{~s{"""if end"""}}"
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // Lines 278-280: triple-quoted ''' inside lowercase sigil content with paired delimiters
+    test('should skip triple-quoted single-quote string inside sigil content in interpolation', () => {
+      // ~s{...} with ''' inside - triple single-quoted string must be consumed
+      const source = `x = "#{~s{'''if end'''}}"
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    // elixirParser.ts lines 295-296: innerBlockDepth-- when do: is found inside nested block
+    // hasDoKeyword: 'do:' pattern with innerBlockDepth > 0
+    test('should handle do: one-liner with inner block keyword before it (lines 295-296)', () => {
+      // outer 'if' has 'do', inner 'if' at depth 0 increments innerBlockDepth,
+      // then inner 'do:' triggers the decrement path
+      // 'if a do\n  if b do: val\nend' - inner 'if' has 'do:' (space-do-colon pattern)
+      const source = 'if a do\n  if b do: val\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: uncovered branches - targeted', () => {
+    // Lines 295-296: innerBlockDepth-- when do: is found (whitespace+do pattern)
+    // hasDoKeyword must encounter an inner block keyword and its do: BEFORE finding the outer do.
+    // The outer do must be on a separate line so isDoColonOneLiner doesn't reject the outer if.
+    test('should decrement innerBlockDepth when inner do: is found before outer do (lines 295-296)', () => {
+      // 'if\n  if b do: val\ndo\nend' - scanning from after outer 'if':
+      // 1. inner 'if' at position 5 -> innerBlockDepth = 1
+      // 2. 'do:' at position 10 (whitespace+do pattern) -> innerBlockDepth > 0, decrement to 0
+      // 3. outer 'do' at position 18 -> innerBlockDepth === 0, return true
+      const source = 'if\n  if b do: val\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Lines 310-313: innerBlockDepth-- via ", do:" pattern
+    test('should decrement innerBlockDepth via comma-do-colon pattern (lines 310-313)', () => {
+      // 'if\n  if b, do: val\ndo\nend' - inner 'if' with ', do:' pattern
+      const source = 'if\n  if b, do: val\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Lines 404-405: isDoColonOneLiner returns false because keyword is not in doColonKeywords
+    // 'fn' is the only blockOpen keyword not in doColonKeywords,
+    // but it is short-circuited at line 166 (if keyword === 'fn' return true).
+    // This test exercises the fn path and verifies fn-end blocks work without do.
+    test('should parse fn-end block without do keyword (fn not in doColonKeywords)', () => {
+      const source = 'fn x -> x * 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+
+    // Additional fn test: fn with multiple clauses
+    test('should parse fn-end block with multiple clauses', () => {
+      const source = 'fn\n  0 -> "zero"\n  x -> "other"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+  });
+
+  suite('Regression: sigil with unmatched quotes in interpolation', () => {
+    test('should handle sigil with apostrophe inside parentheses', () => {
+      const source = '"result: #{~s(it\'s ok)}"\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle sigil with unmatched double quote inside brackets', () => {
+      const source = '"result: #{~s[say "hello]}"\nif true do\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: hasDoKeyword with do followed by comment', () => {
+    test('should recognize do immediately followed by # as valid do keyword', () => {
+      const source = 'if true do# inline comment\n  :body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should recognize do# with comma-do pattern', () => {
+      const source = 'for x <- list, do#comment\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should still recognize do followed by space then comment', () => {
+      const source = 'if true do # comment\n  :body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: fn: keyword argument should not increment fnDepth', () => {
+    test('should recognize block when fn: keyword argument is present', () => {
+      const source = 'quote fn: my_fn do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'quote', 'end');
+    });
+
+    test('should recognize block with multiple keyword arguments including fn:', () => {
+      const source = 'with fn: callback, do_something: true do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with', 'end');
+    });
+
+    test('should still track real fn...end nesting', () => {
+      const source = 'with fn -> :ok end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: range operator .. before keyword', () => {
+    test('should recognize keyword after .. range operator', () => {
+      const source = '1..if true do\n  42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still reject Module.keyword', () => {
+      const source = 'Kernel.if(true, do: 1)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });

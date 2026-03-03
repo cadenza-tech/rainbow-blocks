@@ -683,6 +683,53 @@ END-PERFORM`;
       const innerPerform = pairs.find((p) => p.nestLevel === 1);
       assert.ok(innerPerform, 'should have inner PERFORM at nestLevel 1');
     });
+
+    test('Bug 15: PERFORM <variable> TIMES should be recognized as structured PERFORM', () => {
+      const source = `PERFORM WS-COUNT TIMES
+  DISPLAY "Hello"
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug 15: PERFORM <single-char> TIMES should be recognized', () => {
+      const source = `PERFORM N TIMES
+  DISPLAY "Hello"
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug 15: PERFORM <hyphenated-name> TIMES should be recognized', () => {
+      const source = `PERFORM MY-COUNT TIMES
+  DISPLAY "Hello"
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug 15: PERFORM <variable> TIMES nested with inline PERFORMs', () => {
+      const source = `PERFORM WS-COUNT TIMES
+  PERFORM PARAGRAPH-A
+  DISPLAY "Hello"
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug 15: PERFORM <literal> TIMES should still work', () => {
+      const source = `PERFORM 5 TIMES
+  DISPLAY "Hello"
+END-PERFORM`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug 15: inline PERFORM should still be excluded', () => {
+      const source = 'PERFORM PARAGRAPH-A';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Performance', () => {
@@ -727,6 +774,292 @@ END-PERFORM`;
       const source = 'PERFORM-COUNT = 5\nPERFORM UNTIL X > 0\n  DISPLAY "OK"\nEND-PERFORM';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Excluded regions - Compiler directives', () => {
+    test('should ignore keywords inside >> compiler directives', () => {
+      const source = '>>IF DEFINED\nPERFORM UNTIL X > 0\n  DISPLAY "OK"\nEND-PERFORM\n>>END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should ignore >>EVALUATE directive', () => {
+      const source = '>>EVALUATE TRUE\n>>END-EVALUATE\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should ignore >>ELSE directive', () => {
+      const source = '>>IF COND\n>>ELSE\n>>END-IF\nIF X > 0\n  DISPLAY "OK"\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Excluded regions - EXEC blocks', () => {
+    test('should ignore keywords inside EXEC SQL block', () => {
+      const source = 'EXEC SQL\n  SELECT IF FROM TABLE\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should ignore keywords inside EXEC CICS block', () => {
+      const source = 'EXEC CICS\n  PERFORM OPERATION\nEND-EXEC\nPERFORM UNTIL X > 0\n  DISPLAY "OK"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should handle EXECUTE keyword variant', () => {
+      const source = 'EXECUTE SQL\n  DELETE FROM TABLE\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should handle lowercase exec block', () => {
+      const source = 'exec sql\n  if something\nend-exec\nif x > 0\nend-if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end-if');
+    });
+
+    test('should handle unterminated EXEC block', () => {
+      const source = 'EXEC SQL\n  SELECT IF FROM TABLE';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match EXEC as part of EXECUTE-PROC identifier', () => {
+      const source = 'EXECUTE-PROC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Excluded regions - Pseudo-text delimiters', () => {
+    test('should ignore keywords inside pseudo-text delimiters', () => {
+      const source = 'COPY X REPLACING ==IF== BY ==WHEN==.\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should handle pseudo-text with PERFORM keyword', () => {
+      const source = 'REPLACE ==PERFORM UNTIL== BY ==SEARCH==.\nPERFORM UNTIL X > 0\n  DISPLAY "OK"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should handle unterminated pseudo-text', () => {
+      const source = '==IF ELSE END-IF';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: uncovered code paths', () => {
+    test('should not treat EXEC inside identifier as EXEC block (line 374-375)', () => {
+      // matchExecBlock: pos > 0 && source[pos-1] is word char → return null
+      // LEXEC starts with E at pos where source[pos-1] = 'L'
+      const source = 'LEXEC SQL SELECT 1\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat EXEC preceded by hyphen as EXEC block', () => {
+      // matchExecBlock: preceding character is '-'
+      const source = 'X-EXEC SQL SELECT 1\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Coverage: hyphenated identifier branches', () => {
+    // Lines 120-121: keyword preceded by hyphen (part of hyphenated identifier like X-IF)
+    // tokenize skips keywords that are part of hyphenated identifiers
+    test('should not match keyword preceded by hyphen (hyphenated identifier)', () => {
+      const source = '       PERFORM\n           DISPLAY X-IF\n       END-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    // Lines 124-125: keyword followed by hyphen (part of hyphenated identifier like IF-HANDLER)
+    // tokenize skips keywords followed by hyphen to avoid matching partial identifiers
+    test('should not match keyword followed by hyphen (hyphenated identifier)', () => {
+      const source = '       PERFORM\n           DISPLAY IF-HANDLER\n       END-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    // Verify both preceding and following hyphen checks work for close keywords
+    test('should not match close keyword in hyphenated identifier', () => {
+      const source = '       IF X > 0\n           DISPLAY MY-END-IF-FLAG\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    // Verify open keyword with preceding hyphen in computeValidPositions
+    test('should not match PERFORM preceded by hyphen in computeValidPositions', () => {
+      const source = '       IF X > 0\n           MOVE X-PERFORM TO Y\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    // Verify open keyword with following hyphen in computeValidPositions
+    test('should not match PERFORM followed by hyphen in computeValidPositions', () => {
+      const source = '       IF X > 0\n           MOVE PERFORM-COUNT TO Y\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat hyphenated identifier as keyword (prefix hyphen)', () => {
+      // Covers lines 120-121: skip keyword preceded by hyphen
+      const source = 'PERFORM\n  DISPLAY "X-PERFORM"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should not treat hyphenated identifier as keyword (suffix hyphen)', () => {
+      // Covers lines 124-125: skip keyword followed by hyphen
+      const source = 'PERFORM\n  MOVE PERFORM-COUNT TO X\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: PERFORM block with inline statements', () => {
+    test('should detect PERFORM block with DISPLAY statement on same line', () => {
+      const source = 'PERFORM DISPLAY WS-RECORD\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should detect PERFORM block with COMPUTE statement on same line', () => {
+      const source = 'PERFORM COMPUTE WS-RESULT = A + B\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still reject paragraph call PERFORM', () => {
+      const source = 'PERFORM MY-PARAGRAPH\nPERFORM UNTIL WS-DONE\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should reject PERFORM with THRU as paragraph range call', () => {
+      const source = 'PERFORM PARA-1 THRU PARA-2\nPERFORM UNTIL WS-DONE\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should reject PERFORM with THROUGH as paragraph range call', () => {
+      const source = 'PERFORM PARA-1 THROUGH PARA-2\nPERFORM UNTIL WS-DONE\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: PERFORM paragraph call with inline comment', () => {
+    test('should reject PERFORM paragraph call followed by inline comment', () => {
+      const source = 'PERFORM PARA-NAME *> this is a comment\nPERFORM UNTIL WS-DONE\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still accept block PERFORM with content after name and comment', () => {
+      const source = 'PERFORM\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: PERFORM with numeric paragraph name', () => {
+    test('should reject PERFORM with numeric paragraph name', () => {
+      const source = 'PERFORM 100.\nPERFORM UNTIL WS-DONE\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still accept PERFORM with numeric variable TIMES', () => {
+      const source = 'PERFORM 10 TIMES\n  DISPLAY "Hello"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: END-EXEC inside string in EXEC block', () => {
+    test('should skip END-EXEC inside single-quoted string', () => {
+      const source = "EXEC SQL\n  SELECT 'END-EXEC' INTO :WS-VAR\n  FROM DUAL\nEND-EXEC\nPERFORM 10 TIMES\n  DISPLAY 'X'\nEND-PERFORM";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should skip END-EXEC inside double-quoted string', () => {
+      const source = 'EXEC SQL\n  SELECT "END-EXEC" INTO :WS-VAR\n  FROM DUAL\nEND-EXEC\nPERFORM 10 TIMES\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still match normal END-EXEC', () => {
+      const source = 'EXEC SQL\n  SELECT * FROM TABLE\nEND-EXEC\nPERFORM 10 TIMES\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Branch coverage: hyphenated identifiers and EXEC boundaries', () => {
+    test('should skip PERFORM preceded by hyphen (hyphenated identifier)', () => {
+      const source = 'INIT-PERFORM SOMETHING\nPERFORM 10 TIMES\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should skip PERFORM followed by hyphen (hyphenated identifier)', () => {
+      const source = 'PERFORM-INIT SOMETHING\nPERFORM 10 TIMES\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should skip END-EXEC preceded by identifier character', () => {
+      const source = 'EXEC SQL\n  SELECT * FROM TABLE\nXEND-EXEC\nEND-EXEC';
+      const regions = parser.getExcludedRegions(source);
+      const execRegion = regions.find((r) => source.slice(r.start, r.end).includes('END-EXEC'));
+      assert.ok(execRegion, 'Should find EXEC region with proper END-EXEC');
+    });
+
+    test('should skip END-EXEC followed by identifier character', () => {
+      const source = 'EXEC SQL\n  SELECT * FROM TABLE\nEND-EXECX\nEND-EXEC';
+      const regions = parser.getExcludedRegions(source);
+      const execRegion = regions.find((r) => source.slice(r.start, r.end).includes('END-EXEC'));
+      assert.ok(execRegion, 'Should find EXEC region with proper END-EXEC');
+    });
+  });
+
+  suite('Branch coverage: EXEC block string handling', () => {
+    test('should handle doubled quotes inside EXEC block string', () => {
+      // Covers lines 383-385: doubled quote (ch repeated) inside string in EXEC block
+      const source = 'EXEC SQL\n  SELECT "He""llo" FROM TABLE\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should handle doubled single quotes inside EXEC block string', () => {
+      // Covers lines 383-385: doubled single quote inside string in EXEC block
+      const source = "EXEC SQL\n  SELECT 'It''s' FROM TABLE\nEND-EXEC\nIF X > 0\nEND-IF";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should break string on newline inside EXEC block string', () => {
+      // Covers lines 390-391: newline breaks string inside EXEC block
+      const source = 'EXEC SQL\n  SELECT "unterminated\nvalue" FROM TABLE\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should break single-quoted string on newline inside EXEC block', () => {
+      // Covers lines 390-391: newline breaks single-quoted string inside EXEC block
+      const source = "EXEC SQL\n  SELECT 'unterminated\nvalue' FROM TABLE\nEND-EXEC\nIF X > 0\nEND-IF";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
     });
   });
 });
