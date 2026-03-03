@@ -5,6 +5,88 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.11] - 2026-03-04
+
+### Fixed
+
+- Ada: Skip `task` without `is` (forward declarations like `task Name;`)
+- Ada: Skip `package` renames and instantiations (`package X is new`, `package X renames`)
+- Ada: Skip `protected` access types and forward declarations
+- Ada: Validate `function`/`procedure`/`accept`/`record`/`task`/`package`/`protected`/`for`/`loop` with dedicated validators
+- Ada: Rewrite `isInsideParens` with paren nesting tracking (fixes false negatives after commas and multi-line strings)
+- Ada: Handle comments between `and` and `then` in short-circuit operator detection
+- Ada: Extract `scanForwardToIs` helper for shared `is` keyword validation
+- AppleScript: Support `U+00AC` line continuation character in compound keywords and line scanning
+- AppleScript: Skip keywords inside `if ... then` conditions (e.g., `if tell then`)
+- AppleScript: Handle block comments before line-start keywords with logical line scanning
+- Bash: Fix `#` after `<>` redirect incorrectly treated as comment start
+- Bash: Support multiple pending heredocs in command substitution and process substitution
+- Bash: Use Bash-specific double-quote handler in arithmetic expansion and bare arithmetic evaluation
+- Bash: Use Bash-specific double-quote handler in parameter expansion
+- Bash: Fix `{` after backtick not recognized at command position
+- Crystal: Handle backtick strings in heredoc line comment/string region scanning
+- COBOL: Skip `END-EXEC` inside string literals in EXEC block matching
+- COBOL: Handle pseudo-text delimiters (`==...==`) as excluded regions
+- Elixir: Accept `#` comment after `do` keyword in `hasDoKeyword` detection
+- Elixir: Skip `fn:` keyword argument (not treated as `fn` block opener)
+- Elixir: Skip keywords preceded by `..` range operator
+- Elixir: Skip keywords preceded by `@` module attribute
+- Elixir: Track inner `do:` one-liners and `do...end` blocks in `hasDoKeyword` scope
+- Erlang: Stop atom matching at newline characters
+- Fortran: Handle `&` continuation after closing paren in `isValidBlockClose` (`end(i) &\n = value`)
+- Fortran: Handle `&` continuation in `isBlockWhereOrForall` string scanning
+- Julia: Distinguish generator filter `if` from block `if` inside parentheses (`isGeneratorFilterIf`)
+- Julia: Restrict `abstract`/`primitive` type pattern to same-line whitespace only (`[ \t]+` instead of `\s+`)
+- Julia: Filter out keywords preceded by `.` (struct field access like `obj.end`)
+- MATLAB: Validate intermediate keywords (`else`/`elseif` for `if`, `case`/`otherwise` for `switch`)
+- MATLAB: Handle `...` line continuation across dot and keyword in `isPrecededByDot`
+- MATLAB: Use MATLAB-specific double-quoted string matching (no backslash escapes, `""` only)
+- Octave: Reject `do` used as variable name (`do = 1`, but not `do == 1`)
+- Octave: Reject block close keywords used as variable names (`end = 5`, `endif = 1`)
+- Pascal: Exclude assembly block interior (`asm...end`) so labels like `begin:` are not keywords
+- Pascal: Scan full stack in `findLastNonRepeatIndex` (not just stack top)
+- Pascal: Check word boundary before `packed` keyword
+- Verilog: Reject keywords preceded or followed by `$` (identifiers like `$end`, `fork$sig`)
+- Verilog: Validate `fork`: reject `disable fork` and `wait fork` statements
+- Verilog: Refactor `isFollowedByBegin` with dedicated skip helpers for sensitivity lists, paren groups, delays, and labels
+- Verilog: Handle `(* ... *)` attributes when `@` is in excluded region
+- Verilog: Skip string literals containing `*)` inside attributes
+- Verilog: Handle `` `define `` and `` `undef `` directives as excluded regions (with backslash-newline continuation)
+- Verilog: Validate block close keywords (reject backtick, dot, or `$` adjacency)
+- VHDL: Restrict compound end pattern to same-line whitespace only (`[ \t]+` instead of `[ \t\r\n]+`)
+- VHDL: Check excluded regions in entity/configuration colon detection
+- VHDL: Find last valid `wait` on line for `wait for` detection (earlier waits may be semicolon-terminated)
+
+### Changed
+
+- Base parser: Make `findExcludedRegions` non-abstract with default loop-based implementation using `tryMatchExcludedRegion`
+- Base parser: Add overridable `tryMatchExcludedRegion` dispatch method for simpler excluded region scanning
+- Base parser: Simplify `isInExcludedRegion` to delegate to `findExcludedRegionAt`
+- All parsers: Promote `tryMatchExcludedRegion` from `private` to `protected` (used by base class default implementation)
+- Extension: Use per-document debounce timers instead of single global timer
+- Extension: Add `onDidOpenTextDocument` listener for language mode changes and newly opened files
+- Extension: Add `onDidCloseTextDocument` listener to clean up pending debounce timers
+- Extension: Add `onDidChangeVisibleTextEditors` listener for split/unsplit editor handling
+- Extension: Update text change listener to trigger on any visible editor (not just active editor)
+
+### Refactored
+
+- Ada: Extract `adaHelpers.ts` with shared utility functions (`skipAdaWhitespaceAndComments`, `isAdaWordAt`, etc.)
+- Bash: Extract `bashStringHelpers.ts` with Bash-specific string matching functions
+- Crystal: Extract `crystalExcluded.ts` with Crystal excluded region helpers
+- Elixir: Extract `elixirHelpers.ts` with Elixir string and sigil matching functions
+- Fortran: Extract `fortranHelpers.ts` with Fortran string, comment, and continuation helpers
+- Ruby: Extract `rubyExcluded.ts` and `rubyFamilyHelpers.ts` with shared Ruby/Crystal helpers
+- Base parser: Extract `parserUtils.ts` with standalone `isInExcludedRegion` utility function
+- Ada: Split monolithic `isValidBlockOpen` into dedicated per-keyword validators
+- VHDL: Split monolithic `isValidBlockOpen` into dedicated per-keyword validators
+- Fortran: Split monolithic `isValidBlockOpen` into dedicated per-keyword validators
+- Verilog: Split monolithic `isFollowedByBegin` into dedicated skip helpers
+
+### Tests
+
+- Add 880+ tests across 16 parser test files for bug fix verification and regression coverage
+
 ## [1.1.10] - 2026-03-02
 
 ### Fixed
@@ -492,6 +574,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.11]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.10...v1.1.11
 [1.1.10]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.7...v1.1.8
