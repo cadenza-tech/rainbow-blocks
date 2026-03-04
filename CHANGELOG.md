@@ -5,6 +5,61 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.12] - 2026-03-04
+
+### Fixed
+
+- Ada: Restrict `\s` to `[ \t]` in `isValidProtectedOpen`, `isValidForOpen`, and compound end pattern to avoid matching across newlines
+- Ada: Use position-based `loop` pairing instead of count-based (rightmost `for`/`while` matched to following `loop`)
+- AppleScript: Restrict `\s` to `[ \t]` in variable name patterns (`set`/`copy`/possessive), `isAtLogicalLineStart`, `isInsideIfCondition`, and `isUsedAsVariableName`
+- Bash: Handle `\` line continuation in `isAtCommandPosition` (scan backward through continuation lines)
+- Bash: Restrict `\s` to `[ \t]` in `isCasePattern` line-start and separator detection
+- Bash: Flush pending heredocs when `)` closes `$()` or `<()`/`>()` before newline (heredoc body consumed correctly)
+- Bash: Use Bash-specific double-quote handler in `matchArithmeticBracket` (was using generic `findStringEnd`)
+- Base parser: Add `isAdjacentToUnicodeLetter` check in `tokenize` to reject keywords adjacent to non-ASCII Unicode letters (e.g., `αend`)
+- COBOL: Restrict `\s` to `[ \t]` in fixed-format sequence area validation
+- COBOL: Skip fixed-format column 7 comment lines and `*>` inline comments inside EXEC blocks
+- Crystal: Restrict `\s` to `[ \t]` in `isForIn` statement-start detection
+- Elixir: Restrict `\s` to `[ \t]` in `hasDoKeyword` `fn:` keyword argument detection (via `elixirHelpers`)
+- Erlang: Restrict `\s` to `[ \t]` in `-spec`/`-type` line detection, `fun` reference patterns, `fun()` type context, and triple-quoted string line-start check
+- Erlang: Stop quoted atom matching at newline characters in `fun` reference patterns
+- Fortran: Restrict `\s` to `[ \t]` in `isValidTypeOpen`, `else if` continuation, `isContinuationBlockForm` end pattern, and `isPrecedingContinuationKeyword`
+- Fortran: Bound `isStringContinuation` backward scan to line start (prevent unbounded scan)
+- Fortran: Skip `!` inline comments in `collapseContinuationLines` (prevent `&` inside comments from being treated as continuation)
+- Fortran: Restrict `\s` to `[ \t]` in `else if`/`else where` same-line and continuation detection
+- Fortran: Restrict `\s` to `[ \t]` in compound end pattern
+- Julia: Filter keywords adjacent to Unicode identifier characters (`\p{L}`) in `tokenize` and `hasBlockOpenerBetween`
+- Julia: Add Unicode letter boundary check in `isGeneratorFilterIf` for `for` keyword detection
+- Octave: Merge `matchMatlabBlockComment` and `matchOctaveBlockComment` into single `matchBlockComment` supporting cross-type delimiters (`%{`/`#}` and `#{`/`%}` are interchangeable)
+- Pascal: Restrict `\s` to `[ \t]` in tagged variant case, tagless variant case, `class of`, and `class` parenthesis detection
+- Pascal: Add `isInsideRecord` check for tagged variant case detection (only skip inside records)
+- Verilog: Restrict `\s` to `[ \t]` in label skip whitespace scanning
+- Verilog: Terminate string literals at newlines inside `(* *)` attribute matching (prevent unterminated strings from consuming past line boundaries)
+- Verilog: Attach preprocessor intermediates (`` `else ``/`` `elsif ``) to matching preprocessor block (not nearest non-preprocessor block)
+- VHDL: Restrict compound end pattern to same-line whitespace only (`[ \t]+` instead of allowing newlines)
+- VHDL: Restrict `\s` to `[ \t]` in `isWaitFor` blank line detection and `isValidEntityOrConfigOpen` blank line detection
+- VHDL: Check excluded regions in `isValidEntityOrConfigOpen` colon and `use` detection (handles comments on same line)
+- VHDL: Search for `generate` between prefix keyword and `loop` across multiple lines in `isValidLoopOpen` (not just same line)
+- VHDL: Restrict `\s` to `[ \t]` in compound end pattern and entity colon detection
+
+### Refactored
+
+- Bash: Extract `bashLeafHelpers.ts` with leaf functions (`isCommentStart`, `matchesWord`, `parseHeredocOperator`, `matchHeredocBody`, `matchDollarSingleQuote`, `matchSingleQuotedString`, `findSingleQuoteEnd`)
+- Bash: Make `matchArithmeticExpansion` and `findBashDoubleQuoteEnd` module-private (not exported)
+- Crystal: Delegate `skipInterpolation` and `skipRegexInterpolation` to shared helpers via `InterpolationHandlers` interface
+- Crystal: Make `skipMacroString` module-private (not exported)
+- Elixir: Make `getSigilCloseDelimiter` module-private (not exported)
+- Fortran: Make `isStringContinuation` and `isContinuationBlockForm` module-private (not exported)
+- Julia: Extract `juliaHelpers.ts` with `isSymbolStart` and `isTransposeOperator` pure functions
+- MATLAB: Change `matchBlockComment` visibility from `private` to `protected` (for Octave override)
+- Ruby: Delegate `skipInterpolation` and `skipRegexInterpolation` to shared helpers via `InterpolationHandlers` interface
+- Ruby/Crystal: Extract shared `skipInterpolationShared`, `skipRegexInterpolationShared`, and `isRegexInInterpolation` to `rubyFamilyHelpers.ts`
+- Ruby/Crystal: Make `getMatchingDelimiter` module-private (not exported)
+
+### Tests
+
+- Add 200+ tests across 18 parser test files for bug fix verification and regression coverage
+
 ## [1.1.11] - 2026-03-04
 
 ### Fixed
@@ -574,6 +629,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.12]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.11...v1.1.12
 [1.1.11]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.10...v1.1.11
 [1.1.10]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.8...v1.1.9
