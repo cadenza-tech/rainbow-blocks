@@ -34,8 +34,6 @@ suite('ErlangBlockParser Test Suite', () => {
     stringBlockClose: 'end'
   };
 
-  generateCommonTests(config);
-
   suite('Simple blocks', () => {
     test('should parse simple begin-end block', () => {
       const source = `begin
@@ -382,13 +380,13 @@ end`;
   suite('Catch expression prefix', () => {
     test('should not treat catch expression as intermediate', () => {
       const pairs = parser.parse('begin\n  X = catch throw(hello),\n  Y\nend');
-      assertSingleBlock(pairs, 'begin', 'end', 0);
+      assertSingleBlock(pairs, 'begin', 'end');
       assert.strictEqual(pairs[0].intermediates.length, 0);
     });
 
     test('should still treat catch as intermediate in try block', () => {
       const pairs = parser.parse('try\n  risky()\ncatch\n  error -> ok\nend');
-      assertSingleBlock(pairs, 'try', 'end', 0);
+      assertSingleBlock(pairs, 'try', 'end');
       assert.strictEqual(pairs[0].intermediates.length, 1);
       assert.strictEqual(pairs[0].intermediates[0].value, 'catch');
     });
@@ -1543,4 +1541,64 @@ bar() -> fun() -> ok end.`;
       assertSingleBlock(pairs, 'begin', 'end');
     });
   });
+
+  suite('Regression: \\s -> [ \\t] in -spec/-type attribute detection', () => {
+    // The -spec/-type detection regex changed from /-\s*(?:spec|type|...)/ to /-[ \t]*(?:spec|type|...)/
+    // This prevents a hyphen on one line and 'spec' on the next from being falsely matched
+
+    test('should not suppress fun after arithmetic subtraction before spec_function call', () => {
+      // "X = A -\nspec_function()" has '-' followed by newline then 'spec_function'
+      // Old regex /-\s*spec/ would match (since \s includes \n).
+      // New regex /-[ \t]*spec/ does NOT match (newline is not [ \t]).
+      // So a 'fun' appearing later should still be treated as a block opener.
+      const source = 'X = A -\nspec_function(),\nfun() ->\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should still suppress fun inside a -spec return type on the same line', () => {
+      // The fix should not break the normal case: -spec on same line suppresses fun inside the spec
+      // Here fun() is INSIDE the spec declaration (no period between -spec and fun)
+      const source = '-spec my_fun(atom()) -> fun((atom()) -> ok)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still suppress fun inside a -type annotation on the same line', () => {
+      // fun() inside a -type declaration (no period between -type and fun) is suppressed
+      const source = '-type my_type() :: fun((atom()) -> ok)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not suppress fun after expression using minus operator with newline', () => {
+      // A minus operator followed by newline then a word starting with 'type' should not match -type
+      const source = 'X = Y -\ntype_of(Z),\nfun() ->\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should not reject fun as function reference when identifier is on next line', () => {
+      // fun followed by newline + identifier/arity should NOT match as fun reference
+      const source = 'F = fun\n  (X) -> X * 2\nend,\nfoo/2.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should not reject fun as quoted function reference when atom crosses lines', () => {
+      // Quoted atom in fun reference pattern should not match across newlines
+      const source = "F = fun\n  'hello'/2,\nfun() ->\n  ok\nend.";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should not reject fun as type context when paren is on next line', () => {
+      // fun followed by newline + ( should not trigger type context check
+      const source = 'F = fun\n  (X) -> X + 1\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+  });
+
+  generateCommonTests(config);
 });

@@ -303,46 +303,44 @@ end`;
   });
 
   suite('Edge cases', () => {
-    suite('General', () => {
-      generateEdgeCaseTests(config);
+    generateEdgeCaseTests(config);
 
-      test('should handle complex real-world Lua code', () => {
-        const source = `local function process(items)
-  for i, item in ipairs(items) do
-    if item.valid then
-      repeat
-        item:update()
-      until item.done
-    else
-      item:skip()
-    end
+    test('should handle complex real-world Lua code', () => {
+      const source = `local function process(items)
+for i, item in ipairs(items) do
+  if item.valid then
+    repeat
+      item:update()
+    until item.done
+  else
+    item:skip()
   end
+end
 end`;
-        const pairs = parser.parse(source);
-        assert.ok(pairs.length >= 4);
+      const pairs = parser.parse(source);
+      assert.ok(pairs.length >= 4);
 
-        // Find the function pair
-        const funcPair = findBlock(pairs, 'function');
-        assert.strictEqual(funcPair.nestLevel, 0);
-      });
+      // Find the function pair
+      const funcPair = findBlock(pairs, 'function');
+      assert.strictEqual(funcPair.nestLevel, 0);
+    });
 
-      test('should handle multiple functions', () => {
-        const source = `function a()
+    test('should handle multiple functions', () => {
+      const source = `function a()
 end
 
 function b()
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 2);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
 
-      test('should handle method-style function', () => {
-        const source = `function obj:method()
-  return self.value
+    test('should handle method-style function', () => {
+      const source = `function obj:method()
+return self.value
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'function', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
     });
 
     suite('Long strings', () => {

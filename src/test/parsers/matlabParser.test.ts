@@ -31,8 +31,6 @@ suite('MatlabBlockParser Test Suite', () => {
     stringBlockClose: 'end'
   };
 
-  generateCommonTests(config);
-
   suite('Simple blocks', () => {
     test('should parse function-end block', () => {
       const source = `function result = myFunc(x)
@@ -499,7 +497,7 @@ end`;
   suite('Digit transpose vs string', () => {
     test('should treat digit followed by quote-letter as string, not transpose', () => {
       const pairs = parser.parse("x = [1'end for while'];\nif true\nend");
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -1156,4 +1154,16 @@ end`;
       assertSingleBlock(pairs, 'function', 'end');
     });
   });
+
+  suite('Regression: isKeywordUsedAsFunctionCall CR-only line ending', () => {
+    test('should detect line start with CR-only line endings', () => {
+      // properties at line start with \r-only line endings should not be a function call
+      const source = 'classdef Foo\rproperties\r  Value\rend\rend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'properties');
+    });
+  });
+
+  generateCommonTests(config);
 });

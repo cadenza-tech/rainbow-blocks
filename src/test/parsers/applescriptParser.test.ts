@@ -733,7 +733,7 @@ end`;
     });
   });
 
-  suite('v7 bug fixes - variable names as block keywords', () => {
+  suite('Variable names as block keywords', () => {
     test('should not treat keyword in set-to as block opener', () => {
       const source = `on run
   set repeat to 5

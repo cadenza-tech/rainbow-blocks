@@ -449,7 +449,6 @@ suite('Fuzzing Tests - All Parsers', () => {
         Ruby: '# \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif true\n  x = "\u3053\u3093\u306b\u3061\u306f"\nend',
         Crystal: '# \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif true\n  x = "\u3053\u3093\u306b\u3061\u306f"\nend',
         Julia: '# \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif true\n  x = "\u3053\u3093\u306b\u3061\u306f"\nend',
-        Python: '# \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif true\n  x = "\u3053\u3093\u306b\u3061\u306f"\nend',
         Lua: '-- \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif true then\n  x = "\u3053\u3093\u306b\u3061\u306f"\nend',
         Bash: '# \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif true; then\n  echo "\u3053\u3093\u306b\u3061\u306f"\nfi',
         Ada: '-- \u65e5\u672c\u8a9e\u30b3\u30e1\u30f3\u30c8\nif X then\n  null;\nend if;'

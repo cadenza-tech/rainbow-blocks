@@ -456,7 +456,7 @@ end`;
   suite('Line continuation procedure', () => {
     test('should reject procedure with :: on continuation line', () => {
       const pairs = parser.parse('type :: my_type\n  integer :: x\ncontains\n  procedure, pass &\n    :: get_x\nend');
-      assertSingleBlock(pairs, 'type', 'end', 0);
+      assertSingleBlock(pairs, 'type', 'end');
     });
   });
 
@@ -1140,7 +1140,7 @@ end select`;
     test('Bug 4: procedure with :: on CR-only continuation line', () => {
       const source = 'type :: my_type\r  integer :: x\rcontains\r  procedure, pass &\r    :: get_x\rend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'type', 'end', 0);
+      assertSingleBlock(pairs, 'type', 'end');
     });
 
     test('Bug 4: procedure without :: on CR-only should be block', () => {
@@ -2599,7 +2599,7 @@ end select`;
       // First :: is in string, second :: is the real declaration separator
       const source = 'type :: my_type\n  integer :: x\ncontains\n  procedure :: get_x\nend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'type', 'end', 0);
+      assertSingleBlock(pairs, 'type', 'end');
     });
   });
 
@@ -2752,7 +2752,7 @@ end select`;
       const source = 'type :: mytype\r  integer :: x\rcontains\r  procedure, pass &\r    :: get_x\rend';
       const pairs = parser.parse(source);
       // procedure has :: on continuation line -> suppressed as type-bound procedure
-      assertSingleBlock(pairs, 'type', 'end', 0);
+      assertSingleBlock(pairs, 'type', 'end');
     });
 
     // isAfterDoubleColon: lines 602-606 - :: found on continuation line but inside excluded region
@@ -3271,6 +3271,97 @@ end program`;
       const source = 'program test\n  integer :: end(10)\n  end(1) &   \n    = 42\nend program';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Regression: isContinuationBlockForm end where across lines', () => {
+    test('should not match end on one line with where on the next as end where', () => {
+      const source = 'program test\n  where (a > 0) b = 1\n  where (c > 0)\n    d = 2\n  end where\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'where');
+      findBlock(pairs, 'program');
+    });
+  });
+
+  suite('Regression: collapseContinuationLines skips ! comments', () => {
+    test('should not treat & inside ! comment as continuation', () => {
+      const result = collapseContinuationLines(' ! see section 5 & appendix A\n  case (1)');
+      // & inside comment should not join lines, so newline is preserved
+      assert.ok(result.includes('\n'));
+      assert.ok(result.includes('case'));
+    });
+
+    test('should still handle & outside comments as continuation', () => {
+      const result = collapseContinuationLines(' &\n  case (1)');
+      assert.ok(result.includes('case'));
+      // Lines should be joined (no newline)
+      assert.ok(!result.includes('\n'));
+    });
+
+    test('should recognize select case with & continuation but not through comment', () => {
+      // Valid Fortran: select with & continuation to case
+      const source = 'select &\n  case (1)\n    x = 1\nend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+  });
+
+  suite('Regression: \\s -> [ \\t] in isContinuationBlockForm end-where/forall pattern', () => {
+    // isContinuationBlockForm end-where/forall regex changed from /^end\s*(where|forall)\b/i
+    // to /^end[ \t]+(where|forall)\b/i so a newline inside the pattern no longer matches
+
+    test('should still detect end where on the same line as block form', () => {
+      // Single-line where spread followed by end where on same line (block form)
+      const source = 'where (a > 0) &\n  b = sqrt(a)\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('should still detect end forall on the same line as block form', () => {
+      const source = 'forall (i = 1:n) &\n  a(i) = b(i)\nend forall';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'forall', 'end forall');
+    });
+
+    test('should treat continuation body followed by end-where as block form (not single-line spread)', () => {
+      // Block where: condition, continuation, end where -> block form
+      const source = 'where (a > 0)\n  b = sqrt(a)\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('should still treat continuation where as single-line spread when next line is non-end keyword', () => {
+      // where with & continuation inside do-loop: single-line spread
+      const source = 'do i = 1, n\n  where (a > 0) &\n    b(i) = sqrt(a(i))\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should still detect select type block with type is guard', () => {
+      // select type with 'type is (integer)' guard - type IS detection still works
+      const source = 'select type (x)\n  type is (integer)\n    print *, x\nend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('should treat type on its own line as block opener when type is on next line', () => {
+      // 'type is' regex uses /^[ \t]+is[ \t]*\(/ after collapseContinuationLines
+      // Without continuation, type on line 1 and 'is (integer)' on line 2 are separate lines
+      // type on first line has no is(...) following it -> treated as block opener
+      const source = 'select type (x)\n  type\nis (integer)\n    y = 1\nend select';
+      const pairs = parser.parse(source);
+      // 'type' on its own line is a block opener (type is not on same/collapsed line)
+      // It will create a block that matches end select as end
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+  });
+
+  suite('Regression: isStringContinuation backward scan bounded to lineStart', () => {
+    test('should not detect & from previous line when ! comment has no preceding &', () => {
+      const source = 'x = y + &\nz = "start ! no-continuation\nif (.true.) then\n  x = 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
     });
   });
 });

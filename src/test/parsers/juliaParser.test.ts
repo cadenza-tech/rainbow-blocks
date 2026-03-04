@@ -907,169 +907,167 @@ end`;
   });
 
   suite('Edge cases', () => {
-    suite('General', () => {
-      generateEdgeCaseTests(config);
+    generateEdgeCaseTests(config);
 
-      test('should handle only comments', () => {
-        const source = `# just a comment
+    test('should handle only comments', () => {
+      const source = `# just a comment
 #=
-  multi-line comment
+multi-line comment
 =#`;
-        const pairs = parser.parse(source);
-        assertNoBlocks(pairs);
-      });
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
 
-      test('should not match keywords in identifiers', () => {
-        const source = `function endif()
+    test('should not match keywords in identifiers', () => {
+      const source = `function endif()
 end
 function dofor()
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 2);
-        for (const pair of pairs) {
-          assert.strictEqual(pair.openKeyword.value, 'function');
-        }
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      for (const pair of pairs) {
+        assert.strictEqual(pair.openKeyword.value, 'function');
+      }
+    });
 
-      test('should not match keywords as part of other words', () => {
-        const source = `begin_process = 1
+    test('should not match keywords as part of other words', () => {
+      const source = `begin_process = 1
 end_process = 2
 function foo()
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'function', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
 
-      test('should handle unmatched blocks gracefully', () => {
-        const source = `if condition
-  if nested
+    test('should handle unmatched blocks gracefully', () => {
+      const source = `if condition
+if nested
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 1);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
 
-      test('should handle keyword at start of file', () => {
-        const source = `if x
+    test('should handle keyword at start of file', () => {
+      const source = `if x
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 1);
-        assertTokenPosition(pairs[0].openKeyword, 0, 0);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+    });
 
-      test('should handle keyword at end of file without newline', () => {
-        const source = 'if x\nend';
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 1);
-      });
+    test('should handle keyword at end of file without newline', () => {
+      const source = 'if x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
 
-      test('should handle one-liner functions (not block syntax)', () => {
-        const source = `f(x) = x^2
+    test('should handle one-liner functions (not block syntax)', () => {
+      const source = `f(x) = x^2
 g(x) = if x > 0 x else -x end
 function h(x)
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 2);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
 
-      test('should handle inline if expressions', () => {
-        const source = `result = if condition value1 else value2 end
+    test('should handle inline if expressions', () => {
+      const source = `result = if condition value1 else value2 end
 function foo()
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 2);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
 
-      test('should handle blocks with only whitespace', () => {
-        const source = `begin
+    test('should handle blocks with only whitespace', () => {
+      const source = `begin
 
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 1);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
 
-      test('should handle deeply nested quotes in strings', () => {
-        const source = `s = "outer \\"inner \\\\"deepest\\\\" inner\\" outer"
+    test('should handle deeply nested quotes in strings', () => {
+      const source = `s = "outer \\"inner \\\\"deepest\\\\" inner\\" outer"
 function foo()
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 1);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
 
-      test('should handle unterminated string at end of file', () => {
-        const source = `function foo()
+    test('should handle unterminated string at end of file', () => {
+      const source = `function foo()
 end
 x = "unterminated string`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'function', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
 
-      test('should handle unterminated comment at end of file', () => {
-        const source = `function foo()
+    test('should handle unterminated comment at end of file', () => {
+      const source = `function foo()
 end
 #= unterminated comment`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'function', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
 
-      test('should handle real-world Julia code', () => {
-        const source = `module Statistics
+    test('should handle real-world Julia code', () => {
+      const source = `module Statistics
 
 using LinearAlgebra
 
 export mean, std, var
 
 """
-    mean(x)
+  mean(x)
 
 Compute the arithmetic mean of collection \`x\`.
 """
 function mean(x)
-    if isempty(x)
-        throw(ArgumentError("mean requires at least one element"))
-    end
-    return sum(x) / length(x)
+  if isempty(x)
+      throw(ArgumentError("mean requires at least one element"))
+  end
+  return sum(x) / length(x)
 end
 
 """
-    std(x; corrected=true)
+  std(x; corrected=true)
 
 Compute the standard deviation.
 """
 function std(x; corrected=true)
-    n = length(x)
-    if n < 2
-        return NaN
-    end
+  n = length(x)
+  if n < 2
+      return NaN
+  end
 
-    m = mean(x)
-    s = 0.0
-    for xi in x
-        s += (xi - m)^2
-    end
+  m = mean(x)
+  s = 0.0
+  for xi in x
+      s += (xi - m)^2
+  end
 
-    if corrected
-        return sqrt(s / (n - 1))
-    else
-        return sqrt(s / n)
-    end
+  if corrected
+      return sqrt(s / (n - 1))
+  else
+      return sqrt(s / n)
+  end
 end
 
 # Variance is just std squared
 var(x; corrected=true) = std(x; corrected=corrected)^2
 
 end # module`;
-        const pairs = parser.parse(source);
+      const pairs = parser.parse(source);
 
-        const modulePairs = pairs.filter((p) => p.openKeyword.value === 'module');
-        const functionPairs = pairs.filter((p) => p.openKeyword.value === 'function');
-        const ifPairs = pairs.filter((p) => p.openKeyword.value === 'if');
-        const forPairs = pairs.filter((p) => p.openKeyword.value === 'for');
+      const modulePairs = pairs.filter((p) => p.openKeyword.value === 'module');
+      const functionPairs = pairs.filter((p) => p.openKeyword.value === 'function');
+      const ifPairs = pairs.filter((p) => p.openKeyword.value === 'if');
+      const forPairs = pairs.filter((p) => p.openKeyword.value === 'for');
 
-        assert.strictEqual(modulePairs.length, 1);
-        assert.strictEqual(functionPairs.length, 2);
-        assert.strictEqual(ifPairs.length, 3);
-        assert.strictEqual(forPairs.length, 1);
-      });
+      assert.strictEqual(modulePairs.length, 1);
+      assert.strictEqual(functionPairs.length, 2);
+      assert.strictEqual(ifPairs.length, 3);
+      assert.strictEqual(forPairs.length, 1);
     });
 
     suite('Triple-quoted strings', () => {
@@ -2625,6 +2623,48 @@ end`;
     test('should reject if as generator filter with mixed parens and brackets', () => {
       // sum(f(a[i]) for i in 1:n if h(a[i]) > 0) - both parens and brackets
       const source = 'sum(f(a[i]) for i in 1:n if h(a[i]) > 0)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: Unicode identifier word boundaries', () => {
+    test('should not detect end inside Unicode identifier \u03B1end', () => {
+      const source = 'function foo()\n  \u03B1end = 42\n  return \u03B1end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect if inside Unicode identifier \u03B2if', () => {
+      const source = 'function foo()\n  \u03B2if = true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect begin inside Unicode identifier end\u03B3begin', () => {
+      const source = 'function foo()\n  end\u03B3 = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still detect keywords not adjacent to Unicode chars', () => {
+      const source = '\u03B1 = begin\n  42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: hasForBetween Unicode word boundary', () => {
+    test('should not match for inside Unicode identifier in generator context', () => {
+      // \u03B1for is a single identifier, not the for keyword
+      const source = 'function foo()\n  x = (\u03B1for = 1; if true 1 else 0 end)\nend';
+      const pairs = parser.parse(source);
+      // if should be a block opener (not rejected as generator filter)
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still match for keyword separated from Unicode letter', () => {
+      const source = 'x = (for i in 1:10 if i > 5; i)';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });

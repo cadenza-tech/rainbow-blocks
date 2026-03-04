@@ -314,17 +314,17 @@ end`;
 
     test('should treat if after not as block, not postfix', () => {
       const pairs = parser.parse('not if condition\n  body\nend');
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
 
     test('should treat while after and as block, not postfix', () => {
       const pairs = parser.parse('x = 1 and while condition\n  body\nend');
-      assertSingleBlock(pairs, 'while', 'end', 0);
+      assertSingleBlock(pairs, 'while', 'end');
     });
 
     test('should treat unless after or as block, not postfix', () => {
       const pairs = parser.parse('x = 1 or unless condition\n  body\nend');
-      assertSingleBlock(pairs, 'unless', 'end', 0);
+      assertSingleBlock(pairs, 'unless', 'end');
     });
 
     test('should ignore semicolon inside string when checking postfix', () => {
@@ -928,67 +928,66 @@ end`;
   });
 
   suite('Edge cases', () => {
-    suite('General', () => {
-      generateEdgeCaseTests(config);
+    generateEdgeCaseTests(config);
 
-      test('should handle for-end block', () => {
-        const source = `for i in 1..10
-  puts i
+    test('should handle for-end block', () => {
+      const source = `for i in 1..10
+puts i
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'for', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
 
-      test('should handle unless-end block', () => {
-        const source = `unless condition
-  do_something
+    test('should handle unless-end block', () => {
+      const source = `unless condition
+do_something
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'unless', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
 
-      test('should handle while-end block', () => {
-        const source = `while condition
-  do_something
+    test('should handle while-end block', () => {
+      const source = `while condition
+do_something
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'while', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
 
-      test('should handle while-do-end block', () => {
-        const source = `while condition do
-  do_something
+    test('should handle while-do-end block', () => {
+      const source = `while condition do
+do_something
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'while', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
 
-      test('should handle until-do-end block', () => {
-        const source = `until condition do
-  do_something
+    test('should handle until-do-end block', () => {
+      const source = `until condition do
+do_something
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'until', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'until', 'end');
+    });
 
-      test('should handle for-do-end block', () => {
-        const source = `for i in 1..10 do
-  puts i
+    test('should handle for-do-end block', () => {
+      const source = `for i in 1..10 do
+puts i
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'for', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
 
-      test('should handle until-end block', () => {
-        const source = `until condition
-  do_something
+    test('should handle until-end block', () => {
+      const source = `until condition
+do_something
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'until', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'until', 'end');
+    });
 
-      test('should handle multiple sequential blocks', () => {
-        const source = `def foo
+    test('should handle multiple sequential blocks', () => {
+      const source = `def foo
 end
 
 def bar
@@ -996,97 +995,96 @@ end
 
 def baz
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 3);
-        assert.ok(pairs.every((p) => p.openKeyword.value === 'def'));
-        assert.ok(pairs.every((p) => p.nestLevel === 0));
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assert.ok(pairs.every((p) => p.openKeyword.value === 'def'));
+      assert.ok(pairs.every((p) => p.nestLevel === 0));
+    });
 
-      test('should handle block with multiple rescue clauses', () => {
-        const source = `begin
-  risky
+    test('should handle block with multiple rescue clauses', () => {
+      const source = `begin
+risky
 rescue TypeError
-  handle_type_error
+handle_type_error
 rescue ArgumentError
-  handle_argument_error
+handle_argument_error
 rescue => e
-  handle_other
+handle_other
 ensure
-  cleanup
+cleanup
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'begin', 'end');
-        assert.strictEqual(pairs[0].intermediates.length, 4);
-        assert.strictEqual(pairs[0].intermediates.filter((i) => i.value === 'rescue').length, 3);
-        assert.strictEqual(pairs[0].intermediates.filter((i) => i.value === 'ensure').length, 1);
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 4);
+      assert.strictEqual(pairs[0].intermediates.filter((i) => i.value === 'rescue').length, 3);
+      assert.strictEqual(pairs[0].intermediates.filter((i) => i.value === 'ensure').length, 1);
+    });
 
-      test('should handle lambda with do-end', () => {
-        const source = `my_lambda = -> do
-  puts "hello"
+    test('should handle lambda with do-end', () => {
+      const source = `my_lambda = -> do
+puts "hello"
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'do', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
 
-      test('should handle method with rescue modifier in body', () => {
-        const source = `def safe_method
-  risky_operation rescue nil
+    test('should handle method with rescue modifier in body', () => {
+      const source = `def safe_method
+risky_operation rescue nil
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'def', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
 
-      test('should handle keywords that are part of method names', () => {
-        const source = `def end_with_suffix
-  do_something
+    test('should handle keywords that are part of method names', () => {
+      const source = `def end_with_suffix
+do_something
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'def', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
 
-      test('should handle complex real-world Ruby code', () => {
-        const source = `module MyModule
-  class MyClass
-    def initialize(name)
-      @name = name
-    end
+    test('should handle complex real-world Ruby code', () => {
+      const source = `module MyModule
+class MyClass
+  def initialize(name)
+    @name = name
+  end
 
-    def process
-      if valid?
-        items.each do |item|
-          case item.type
-          when :a
-            handle_a(item)
-          when :b
-            handle_b(item)
-          else
-            handle_default(item)
-          end
+  def process
+    if valid?
+      items.each do |item|
+        case item.type
+        when :a
+          handle_a(item)
+        when :b
+          handle_b(item)
+        else
+          handle_default(item)
         end
-      else
-        raise "Invalid"
       end
-    end
-
-    private
-
-    def valid?
-      @name != nil
+    else
+      raise "Invalid"
     end
   end
+
+  private
+
+  def valid?
+    @name != nil
+  end
+end
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 8);
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 8);
 
-        const modulePair = findBlock(pairs, 'module');
-        const classPair = findBlock(pairs, 'class');
-        const casePair = findBlock(pairs, 'case');
+      const modulePair = findBlock(pairs, 'module');
+      const classPair = findBlock(pairs, 'class');
+      const casePair = findBlock(pairs, 'case');
 
-        assert.strictEqual(modulePair.nestLevel, 0);
-        assert.strictEqual(classPair.nestLevel, 1);
-        assertIntermediates(casePair, ['when', 'when', 'else']);
-      });
+      assert.strictEqual(modulePair.nestLevel, 0);
+      assert.strictEqual(classPair.nestLevel, 1);
+      assertIntermediates(casePair, ['when', 'when', 'else']);
     });
 
     suite('Quoted symbols', () => {
@@ -1236,7 +1234,7 @@ end
       test('should exclude content after =end on the same line', () => {
         const pairs = parser.parse('=begin\ncomment\n=end if true\ndo\nend');
         // "if true" after =end should be excluded (still part of comment)
-        assertSingleBlock(pairs, 'do', 'end', 0);
+        assertSingleBlock(pairs, 'do', 'end');
       });
     });
 
@@ -1374,13 +1372,13 @@ end`;
   suite('Rescue modifier', () => {
     test('should not treat inline rescue as intermediate', () => {
       const pairs = parser.parse('def foo\n  risky rescue nil\nend');
-      assertSingleBlock(pairs, 'def', 'end', 0);
+      assertSingleBlock(pairs, 'def', 'end');
       assert.strictEqual(pairs[0].intermediates.length, 0);
     });
 
     test('should still treat rescue as intermediate in begin block', () => {
       const pairs = parser.parse('begin\n  risky\nrescue\n  handle\nend');
-      assertSingleBlock(pairs, 'begin', 'end', 0);
+      assertSingleBlock(pairs, 'begin', 'end');
       assert.strictEqual(pairs[0].intermediates.length, 1);
     });
   });

@@ -31,8 +31,6 @@ suite('OctaveBlockParser Test Suite', () => {
     stringBlockClose: 'end'
   };
 
-  generateCommonTests(config);
-
   suite('Simple blocks', () => {
     test('should parse function-end block', () => {
       const source = `function result = myFunc(x)
@@ -528,7 +526,7 @@ endif`;
   suite('Digit transpose vs string', () => {
     test('should treat digit followed by quote-letter as string, not transpose', () => {
       const pairs = parser.parse("x = [1'end for while'];\nif true\nend");
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -707,7 +705,7 @@ end`;
     });
   });
 
-  suite('v7 bug fixes', () => {
+  suite('Nested block comments', () => {
     test('should handle nested MATLAB-style block comments', () => {
       const source = `%{
   %{
@@ -1078,4 +1076,32 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
+
+  suite('Regression: cross-type block comment delimiters', () => {
+    test('should close %{ with #}', () => {
+      const source = '%{\n  comment\n#}\nif true\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close #{ with %}', () => {
+      const source = '#{\n  comment\n%}\nif true\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle nested cross-type block comments', () => {
+      const source = '%{\n  #{\n    nested\n  #}\n  still comment\n%}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle cross-type nested closer', () => {
+      const source = '%{\n  #{\n    nested\n  %}\n  still comment\n#}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  generateCommonTests(config);
 });

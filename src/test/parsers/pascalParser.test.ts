@@ -32,8 +32,6 @@ suite('PascalBlockParser Test Suite', () => {
     commentBlockClose: 'end'
   };
 
-  generateCommonTests(config);
-
   suite('Simple blocks', () => {
     test('should parse simple begin-end block', () => {
       const source = `begin
@@ -523,7 +521,7 @@ end;`;
   suite('Variant record case', () => {
     test('should not treat case in variant record as block', () => {
       const pairs = parser.parse('TVariant = record\n  case Tag: Integer of\n    0: (IntVal: Integer);\n    1: (FloatVal: Double);\nend');
-      assertSingleBlock(pairs, 'record', 'end', 0);
+      assertSingleBlock(pairs, 'record', 'end');
     });
   });
 
@@ -638,6 +636,12 @@ end;`;
       const pairs = parser.parse('// comment\rbegin\r  x := 1;\rend');
       assertSingleBlock(pairs, 'begin', 'end');
     });
+
+    test('should handle Pascal string with CR-only ending', () => {
+      const source = "x := 'unterminated\rif true then\rbegin\r  action;\rend;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
   });
 
   suite('isInsideRecord with begin-end', () => {
@@ -681,20 +685,12 @@ end`;
   suite('Variant case with qualified type names', () => {
     test('should not treat variant case with qualified type as block', () => {
       const pairs = parser.parse('TVariant = record\n  case Types.MyEnum of\n    0: (IntVal: Integer);\nend');
-      assertSingleBlock(pairs, 'record', 'end', 0);
+      assertSingleBlock(pairs, 'record', 'end');
     });
 
     test('should not treat variant case with dotted type name as block', () => {
       const pairs = parser.parse('TVariant = record\n  case MyUnit.TColor of\n    0: (R: Byte);\n    1: (G: Byte);\nend');
-      assertSingleBlock(pairs, 'record', 'end', 0);
-    });
-  });
-
-  suite('CR-only line endings', () => {
-    test('should handle Pascal string with CR-only ending', () => {
-      const source = "x := 'unterminated\rif true then\rbegin\r  action;\rend;";
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
+      assertSingleBlock(pairs, 'record', 'end');
     });
   });
 
@@ -1540,4 +1536,96 @@ end`;
       assertSingleBlock(pairs, 'object', 'end');
     });
   });
+
+  suite('Regression: case on separate line from first arm', () => {
+    test('should detect case as block opener when first arm has identifier:label on next line', () => {
+      const source = 'begin\n  case\n    Status: HandleStatus;\n    Error: HandleError;\n  end;\nend.';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still reject tagged variant case inside record', () => {
+      const source = 'type\n  T = record\n    case Tag: Integer of\n      1: (x: Integer);\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect case with CRLF before arm label', () => {
+      const source = 'begin\r\n  case\r\n    MyLabel: DoSomething;\r\n  end;\r\nend.';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: \\s -> [ \\t] in variant case and class of patterns', () => {
+    // Tagless variant regex changed from /^\s+identifier\s+of\b/ to /^[ \t]+identifier[ \t]+of\b/
+    // so a newline between 'case' and 'Integer of' no longer suppresses the case block
+
+    test('should detect case as block when identifier-of is on the next line inside record', () => {
+      // With the old /^\s+/ regex, the newline would match \s and suppress case as tagless variant.
+      // With the fixed /^[ \t]+/ regex, the newline does NOT match, so case is a block opener.
+      const source = 'type\n  TRec = record\n    case\n      Integer of\n    0: (IntVal: Integer);\n  end;\nend';
+      const pairs = parser.parse(source);
+      // case is now treated as a block opener (not suppressed as tagless variant)
+      // record-end and case-end are two separate blocks
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should still suppress tagless variant case with identifier and of on same line inside record', () => {
+      // The horizontal-whitespace-only variant (same line) should still be suppressed
+      const source = 'type\n  TRec = record\n    case Integer of\n    0: (IntVal: Integer);\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect case as block when tag colon is on the next line inside record', () => {
+      // With the old /^\s+identifier\s*:/ regex, a newline after Tag would match \s.
+      // With the fixed /^[ \t]+identifier[ \t]*:/ regex, the newline does NOT match,
+      // so case is treated as a block opener.
+      const source = 'type\n  TRec = record\n    case Tag\n      : Integer of\n    0: (IntVal: Integer);\n  end;\nend';
+      const pairs = parser.parse(source);
+      // case is now a block opener because the colon is on the next line
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should still suppress tagged variant case with tag and colon on same line inside record', () => {
+      // Tagged variant with horizontal whitespace only should still be suppressed
+      const source = 'type\n  TRec = record\n    case Tag: Integer of\n      0: (IntVal: Integer);\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect class as block when of is on the next line', () => {
+      // 'class of' check changed from /^\s+of\b/ to /^[ \t]+of\b/
+      // A newline between 'class' and 'of' no longer matches the class-reference-type pattern
+      // Provide an extra 'end' so the class block can be matched (class...end and begin...end)
+      const source = 'type\n  TRef = class\n  of TBase;\nend;\nbegin\nend';
+      const pairs = parser.parse(source);
+      // 'class' is followed by newline then 'of', so it is NOT treated as 'class of' reference type
+      // It is treated as a class block opener, matching the first 'end'
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'class');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should still suppress class of on the same line as class reference type', () => {
+      // 'class of TBase' on the same line should still suppress class as a block
+      const source = 'type\n  TRef = class of TBase;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat class with comment on next line as forward declaration', () => {
+      // class followed by (* comment *) on next line should not enter forward declaration path
+      const source = 'type\n  TMyClass = class\n  (* comment *)\n  private\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  generateCommonTests(config);
 });

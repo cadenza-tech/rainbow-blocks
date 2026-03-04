@@ -31,8 +31,6 @@ suite('VerilogBlockParser Test Suite', () => {
     stringBlockClose: 'endmodule'
   };
 
-  generateCommonTests(config);
-
   suite('Simple blocks', () => {
     test('should parse module-endmodule block', () => {
       const source = `module counter;
@@ -681,7 +679,7 @@ end`;
     });
   });
 
-  suite('v7 bug fixes - control keyword chaining', () => {
+  suite('Control keyword chaining', () => {
     test('should not pair orphaned else with unrelated begin-end', () => {
       const source = `module test;
   always @(posedge clk)
@@ -1570,4 +1568,50 @@ endmodule`;
       assertSingleBlock(pairs, 'module', 'endmodule');
     });
   });
+
+  suite('Regression: preprocessor middle directives target correct block', () => {
+    test('should attach `else to `ifdef block, not begin block', () => {
+      const source = '`ifdef FEATURE\nbegin\n  a <= 1;\n`else\n  a <= 2;\nend\n`endif';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifdefBlock = findBlock(pairs, '`ifdef');
+      assert.ok(ifdefBlock.intermediates.some((t) => t.value === '`else'));
+      const beginBlock = findBlock(pairs, 'begin');
+      assert.strictEqual(beginBlock.intermediates.length, 0);
+    });
+
+    test('should attach default to case block, not surrounding begin', () => {
+      const source = "begin\n  case (sel)\n    2'b00: a = 1;\n    default: a = 0;\n  endcase\nend";
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.ok(caseBlock.intermediates.some((t) => t.value === 'default'));
+      const beginBlock = findBlock(pairs, 'begin');
+      assert.strictEqual(beginBlock.intermediates.length, 0);
+    });
+  });
+
+  suite('Regression: attribute string scan newline termination', () => {
+    test('should detect module/endmodule when attribute string is unterminated before newline', () => {
+      const source = '(* attr = "unterminated\n*) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should detect module/endmodule when attribute has a properly terminated string', () => {
+      const source = '(* attr = "proper string" *) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat cross-line identifier-colon as label in trySkipLabel', () => {
+      // identifier on one line and colon on next should not be matched as a label
+      const source = 'always @(posedge clk)\n  begin\n    x <= 1;\n  end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginEnd = findBlock(pairs, 'begin');
+      assert.strictEqual(beginEnd.closeKeyword.value, 'end');
+    });
+  });
+
+  generateCommonTests(config);
 });

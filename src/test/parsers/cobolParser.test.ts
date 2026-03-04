@@ -31,8 +31,6 @@ suite('CobolBlockParser Test Suite', () => {
     stringBlockClose: 'END-IF'
   };
 
-  generateCommonTests(config);
-
   suite('Simple blocks', () => {
     test('should parse PERFORM block', () => {
       const source = `PERFORM
@@ -1062,4 +1060,78 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
   });
+
+  suite('Regression: END-EXEC inside *> inline comment in EXEC block', () => {
+    test('should not end EXEC block prematurely when END-EXEC appears in *> inline comment', () => {
+      // Bug: matchExecBlock did not skip *> inline comments, so END-EXEC in a comment
+      // terminated the excluded region early, causing keywords after the comment to be visible.
+      const source = 'EXEC SQL\n  SELECT * FROM TABLE *> END-EXEC fake\n  WHERE ID = 1\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      // The IF/END-IF outside the EXEC block should be the only block found.
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should find the real END-EXEC after a *> inline comment containing END-EXEC', () => {
+      // Bug: the premature end caused the excluded region to stop at the comment line,
+      // so keywords inside the EXEC body after the comment were tokenized as live code.
+      const source = 'EXEC SQL\n  SELECT * FROM TABLE *> END-EXEC fake\n  PERFORM SOME-PROC\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      // PERFORM inside the EXEC block must remain excluded; only IF/END-IF should match.
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should skip END-EXEC in fixed-format column 7 comment line', () => {
+      // Column 7 comment indicator (*) means the whole line is a comment
+      const source = '       EXEC SQL\n      *    END-EXEC in comment\n           SELECT COL1\n       END-EXEC\n       IF X > 0\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should skip END-EXEC in fixed-format column 7 slash comment line', () => {
+      // Column 7 comment indicator (/) also denotes a comment line
+      const source = '       EXEC SQL\n      /    END-EXEC in comment\n       END-EXEC\n       IF X > 0\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Branch coverage: hyphenated identifiers', () => {
+    test('should not match keyword preceded by hyphen (e.g., X-IF)', () => {
+      const source = '       MOVE X-IF TO Y\n       IF X > 0\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not match keyword followed by hyphen (e.g., IF-X)', () => {
+      const source = '       MOVE IF-X TO Y\n       IF X > 0\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Branch coverage: fixed-format comment with tab', () => {
+    test('should handle tab in fixed-format sequence area', () => {
+      // Tab advances visual column; check that column 7 indicator is recognized
+      const source = '\t*     COMMENT LINE\n       IF X > 0\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat line as comment when tab overshoots column 6', () => {
+      // A tab from column 0 jumps to column 8, overshooting column 6
+      const source = '\tIF X > 0\n\tEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Branch coverage: EXEC block with CRLF', () => {
+    test('should handle CRLF inside EXEC block', () => {
+      const source = '       EXEC SQL\r\n       SELECT 1\r\n       END-EXEC\r\n       IF X > 0\r\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  generateCommonTests(config);
 });

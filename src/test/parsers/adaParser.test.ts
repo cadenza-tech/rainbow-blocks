@@ -445,29 +445,29 @@ end Read;`;
   suite('Access subprogram types', () => {
     test('should not treat access function as block open', () => {
       const pairs = parser.parse('declare\n  type Func_Ptr is access function (X : Integer) return Integer;\nbegin\n  null;\nend;');
-      assertSingleBlock(pairs, 'declare', 'end', 0);
+      assertSingleBlock(pairs, 'declare', 'end');
     });
 
     test('should not treat access procedure as block open', () => {
       const pairs = parser.parse('declare\n  type Proc_Ptr is access procedure (X : Integer);\nbegin\n  null;\nend;');
-      assertSingleBlock(pairs, 'declare', 'end', 0);
+      assertSingleBlock(pairs, 'declare', 'end');
     });
 
     test('should not treat access function with comment as block open', () => {
       const pairs = parser.parse('declare\n  type Func_Ptr is access -- callback\n    function (X : Integer) return Integer;\nbegin\n  null;\nend;');
-      assertSingleBlock(pairs, 'declare', 'end', 0);
+      assertSingleBlock(pairs, 'declare', 'end');
     });
 
     test('should not treat access procedure with comment as block open', () => {
       const pairs = parser.parse('declare\n  type Proc_Ptr is access -- handler\n    procedure (X : Integer);\nbegin\n  null;\nend;');
-      assertSingleBlock(pairs, 'declare', 'end', 0);
+      assertSingleBlock(pairs, 'declare', 'end');
     });
   });
 
   suite('Boolean operator or', () => {
     test('should not treat or in if condition as intermediate', () => {
       const pairs = parser.parse('if A or B then\n  null;\nend if;');
-      assertSingleBlock(pairs, 'if', 'end if', 0);
+      assertSingleBlock(pairs, 'if', 'end if');
       assert.strictEqual(pairs[0].intermediates.length, 1);
       assert.strictEqual(pairs[0].intermediates[0].value.toLowerCase(), 'then');
     });
@@ -476,7 +476,7 @@ end Read;`;
   suite('Type declaration is', () => {
     test('should not treat is in type declaration as intermediate', () => {
       const pairs = parser.parse('procedure Test is\n  type T is range 1 .. 10;\nbegin\n  null;\nend Test;');
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       assert.ok(!intermediates.includes('is') || intermediates.filter((v) => v === 'is').length === 1, 'should have at most one is intermediate');
     });
@@ -484,7 +484,7 @@ end Read;`;
     test('should not treat is on continuation line of type declaration as intermediate', () => {
       const source = 'procedure Test is\n  type My_Type\n    is range 1 .. 100;\nbegin\n  null;\nend Test;';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       // Only the 'is' after 'procedure Test' should be an intermediate, not the type 'is'
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
@@ -493,7 +493,7 @@ end Read;`;
     test('should not treat is in subtype declaration on continuation line as intermediate', () => {
       const source = 'procedure Test is\n  subtype S\n    is Integer range 1 .. 10;\nbegin\n  null;\nend Test;';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
@@ -658,7 +658,7 @@ end loop;`;
     test('should skip is in type declaration with \\r-only line endings', () => {
       const source = 'procedure Test is\r  type T is range 1 .. 10;\rbegin\r  null;\rend Test;';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
@@ -666,7 +666,7 @@ end loop;`;
     test('should skip is on continuation line with \\r-only line endings', () => {
       const source = 'procedure Test is\r  type My_Type\r    is range 1 .. 100;\rbegin\r  null;\rend Test;';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
@@ -709,7 +709,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('Bug 16: is separate on separate lines', () => {
@@ -720,7 +720,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('Bug 16: is new on separate lines', () => {
@@ -731,7 +731,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'package', 'end', 0);
+      assertSingleBlock(pairs, 'package', 'end');
     });
 
     test('Bug 16: is null on separate lines', () => {
@@ -742,19 +742,19 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('Bug 16: is abstract with CRLF line endings', () => {
       const source = 'procedure Test is\r\n  type T is\r\n    abstract tagged limited private;\r\nbegin\r\n  null;\r\nend Test;';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('Bug 16: is abstract with \\r-only line endings', () => {
       const source = 'procedure Test is\r  type T is\r    abstract tagged limited private;\rbegin\r  null;\rend Test;';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
   });
 
@@ -815,7 +815,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
@@ -830,7 +830,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
@@ -843,7 +843,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       // 'is' after procedure should count, and the standalone 'is' should also count
       // since 'X := 1;' is not a type/subtype declaration
@@ -860,7 +860,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('should not treat procedure with is <> as block opener', () => {
@@ -871,7 +871,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('should still treat procedure with is and body as block', () => {
@@ -880,7 +880,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
   });
 
@@ -1519,7 +1519,7 @@ begin
   null;
 end Outer;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('should skip comment between is and separate in procedure declaration', () => {
@@ -1530,7 +1530,7 @@ begin
   null;
 end Outer;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('should skip multi-line comment between is and new in function declaration', () => {
@@ -1541,7 +1541,7 @@ begin
   null;
 end Test;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'package', 'end', 0);
+      assertSingleBlock(pairs, 'package', 'end');
     });
 
     // Covers lines 190-192: if inside parentheses (Ada 2012 conditional expression)
@@ -1551,7 +1551,7 @@ begin
   X := (if Condition then 1 else 2);
 end P;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('should not reject if after function call parenthesis', () => {
@@ -1572,7 +1572,7 @@ begin
   null;
 end P;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       // Both 'is' after procedure and the standalone 'is' should be intermediates
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 2);
@@ -1588,7 +1588,7 @@ begin
   null;
 end P;`;
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
       // The is after procedure + the standalone is (with semicolon before it) = 2
       assert.strictEqual(intermediates.filter((v) => v === 'is').length, 2);
@@ -1620,7 +1620,7 @@ end P;`;
       // ( is preceded by ) from character literal, not identifier, so would be inside parens
       // But actually ) is not a-zA-Z0-9_ so the condition at line 672 is false -> return true
       // So the if inside ('a'(if...)) should be rejected as conditional expression
-      assertSingleBlock(pairs, 'procedure', 'end', 0);
+      assertSingleBlock(pairs, 'procedure', 'end');
     });
 
     test('should not treat if as conditional when preceded by function call paren', () => {
@@ -1925,6 +1925,43 @@ end if;`;
       const source = 'X := A or else B;';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: isValidProtectedOpen cross-line access match', () => {
+    test('should not suppress protected when access is on a previous line', () => {
+      const source = 'type Handler is access\nprotected type Controller is\n  entry Process;\nend Controller;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'protected');
+    });
+
+    test('should still suppress protected after access on the same line', () => {
+      const source = 'type Handler is access protected;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still suppress protected after access all on the same line', () => {
+      const source = 'type Handler is access all protected;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: isValidLoopOpen position-based pairing', () => {
+    test('should not treat loop as standalone when loop precedes for on the same line', () => {
+      const source = 'loop\n  for I in 1..10 loop\n    null;\n  end loop;\nend loop;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'loop');
+      findBlock(pairs, 'for');
+    });
+
+    test('should still detect standalone loop when for has its own loop', () => {
+      const source = 'for I in 1..10 loop\n  null;\nend loop;\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
     });
   });
 });

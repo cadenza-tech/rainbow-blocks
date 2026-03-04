@@ -231,19 +231,19 @@ end`;
     test('should handle hex escape in char literal', () => {
       // '\x41' is a valid Crystal char literal (hex for 'A')
       const pairs = parser.parse("x = '\\x41'\nif true\nend");
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
 
     test('should handle octal escape in char literal', () => {
       // '\o101' is a valid Crystal char literal (octal for 'A')
       const pairs = parser.parse("x = '\\o101'\nif true\nend");
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
 
     test('should handle legacy octal escape in char literal', () => {
       // '\101' is a valid Crystal char literal (legacy octal for 'A')
       const pairs = parser.parse("x = '\\101'\nif true\nend");
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -634,71 +634,69 @@ end`;
   });
 
   suite('Edge cases', () => {
-    suite('General', () => {
-      generateEdgeCaseTests(config);
+    generateEdgeCaseTests(config);
 
-      test('should handle for-end block', () => {
-        const source = `for i in 1..10
-  puts i
+    test('should handle for-end block', () => {
+      const source = `for i in 1..10
+puts i
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'for', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
 
-      test('should handle unless-end block', () => {
-        const source = `unless condition
-  action
+    test('should handle unless-end block', () => {
+      const source = `unless condition
+action
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'unless', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
 
-      test('should handle while-end block', () => {
-        const source = `while condition
-  action
+    test('should handle while-end block', () => {
+      const source = `while condition
+action
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'while', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
 
-      test('should handle until-end block', () => {
-        const source = `until condition
-  action
+    test('should handle until-end block', () => {
+      const source = `until condition
+action
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'until', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'until', 'end');
+    });
 
-      test('should handle complex real-world Crystal code', () => {
-        const source = `class Server
-  def initialize(@port : Int32)
-  end
+    test('should handle complex real-world Crystal code', () => {
+      const source = `class Server
+def initialize(@port : Int32)
+end
 
-  def start
-    server = TCPServer.new("localhost", @port)
-    while client = server.accept?
-      spawn do
-        handle_client(client)
-      end
-    end
-  rescue ex : Exception
-    puts ex.message
-  ensure
-    server.close if server
-  end
-
-  private def handle_client(client)
-    if message = client.gets
-      client.puts "Echo: #{message}"
+def start
+  server = TCPServer.new("localhost", @port)
+  while client = server.accept?
+    spawn do
+      handle_client(client)
     end
   end
-end`;
-        const pairs = parser.parse(source);
-        assert.ok(pairs.length >= 5);
+rescue ex : Exception
+  puts ex.message
+ensure
+  server.close if server
+end
 
-        const classPair = findBlock(pairs, 'class');
-        assert.strictEqual(classPair.nestLevel, 0);
-      });
+private def handle_client(client)
+  if message = client.gets
+    client.puts "Echo: #{message}"
+  end
+end
+end`;
+      const pairs = parser.parse(source);
+      assert.ok(pairs.length >= 5);
+
+      const classPair = findBlock(pairs, 'class');
+      assert.strictEqual(classPair.nestLevel, 0);
     });
 
     suite('Unterminated constructs', () => {
@@ -1374,35 +1372,35 @@ end`;
   suite('Loop separator do', () => {
     test('should not treat while-do as separate block', () => {
       const pairs = parser.parse('while condition do\n  action\nend');
-      assertSingleBlock(pairs, 'while', 'end', 0);
+      assertSingleBlock(pairs, 'while', 'end');
     });
 
     test('should not treat until-do as separate block', () => {
       const pairs = parser.parse('until condition do\n  action\nend');
-      assertSingleBlock(pairs, 'until', 'end', 0);
+      assertSingleBlock(pairs, 'until', 'end');
     });
 
     test('should not treat for-do as separate block', () => {
       const pairs = parser.parse('for item in collection do\n  action\nend');
-      assertSingleBlock(pairs, 'for', 'end', 0);
+      assertSingleBlock(pairs, 'for', 'end');
     });
 
     test('should still treat standalone do as block', () => {
       const pairs = parser.parse('[1, 2].each do |item|\n  puts item\nend');
-      assertSingleBlock(pairs, 'do', 'end', 0);
+      assertSingleBlock(pairs, 'do', 'end');
     });
   });
 
   suite('Rescue modifier', () => {
     test('should not treat inline rescue as intermediate', () => {
       const pairs = parser.parse('def foo\n  risky rescue nil\nend');
-      assertSingleBlock(pairs, 'def', 'end', 0);
+      assertSingleBlock(pairs, 'def', 'end');
       assert.strictEqual(pairs[0].intermediates.length, 0);
     });
 
     test('should still treat rescue as intermediate in begin block', () => {
       const pairs = parser.parse('begin\n  risky\nrescue\n  handle\nend');
-      assertSingleBlock(pairs, 'begin', 'end', 0);
+      assertSingleBlock(pairs, 'begin', 'end');
       assert.strictEqual(pairs[0].intermediates.length, 1);
     });
   });
@@ -3011,6 +3009,22 @@ end`;
 
     test('should still handle heredoc without backtick', () => {
       const source = 'x = <<-ONE + <<-TWO\ncontent one\nONE\ncontent two\nTWO\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: heredoc terminator with trailing whitespace', () => {
+    test('should not match terminator with trailing whitespace', () => {
+      // Crystal <<- strips leading whitespace but not trailing
+      const source = 'x = <<-EOF\nif true\nEOF   \nend\nEOF\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      // The heredoc includes "if true\nEOF   \nend\n" and terminates at bare "EOF"
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still match terminator with leading whitespace', () => {
+      const source = 'x = <<-EOF\ncontent\n  EOF\nif true\n  1\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });

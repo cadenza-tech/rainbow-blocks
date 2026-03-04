@@ -614,24 +614,24 @@ end loop;`;
   suite('Function/procedure declarations', () => {
     test('should not treat function declaration as block open', () => {
       const pairs = parser.parse('package my_pkg is\n  function add(a, b : integer) return integer;\nend;');
-      assertSingleBlock(pairs, 'package', 'end', 0);
+      assertSingleBlock(pairs, 'package', 'end');
     });
 
     test('should not treat procedure declaration as block open', () => {
       const pairs = parser.parse('package my_pkg is\n  procedure do_something(x : integer);\nend;');
-      assertSingleBlock(pairs, 'package', 'end', 0);
+      assertSingleBlock(pairs, 'package', 'end');
     });
 
     test('should still parse function with body as block', () => {
       const pairs = parser.parse('function add(a, b : integer) return integer is\nbegin\n  return a + b;\nend;');
-      assertSingleBlock(pairs, 'function', 'end', 0);
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 
   suite('Use entity', () => {
     test('should not treat use entity as block open', () => {
       const pairs = parser.parse('configuration cfg of test is\n  use entity work.impl;\nend configuration;');
-      assertSingleBlock(pairs, 'configuration', 'end configuration', 0);
+      assertSingleBlock(pairs, 'configuration', 'end configuration');
     });
   });
 
@@ -809,7 +809,7 @@ end architecture;`;
     });
   });
 
-  suite('v7 bug fixes', () => {
+  suite('Signal assignment and loop validation', () => {
     test('should not treat <= in preceding signal assignment as affecting later block', () => {
       const source = `process is
 begin
@@ -1740,6 +1740,91 @@ end entity;`;
       const source = 'label:\nentity work.my_ent;';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: multi-line for...generate loop detection', () => {
+    test('should treat loop as standalone when generate is on next line after for', () => {
+      // Bug: isValidLoopOpen only checked the same line as for/while for 'generate'.
+      // Multi-line for...generate failed - for was treated as a loop prefix instead of
+      // a generate prefix, causing the standalone loop inside to be rejected.
+      const source = `gen: for i in 0 to 3
+  generate
+    loop
+      null;
+    end loop;
+  end generate;`;
+      const pairs = parser.parse(source);
+      const loopPair = findBlock(pairs, 'loop');
+      assert.ok(loopPair, 'standalone loop should be recognized inside multi-line for...generate');
+      assert.strictEqual(loopPair.closeKeyword.value.toLowerCase(), 'end loop');
+    });
+
+    test('should treat loop as standalone when generate is on next line after while', () => {
+      // Same bug: while...generate split across lines.
+      const source = `gen: while condition
+  generate
+    loop
+      null;
+    end loop;
+  end generate;`;
+      const pairs = parser.parse(source);
+      const loopPair = findBlock(pairs, 'loop');
+      assert.ok(loopPair, 'standalone loop should be recognized inside multi-line while...generate');
+      assert.strictEqual(loopPair.closeKeyword.value.toLowerCase(), 'end loop');
+    });
+
+    test('should treat loop as standalone when generate is separated by multiple lines from for', () => {
+      const source = `gen: for i in 0 to 3
+  -- comment before generate
+  generate
+    loop
+      null;
+    end loop;
+  end generate;`;
+      const pairs = parser.parse(source);
+      const loopPair = findBlock(pairs, 'loop');
+      assert.ok(loopPair, 'standalone loop should be recognized when generate is separated by comment from for');
+    });
+
+    test('should still treat loop as part of for-loop when loop is on next line (no generate)', () => {
+      // Ensure the fix does not break the existing multi-line for...loop case.
+      const source = `for i in 0 to 3
+loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should not confuse generate in comment between for and loop as real generate', () => {
+      // If 'generate' only appears in a comment, for/while is still a loop prefix.
+      const source = `for i in 0 to 3 -- generate
+loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should reject entity after use with trailing comment on same line', () => {
+      // use followed by comment should still be recognized as direct instantiation
+      const source = 'use -- using entity\n  entity work.my_entity\n    port map (a => b);';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject entity after use with trailing comment on previous line', () => {
+      // Multi-line use with comment should still reject entity as block opener
+      const source = 'use -- comment\n  entity work.my_entity\n    port map (a => b);';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect entity as block opener without use prefix', () => {
+      const source = 'entity my_entity is\n  port (a : in std_logic);\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
     });
   });
 });

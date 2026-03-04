@@ -25,6 +25,15 @@ class TestBlockParser extends BaseBlockParser {
   }
 }
 
+// Parser that uses base class findExcludedRegions (via tryMatchExcludedRegion default)
+class DefaultExcludedRegionsParser extends BaseBlockParser {
+  protected readonly keywords: LanguageKeywords = {
+    blockOpen: ['if'] as const,
+    blockClose: ['end'] as const,
+    blockMiddle: [] as const
+  };
+}
+
 suite('BaseBlockParser Test Suite', () => {
   let parser: TestBlockParser;
 
@@ -181,6 +190,24 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
+    test('should not match keyword adjacent to Unicode letter (before)', () => {
+      const source = '\u03B1end\nif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match keyword adjacent to Unicode letter (after)', () => {
+      const source = 'do\u00E9\nif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should match keyword separated from Unicode letter by space', () => {
+      const source = '\u03B1 if\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
     test('should handle CR-only line endings', () => {
       const source = 'if true\rdo\r  x\rend\rend';
       const pairs = parser.parse(source);
@@ -204,6 +231,15 @@ end`;
       assert.ok(ifPair);
       assert.strictEqual(ifPair.openKeyword.line, 0);
       assert.strictEqual(ifPair.closeKeyword.line, 3);
+    });
+  });
+
+  suite('Default tryMatchExcludedRegion', () => {
+    test('should return null for all positions (no excluded regions)', () => {
+      const defaultParser = new DefaultExcludedRegionsParser();
+      const source = 'if x\nend';
+      const pairs = defaultParser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 });

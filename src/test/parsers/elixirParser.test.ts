@@ -348,7 +348,7 @@ end`;
     test('should not treat do with bare colon at end of line as do: one-liner', () => {
       // "do :" at end of line is not do: syntax
       const pairs = parser.parse('if condition do :\n  body\nend');
-      assertSingleBlock(pairs, 'if', 'end', 0);
+      assertSingleBlock(pairs, 'if', 'end');
     });
 
     test('should handle mixed do: and do-end', () => {
@@ -650,72 +650,70 @@ end`;
   });
 
   suite('Edge cases', () => {
-    suite('General', () => {
-      generateEdgeCaseTests(config);
+    generateEdgeCaseTests(config);
 
-      test('should handle multiple fn blocks', () => {
-        const source = `list
+    test('should handle multiple fn blocks', () => {
+      const source = `list
 |> Enum.map(fn x -> x * 2 end)
 |> Enum.filter(fn x -> x > 5 end)`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 2);
-        assert.ok(pairs.every((p) => p.openKeyword.value === 'fn'));
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.every((p) => p.openKeyword.value === 'fn'));
+    });
 
-      test('should handle complex real-world Elixir code', () => {
-        const source = `defmodule MyApp.User do
-  defstruct [:name, :email]
+    test('should handle complex real-world Elixir code', () => {
+      const source = `defmodule MyApp.User do
+defstruct [:name, :email]
 
-  def new(name, email) do
-    %__MODULE__{name: name, email: email}
+def new(name, email) do
+  %__MODULE__{name: name, email: email}
+end
+
+def validate(%__MODULE__{} = user) do
+  with {:ok, _} <- validate_name(user.name),
+       {:ok, _} <- validate_email(user.email) do
+    {:ok, user}
+  else
+    {:error, reason} -> {:error, reason}
   end
+end
 
-  def validate(%__MODULE__{} = user) do
-    with {:ok, _} <- validate_name(user.name),
-         {:ok, _} <- validate_email(user.email) do
-      {:ok, user}
-    else
-      {:error, reason} -> {:error, reason}
-    end
+defp validate_name(name) when is_binary(name) do
+  if String.length(name) > 0 do
+    {:ok, name}
+  else
+    {:error, :empty_name}
   end
-
-  defp validate_name(name) when is_binary(name) do
-    if String.length(name) > 0 do
-      {:ok, name}
-    else
-      {:error, :empty_name}
-    end
-  end
+end
 end`;
-        const pairs = parser.parse(source);
-        assert.ok(pairs.length >= 5);
+      const pairs = parser.parse(source);
+      assert.ok(pairs.length >= 5);
 
-        const modulePair = findBlock(pairs, 'defmodule');
-        assert.strictEqual(modulePair.nestLevel, 0);
-      });
+      const modulePair = findBlock(pairs, 'defmodule');
+      assert.strictEqual(modulePair.nestLevel, 0);
+    });
 
-      test('should handle empty defmodule', () => {
-        const source = `defmodule Empty do
+    test('should handle empty defmodule', () => {
+      const source = `defmodule Empty do
 end`;
-        const pairs = parser.parse(source);
-        assertSingleBlock(pairs, 'defmodule', 'end');
-      });
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmodule', 'end');
+    });
 
-      test('should handle deeply nested blocks', () => {
-        const source = `defmodule A do
-  def b do
-    if c do
-      case d do
-        _ -> fn e do
-          e
-        end
+    test('should handle deeply nested blocks', () => {
+      const source = `defmodule A do
+def b do
+  if c do
+    case d do
+      _ -> fn e do
+        e
       end
     end
   end
+end
 end`;
-        const pairs = parser.parse(source);
-        assertBlockCount(pairs, 5);
-      });
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 5);
     });
 
     suite('Triple-quoted strings', () => {
