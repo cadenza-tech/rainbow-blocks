@@ -3,15 +3,18 @@
 import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import { isForIn, isLoopDo, isPostfixConditional, isPostfixRescue, matchCharLiteral, matchHeredoc, matchMacroTemplate } from './crystalExcluded';
+import type { InterpolationHandlers } from './rubyFamilyHelpers';
 import {
   isRegexStart,
   matchBacktickString,
   matchInterpolatedString,
   matchPercentLiteral,
   matchRegexLiteral,
+  skipInterpolationShared,
   skipNestedBacktickString,
   skipNestedRegex,
-  skipNestedString
+  skipNestedString,
+  skipRegexInterpolationShared
 } from './rubyFamilyHelpers';
 
 // Valid Crystal regex flags
@@ -340,46 +343,7 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Skips #{} interpolation inside regex, tracking brace depth
   private skipRegexInterpolation(source: string, pos: number): number {
-    let depth = 1;
-    let i = pos;
-    while (i < source.length && depth > 0) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      // Handle # line comments (but not #{} interpolation)
-      if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      }
-      if (source[i] === '{') {
-        depth++;
-      } else if (source[i] === '}') {
-        depth--;
-      } else if (source[i] === '"') {
-        i = this.skipNestedString(source, i);
-        continue;
-      } else if (source[i] === "'") {
-        i = this.skipNestedString(source, i);
-        continue;
-      } else if (source[i] === '`') {
-        i = this.skipNestedBacktickString(source, i);
-        continue;
-      } else if (source[i] === '/' && this.isRegexInInterpolation(source, i, pos)) {
-        i = this.skipNestedRegex(source, i);
-        continue;
-      } else if (source[i] === '%' && i + 1 < source.length && !this.isModuloOperator(source, i)) {
-        const result = this.matchPercentLiteral(source, i);
-        if (result) {
-          i = result.end;
-          continue;
-        }
-      }
-      i++;
-    }
-    return i;
+    return skipRegexInterpolationShared(source, pos, this.interpolationHandlers);
   }
 
   // Checks if slash is regex start (not division)
@@ -415,77 +379,20 @@ export class CrystalBlockParser extends BaseBlockParser {
     return matchInterpolatedString(source, pos, (s, p) => this.skipInterpolation(s, p));
   }
 
-  // Skips #{} interpolation block, tracking brace depth
-  private skipInterpolation(source: string, pos: number): number {
-    let depth = 1;
-    let i = pos;
-    let heredocSkipEnd = -1;
-    while (i < source.length && depth > 0) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      // Handle # line comments (but not #{} interpolation)
-      if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      }
-      // At line break, skip pending heredoc body
-      if ((source[i] === '\n' || source[i] === '\r') && heredocSkipEnd > i) {
-        if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
-          i += 2;
-        } else {
-          i++;
-        }
-        i = heredocSkipEnd;
-        heredocSkipEnd = -1;
-        continue;
-      }
-      if (source[i] === '{') {
-        depth++;
-      } else if (source[i] === '}') {
-        depth--;
-      } else if (source[i] === '"') {
-        i = this.skipNestedString(source, i);
-        continue;
-      } else if (source[i] === "'") {
-        i = this.skipNestedString(source, i);
-        continue;
-      } else if (source[i] === '`') {
-        i = this.skipNestedBacktickString(source, i);
-        continue;
-      } else if (source[i] === '/' && this.isRegexInInterpolation(source, i, pos)) {
-        i = this.skipNestedRegex(source, i);
-        continue;
-      } else if (source[i] === '%' && i + 1 < source.length && !this.isModuloOperator(source, i)) {
-        const result = this.matchPercentLiteral(source, i);
-        if (result) {
-          i = result.end;
-          continue;
-        }
-      } else if (source[i] === '<' && i + 1 < source.length && source[i + 1] === '<' && heredocSkipEnd < 0) {
-        const heredocResult = matchHeredoc(source, i);
-        if (heredocResult) {
-          heredocSkipEnd = heredocResult.end;
-        }
-      }
-      i++;
-    }
-    return i;
+  private get interpolationHandlers(): InterpolationHandlers {
+    return {
+      skipNestedString: (s, p) => this.skipNestedString(s, p),
+      skipNestedBacktickString: (s, p) => this.skipNestedBacktickString(s, p),
+      skipNestedRegex: (s, p) => this.skipNestedRegex(s, p),
+      matchPercentLiteral: (s, p) => this.matchPercentLiteral(s, p),
+      isModuloOperator: (s, p) => this.isModuloOperator(s, p),
+      matchHeredoc: (s, p) => matchHeredoc(s, p)
+    };
   }
 
-  // Checks if / inside interpolation starts a regex (not division)
-  private isRegexInInterpolation(source: string, pos: number, interpStart: number): boolean {
-    if (pos === interpStart) return true;
-    let j = pos - 1;
-    while (j >= interpStart && (source[j] === ' ' || source[j] === '\t')) {
-      j--;
-    }
-    if (j < interpStart) return true;
-    // Operators and punctuation after which / starts a regex, not division
-    return /[(,=!~|&{[:;+\-*%<>^?]/.test(source[j]);
+  // Skips #{} interpolation block, tracking brace depth
+  private skipInterpolation(source: string, pos: number): number {
+    return skipInterpolationShared(source, pos, this.interpolationHandlers);
   }
 
   // Skips a regex literal inside interpolation

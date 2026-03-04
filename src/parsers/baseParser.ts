@@ -93,6 +93,11 @@ export abstract class BaseBlockParser {
       }
 
       const keyword = match[1];
+
+      // JavaScript \b only handles ASCII word boundaries, so check for adjacent Unicode letters
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, keyword.length)) {
+        continue;
+      }
       const type = this.getTokenType(keyword);
 
       // Validate block open keywords
@@ -261,6 +266,21 @@ export abstract class BaseBlockParser {
   // Checks if a position is at the start of a line
   protected isAtLineStart(source: string, pos: number): boolean {
     return pos === 0 || source[pos - 1] === '\n' || source[pos - 1] === '\r';
+  }
+
+  // Checks if a keyword match is adjacent to a non-ASCII Unicode letter
+  // JavaScript \b treats non-ASCII letters as non-word characters, causing false matches like `αend`
+  protected isAdjacentToUnicodeLetter(source: string, startOffset: number, keywordLength: number): boolean {
+    if (startOffset > 0) {
+      const before = source[startOffset - 1];
+      if (!/\w/.test(before) && /\p{L}/u.test(before)) return true;
+    }
+    const afterPos = startOffset + keywordLength;
+    if (afterPos < source.length) {
+      const after = source[afterPos];
+      if (!/\w/.test(after) && /\p{L}/u.test(after)) return true;
+    }
+    return false;
   }
 
   // Escapes regex metacharacters in a string

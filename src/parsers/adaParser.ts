@@ -206,7 +206,7 @@ export class AdaBlockParser extends BaseBlockParser {
   // Validates 'protected': access types and forward declarations are not blocks
   private isValidProtectedOpen(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
     const textBefore = source.slice(0, position);
-    const accessMatch = textBefore.match(/\b(access)(\s+(all|constant))?\s*$/i);
+    const accessMatch = textBefore.match(/\b(access)([ \t]+(all|constant))?[ \t]*$/i);
     if (accessMatch) {
       const accessPos = position - accessMatch[0].length + accessMatch[0].indexOf(accessMatch[1]);
       if (!this.isInExcludedRegion(accessPos, excludedRegions)) {
@@ -230,11 +230,11 @@ export class AdaBlockParser extends BaseBlockParser {
     const afterFor = source.slice(position + 3);
     // for X'Attribute use ... (attribute representation clause)
     // Also handles dotted names like Pkg.Type'Size
-    if (/^\s+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*\s*'/.test(afterFor)) {
+    if (/^[ \t]+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*[ \t]*'/.test(afterFor)) {
       return false;
     }
     // for T use record ... end record; or for Color use (...);
-    if (/^\s+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*\s+use\b/i.test(afterFor)) {
+    if (/^[ \t]+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*[ \t]+use\b/i.test(afterFor)) {
       return false;
     }
     return true;
@@ -274,16 +274,31 @@ export class AdaBlockParser extends BaseBlockParser {
         }
       }
       if (prefixCount > 0) {
-        // Count non-excluded 'loop' keywords on the same line
-        let loopCount = 0;
-        for (const loopMatch of lineText.matchAll(/\bloop\b/gi)) {
-          const loopAbsPos = lineStartOffset + loopMatch.index;
-          if (!this.isInExcludedRegion(loopAbsPos, excludedRegions)) {
-            loopCount++;
+        // Find the rightmost non-excluded for/while position on this line
+        let lastPrefixEnd = -1;
+        for (const prefix of LOOP_PREFIX_KEYWORDS) {
+          const pattern = new RegExp(`\\b${prefix}\\b`, 'gi');
+          for (const prefixMatch of lineText.matchAll(pattern)) {
+            const absolutePos = lineStartOffset + prefixMatch.index;
+            if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
+              const end = prefixMatch.index + prefix.length;
+              if (end > lastPrefixEnd) lastPrefixEnd = end;
+            }
           }
         }
-        // If all for/while are already paired with loops, this loop is standalone
-        return loopCount >= prefixCount;
+        // Check if any non-excluded 'loop' appears AFTER the rightmost for/while
+        let hasLoopAfterPrefix = false;
+        for (const loopMatch of lineText.matchAll(/\bloop\b/gi)) {
+          if (loopMatch.index >= lastPrefixEnd) {
+            const loopAbsPos = lineStartOffset + loopMatch.index;
+            if (!this.isInExcludedRegion(loopAbsPos, excludedRegions)) {
+              hasLoopAfterPrefix = true;
+              break;
+            }
+          }
+        }
+        // If the rightmost for/while already has a loop after it, this loop is standalone
+        return hasLoopAfterPrefix;
       }
 
       // Stop at a previous statement (indicated by semicolon not in excluded region)
@@ -568,7 +583,7 @@ export class AdaBlockParser extends BaseBlockParser {
           const closeValue = token.value.toLowerCase();
 
           // Check if it's a compound end
-          const compoundMatch = closeValue.match(/^end\s+(\S+)/);
+          const compoundMatch = closeValue.match(/^end[ \t]+(\S+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
             let matchIndex = -1;

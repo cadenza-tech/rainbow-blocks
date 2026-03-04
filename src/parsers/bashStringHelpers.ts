@@ -2,112 +2,7 @@
 
 import type { ExcludedRegion } from '../types';
 
-// Checks if '#' at position is a comment start (at word boundary, not mid-word)
-export function isCommentStart(source: string, pos: number): boolean {
-  if (pos === 0) return true;
-  const prev = source[pos - 1];
-  // $ before # is handled separately (for $#, ${#, $$# special cases)
-  if (prev === '$') return true;
-  // # after shell metacharacters or whitespace starts a comment
-  // Note: < and > are excluded because >#file and <#file are redirects to files starting with #
-  return /[\s;|&(){}]/.test(prev);
-}
-
-// Checks if source has a whole word match at position
-export function matchesWord(source: string, pos: number, word: string): boolean {
-  if (pos + word.length > source.length) return false;
-  if (source.slice(pos, pos + word.length) !== word) return false;
-  if (pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) return false;
-  const after = pos + word.length;
-  if (after < source.length && /[a-zA-Z0-9_]/.test(source[after])) return false;
-  return true;
-}
-
-// Parses a heredoc operator at position and extracts delimiter info
-// Returns null if the position is not a valid heredoc operator
-export function parseHeredocOperator(source: string, pos: number): { stripTabs: boolean; terminator: string; matchLength: number } | null {
-  // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, etc.
-  const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])(.*?)\2|([A-Za-z_][A-Za-z0-9_\-.]*))(?=[^A-Za-z0-9_\-.]|$)/;
-  const match = source.slice(pos).match(heredocPattern);
-  if (!match) return null;
-  return {
-    stripTabs: match[1] === '-',
-    terminator: match[3] ?? match[4],
-    matchLength: match[0].length
-  };
-}
-
-// Matches a heredoc body starting from a given position (after a previous heredoc body)
-export function matchHeredocBody(source: string, bodyStart: number, stripTabs: boolean, terminator: string): ExcludedRegion | null {
-  let i = bodyStart;
-
-  while (i < source.length) {
-    const lineStart = i;
-    let lineEnd = i;
-    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-      lineEnd++;
-    }
-
-    const line = source.slice(lineStart, lineEnd);
-    const trimmedLine = stripTabs ? line.replace(/^\t*/, '') : line;
-
-    if (trimmedLine === terminator) {
-      let regionEnd = lineEnd;
-      if (regionEnd < source.length) {
-        if (source[regionEnd] === '\r' && regionEnd + 1 < source.length && source[regionEnd + 1] === '\n') {
-          regionEnd += 2;
-        } else {
-          regionEnd += 1;
-        }
-      }
-      return {
-        start: bodyStart,
-        end: regionEnd
-      };
-    }
-
-    // Skip past line ending
-    if (lineEnd < source.length) {
-      if (source[lineEnd] === '\r' && lineEnd + 1 < source.length && source[lineEnd + 1] === '\n') {
-        i = lineEnd + 2;
-      } else {
-        i = lineEnd + 1;
-      }
-    } else {
-      i = lineEnd;
-    }
-  }
-
-  return { start: bodyStart, end: source.length };
-}
-
-// Matches $'...' ANSI-C quoting
-export function matchDollarSingleQuote(source: string, pos: number): ExcludedRegion {
-  let i = pos + 2;
-  while (i < source.length) {
-    if (source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
-    }
-    if (source[i] === "'") {
-      return { start: pos, end: i + 1 };
-    }
-    i++;
-  }
-  return { start: pos, end: source.length };
-}
-
-// Matches single-quoted string (no escape sequences in bash single quotes)
-export function matchSingleQuotedString(source: string, pos: number): ExcludedRegion {
-  let i = pos + 1;
-  while (i < source.length) {
-    if (source[i] === "'") {
-      return { start: pos, end: i + 1 };
-    }
-    i++;
-  }
-  return { start: pos, end: source.length };
-}
+import { findSingleQuoteEnd, isCommentStart, matchDollarSingleQuote, matchesWord, matchHeredocBody, parseHeredocOperator } from './bashLeafHelpers';
 
 // Matches backtick command substitution with limited escape handling
 export function matchBacktickCommand(source: string, pos: number): ExcludedRegion {
@@ -129,34 +24,6 @@ export function matchBacktickCommand(source: string, pos: number): ExcludedRegio
   return { start: pos, end: source.length };
 }
 
-// Finds end of double-quoted string with escape sequence handling
-export function findStringEnd(source: string, pos: number, quote: string): number {
-  let i = pos + 1;
-  while (i < source.length) {
-    if (source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
-    }
-    if (source[i] === quote) {
-      return i + 1;
-    }
-    i++;
-  }
-  return source.length;
-}
-
-// Finds end of single-quoted string (no escapes)
-export function findSingleQuoteEnd(source: string, pos: number): number {
-  let i = pos + 1;
-  while (i < source.length) {
-    if (source[i] === "'") {
-      return i + 1;
-    }
-    i++;
-  }
-  return source.length;
-}
-
 // Matches arithmetic bracket $[...] (deprecated syntax)
 export function matchArithmeticBracket(source: string, pos: number): ExcludedRegion {
   let i = pos + 2;
@@ -167,7 +34,7 @@ export function matchArithmeticBracket(source: string, pos: number): ExcludedReg
 
     // Skip strings inside arithmetic bracket
     if (char === '"') {
-      i = findStringEnd(source, i, '"');
+      i = findBashDoubleQuoteEnd(source, i);
       continue;
     }
     if (char === "'") {
@@ -331,7 +198,7 @@ export function matchParameterExpansion(source: string, pos: number): ExcludedRe
 }
 
 // Matches arithmetic expansion $((...)) with string skipping
-export function matchArithmeticExpansion(source: string, pos: number): ExcludedRegion {
+function matchArithmeticExpansion(source: string, pos: number): ExcludedRegion {
   let i = pos + 3;
   let depth = 2;
 
@@ -506,7 +373,7 @@ export function matchBashDoubleQuote(source: string, pos: number): ExcludedRegio
 
 // Finds end of double-quoted string with Bash-aware handling for $(), ${}, single quotes, and backticks
 // Used inside matchCommandSubstitution and matchProcessSubstitution where nested constructs matter
-export function findBashDoubleQuoteEnd(source: string, pos: number): number {
+function findBashDoubleQuoteEnd(source: string, pos: number): number {
   let i = pos + 1;
   while (i < source.length) {
     const char = source[i];
@@ -662,6 +529,34 @@ export function matchCommandSubstitution(source: string, pos: number): ExcludedR
         continue;
       }
       depth--;
+      // Flush pending heredocs when closing $() before a newline is encountered
+      if (depth === 0 && pendingHeredocs.length > 0) {
+        i++;
+        // Find the next newline after the closing )
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        if (i < source.length) {
+          let bodyStart = i + 1;
+          if (source[i] === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
+            bodyStart++;
+          }
+          for (const hd of pendingHeredocs) {
+            const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator);
+            bodyStart = body ? body.end : bodyStart;
+          }
+          // Exclude the trailing newline so isAtCommandPosition can see the line boundary
+          if (bodyStart > pos && source[bodyStart - 1] === '\n') {
+            bodyStart--;
+            if (bodyStart > pos && source[bodyStart - 1] === '\r') {
+              bodyStart--;
+            }
+          }
+          return { start: pos, end: bodyStart };
+        }
+        pendingHeredocs.length = 0;
+        return { start: pos, end: i };
+      }
     }
     i++;
   }
@@ -772,6 +667,33 @@ export function matchProcessSubstitution(source: string, pos: number): ExcludedR
         continue;
       }
       depth--;
+      // Flush pending heredocs when closing >() or <() before a newline is encountered
+      if (depth === 0 && pendingHeredocs.length > 0) {
+        i++;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        if (i < source.length) {
+          let bodyStart = i + 1;
+          if (source[i] === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
+            bodyStart++;
+          }
+          for (const hd of pendingHeredocs) {
+            const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator);
+            bodyStart = body ? body.end : bodyStart;
+          }
+          // Exclude the trailing newline so isAtCommandPosition can see the line boundary
+          if (bodyStart > pos && source[bodyStart - 1] === '\n') {
+            bodyStart--;
+            if (bodyStart > pos && source[bodyStart - 1] === '\r') {
+              bodyStart--;
+            }
+          }
+          return { start: pos - 1, end: bodyStart };
+        }
+        pendingHeredocs.length = 0;
+        return { start: pos - 1, end: i };
+      }
     }
     i++;
   }

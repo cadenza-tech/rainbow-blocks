@@ -91,7 +91,7 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
 }
 
 // Skips a string inside macro template, returning position after closing quote
-export function skipMacroString(source: string, pos: number, quote: string): number {
+function skipMacroString(source: string, pos: number, quote: string): number {
   let i = pos + 1;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
@@ -252,8 +252,7 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
 
     const line = source.slice(contentLineStart, contentLineEnd);
 
-    // Crystal <<- always allows indented terminators
-    // Also trim trailing whitespace so "  EOF  " matches terminator "EOF"
+    // Crystal <<- always allows indented terminators (strip whitespace)
     const trimmedLine = line.trim();
 
     if (trimmedLine === terminators[terminatorIndex].terminator) {
@@ -427,7 +426,7 @@ export function isForIn(source: string, position: number, excludedRegions: Exclu
     before = rawBefore.slice(lastSemicolon + 1).replace(/\\\r?\n|\\\r/g, ' ');
   }
   // Check if this statement starts with 'for'
-  return /^\s*for\b/.test(before);
+  return /^[ \t]*for\b/.test(before);
 }
 
 // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener

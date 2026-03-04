@@ -67,7 +67,7 @@ export class MatlabBlockParser extends BaseBlockParser {
     while (beforePos >= 0 && (source[beforePos] === ' ' || source[beforePos] === '\t')) {
       beforePos--;
     }
-    if (beforePos < 0 || source[beforePos] === '\n') {
+    if (beforePos < 0 || source[beforePos] === '\n' || source[beforePos] === '\r') {
       // At start of line followed by '(' - function call like properties(obj)
       // But classdef section keywords at line start with '(' after are also
       // valid as access modifiers: properties (Access = public)
@@ -283,7 +283,7 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Matches block comment: %{ ... %} with nesting support
-  private matchBlockComment(source: string, pos: number): ExcludedRegion {
+  protected matchBlockComment(source: string, pos: number): ExcludedRegion {
     let i = pos + 2;
     let depth = 1;
 

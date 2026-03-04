@@ -379,7 +379,7 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     // Skip whitespace after identifier
     let afterIdent = i;
-    while (afterIdent < source.length && /\s/.test(source[afterIdent])) afterIdent++;
+    while (afterIdent < source.length && /[ \t]/.test(source[afterIdent])) afterIdent++;
     if (afterIdent < source.length && source[afterIdent] === ':' && (afterIdent + 1 >= source.length || source[afterIdent + 1] !== ':')) {
       return afterIdent + 1;
     }
@@ -514,17 +514,17 @@ export class VerilogBlockParser extends BaseBlockParser {
   private matchAttribute(source: string, pos: number): ExcludedRegion | null {
     let i = pos + 2;
     while (i < source.length) {
-      // Skip string literals inside attributes
+      // Skip string literals inside attributes (terminate at newlines like Verilog strings)
       if (source[i] === '"') {
         i++;
-        while (i < source.length && source[i] !== '"') {
+        while (i < source.length && source[i] !== '"' && source[i] !== '\n' && source[i] !== '\r') {
           if (source[i] === '\\' && i + 1 < source.length) {
             i += 2;
             continue;
           }
           i++;
         }
-        if (i < source.length) i++;
+        if (i < source.length && source[i] === '"') i++;
         continue;
       }
       if (source[i] === '*' && i + 1 < source.length && source[i + 1] === ')') {
@@ -627,11 +627,21 @@ export class VerilogBlockParser extends BaseBlockParser {
           stack.push({ token, intermediates: [] });
           break;
 
-        case 'block_middle':
+        case 'block_middle': {
           if (stack.length > 0) {
-            stack[stack.length - 1].intermediates.push(token);
+            const isPreprocessorMiddle = token.value.startsWith('`');
+            // Find the correct block to attach this intermediate to
+            for (let si = stack.length - 1; si >= 0; si--) {
+              const openerValue = stack[si].token.value;
+              const isPreprocessorBlock = openerValue.startsWith('`');
+              if (isPreprocessorMiddle === isPreprocessorBlock) {
+                stack[si].intermediates.push(token);
+                break;
+              }
+            }
           }
           break;
+        }
 
         case 'block_close': {
           const closeValue = token.value;

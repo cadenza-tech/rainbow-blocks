@@ -25,7 +25,7 @@ const COMPOUND_END_TYPES = [
 ];
 
 // Pattern to match compound end keywords (case insensitive)
-// Allow newlines between 'end' and the type keyword (e.g., end\nprocess)
+// Only allow spaces/tabs between 'end' and the type keyword (same line only)
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 // Keywords that can be followed by 'loop' or 'generate'
@@ -106,7 +106,7 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
     // Check previous lines for 'wait' (multi-line wait for, skip blank lines)
-    if (/^\s*$/.test(lineBefore) && lastNewline > 0) {
+    if (/^[ \t]*$/.test(lineBefore) && lastNewline > 0) {
       let scanEnd = lastNewline;
       // Skip the \r in \r\n pairs
       if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
@@ -116,7 +116,7 @@ export class VhdlBlockParser extends BaseBlockParser {
         const prevNl = Math.max(textBefore.lastIndexOf('\n', scanEnd - 1), textBefore.lastIndexOf('\r', scanEnd - 1));
         const rawPrevLine = textBefore.slice(prevNl + 1, scanEnd);
         const prevLine = rawPrevLine.trimStart();
-        if (/^\s*$/.test(prevLine)) {
+        if (/^[ \t]*$/.test(prevLine)) {
           if (prevNl <= 0) break;
           scanEnd = prevNl;
           if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
@@ -139,12 +139,15 @@ export class VhdlBlockParser extends BaseBlockParser {
   private isValidEntityOrConfigOpen(lowerKeyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const textBefore = source.slice(0, position).toLowerCase();
     const lastNl = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
-    const lineBefore = textBefore.slice(lastNl + 1);
-    if (/\buse[ \t]+$/.test(lineBefore)) {
+    const rawLineBefore = textBefore.slice(lastNl + 1);
+    const lineBefore = rawLineBefore.trimStart();
+    const trimOffset = rawLineBefore.length - lineBefore.length;
+    const lineBeforeNoComment = this.stripTrailingComment(lineBefore, lastNl + 1 + trimOffset, excludedRegions);
+    if (/\buse[ \t]+$/.test(lineBeforeNoComment)) {
       return false;
     }
     // Check previous lines for 'use' (multi-line use entity/configuration)
-    if (/^\s*$/.test(lineBefore.trim()) && lastNl > 0) {
+    if (/^[ \t]*$/.test(lineBeforeNoComment) && lastNl > 0) {
       let scanEnd = lastNl;
       if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
         scanEnd--;
@@ -152,8 +155,9 @@ export class VhdlBlockParser extends BaseBlockParser {
       for (let attempt = 0; attempt < 5; attempt++) {
         const prevNl = Math.max(textBefore.lastIndexOf('\n', scanEnd - 1), textBefore.lastIndexOf('\r', scanEnd - 1));
         const prevLine = textBefore.slice(prevNl + 1, scanEnd);
-        const trimmedPrev = prevLine.trim();
-        if (trimmedPrev.length === 0) {
+        const trimmedPrev = prevLine.trimStart();
+        const prevTrimOffset = prevLine.length - trimmedPrev.length;
+        if (trimmedPrev.trim().length === 0) {
           if (prevNl <= 0) break;
           scanEnd = prevNl;
           if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
@@ -161,10 +165,11 @@ export class VhdlBlockParser extends BaseBlockParser {
           }
           continue;
         }
-        const useMatch = trimmedPrev.match(/\buse[ \t]*$/);
+        const prevNoComment = this.stripTrailingComment(trimmedPrev, prevNl + 1 + prevTrimOffset, excludedRegions);
+        const useMatch = prevNoComment.match(/\buse[ \t]*$/);
         if (useMatch && useMatch.index !== undefined) {
           // Check that the 'use' is not inside an excluded region (e.g., comment)
-          const useOffset = prevNl + 1 + (prevLine.length - trimmedPrev.length) + useMatch.index;
+          const useOffset = prevNl + 1 + prevTrimOffset + useMatch.index;
           if (!this.isInExcludedRegion(useOffset, excludedRegions)) {
             return false;
           }
@@ -173,14 +178,14 @@ export class VhdlBlockParser extends BaseBlockParser {
       }
     }
     if (lowerKeyword === 'entity') {
-      const colonMatch = lineBefore.match(/:\s*$/);
+      const colonMatch = lineBeforeNoComment.match(/:[ \t]*$/);
       if (colonMatch) {
-        const colonOffset = lastNl + 1 + (lineBefore.length - colonMatch[0].length);
+        const colonOffset = lastNl + 1 + trimOffset + (lineBeforeNoComment.length - colonMatch[0].length);
         if (!this.isInExcludedRegion(colonOffset, excludedRegions)) {
           return false;
         }
       }
-      if (/^\s*$/.test(lineBefore.trimEnd()) && lastNl > 0) {
+      if (/^[ \t]*$/.test(lineBeforeNoComment) && lastNl > 0) {
         // Skip the \r in \r\n pair to avoid finding the same line ending
         let searchEnd = lastNl - 1;
         if (searchEnd >= 0 && textBefore[searchEnd] === '\r') {
@@ -188,7 +193,7 @@ export class VhdlBlockParser extends BaseBlockParser {
         }
         const prevNl = Math.max(textBefore.lastIndexOf('\n', searchEnd), textBefore.lastIndexOf('\r', searchEnd));
         const prevLine = textBefore.slice(prevNl + 1, lastNl);
-        const prevColonMatch = prevLine.match(/:\s*$/);
+        const prevColonMatch = prevLine.match(/:[ \t]*$/);
         if (prevColonMatch) {
           const prevColonOffset = prevNl + 1 + (prevLine.length - prevColonMatch[0].length);
           if (!this.isInExcludedRegion(prevColonOffset, excludedRegions)) {
@@ -266,12 +271,13 @@ export class VhdlBlockParser extends BaseBlockParser {
           if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
             continue;
           }
-          // Check if 'generate' appears on the same line (not in excluded region)
-          // If so, the for/while is a generate prefix, not a loop prefix
+          // Check if 'generate' appears between the for/while and 'loop' (not in excluded region)
+          // Must check all lines between prefix and loop, since generate may be on a different line
+          const textBetween = source.slice(absolutePos, position).toLowerCase();
           const generatePattern = /\bgenerate\b/g;
           let isGeneratePrefix = false;
-          for (const genMatch of lineText.matchAll(generatePattern)) {
-            const genAbsPos = lineStartOffset + genMatch.index;
+          for (const genMatch of textBetween.matchAll(generatePattern)) {
+            const genAbsPos = absolutePos + genMatch.index;
             if (!this.isInExcludedRegion(genAbsPos, excludedRegions)) {
               isGeneratePrefix = true;
               break;
@@ -679,7 +685,7 @@ export class VhdlBlockParser extends BaseBlockParser {
           const closeValue = token.value.toLowerCase();
 
           // Check if it's a compound end
-          const compoundMatch = closeValue.match(/^end\s+(\S+)/);
+          const compoundMatch = closeValue.match(/^end[ \t]+(\S+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
 

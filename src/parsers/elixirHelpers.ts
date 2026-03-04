@@ -14,7 +14,7 @@ const SIGIL_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 };
 
 // Returns matching close delimiter for sigils
-export function getSigilCloseDelimiter(open: string): string | null {
+function getSigilCloseDelimiter(open: string): string | null {
   if (open in SIGIL_PAIRED_DELIMITERS) {
     return SIGIL_PAIRED_DELIMITERS[open];
   }

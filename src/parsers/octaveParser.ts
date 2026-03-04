@@ -185,14 +185,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Block comment: %{ ... %} (MATLAB style, at line start with optional whitespace, no trailing content)
     if (char === '%' && pos + 1 < source.length && source[pos + 1] === '{') {
       if (this.isAtLineStartWithWhitespace(source, pos) && this.isOctaveBlockCommentStart(source, pos)) {
-        return this.matchMatlabBlockComment(source, pos);
+        return this.matchBlockComment(source, pos);
       }
     }
 
     // Block comment: #{ ... #} (Octave style, at line start with optional whitespace, no trailing content)
     if (char === '#' && pos + 1 < source.length && source[pos + 1] === '{') {
       if (this.isAtLineStartWithWhitespace(source, pos) && this.isOctaveBlockCommentStart(source, pos)) {
-        return this.matchOctaveBlockComment(source, pos);
+        return this.matchBlockComment(source, pos);
       }
     }
 
@@ -236,67 +236,23 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return true;
   }
 
-  // Matches MATLAB-style block comment: %{ ... %} with nesting support
-  private matchMatlabBlockComment(source: string, pos: number): ExcludedRegion {
+  // Overrides parent to support cross-type delimiters: %{/%} and #{/#} are interchangeable in Octave
+  protected override matchBlockComment(source: string, pos: number): ExcludedRegion {
     let i = pos + 2;
     let depth = 1;
 
     while (i < source.length) {
-      if (source[i] === '%' && i + 1 < source.length && source[i + 1] === '{') {
+      // Check for nested block comment opener: %{ or #{
+      if ((source[i] === '%' || source[i] === '#') && i + 1 < source.length && source[i + 1] === '{') {
         if (this.isAtLineStartWithWhitespace(source, i) && this.isOctaveBlockCommentStart(source, i)) {
           depth++;
           i += 2;
           continue;
         }
       }
-      if (source[i] === '%' && i + 1 < source.length && source[i + 1] === '}') {
+      // Check for block comment closer: %} or #}
+      if ((source[i] === '%' || source[i] === '#') && i + 1 < source.length && source[i + 1] === '}') {
         if (this.isAtLineStartWithWhitespace(source, i)) {
-          // Verify no trailing content after %}
-          let trailingPos = i + 2;
-          let hasTrailingContent = false;
-          while (trailingPos < source.length && source[trailingPos] !== '\n' && source[trailingPos] !== '\r') {
-            if (source[trailingPos] !== ' ' && source[trailingPos] !== '\t') {
-              hasTrailingContent = true;
-              break;
-            }
-            trailingPos++;
-          }
-          if (!hasTrailingContent) {
-            depth--;
-            if (depth === 0) {
-              let lineEnd = i + 2;
-              while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-                lineEnd++;
-              }
-              return { start: pos, end: lineEnd };
-            }
-            i += 2;
-            continue;
-          }
-        }
-      }
-      i++;
-    }
-
-    return { start: pos, end: source.length };
-  }
-
-  // Matches Octave-style block comment: #{ ... #} with nesting support
-  private matchOctaveBlockComment(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-    let depth = 1;
-
-    while (i < source.length) {
-      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
-        if (this.isAtLineStartWithWhitespace(source, i) && this.isOctaveBlockCommentStart(source, i)) {
-          depth++;
-          i += 2;
-          continue;
-        }
-      }
-      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '}') {
-        if (this.isAtLineStartWithWhitespace(source, i)) {
-          // Verify no trailing content after #}
           let trailingPos = i + 2;
           let hasTrailingContent = false;
           while (trailingPos < source.length && source[trailingPos] !== '\n' && source[trailingPos] !== '\r') {

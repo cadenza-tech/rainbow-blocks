@@ -2,20 +2,16 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { isCommentStart, matchDollarSingleQuote, matchHeredocBody, matchSingleQuotedString, parseHeredocOperator } from './bashLeafHelpers';
 import {
-  isCommentStart,
   matchArithmeticBracket,
   matchBacktickCommand,
   matchBareArithmeticEvaluation,
   matchBashDoubleQuote,
   matchCommandSubstitution,
-  matchDollarSingleQuote,
   matchHeredoc,
-  matchHeredocBody,
   matchParameterExpansion,
-  matchProcessSubstitution,
-  matchSingleQuotedString,
-  parseHeredocOperator
+  matchProcessSubstitution
 } from './bashStringHelpers';
 import { findLastOpenerByType, findLineStart } from './parserUtils';
 
@@ -202,8 +198,42 @@ export class BashBlockParser extends BaseBlockParser {
       }
     }
 
-    // At start of file or after line ending (\n or \r)
-    if (i < 0 || source[i] === '\n' || source[i] === '\r') {
+    // Follow backslash line continuations: if line ends with \<newline>, continue scanning the previous line
+    while (i >= 0 && (source[i] === '\n' || source[i] === '\r')) {
+      // Check for \<newline> continuation
+      let beforeNewline = i - 1;
+      if (source[i] === '\n' && beforeNewline >= 0 && source[beforeNewline] === '\r') {
+        beforeNewline--;
+      }
+      if (beforeNewline >= 0 && source[beforeNewline] === '\\') {
+        // Backslash continuation: skip \ and continue scanning the previous line
+        i = beforeNewline - 1;
+        while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+          i--;
+        }
+        // Skip excluded regions again after crossing line continuation
+        let skippedAgain = true;
+        while (skippedAgain) {
+          skippedAgain = false;
+          for (const region of excludedRegions) {
+            if (i >= region.start && i < region.end) {
+              i = region.start - 1;
+              skippedAgain = true;
+              while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+                i--;
+              }
+              break;
+            }
+          }
+        }
+      } else {
+        // Normal line ending (not a continuation) -> keyword is at command position
+        return true;
+      }
+    }
+
+    // At start of file
+    if (i < 0) {
       return true;
     }
 
@@ -341,7 +371,7 @@ export class BashBlockParser extends BaseBlockParser {
           }
           const lineStart = findLineStart(source, k);
           const textBefore = source.slice(lineStart, k);
-          if (/^\s*$/.test(textBefore) || /;;\s*$|;&\s*$|;;&\s*$/.test(textBefore)) {
+          if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore)) {
             return true;
           }
           return false;
@@ -359,7 +389,7 @@ export class BashBlockParser extends BaseBlockParser {
     if (k >= 0 && source[k] === '(') {
       const lineStart = findLineStart(source, k);
       const textBefore = source.slice(lineStart, k);
-      if (/^\s*$/.test(textBefore) || /;;\s*$|;&\s*$|;;&\s*$/.test(textBefore)) {
+      if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore)) {
         return true;
       }
     }

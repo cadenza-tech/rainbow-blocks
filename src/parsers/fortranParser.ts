@@ -133,12 +133,12 @@ export class FortranBlockParser extends BaseBlockParser {
     // Also handles continuation: type &\n  is (integer)
     let afterKeyword = source.slice(position + keyword.length);
     afterKeyword = collapseContinuationLines(afterKeyword);
-    if (/^[ \t]+is\s*\(/i.test(afterKeyword)) {
+    if (/^[ \t]+is[ \t]*\(/i.test(afterKeyword)) {
       return false;
     }
     // type(name) as type specifier: type(identifier) followed by :: or ,
     // Use collapsed text to handle continuation lines between type and (
-    if (/^\s*\(/i.test(afterKeyword)) {
+    if (/^[ \t]*\(/i.test(afterKeyword)) {
       if (isTypeSpecifier(afterKeyword, 0)) {
         return false;
       }
@@ -520,9 +520,9 @@ export class FortranBlockParser extends BaseBlockParser {
           if (isMergeTarget) {
             const textBetween = source.slice(current.endOffset, tokens[ti + 1].startOffset);
             // Same line: else if / else where
-            const isSameLine = /^\s+$/.test(textBetween) && !textBetween.includes('\n') && !textBetween.includes('\r');
+            const isSameLine = /^[ \t]+$/.test(textBetween);
             // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if/where
-            const isContinuation = /^\s*&\s*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:\s*![^\r\n]*(?:\r\n|\r|\n))*\s*&?\s*$/.test(textBetween);
+            const isContinuation = /^[ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*![^\r\n]*(?:\r\n|\r|\n))*[ \t]*&?[ \t]*$/.test(textBetween);
             if (isSameLine || isContinuation) {
               mergedTokens.push({
                 type: 'block_middle',
@@ -674,7 +674,7 @@ export class FortranBlockParser extends BaseBlockParser {
           let matchIndex = -1;
 
           // Check if it's a compound end (e.g., "end program", "endprogram")
-          const compoundMatch = closeValue.match(/^end\s*(.+)/);
+          const compoundMatch = closeValue.match(/^end[ \t]*(.+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
             matchIndex = findLastOpenerByType(stack, endType, true);

@@ -28,7 +28,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     // Note: -record is excluded because fun() inside records defines real anonymous functions
     const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
     const lineBefore = source.slice(lineStart, position).trimStart();
-    if (/^-\s*(spec|type|callback|opaque)\b/.test(lineBefore)) {
+    if (/^-[ \t]*(spec|type|callback|opaque)\b/.test(lineBefore)) {
       return false;
     }
 
@@ -36,23 +36,23 @@ export class ErlangBlockParser extends BaseBlockParser {
     const afterFun = source.slice(position + 3);
     // fun Module:Function/Arity or fun Function/Arity
     // Module can be a quoted atom: fun 'my.module':func/N
-    const atomOrIdent = "(?:[a-zA-Z_][a-zA-Z0-9_]*|'(?:[^'\\\\]|\\\\.)*')";
-    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*\\d`);
+    const atomOrIdent = "(?:[a-zA-Z_][a-zA-Z0-9_]*|'(?:[^'\\\\\\n\\r]|\\\\.)*')";
+    const funRefModPattern = new RegExp(`^[ \\t]+${atomOrIdent}[ \\t]*:[ \\t]*${atomOrIdent}[ \\t]*/[ \\t]*\\d`);
     if (funRefModPattern.test(afterFun)) {
       return false;
     }
-    if (/^\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\/\s*\d/.test(afterFun)) {
+    if (/^[ \t]+[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\/[ \t]*\d/.test(afterFun)) {
       return false;
     }
     // fun 'quoted-atom'/Arity (function reference without module prefix)
-    const quotedFunRef = /^\s+'(?:[^'\\]|\\.)*'\s*\/\s*\d/;
+    const quotedFunRef = /^[ \t]+'(?:[^'\\\n\r]|\\.)*'[ \t]*\/[ \t]*\d/;
     if (quotedFunRef.test(afterFun)) {
       return false;
     }
 
     // fun() in type annotation context (after ::)
     // Handles: handler :: fun((atom()) -> ok) in -record declarations
-    if (/^\s*\(/.test(afterFun)) {
+    if (/^[ \t]*\(/.test(afterFun)) {
       let j = position - 1;
       while (j >= 0) {
         if (this.isInExcludedRegion(j, excludedRegions)) {
@@ -71,12 +71,12 @@ export class ErlangBlockParser extends BaseBlockParser {
     }
 
     // fun() in type context (inside parentheses of -spec/-type)
-    if (/^\s*\(/.test(afterFun)) {
+    if (/^[ \t]*\(/.test(afterFun)) {
       // Check if in a -spec/-type context by scanning back for attribute
       // Must search for actual attribute pattern, not just '-'
       // (to avoid matching '-' in '->' operator)
       const textBefore = source.slice(0, position);
-      const attrPattern = /-\s*(?:spec|type|callback|opaque)\b/g;
+      const attrPattern = /-[ \t]*(?:spec|type|callback|opaque)\b/g;
       let lastAttr = -1;
       for (const match of textBefore.matchAll(attrPattern)) {
         // Skip matches inside excluded regions (strings, comments)
@@ -263,7 +263,7 @@ export class ErlangBlockParser extends BaseBlockParser {
         while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
           lineStart--;
         }
-        if (/^\s*$/.test(source.slice(lineStart, i))) {
+        if (/^[ \t]*$/.test(source.slice(lineStart, i))) {
           return { start: pos, end: i + 3 };
         }
       }

@@ -2,6 +2,7 @@
 
 import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { isSymbolStart, isTransposeOperator } from './juliaHelpers';
 
 export class JuliaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -27,12 +28,21 @@ export class JuliaBlockParser extends BaseBlockParser {
     blockMiddle: ['elseif', 'else', 'catch', 'finally']
   };
 
-  // Filters out keywords preceded by dot (struct field access like obj.end, range.begin)
+  // Filters out keywords preceded by dot or adjacent to Unicode identifier characters
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       // Skip keywords preceded by dot (struct field access like obj.end, range.begin)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
+        return false;
+      }
+      // Skip keywords adjacent to Unicode identifier characters (e.g., αend, endβ)
+      // JavaScript \b only handles ASCII word boundaries, so Unicode letters need explicit check
+      if (token.startOffset > 0 && /\p{L}/u.test(source[token.startOffset - 1])) {
+        return false;
+      }
+      const afterPos = token.endOffset;
+      if (afterPos < source.length && /\p{L}/u.test(source[afterPos])) {
         return false;
       }
       return true;
@@ -173,7 +183,7 @@ export class JuliaBlockParser extends BaseBlockParser {
           // Check word boundaries
           const before = i > 0 ? source[i - 1] : ' ';
           const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
-          if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+          if (!/[a-zA-Z0-9_]/.test(before) && !/\p{L}/u.test(before) && !/[a-zA-Z0-9_]/.test(after) && !/\p{L}/u.test(after)) {
             return true;
           }
         }
@@ -213,7 +223,7 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (depth === 0 && i + 3 <= end && source.slice(i, i + 3) === 'for') {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + 3 < source.length ? source[i + 3] : ' ';
-        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+        if (!/[a-zA-Z0-9_]/.test(before) && !/\p{L}/u.test(before) && !/[a-zA-Z0-9_]/.test(after) && !/\p{L}/u.test(after)) {
           return true;
         }
       }
@@ -461,26 +471,7 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if colon starts a symbol (not ternary operator)
   private isSymbolStart(source: string, pos: number): boolean {
-    const nextChar = source[pos + 1];
-    if (!nextChar) {
-      return false;
-    }
-
-    // Symbol must start with letter, underscore, @, or certain operators
-    if (!/[\w!%&*+\-/<=>?\\^|~@]/.test(nextChar) && nextChar.charCodeAt(0) <= 127) {
-      return false;
-    }
-
-    // Colon after identifier/number/bracket is ternary, not symbol
-    // :: (type annotation) second colon is not a symbol start
-    if (pos > 0) {
-      const prevChar = source[pos - 1];
-      if (prevChar === ':' || /[\w)\]}]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
-        return false;
-      }
-    }
-
-    return true;
+    return isSymbolStart(source, pos);
   }
 
   // Matches symbol literal including operator symbols and Unicode
@@ -524,28 +515,7 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if single quote is transpose operator (not character literal)
   private isTransposeOperator(source: string, pos: number): boolean {
-    if (pos === 0) {
-      return false;
-    }
-
-    const prevChar = source[pos - 1];
-
-    // Transpose follows closing brackets
-    if (prevChar === ')' || prevChar === ']' || prevChar === '}') {
-      return true;
-    }
-
-    // Double transpose: A'' (second ' is also transpose)
-    if (prevChar === "'") {
-      return true;
-    }
-
-    // Transpose follows identifiers or Unicode letters
-    if (/[\w]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
-      return true;
-    }
-
-    return false;
+    return isTransposeOperator(source, pos);
   }
 
   // Matches character literal (doesn't span multiple lines)

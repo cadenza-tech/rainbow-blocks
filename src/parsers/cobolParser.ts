@@ -276,7 +276,7 @@ export class CobolBlockParser extends BaseBlockParser {
       }
       if (this.getVisualColumn(source, lineStart, pos) === 6) {
         const sequenceArea = source.slice(lineStart, pos);
-        if (/^[\d\s\t]*$/.test(sequenceArea)) {
+        if (/^[\d \t]*$/.test(sequenceArea)) {
           if (char === 'D' || char === 'd') {
             const nextChar = pos + 1 < source.length ? source[pos + 1] : '';
             if (/[a-zA-Z0-9_-]/.test(nextChar)) {
@@ -332,6 +332,31 @@ export class CobolBlockParser extends BaseBlockParser {
     return visualCol;
   }
 
+  // Checks if a line starting at lineStart is a fixed-format column 7 comment line
+  private isFixedFormatCommentLine(source: string, lineStart: number): boolean {
+    // Find position at visual column 6 (0-indexed)
+    let visualCol = 0;
+    let i = lineStart;
+    while (i < source.length && source[i] !== '\n' && source[i] !== '\r' && visualCol < 6) {
+      if (source[i] === '\t') {
+        visualCol = Math.floor(visualCol / 8 + 1) * 8;
+      } else {
+        visualCol++;
+      }
+      i++;
+    }
+    if (visualCol !== 6 || i >= source.length) {
+      return false;
+    }
+    const indicator = source[i];
+    if (indicator !== '*' && indicator !== '/' && indicator !== 'D' && indicator !== 'd') {
+      return false;
+    }
+    // Validate columns 1-6 look like fixed-format sequence area
+    const sequenceArea = source.slice(lineStart, i);
+    return /^[\d \t]*$/.test(sequenceArea);
+  }
+
   // Matches COBOL string with specified quote character
   private matchCobolString(source: string, pos: number, quote: string): ExcludedRegion {
     let i = pos + 1;
@@ -369,11 +394,35 @@ export class CobolBlockParser extends BaseBlockParser {
       return null;
     }
 
-    // Search for END-EXEC (case-insensitive), skipping string literals
+    // Search for END-EXEC (case-insensitive), skipping string literals and inline comments
     const startWord = isExecute ? 'EXECUTE' : 'EXEC';
     let i = pos + startWord.length;
     while (i < source.length) {
       const ch = source[i];
+      // Skip fixed-format column 7 comment lines inside EXEC block
+      if (ch === '\n' || ch === '\r') {
+        let lineStart = i + 1;
+        if (ch === '\r' && lineStart < source.length && source[lineStart] === '\n') {
+          lineStart++;
+        }
+        if (lineStart < source.length && this.isFixedFormatCommentLine(source, lineStart)) {
+          i = lineStart;
+          while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+            i++;
+          }
+          continue;
+        }
+        i = lineStart;
+        continue;
+      }
+      // Skip *> inline comments inside EXEC block
+      if (ch === '*' && i + 1 < source.length && source[i + 1] === '>') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
       // Skip single/double-quoted strings inside EXEC block
       if (ch === "'" || ch === '"') {
         i++;

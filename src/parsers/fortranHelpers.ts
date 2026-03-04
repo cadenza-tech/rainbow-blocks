@@ -5,7 +5,7 @@ import { findLineStart, isInExcludedRegion } from './parserUtils';
 
 // Checks if the character before a line break is & (string continuation)
 // Handles inline comments: 'hello & ! comment\n&world'
-export function isStringContinuation(source: string, lineBreakPos: number): boolean {
+function isStringContinuation(source: string, lineBreakPos: number): boolean {
   let j = lineBreakPos - 1;
   while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
     j--;
@@ -55,10 +55,10 @@ export function isStringContinuation(source: string, lineBreakPos: number): bool
     }
     if (source[ci] === '!') {
       let k = ci - 1;
-      while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+      while (k >= lineStart && (source[k] === ' ' || source[k] === '\t')) {
         k--;
       }
-      return k >= 0 && source[k] === '&';
+      return k >= lineStart && source[k] === '&';
     }
   }
   return false;
@@ -112,7 +112,7 @@ export function collapseContinuationLines(text: string): string {
   let result = '';
   let i = 0;
   while (i < text.length) {
-    // Find next & outside string literals (Fortran uses '' and "" as escaped quotes)
+    // Find next & outside string literals and comments (Fortran uses '' and "" as escaped quotes)
     let ampIdx = -1;
     for (let k = i; k < text.length; k++) {
       const ch = text[k];
@@ -128,6 +128,14 @@ export function collapseContinuationLines(text: string): string {
           }
           k++;
         }
+        continue;
+      }
+      // Skip ! inline comment to end of line (& inside comments is not continuation)
+      if (ch === '!') {
+        while (k < text.length && text[k] !== '\n' && text[k] !== '\r') {
+          k++;
+        }
+        k--;
         continue;
       }
       if (ch === '&') {
@@ -294,7 +302,7 @@ export function isTypeSpecifier(source: string, parenStart: number): boolean {
 }
 
 // Checks if a continuation line represents a block form (where/forall)
-export function isContinuationBlockForm(source: string, ampPos: number): boolean {
+function isContinuationBlockForm(source: string, ampPos: number): boolean {
   let i = ampPos + 1;
 
   // Follow the chain of continuation lines
@@ -367,7 +375,7 @@ export function isContinuationBlockForm(source: string, ampPos: number): boolean
     break;
   }
   // If next line starts with 'end where' or 'end forall', it's block form
-  if (i < source.length && /^end\s*(where|forall)\b/i.test(source.slice(i))) {
+  if (i < source.length && /^end[ \t]+(where|forall)\b/i.test(source.slice(i))) {
     return true;
   }
   // If next line starts with 'end' (other), this was single-line spread
@@ -525,7 +533,7 @@ export function isPrecedingContinuationKeyword(source: string, position: number,
 
   // Current line before position must be just whitespace/continuation &
   const currentLineBefore = source.slice(currentLineStart, position).trimStart();
-  if (currentLineBefore !== '' && !/^&\s*$/.test(currentLineBefore)) {
+  if (currentLineBefore !== '' && !/^&[ \t]*$/.test(currentLineBefore)) {
     return false;
   }
 

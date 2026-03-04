@@ -17,13 +17,15 @@ export class PascalBlockParser extends BaseBlockParser {
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
       const afterCase = source.slice(position + keyword.length);
-      // Tagged variant: case Tag: Type of
-      if (/^\s+[a-zA-Z_]\w*\s*:/i.test(afterCase)) {
-        return false;
+      // Tagged variant: case Tag: Type of (only inside record)
+      if (/^[ \t]+[a-zA-Z_]\w*[ \t]*:/i.test(afterCase)) {
+        if (this.isInsideRecord(source, position, excludedRegions)) {
+          return false;
+        }
       }
       // Tagless variant: case TypeName of (identifier followed by 'of', no colon)
       // TypeName can be qualified (e.g., Types.MyEnum)
-      if (/^\s+[a-zA-Z_][\w.]*\s+of\b/i.test(afterCase)) {
+      if (/^[ \t]+[a-zA-Z_][\w.]*[ \t]+of\b/i.test(afterCase)) {
         // Check if we're inside a record block by scanning backward
         if (this.isInsideRecord(source, position, excludedRegions)) {
           return false;
@@ -42,7 +44,7 @@ export class PascalBlockParser extends BaseBlockParser {
     // 'class of' is a class reference type, not a block
     if (keyword === 'class') {
       const afterClass = source.slice(position + keyword.length);
-      if (/^\s+of\b/i.test(afterClass)) {
+      if (/^[ \t]+of\b/i.test(afterClass)) {
         return false;
       }
     }
@@ -71,7 +73,7 @@ export class PascalBlockParser extends BaseBlockParser {
     // Handle nested parentheses like class(TBase(TParam))
     if (keyword === 'class') {
       const afterClass = source.slice(position + keyword.length);
-      if (/^\s*\(/.test(afterClass)) {
+      if (/^[ \t]*\(/.test(afterClass)) {
         let j = position + keyword.length;
         // Skip leading whitespace (including newlines) to find '('
         while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {

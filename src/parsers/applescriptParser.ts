@@ -265,7 +265,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           .toLowerCase()
           .replace(/\u00AC[ \t]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
-        if (/^(set|copy)\s+$/.test(lineBefore) || /'s\s+$/.test(lineBefore)) {
+        if (/^(set|copy)[ \t]+$/.test(lineBefore) || /'s[ \t]+$/.test(lineBefore)) {
           return { nextPos: flexMatch };
         }
       }
@@ -278,7 +278,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           .toLowerCase()
           .replace(/\u00AC[ \t]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
-        if (/^(set|copy)\s+$/.test(lineBefore) || /'s\s+$/.test(lineBefore)) {
+        if (/^(set|copy)[ \t]+$/.test(lineBefore) || /'s[ \t]+$/.test(lineBefore)) {
           return { nextPos: flexMatch };
         }
       }
@@ -373,7 +373,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const relStart = overlapStart - lineStart;
       beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
     }
-    return /^\s*$/.test(beforeText);
+    return /^[ \t]*$/.test(beforeText);
   }
 
   // Matches blocks with specific pairing for compound end keywords
@@ -534,7 +534,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // Normalize continuation characters for backward scan
     const beforeText = rawBefore.replace(/\u00AC[ \t]*(?:\r\n|\r|\n)[ \t]*/g, ' ');
     // Check if 'if' appears before this keyword on the same logical line
-    const ifMatch = beforeText.match(/(?:^|[^a-z0-9_])if\s+$/);
+    const ifMatch = beforeText.match(/(?:^|[^a-z0-9_])if[ \t]+$/);
     if (!ifMatch) {
       return false;
     }
@@ -572,21 +572,21 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     const afterKwNorm = rawAfterKw.replace(/\u00AC[ \t]*(?:\r\n|\r|\n)[ \t]*/g, ' ');
 
     // 'set <keyword> to' pattern (only on same logical line, not across plain newlines)
-    if (/^set\s+$/.test(lineBefore)) {
+    if (/^set[ \t]+$/.test(lineBefore)) {
       if (/^[ \t]+to\b/.test(afterKwNorm)) {
         return true;
       }
     }
 
     // 'copy <keyword> to' pattern (only on same logical line, not across plain newlines)
-    if (/^copy\s+$/.test(lineBefore)) {
+    if (/^copy[ \t]+$/.test(lineBefore)) {
       if (/^[ \t]+to\b/.test(afterKwNorm)) {
         return true;
       }
     }
 
     // Possessive form: 'X's <keyword>' pattern (property access)
-    if (/'s\s+$/.test(lineBefore)) {
+    if (/'s[ \t]+$/.test(lineBefore)) {
       return true;
     }
 

@@ -17,7 +17,7 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`]/;
 
 // Returns the matching close delimiter for an open delimiter
-export function getMatchingDelimiter(open: string): string | null {
+function getMatchingDelimiter(open: string): string | null {
   if (open in PAIRED_DELIMITERS) {
     return PAIRED_DELIMITERS[open];
   }
@@ -270,4 +270,130 @@ export function matchPercentLiteral(
   }
 
   return { end: i };
+}
+
+// Interface for interpolation handler callbacks
+export interface InterpolationHandlers {
+  skipNestedString: (source: string, pos: number) => number;
+  skipNestedBacktickString: (source: string, pos: number) => number;
+  skipNestedRegex: (source: string, pos: number) => number;
+  matchPercentLiteral: (source: string, pos: number) => { end: number } | null;
+  isModuloOperator: (source: string, pos: number) => boolean;
+  matchHeredoc: (source: string, pos: number) => { contentStart: number; end: number } | null;
+}
+
+// Check if / starts a regex (not division) inside interpolation
+function isRegexInInterpolation(source: string, pos: number, interpStart: number): boolean {
+  if (pos === interpStart) return true;
+  let j = pos - 1;
+  while (j >= interpStart && (source[j] === ' ' || source[j] === '\t')) {
+    j--;
+  }
+  if (j < interpStart) return true;
+  return /[(,=!~|&{[:;+\-*%<>^?]/.test(source[j]);
+}
+
+// Shared skip logic for #{} interpolation in strings (with heredoc support)
+export function skipInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers): number {
+  let depth = 1;
+  let i = pos;
+  let heredocSkipEnd = -1;
+  while (i < source.length && depth > 0) {
+    if (source[i] === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+    // Handle # line comments (but not #{} interpolation)
+    if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        i++;
+      }
+      continue;
+    }
+    // At line break, skip pending heredoc body
+    if ((source[i] === '\n' || source[i] === '\r') && heredocSkipEnd > i) {
+      if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+        i += 2;
+      } else {
+        i++;
+      }
+      i = heredocSkipEnd;
+      heredocSkipEnd = -1;
+      continue;
+    }
+    if (source[i] === '{') {
+      depth++;
+    } else if (source[i] === '}') {
+      depth--;
+    } else if (source[i] === '"') {
+      i = handlers.skipNestedString(source, i);
+      continue;
+    } else if (source[i] === "'") {
+      i = handlers.skipNestedString(source, i);
+      continue;
+    } else if (source[i] === '`') {
+      i = handlers.skipNestedBacktickString(source, i);
+      continue;
+    } else if (source[i] === '/' && isRegexInInterpolation(source, i, pos)) {
+      i = handlers.skipNestedRegex(source, i);
+      continue;
+    } else if (source[i] === '%' && i + 1 < source.length && !handlers.isModuloOperator(source, i)) {
+      const result = handlers.matchPercentLiteral(source, i);
+      if (result) {
+        i = result.end;
+        continue;
+      }
+    } else if (source[i] === '<' && i + 1 < source.length && source[i + 1] === '<' && heredocSkipEnd < 0) {
+      const heredocResult = handlers.matchHeredoc(source, i);
+      if (heredocResult) {
+        heredocSkipEnd = heredocResult.end;
+      }
+    }
+    i++;
+  }
+  return i;
+}
+
+// Shared skip logic for #{} interpolation in regex (no heredoc support)
+export function skipRegexInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers): number {
+  let depth = 1;
+  let i = pos;
+  while (i < source.length && depth > 0) {
+    if (source[i] === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+    // Handle # line comments (but not #{} interpolation)
+    if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        i++;
+      }
+      continue;
+    }
+    if (source[i] === '{') {
+      depth++;
+    } else if (source[i] === '}') {
+      depth--;
+    } else if (source[i] === '"') {
+      i = handlers.skipNestedString(source, i);
+      continue;
+    } else if (source[i] === "'") {
+      i = handlers.skipNestedString(source, i);
+      continue;
+    } else if (source[i] === '`') {
+      i = handlers.skipNestedBacktickString(source, i);
+      continue;
+    } else if (source[i] === '/' && isRegexInInterpolation(source, i, pos)) {
+      i = handlers.skipNestedRegex(source, i);
+      continue;
+    } else if (source[i] === '%' && i + 1 < source.length && !handlers.isModuloOperator(source, i)) {
+      const result = handlers.matchPercentLiteral(source, i);
+      if (result) {
+        i = result.end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return i;
 }
