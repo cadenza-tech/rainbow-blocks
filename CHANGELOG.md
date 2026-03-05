@@ -5,6 +5,34 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.13] - 2026-03-05
+
+### Fixed
+
+- Ada: Rewrite `or else` short-circuit detection to check whitespace between `or` and `else` tokens instead of stack-based `select` lookup (fixes false negatives inside `select` when guards)
+- AppleScript: Handle multiple consecutive continuation characters (`¬¬`) in compound keyword matching
+- Bash: Prevent `<<<` here-string inside `$()`, `<()`, `>()` from being treated as heredoc operator
+- Crystal: Add interpolation support (`#{}`) for double-quoted symbols (`:"`); single-quoted symbols remain interpolation-free
+- Erlang: Exempt `block_close` tokens from `=>`/`:=` map key filter (allow `begin-end` as map key expression)
+- Fortran: Handle bare `&` continuation-only lines and `& ! comment` lines in `CONTINUATION_COMPOUND_END_PATTERN` and `collapseContinuationLines`
+- Julia: Handle prefixed strings (`r"..."`, `raw"..."`, etc.) inside `$()` interpolation blocks
+- MATLAB: Fix out-of-bounds access in `isValidBlockOpen` when `=` is at end of source
+- Verilog: Terminate string literals at backslash-newline inside `(* *)` attribute matching
+- VHDL: Strip trailing `\r` from previous line in `isValidEntityOrConfigOpen` colon detection (CRLF line ending fix)
+
+### Refactored
+
+- Julia: Extract interpolation skip functions (`skipJuliaInterpolation`, `skipPrefixedStringInInterpolation`, `skipNestedJuliaString`, `skipCharLiteral`, `skipBacktickString`) to `juliaHelpers.ts`
+- Lua/Pascal: Replace duplicate `findLastRepeatIndex` with shared `findLastOpenerByType` from `parserUtils.ts`
+
+### Tests
+
+- Add 18 tests across 11 parser test files for bug fix verification and regression coverage
+
+### Other
+
+- Fix missing carriage return in `.gitignore` Icon entry
+
 ## [1.1.12] - 2026-03-04
 
 ### Fixed
@@ -629,6 +657,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.13]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.12...v1.1.13
 [1.1.12]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.11...v1.1.12
 [1.1.11]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.10...v1.1.11
 [1.1.10]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.9...v1.1.10
