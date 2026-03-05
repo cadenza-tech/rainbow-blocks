@@ -2,7 +2,7 @@
   "name": "rainbow-blocks",
   "displayName": "Rainbow Blocks",
   "description": "Colorize matching block pairs for Ruby, Elixir, Crystal, Lua, Julia, Bash, and more",
-  "version": "1.1.12",
+  "version": "1.1.13",
   "publisher": "cadenza-tech",
   "license": "MIT",
   "icon": "images/icon.png",
