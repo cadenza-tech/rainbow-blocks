@@ -1724,8 +1724,8 @@ end if;`;
   });
 
   suite('Coverage: uncovered code paths', () => {
-    test('should handle or else inside nested block in select (lines 710, 713)', () => {
-      // isOrPrecededBySelect: depth++ when block_close before or, depth-- for matching open
+    test('should handle or else inside nested block in select', () => {
+      // isOrElseShortCircuit: statements between or and else prevent short-circuit removal
       const source = `select
   accept Do_Work;
   loop
@@ -1741,15 +1741,15 @@ end select;`;
       assert.ok(selectPair, 'should find select block');
     });
 
-    test('should treat or else as short-circuit when not preceded by select (lines 719-720)', () => {
-      // isOrPrecededBySelect: returns false when no select found → or/else removed as short-circuit
+    test('should treat or else as short-circuit when only whitespace between or and else', () => {
+      // isOrElseShortCircuit: only whitespace between or and else → short-circuit removal
       const source = 'if (A or else B) then\n  null;\nend if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
 
     test('should not treat or as select intermediate when not preceded by select', () => {
-      // Covers isPrecedingSelect return false (lines 734-735)
+      // or without else is kept as intermediate when inside non-select block
       const source = 'if a or b then\n  null;\nend if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
@@ -1905,7 +1905,7 @@ end if;`;
     });
   });
 
-  suite('Branch coverage: isAdaWordAt boundary checks and isOrPrecededBySelect', () => {
+  suite('Branch coverage: isAdaWordAt boundary checks and isOrElseShortCircuit', () => {
     test('should reject is inside identifier (preceding boundary check, adaHelpers line 52)', () => {
       // 'this_value' contains 'is' substring; isAdaWordAt should reject it due to preceding char
       const source = 'function this_value is\nbegin\n  return 0;\nend this_value;';
@@ -1920,7 +1920,7 @@ end if;`;
       assertSingleBlock(pairs, 'procedure', 'end');
     });
 
-    test('should handle or else with no preceding block_open (isOrPrecededBySelect line 730)', () => {
+    test('should handle or else with no preceding block_open', () => {
       // 'or else' without any preceding block_open keyword in the token stream
       const source = 'X := A or else B;';
       const pairs = parser.parse(source);
@@ -1962,6 +1962,22 @@ end if;`;
       const source = 'for I in 1..10 loop\n  null;\nend loop;\nloop\n  null;\nend loop;';
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: or else short-circuit inside select block', () => {
+    test('should remove or else inside when guard of select', () => {
+      const source = 'select\n  when Guard1 or else Guard2 =>\n    accept Foo;\nor\n  accept Bar;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['when', 'or']);
+    });
+
+    test('should still keep or as select intermediate', () => {
+      const source = 'select\n  accept Foo;\nor\n  accept Bar;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
     });
   });
 });

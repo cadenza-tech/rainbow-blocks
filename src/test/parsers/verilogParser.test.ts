@@ -1613,5 +1613,13 @@ endmodule`;
     });
   });
 
+  suite('Regression: matchAttribute string escape with newline', () => {
+    test('should terminate string at backslash-newline inside attribute', () => {
+      const source = '(* attr = "test\\\n*) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });

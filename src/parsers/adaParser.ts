@@ -496,10 +496,11 @@ export class AdaBlockParser extends BaseBlockParser {
       const lowerValue = token.value.toLowerCase();
 
       // 'or else' short-circuit: remove both 'or' and 'else' tokens
-      // But NOT if the 'or' is an intermediate of a select block (selective accept)
+      // In a select block, 'or' and 'else' can be separate intermediates with statements between them.
+      // To distinguish: check if only whitespace/comments exist between 'or' and 'else' in source.
       if (lowerValue === 'else' && filtered.length > 0 && filtered[filtered.length - 1].value.toLowerCase() === 'or') {
-        const isSelectOr = this.isOrPrecededBySelect(filtered);
-        if (!isSelectOr) {
+        const orToken = filtered[filtered.length - 1];
+        if (this.isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, excludedRegions)) {
           filtered.pop();
           continue;
         }
@@ -726,23 +727,21 @@ export class AdaBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if the 'or' at the end of filtered tokens is preceded by a 'select' block opener
-  // Uses a stack to track open/close blocks and determine if 'or' belongs to a select
-  private isOrPrecededBySelect(filtered: Token[]): boolean {
-    let depth = 0;
-    for (let i = filtered.length - 2; i >= 0; i--) {
-      const t = filtered[i];
-      if (t.type === 'block_close') {
-        depth++;
-      } else if (t.type === 'block_open') {
-        if (depth > 0) {
-          depth--;
-        } else {
-          return t.value.toLowerCase() === 'select';
-        }
+  // Checks if source between 'or' end and 'else' start contains only whitespace and comments
+  // If true, it's the 'or else' short-circuit operator; if false, they are separate tokens
+  private isOrElseShortCircuit(source: string, orEnd: number, elseStart: number, excludedRegions: ExcludedRegion[]): boolean {
+    for (let i = orEnd; i < elseStart; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
+      // Ada comment starts with '--', skip to end of line
+      if (ch === '-' && i + 1 < source.length && source[i + 1] === '-') {
+        while (i < elseStart && source[i] !== '\n' && source[i] !== '\r') i++;
+        continue;
       }
+      return false;
     }
-    return false;
+    return true;
   }
 
   // Scan forward from startPos tracking parens, looking for 'is' keyword

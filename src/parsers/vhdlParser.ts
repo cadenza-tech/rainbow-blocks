@@ -192,7 +192,11 @@ export class VhdlBlockParser extends BaseBlockParser {
           searchEnd--;
         }
         const prevNl = Math.max(textBefore.lastIndexOf('\n', searchEnd), textBefore.lastIndexOf('\r', searchEnd));
-        const prevLine = textBefore.slice(prevNl + 1, lastNl);
+        let prevLineEnd = lastNl;
+        if (prevLineEnd > 0 && textBefore[prevLineEnd - 1] === '\r') {
+          prevLineEnd--;
+        }
+        const prevLine = textBefore.slice(prevNl + 1, prevLineEnd);
         const prevColonMatch = prevLine.match(/:[ \t]*$/);
         if (prevColonMatch) {
           const prevColonOffset = prevNl + 1 + (prevLine.length - prevColonMatch[0].length);

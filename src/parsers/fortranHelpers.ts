@@ -193,7 +193,13 @@ export function collapseContinuationLines(text: string): string {
         while (afterAmpCheck < text.length && (text[afterAmpCheck] === ' ' || text[afterAmpCheck] === '\t')) {
           afterAmpCheck++;
         }
-        if (afterAmpCheck >= text.length || text[afterAmpCheck] === '\n' || text[afterAmpCheck] === '\r') {
+        if (afterAmpCheck >= text.length || text[afterAmpCheck] === '\n' || text[afterAmpCheck] === '\r' || text[afterAmpCheck] === '!') {
+          // Skip inline comment to find the line break
+          if (afterAmpCheck < text.length && text[afterAmpCheck] === '!') {
+            while (afterAmpCheck < text.length && text[afterAmpCheck] !== '\n' && text[afterAmpCheck] !== '\r') {
+              afterAmpCheck++;
+            }
+          }
           if (afterAmpCheck < text.length && text[afterAmpCheck] === '\r' && afterAmpCheck + 1 < text.length && text[afterAmpCheck + 1] === '\n') {
             j = afterAmpCheck + 2;
           } else if (afterAmpCheck < text.length) {

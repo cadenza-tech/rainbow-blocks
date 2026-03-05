@@ -1600,5 +1600,25 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: block expression end as map key', () => {
+    test('should pair begin-end when end is followed by =>', () => {
+      const source = '#{begin ok end => value}.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair fun-end when end is followed by :=', () => {
+      const source = 'M#{fun() -> ok end := new_value}.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should still filter block_open keywords used as map keys', () => {
+      const source = '#{begin => 1, fun => 2}.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

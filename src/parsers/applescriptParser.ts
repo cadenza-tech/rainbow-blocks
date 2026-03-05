@@ -641,8 +641,8 @@ export class ApplescriptBlockParser extends BaseBlockParser {
             j++;
           }
         }
-        // Handle continuation character followed by optional whitespace, newline, then optional whitespace
-        if (j < lowerSource.length && lowerSource[j] === '\u00AC') {
+        // Handle continuation character(s) followed by optional whitespace, newline, then optional whitespace
+        while (j < lowerSource.length && lowerSource[j] === '\u00AC') {
           j++;
           while (j < lowerSource.length && (lowerSource[j] === ' ' || lowerSource[j] === '\t')) {
             j++;

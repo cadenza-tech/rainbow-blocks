@@ -126,7 +126,8 @@ export class ErlangBlockParser extends BaseBlockParser {
       const afterToken = source.slice(token.endOffset);
       // Allow at most one line break to handle multi-line map expressions
       // Also skip trailing comments (% ...) before line break
-      if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
+      // Exempt block_close tokens (end) to support block expressions as map keys
+      if (token.type !== 'block_close' && /^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
         return false;
       }
       // Reject keywords preceded by '.' (record field access like Rec#state.end)

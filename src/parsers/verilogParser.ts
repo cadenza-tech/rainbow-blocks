@@ -519,6 +519,8 @@ export class VerilogBlockParser extends BaseBlockParser {
         i++;
         while (i < source.length && source[i] !== '"' && source[i] !== '\n' && source[i] !== '\r') {
           if (source[i] === '\\' && i + 1 < source.length) {
+            const nextChar = source[i + 1];
+            if (nextChar === '\n' || nextChar === '\r') break;
             i += 2;
             continue;
           }

@@ -4131,4 +4131,18 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: here-string inside command/process substitution', () => {
+    test('should not treat <<< as heredoc inside $()', () => {
+      const source = 'result=$(cat <<<EOF)\nif true; then\n  echo hello\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat <<< as heredoc inside <()', () => {
+      const source = 'diff <(cat <<<EOF) file.txt\nif true; then\n  echo hello\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });

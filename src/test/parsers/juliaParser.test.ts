@@ -2669,4 +2669,24 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  suite('Regression: prefixed string inside interpolation', () => {
+    test('should handle raw string inside $() interpolation', () => {
+      const source = '"$(r"$end")" \nfunction f()\n  return 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle triple-quoted prefixed string inside $() interpolation', () => {
+      const source = '"""$(raw"""\nend\n""")"""\nfunction f()\n  return 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still handle regular string inside $() interpolation', () => {
+      const source = '"$("hello")" \nfunction f()\n  return 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
 });

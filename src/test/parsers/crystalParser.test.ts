@@ -3029,4 +3029,18 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
+
+  suite('Regression: double-quoted symbol interpolation', () => {
+    test('should exclude do keyword inside interpolation in double-quoted symbol', () => {
+      const source = 'x = :"hello #{" do "} world"\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle simple double-quoted symbol without interpolation', () => {
+      const source = 'x = :"hello world"\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
 });

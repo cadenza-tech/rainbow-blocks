@@ -40,9 +40,9 @@ const COMPOUND_END_TYPES = [
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 // Pattern to match compound end keywords with continuation line: end &\n[&]keyword
-// Also handles comment-only lines between end & and keyword
+// Also handles comment-only lines and bare continuation-only lines between end & and keyword
 const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
-  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*![^\\r\\n]*(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*(?:![^\\r\\n]*|&[ \\t]*(?:![^\\r\\n]*)?)(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
 

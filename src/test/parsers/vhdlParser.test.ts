@@ -1827,4 +1827,18 @@ end loop;`;
       assertSingleBlock(pairs, 'entity', 'end entity');
     });
   });
+
+  suite('Regression: CRLF colon detection on previous line for entity', () => {
+    test('should reject entity as block opener when colon is on previous CRLF line', () => {
+      const source = 'my_inst:\r\n  entity work.my_entity';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still reject entity when colon is on same line', () => {
+      const source = 'my_inst: entity work.my_entity';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });

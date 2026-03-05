@@ -630,12 +630,61 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (source[i] === ')') {
         depth--;
       } else if (source[i] === '"') {
+        // Check for prefixed string (string macro like r"...", raw"...", etc.)
+        // Prefixed strings have no interpolation support
+        if (i > pos) {
+          let prefixStart = i - 1;
+          while (prefixStart >= pos && /[a-zA-Z0-9_]/.test(source[prefixStart])) {
+            prefixStart--;
+          }
+          prefixStart++;
+          if (prefixStart < i && /[a-zA-Z]/.test(source[prefixStart])) {
+            i = this.skipPrefixedStringInInterpolation(source, i);
+            continue;
+          }
+        }
         i = this.skipNestedJuliaString(source, i);
         continue;
       }
       i++;
     }
     return i;
+  }
+
+  // Skips a prefixed string (no interpolation) inside interpolation
+  private skipPrefixedStringInInterpolation(source: string, pos: number): number {
+    // Check for triple-quoted prefixed string
+    if (source.slice(pos, pos + 3) === '"""') {
+      let i = pos + 3;
+      while (i < source.length) {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        if (source.slice(i, i + 3) === '"""') {
+          i += 3;
+          while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+          return i;
+        }
+        i++;
+      }
+      return source.length;
+    }
+    // Regular prefixed string
+    let i = pos + 1;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '"') {
+        i++;
+        while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+        return i;
+      }
+      i++;
+    }
+    return source.length;
   }
 
   // Skips a nested string inside interpolation (handles both regular and triple-quoted)

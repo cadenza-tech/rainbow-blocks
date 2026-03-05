@@ -497,7 +497,13 @@ export function matchCommandSubstitution(source: string, pos: number): ExcludedR
     }
 
     // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
-    if (char === '<' && i + 1 < source.length && source[i + 1] === '<' && (i + 2 >= source.length || source[i + 2] !== '<')) {
+    if (
+      char === '<' &&
+      i + 1 < source.length &&
+      source[i + 1] === '<' &&
+      (i + 2 >= source.length || source[i + 2] !== '<') &&
+      (i === 0 || source[i - 1] !== '<')
+    ) {
       const heredoc = parseHeredocOperator(source, i);
       if (heredoc) {
         pendingHeredocs.push({ stripTabs: heredoc.stripTabs, terminator: heredoc.terminator });
@@ -637,7 +643,13 @@ export function matchProcessSubstitution(source: string, pos: number): ExcludedR
     }
 
     // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
-    if (char === '<' && i + 1 < source.length && source[i + 1] === '<' && (i + 2 >= source.length || source[i + 2] !== '<')) {
+    if (
+      char === '<' &&
+      i + 1 < source.length &&
+      source[i + 1] === '<' &&
+      (i + 2 >= source.length || source[i + 2] !== '<') &&
+      (i === 0 || source[i - 1] !== '<')
+    ) {
       const heredoc = parseHeredocOperator(source, i);
       if (heredoc) {
         pendingHeredocs.push({ stripTabs: heredoc.stripTabs, terminator: heredoc.terminator });

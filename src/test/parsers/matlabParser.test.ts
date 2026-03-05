@@ -652,6 +652,12 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
+    test('should not treat properties = at end of source as block open', () => {
+      const source = 'properties =';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
     test('should not treat events = as block open', () => {
       const source = `events = getEvents();
 for i = 1:10

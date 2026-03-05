@@ -235,16 +235,35 @@ export class CrystalBlockParser extends BaseBlockParser {
   private matchSymbolLiteral(source: string, pos: number): ExcludedRegion {
     const nextChar = source[pos + 1];
 
-    // Quoted symbol
-    if (nextChar === '"' || nextChar === "'") {
-      const quote = nextChar;
+    // Double-quoted symbol with interpolation support
+    if (nextChar === '"') {
       let i = pos + 2;
       while (i < source.length) {
         if (source[i] === '\\' && i + 1 < source.length) {
           i += 2;
           continue;
         }
-        if (source[i] === quote) {
+        if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          i = this.skipInterpolation(source, i + 2);
+          continue;
+        }
+        if (source[i] === '"') {
+          return { start: pos, end: i + 1 };
+        }
+        i++;
+      }
+      return { start: pos, end: i };
+    }
+
+    // Single-quoted symbol (no interpolation)
+    if (nextChar === "'") {
+      let i = pos + 2;
+      while (i < source.length) {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        if (source[i] === "'") {
           return { start: pos, end: i + 1 };
         }
         i++;

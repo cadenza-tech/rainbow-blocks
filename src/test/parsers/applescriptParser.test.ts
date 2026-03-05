@@ -1537,4 +1537,12 @@ end try`;
       assertSingleBlock(pairs, 'repeat', 'end repeat');
     });
   });
+
+  suite('Regression: multiple continuation characters in compound keyword', () => {
+    test('should handle double continuation between end and tell', () => {
+      const source = 'tell application "Finder"\n  get name\nend \u00AC\n\u00AC\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
 });

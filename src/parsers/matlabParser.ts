@@ -32,7 +32,7 @@ export class MatlabBlockParser extends BaseBlockParser {
       while (afterPos < source.length && (source[afterPos] === ' ' || source[afterPos] === '\t')) {
         afterPos++;
       }
-      if (afterPos < source.length && source[afterPos] === '=' && source[afterPos + 1] !== '=') {
+      if (afterPos < source.length && source[afterPos] === '=' && (afterPos + 1 >= source.length || source[afterPos + 1] !== '=')) {
         return false;
       }
       // Reject classdef section keywords inside parentheses or brackets

@@ -2990,6 +2990,24 @@ end select`;
       assertBlockCount(pairs, 2);
     });
 
+    // collapseContinuationLines: continuation-only line with trailing ! comment
+    test('collapseContinuationLines: continuation-only line with trailing comment', () => {
+      // "select &\n  & ! comment\n  &case (x)\n..." - the "& ! comment" line should be skipped
+      const source = 'select &\n  & ! comment\n  &case (x)\n  case default\n    y = 1\nend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('collapseContinuationLines: continuation-only line with trailing comment (direct call)', () => {
+      const result = collapseContinuationLines('hello &\n  & ! trailing comment\n  &world');
+      assert.strictEqual(result, 'hello  world');
+    });
+
+    test('collapseContinuationLines: continuation-only line with trailing comment CRLF', () => {
+      const result = collapseContinuationLines('hello &\r\n  & ! comment\r\n  &world');
+      assert.strictEqual(result, 'hello  world');
+    });
+
     // collapseContinuationLines: line 171 - trailing whitespace after & on continuation-only line
     test('collapseContinuationLines: continuation-only line with trailing whitespace after &', () => {
       // "select &\n  &  \n  case (x)\n..." - the "& " line has trailing whitespace after &
@@ -3360,6 +3378,20 @@ end program`;
   suite('Regression: isStringContinuation backward scan bounded to lineStart', () => {
     test('should not detect & from previous line when ! comment has no preceding &', () => {
       const source = 'x = y + &\nz = "start ! no-continuation\nif (.true.) then\n  x = 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Regression: continuation compound end with bare & line', () => {
+    test('should recognize compound end type with bare & continuation line between', () => {
+      const source = 'if (.true.) then\n  x = 1\nend &\n  &\n  if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still recognize compound end with comment-only line between', () => {
+      const source = 'if (.true.) then\n  x = 1\nend &\n  ! comment\n  if';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
