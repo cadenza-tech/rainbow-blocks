@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { findLastOpenerByType } from './parserUtils';
 
 export class LuaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -179,7 +180,7 @@ export class LuaBlockParser extends BaseBlockParser {
         case 'block_close': {
           // until only closes repeat
           if (token.value === 'until') {
-            const repeatIndex = this.findLastRepeatIndex(stack);
+            const repeatIndex = findLastOpenerByType(stack, 'repeat');
             if (repeatIndex >= 0) {
               const openBlock = stack.splice(repeatIndex, 1)[0];
               pairs.push({
@@ -208,16 +209,6 @@ export class LuaBlockParser extends BaseBlockParser {
     }
 
     return pairs;
-  }
-
-  // Finds the index of the last repeat block in the stack
-  private findLastRepeatIndex(stack: OpenBlock[]): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value === 'repeat') {
-        return i;
-      }
-    }
-    return -1;
   }
 
   // Finds the index of the last non-repeat block in the stack
