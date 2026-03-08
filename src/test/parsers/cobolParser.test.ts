@@ -1133,5 +1133,67 @@ END-PERFORM`;
     });
   });
 
+  suite('Branch coverage: computeValidPositions hyphenated identifiers', () => {
+    // Lines 119-121: keyword preceded by hyphen in computeValidPositions
+    // Existing tests cover X-PERFORM and X-IF in tokenize; these target
+    // computeValidPositions specifically with EVALUATE keyword
+    test('should skip EVALUATE preceded by hyphen in computeValidPositions', () => {
+      const source = 'MY-EVALUATE SOMETHING\nEVALUATE TRUE\n  WHEN 1\n    DISPLAY "A"\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+    });
+
+    // Lines 123-125: keyword followed by hyphen in computeValidPositions
+    test('should skip EVALUATE followed by hyphen in computeValidPositions', () => {
+      const source = 'EVALUATE-HANDLER SOMETHING\nEVALUATE TRUE\n  WHEN 1\n    DISPLAY "A"\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+    });
+  });
+
+  suite('Branch coverage: isFixedFormatCommentLine tab and early return in EXEC block', () => {
+    // Line 342: tab handling in isFixedFormatCommentLine called from matchExecBlock (line 408)
+    // A tab at col 0 advances to col 8, overshooting col 6, triggering both
+    // the tab branch (line 342) and the early return (lines 349-350, visualCol !== 6)
+    test('should handle tab that overshoots column 6 inside EXEC block comment check', () => {
+      // Inside EXEC block, a newline triggers isFixedFormatCommentLine check.
+      // Tab from col 0 -> col 8 (overshoots 6), so visualCol !== 6 -> return false
+      const source = 'EXEC SQL\n\t*END-EXEC\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    // Lines 349-350: visualCol !== 6 early return (line too short)
+    test('should return false when line in EXEC block is too short to reach column 6', () => {
+      // A very short line (3 chars) inside EXEC block: visualCol reaches 3, not 6
+      const source = 'EXEC SQL\nABC\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should return false when EXEC block line ends before reaching column 6', () => {
+      // Line with only 4 characters before newline inside EXEC block
+      const source = 'EXEC SQL\n1234\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    // Lines 349-350: i >= source.length early return (source ends before col 6)
+    test('should return false when source ends before reaching column 6 in EXEC block', () => {
+      // Source ends at the short line without a newline; EXEC block unterminated
+      const source = 'EXEC SQL\nAB';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle tab with trailing content inside EXEC block line', () => {
+      // Tab overshoots column 6, so the line is not treated as a comment line
+      // END-EXEC after tab is not at column 7 indicator position
+      const source = 'EXEC SQL\n\tEND-EXEC\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });

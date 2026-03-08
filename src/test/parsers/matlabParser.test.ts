@@ -1171,5 +1171,16 @@ end`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should skip newline after inline comment when checking dot precedence', () => {
+      // Covers lines 169-170: isPrecededByDot second disjunct
+      // % comment creates excluded region ending at \n position (LF-only)
+      // When scanning backward from 'end', the newline check finds the comment region
+      const source = 'function f\n  x = obj. % field\nend;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

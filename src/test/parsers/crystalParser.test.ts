@@ -1405,6 +1405,24 @@ end`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should handle unterminated single-quoted symbol', () => {
+      // Covers lines 271-272: :'symbol with no closing quote runs to end of source
+      const source = "x = :'unterminated_symbol\nif true\nend";
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should filter keyword in double-quoted heredoc opener', () => {
+      // Covers lines 322-323: <<-"end" style heredoc opener
+      // The keyword inside double quotes is detected as excluded region by gap scan,
+      // but the tokenize filter at lines 321-323 provides an additional safety net
+      const source = '<<-"end"\nheredoc content\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Regex after keyword', () => {

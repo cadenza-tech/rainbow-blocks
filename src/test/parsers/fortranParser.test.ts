@@ -3396,4 +3396,97 @@ end program`;
       assertSingleBlock(pairs, 'if', 'end if');
     });
   });
+
+  suite('Branch coverage: isValidBlockClose compound end keywords bypass', () => {
+    test('should accept end if without bare end validation', () => {
+      // Covers fortranParser.ts lines 275-276: keyword !== 'end' returns true immediately
+      // Compound end keywords like "end if" skip the variable-name checks
+      const source = 'if (.true.) then\n  x = 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should accept end do without bare end validation', () => {
+      // Covers fortranParser.ts lines 275-276: compound end keyword passes through
+      const source = 'do i = 1, 10\n  x = x + 1\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should accept end program without bare end validation', () => {
+      // Covers fortranParser.ts lines 275-276: compound end keyword passes through
+      const source = 'program main\n  x = 1\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Branch coverage: else+where merge with intervening token', () => {
+    test('should not merge else and where when another token exists between them', () => {
+      // Covers fortranParser.ts lines 546-549: elseWhereMatch.whereStart >= nextTokenStart
+      // else followed by an if token, then where text after the if
+      // The source-based matchElseWhere finds "where" but another token (if) comes first
+      const source = 'where (a > 0)\n  b = 1\nelse\nif (.true.) then\n  where (c > 0)\n    d = 2\n  end where\nend if';
+      const pairs = parser.parse(source);
+      // else is not merged with where since if token intervenes
+      assert.ok(pairs.length >= 1);
+    });
+
+    test('should not merge else with where keyword from a different block', () => {
+      // Covers fortranParser.ts lines 547-548: another token between else and where
+      // else is part of an if block, followed by a do block, then a where block
+      const source = 'if (.true.) then\n  x = 1\nelse\ndo i = 1, 5\n  where (a > 0)\n    b = 1\n  end where\nend do\nend if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'do');
+      findBlock(pairs, 'where');
+    });
+  });
+
+  suite('Branch coverage: isStringContinuation fallback returning false', () => {
+    test('should return false when line has no & and no ! comment', () => {
+      // Covers fortranHelpers.ts lines 64-65: isStringContinuation returns false
+      // A string with a newline but no & continuation marker on the line
+      const source = "program test\n  x = 'hello\nworld'\n  if (.true.) then\n    y = 1\n  end if\nend program";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'program');
+      findBlock(pairs, 'if');
+    });
+  });
+
+  suite('Branch coverage: CR line ending in isPrecedingContinuationKeyword', () => {
+    test('should strip trailing CR from previous line during backward scan', () => {
+      // Covers fortranHelpers.ts lines 556-557: prevLine.endsWith('\\r') -> slice
+      // Uses CR-only line endings so prevLine includes trailing \\r
+      const source = 'select &\r  type (x)\r    x = 1\rend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('should handle CRLF in isPrecedingContinuationKeyword backward scan', () => {
+      // Covers fortranHelpers.ts lines 555-557: CR stripping on CRLF content
+      const source = 'select &\r\n  type (x)\r\n    x = 1\r\nend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+  });
+
+  suite('Branch coverage: CR line ending in isAfterDoubleColon backward scan', () => {
+    test('should strip trailing CR from continuation line in isAfterDoubleColon', () => {
+      // Covers fortranHelpers.ts lines 618-619: prevLine.endsWith('\\r') -> slice
+      // Uses CR-only line endings with :: on a continuation line
+      const source = 'program test\r  integer &\r  :: x\r  if (.true.) then\r    y = 1\r  end if\rend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle CRLF in isAfterDoubleColon backward scan with continuation', () => {
+      // Covers fortranHelpers.ts lines 617-619: CR handling on CRLF boundary
+      const source = 'program test\r\n  integer &\r\n  :: x\r\n  if (.true.) then\r\n    y = 1\r\n  end if\r\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
 });

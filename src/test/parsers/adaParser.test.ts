@@ -1980,4 +1980,61 @@ end if;`;
       assertIntermediates(pairs[0], ['or']);
     });
   });
+
+  suite('Branch coverage: findExcludedRegionAt null fallback and isOrElseShortCircuit comment', () => {
+    // Lines 514-522: backward scan from 'then' crossing excluded regions (comments)
+    // The loop at lines 515-521 calls isInExcludedRegion then findExcludedRegionAt.
+    // Lines 519-521 are the defensive fallback when findExcludedRegionAt returns null.
+    // We exercise the region-skipping loop by placing multiple comments between and/then.
+    test('should handle and then with multiple comments between and and then', () => {
+      // Multiple excluded regions (comments) between 'and' and 'then'
+      // The backward scan must skip through two separate comment regions
+      const source = `if A and -- first comment
+-- second comment
+then B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should handle and then with string literal between and and then', () => {
+      // String literal (excluded region) between 'and' and 'then'
+      // The backward scan crosses a string excluded region
+      const source = `X := "test";
+if A and "value"
+then B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    // Lines 738-741: isOrElseShortCircuit encounters a comment between 'or' and 'else'
+    // The '--' comment handling branch (lines 738-741) skips the comment characters
+    test('should treat or else as short-circuit when comment appears between or and else', () => {
+      const source = `if A or -- this is a comment
+else B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // 'or' and 'else' should be removed as short-circuit operator; only 'then' remains
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should treat or else as short-circuit with multiple comments between or and else', () => {
+      // Two comment lines between or and else
+      const source = `if X or -- first comment
+-- second comment
+  else Y then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
 });

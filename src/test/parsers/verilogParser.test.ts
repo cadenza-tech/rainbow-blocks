@@ -1613,6 +1613,24 @@ endmodule`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should skip escaped identifier label in trySkipLabel', () => {
+      // Covers lines 374-376: escaped identifier label like \my_label: before begin
+      const source = 'always @(posedge clk)\n  \\my_label: begin\n    x <= 1;\n  end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+
+    test('should skip escaped identifier label with special characters', () => {
+      // Covers lines 374-376: escaped identifier with special chars terminated by whitespace
+      const source = 'always @(posedge clk)\n  \\label+name : begin\n    x <= 1;\n  end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+  });
+
   suite('Regression: matchAttribute string escape with newline', () => {
     test('should terminate string at backslash-newline inside attribute', () => {
       const source = '(* attr = "test\\\n*) module test;\nendmodule';

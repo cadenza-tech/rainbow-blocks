@@ -1421,6 +1421,29 @@ end`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should reject keyword preceded by Unicode letter', () => {
+      // Covers lines 42-43: Unicode letter before keyword (e.g., \u03B1if = "alphaif")
+      const source = '\u03B1if true\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject keyword followed by Unicode letter', () => {
+      // Covers lines 46-47: Unicode letter after keyword (e.g., if\u03B1 = "ifalpha")
+      const source = 'if\u03B1 true\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still parse keyword not adjacent to Unicode letter', () => {
+      // Verifies that normal keywords separated by space from Unicode identifiers work
+      const source = '\u03B1 = if true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {
@@ -2667,6 +2690,53 @@ end`;
       const source = 'x = (for i in 1:10 if i > 5; i)';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Branch coverage: prefixed strings in interpolation', () => {
+    test('should handle escape sequence in triple-quoted prefixed string inside interpolation', () => {
+      // The r""" string contains \n escape, exercising lines 54-57 of juliaHelpers.ts
+      const source = '"$(r"""pat\\ntern""")"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      // Outer string covers the full "$(r"""...""")" portion
+      assert.strictEqual(regions[0].start, 0);
+      assert.ok(regions[0].end <= source.indexOf('\n') + 1);
+    });
+
+    test('should handle unterminated triple-quoted prefixed string inside interpolation', () => {
+      // The r""" string never closes, exercising lines 65-66 of juliaHelpers.ts
+      const source = '"$(r"""unterminated';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      // Entire source is consumed as one excluded region (the outer string)
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should handle escape sequence in regular prefixed string inside interpolation', () => {
+      // The r"..." string contains \n escape, exercising lines 70-73 of juliaHelpers.ts
+      const source = '"$(r"pat\\ntern")"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions[0].start, 0);
+      assert.ok(regions[0].end <= source.indexOf('\n') + 1);
+    });
+
+    test('should handle unterminated regular prefixed string inside interpolation', () => {
+      // The r"..." string never closes, exercising lines 81-82 of juliaHelpers.ts
+      const source = '"$(r"unterminated';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      // Entire source is consumed as one excluded region
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
     });
   });
 

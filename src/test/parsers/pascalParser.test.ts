@@ -1627,5 +1627,22 @@ end`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should pass block_close keywords through tokenize validation', () => {
+      // Covers lines 403-405: isValidBlockClose always returns true (base class)
+      // Verifies that end keywords are never rejected by the block_close validation
+      const source = 'begin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should handle case-insensitive block_close in tokenize', () => {
+      // Covers lines 394, 403-405: keyword normalization and block_close validation
+      const source = 'BEGIN\nEND';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

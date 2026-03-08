@@ -1620,5 +1620,102 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Branch coverage: dot-preceded keyword rejection and fallback intermediates', () => {
+    // Lines 134-136: keyword preceded by dot in tokenize filter (record field access)
+    // Existing tests in 'Uncovered line coverage' cover .end, .begin, .if
+    // Add .fun and .case to ensure all block keyword types are covered through tokenize
+    test('should reject fun preceded by dot as record field access', () => {
+      const source = 'begin\n  Z = Config.fun,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject case preceded by dot as record field', () => {
+      const source = 'begin\n  V = State#rec.case,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject receive preceded by dot as record field', () => {
+      const source = 'begin\n  W = Cfg.receive,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject try preceded by dot as record field', () => {
+      const source = 'begin\n  U = State.try,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject maybe preceded by dot as record field', () => {
+      const source = 'begin\n  T = Opts.maybe,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    // Lines 311-312: fallback else branch for intermediates that are not catch/of/after/else.
+    // The only block_middle keywords defined are: of, after, catch, else.
+    // Since all four are handled by explicit if-else branches, this fallback is unreachable
+    // with the current keyword set. We verify the explicit branches work correctly
+    // and that unrecognized intermediates in other block types are silently ignored.
+    test('should not add catch as intermediate for non-try block', () => {
+      // catch is only valid for try blocks; inside begin it should be ignored
+      const source = 'begin\n  catch some_error,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not add of as intermediate for non-case/non-try block', () => {
+      const source = 'begin\n  of,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not add after as intermediate for non-receive/non-try block', () => {
+      const source = 'begin\n  after,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not add else as intermediate for non-if/non-try/non-maybe block', () => {
+      const source = 'begin\n  else,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should add catch as intermediate for try block', () => {
+      const source = 'try\n  error\ncatch\n  _:_ -> ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should add of as intermediate for case block', () => {
+      const source = 'case X of\n  1 -> ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+    });
+
+    test('should add after as intermediate for receive block', () => {
+      const source = 'receive\n  Msg -> ok\nafter\n  1000 -> timeout\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], ['after']);
+    });
+
+    test('should add else as intermediate for maybe block', () => {
+      const source = 'maybe\n  ok\nelse\n  error\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'maybe', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   generateCommonTests(config);
 });

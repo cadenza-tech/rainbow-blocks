@@ -1054,6 +1054,26 @@ end`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should not suppress fn with do: pattern', () => {
+      // Covers lines 389-390: isDoColonOneLiner returns false for fn
+      // fn is not in the doColonKeywords list, so isDoColonOneLiner short-circuits
+      // fn bypasses isDoColonOneLiner entirely (line 147 returns early),
+      // ensuring fn blocks always work regardless of do: syntax on the same line
+      const source = 'Enum.map(list, fn x -> x * 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+
+    test('should reject do: one-liner for if keyword', () => {
+      // Verifies that keywords IN the doColonKeywords list (like if) are properly
+      // rejected when they have do: syntax, confirming the opposite path of lines 389-390
+      const source = 'if true, do: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Triple-quoted string escape handling', () => {

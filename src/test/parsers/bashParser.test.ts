@@ -4150,6 +4150,83 @@ fi`;
     });
   });
 
+  suite('Branch coverage: isParameterExpansion returning true', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test name
+    test('should not treat # as comment inside ${#var} parameter expansion', () => {
+      // Covers bashParser.ts lines 174-175: isParameterExpansion returns true
+      // ${#var} is the string length operator; # should not start a comment
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'if true; then\n  len=${#mystring}\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test name
+    test('should handle ${#array[@]} length without treating # as comment', () => {
+      // Covers bashParser.ts lines 174-175: isParameterExpansion returns true
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'if [ ${#arr[@]} -gt 0 ]; then\n  echo many\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Branch coverage: isAtCommandPosition after backtick', () => {
+    test('should recognize keyword at command position after backtick substitution', () => {
+      // Covers bashParser.ts lines 277-278: isAtCommandPosition returns true after backtick
+      const source = '`date` if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize for loop after backtick command', () => {
+      // Covers bashParser.ts lines 277-278: backtick ends command substitution context
+      const source = 'x=`echo hi`\nfor i in 1 2 3; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Branch coverage: isCasePattern (pattern) syntax', () => {
+    test('should treat keyword inside explicit (pattern) as case pattern at line start', () => {
+      // Covers bashParser.ts lines 392-397: isCasePattern check for (keyword) at line start
+      const source = 'case $x in\n(for)\n  echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should treat keyword inside (pattern) after ;; as case pattern', () => {
+      // Covers bashParser.ts lines 394-396: textBefore matches /;;[ \t]*$/
+      const source = 'case $x in\n  a) echo a;; (while)\n    echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should treat keyword inside (pattern) after ;& as case pattern', () => {
+      // Covers bashParser.ts lines 394-396: textBefore matches /;&[ \t]*$/
+      const source = 'case $x in\n  a) echo a;& (select)\n    echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Branch coverage: tokenize skipping ${ in brace pattern', () => {
+    test('should skip { preceded by $ during brace tokenization', () => {
+      // Covers bashParser.ts lines 472-473: char === '{' && source[i-1] === '$'
+      // The ${ should not be treated as command group open brace
+      const source = 'for i in 1; do\n  echo $' + '{HOME}/path\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not create block pair for ${ inside while loop', () => {
+      // Covers bashParser.ts lines 472-473: ${ skipped in brace matching
+      const source = 'while true; do\n  x=$' + '{var:-default}\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+  });
+
   suite('Regression: here-string inside command/process substitution', () => {
     test('should not treat <<< as heredoc inside $()', () => {
       const source = 'result=$(cat <<<EOF)\nif true; then\n  echo hello\nfi';

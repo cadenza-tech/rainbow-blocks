@@ -635,6 +635,22 @@ end loop;`;
     });
   });
 
+  suite('Branch coverage', () => {
+    test('should reject loop preceded by dot as record field access', () => {
+      // Covers lines 247-248: record.loop treated as field access, not block open
+      const source = 'process is\nbegin\n  x := record_var.loop;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should reject loop preceded by dot with spaces', () => {
+      // Covers lines 243-248: dot with whitespace before loop (record . loop)
+      const source = 'process is\nbegin\n  x := rec . loop;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Test helper methods - VHDL specific', () => {
