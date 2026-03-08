@@ -3,6 +3,7 @@
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType, findLastOpenerForLoop, getTokenTypeCaseInsensitive } from './parserUtils';
+import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = [
@@ -382,17 +383,17 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     // Block comment: /* ... */ (VHDL-2008)
     if (char === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
-      return this.matchBlockComment(source, pos);
+      return matchVhdlBlockComment(source, pos);
     }
 
     // Double-quoted string
     if (char === '"') {
-      return this.matchVhdlString(source, pos);
+      return matchVhdlString(source, pos);
     }
 
     // Character literal: 'x'
     if (char === "'") {
-      return this.matchCharacterLiteral(source, pos);
+      return matchVhdlCharacterLiteral(source, pos);
     }
 
     // VHDL-93 extended identifier: \keyword\ (backslash-delimited)
@@ -417,66 +418,6 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
 
     return null;
-  }
-
-  // Matches block comment: /* ... */
-  private matchBlockComment(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-
-    while (i < source.length) {
-      if (source[i] === '*' && i + 1 < source.length && source[i + 1] === '/') {
-        return { start: pos, end: i + 2 };
-      }
-      i++;
-    }
-
-    return { start: pos, end: source.length };
-  }
-
-  // Matches VHDL string: "..."
-  private matchVhdlString(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === '"') {
-        // Check for doubled quote escape ""
-        if (i + 1 < source.length && source[i + 1] === '"') {
-          i += 2;
-          continue;
-        }
-        return { start: pos, end: i + 1 };
-      }
-      // String cannot span multiple lines in VHDL
-      if (source[i] === '\n' || source[i] === '\r') {
-        return { start: pos, end: i };
-      }
-      i++;
-    }
-
-    return { start: pos, end: source.length };
-  }
-
-  // Matches character literal: 'x' (single character only)
-  private matchCharacterLiteral(source: string, pos: number): ExcludedRegion {
-    // Character literal is 'x' where x is a single character
-    // It could also be an attribute tick, so we need to be careful
-    if (pos + 2 < source.length && source[pos + 2] === "'") {
-      // Qualified expression: type_name'(expr) — tick before '(' preceded by identifier
-      // is not a character literal, treat as attribute tick
-      if (source[pos + 1] === '(' && pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
-        return { start: pos, end: pos + 1 };
-      }
-      // Character literal containing single quote: '''' (four single quotes)
-      if (source[pos + 1] === "'" && pos + 3 < source.length && source[pos + 3] === "'") {
-        return { start: pos, end: pos + 4 };
-      }
-      return { start: pos, end: pos + 3 };
-    }
-    // Attribute tick: skip the attribute name to avoid matching keywords
-    let i = pos + 1;
-    while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
-      i++;
-    }
-    return { start: pos, end: i };
   }
 
   // Override tokenize to handle compound end keywords and case insensitivity
