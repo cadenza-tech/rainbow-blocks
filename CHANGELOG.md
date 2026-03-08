@@ -5,6 +5,20 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.14] - 2026-03-08
+
+### Fixed
+
+- Bash: Fix `$$#` comment detection using odd/even `$` count (`$#` is argument count variable, `$$#` is PID + comment, `$$$#` is PID + argument count)
+- Bash: Skip excluded regions (comments) in `isCasePattern` backward scan to avoid false case pattern detection from `)` inside comments
+- Ruby/Crystal: Extend excluded region to cover heredoc body when heredoc starts inside `#{}` interpolation and `}` closes on the same line as the heredoc opener
+- Ruby/Crystal: Recognize `%{...}`, `%(...)`, `%[...]`, `%<...>` (percent literals without specifier after paired delimiters) as percent literals, not modulo operators
+
+### Tests
+
+- Add 12 regression tests across Bash, Ruby, and Crystal parser fixes
+- Improve branch coverage across 12 parsers (61 tests added)
+
 ## [1.1.13] - 2026-03-05
 
 ### Fixed
@@ -657,6 +671,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.14]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.13...v1.1.14
 [1.1.13]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.12...v1.1.13
 [1.1.12]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.11...v1.1.12
 [1.1.11]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.10...v1.1.11
