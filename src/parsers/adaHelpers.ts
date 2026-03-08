@@ -54,6 +54,54 @@ export function isAdaWordAt(source: string, pos: number, word: string): boolean 
   return true;
 }
 
+// Checks if source between 'or' end and 'else' start contains only whitespace and comments
+// If true, it's the 'or else' short-circuit operator; if false, they are separate tokens
+export function isOrElseShortCircuit(source: string, orEnd: number, elseStart: number, isInExcluded: (pos: number) => boolean): boolean {
+  for (let i = orEnd; i < elseStart; i++) {
+    if (isInExcluded(i)) continue;
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
+    // Ada comment starts with '--', skip to end of line
+    if (ch === '-' && i + 1 < source.length && source[i + 1] === '-') {
+      while (i < elseStart && source[i] !== '\n' && source[i] !== '\r') i++;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+// Scan forward from startPos tracking parens, looking for 'is' keyword
+// Returns position of 'is' if found, or -1 if ';' or a reject keyword is found first (or end of source)
+export function scanForwardToIs(
+  source: string,
+  startPos: number,
+  isInExcluded: (pos: number) => boolean,
+  rejectKeywords?: readonly string[]
+): number {
+  let j = startPos;
+  let parenDepth = 0;
+  while (j < source.length) {
+    if (isInExcluded(j)) {
+      j++;
+      continue;
+    }
+    if (source[j] === '(') parenDepth++;
+    else if (source[j] === ')') parenDepth--;
+    else if (parenDepth === 0) {
+      if (source[j] === ';') return -1;
+      if (rejectKeywords) {
+        for (const rk of rejectKeywords) {
+          if (isAdaWordAt(source, j, rk)) return -1;
+        }
+      }
+      if (isAdaWordAt(source, j, 'is')) return j;
+    }
+    j++;
+  }
+  return -1;
+}
+
 // Skips whitespace and comments starting from the given position
 // Returns the position of the first non-whitespace, non-comment character
 export function skipAdaWhitespaceAndComments(source: string, pos: number): number {

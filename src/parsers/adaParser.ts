@@ -1,7 +1,14 @@
 // Ada block parser: procedure, function, if, loop, case with compound end keywords
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
-import { isAdaWordAt, matchAdaString, matchCharacterLiteral, skipAdaWhitespaceAndComments } from './adaHelpers';
+import {
+  isAdaWordAt,
+  isOrElseShortCircuit,
+  matchAdaString,
+  matchCharacterLiteral,
+  scanForwardToIs,
+  skipAdaWhitespaceAndComments
+} from './adaHelpers';
 import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive } from './parserUtils';
 
@@ -50,7 +57,7 @@ export class AdaBlockParser extends BaseBlockParser {
     const lowerKeyword = keyword.toLowerCase();
 
     if (lowerKeyword === 'entry') {
-      return this.scanForwardToIs(source, position + keyword.length, excludedRegions) >= 0;
+      return scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions)) >= 0;
     }
 
     if (lowerKeyword === 'task') {
@@ -94,7 +101,7 @@ export class AdaBlockParser extends BaseBlockParser {
 
   // Validates 'task': forward declarations (task Name;) are not blocks
   private isValidTaskOpen(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
-    const isPos = this.scanForwardToIs(source, position + keyword.length, excludedRegions);
+    const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions));
     if (isPos < 0) return false;
     const k = skipAdaWhitespaceAndComments(source, isPos + 2);
     if (isAdaWordAt(source, k, 'separate')) return false;
@@ -103,7 +110,7 @@ export class AdaBlockParser extends BaseBlockParser {
 
   // Validates 'package': renames and instantiations (is new) are not blocks
   private isValidPackageOpen(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
-    const isPos = this.scanForwardToIs(source, position + keyword.length, excludedRegions, ['renames']);
+    const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions), ['renames']);
     if (isPos < 0) return false;
     const k = skipAdaWhitespaceAndComments(source, isPos + 2);
     if (isAdaWordAt(source, k, 'new')) return false;
@@ -137,7 +144,7 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
     // Scan forward: if ';' comes before 'is', it's a declaration, not a body
-    const isPos = this.scanForwardToIs(source, position + keyword.length, excludedRegions);
+    const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions));
     if (isPos < 0) return false;
     const k = skipAdaWhitespaceAndComments(source, isPos + 2);
     const afterIs = source.slice(k).match(/^([a-zA-Z_]\w*)/);
@@ -214,7 +221,7 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
     // Scan forward: if ';' comes before 'is', it's a forward declaration
-    const isPos = this.scanForwardToIs(source, position + keyword.length, excludedRegions);
+    const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions));
     if (isPos < 0) return false;
     const k = skipAdaWhitespaceAndComments(source, isPos + 2);
     if (isAdaWordAt(source, k, 'separate')) return false;
@@ -500,7 +507,7 @@ export class AdaBlockParser extends BaseBlockParser {
       // To distinguish: check if only whitespace/comments exist between 'or' and 'else' in source.
       if (lowerValue === 'else' && filtered.length > 0 && filtered[filtered.length - 1].value.toLowerCase() === 'or') {
         const orToken = filtered[filtered.length - 1];
-        if (this.isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, excludedRegions)) {
+        if (isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, (pos) => this.isInExcludedRegion(pos, excludedRegions))) {
           filtered.pop();
           continue;
         }
@@ -725,48 +732,5 @@ export class AdaBlockParser extends BaseBlockParser {
       }
     }
     return false;
-  }
-
-  // Checks if source between 'or' end and 'else' start contains only whitespace and comments
-  // If true, it's the 'or else' short-circuit operator; if false, they are separate tokens
-  private isOrElseShortCircuit(source: string, orEnd: number, elseStart: number, excludedRegions: ExcludedRegion[]): boolean {
-    for (let i = orEnd; i < elseStart; i++) {
-      if (this.isInExcludedRegion(i, excludedRegions)) continue;
-      const ch = source[i];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
-      // Ada comment starts with '--', skip to end of line
-      if (ch === '-' && i + 1 < source.length && source[i + 1] === '-') {
-        while (i < elseStart && source[i] !== '\n' && source[i] !== '\r') i++;
-        continue;
-      }
-      return false;
-    }
-    return true;
-  }
-
-  // Scan forward from startPos tracking parens, looking for 'is' keyword
-  // Returns position of 'is' if found, or -1 if ';' or a reject keyword is found first (or end of source)
-  private scanForwardToIs(source: string, startPos: number, excludedRegions: ExcludedRegion[], rejectKeywords?: readonly string[]): number {
-    let j = startPos;
-    let parenDepth = 0;
-    while (j < source.length) {
-      if (this.isInExcludedRegion(j, excludedRegions)) {
-        j++;
-        continue;
-      }
-      if (source[j] === '(') parenDepth++;
-      else if (source[j] === ')') parenDepth--;
-      else if (parenDepth === 0) {
-        if (source[j] === ';') return -1;
-        if (rejectKeywords) {
-          for (const rk of rejectKeywords) {
-            if (isAdaWordAt(source, j, rk)) return -1;
-          }
-        }
-        if (isAdaWordAt(source, j, 'is')) return j;
-      }
-      j++;
-    }
-    return -1;
   }
 }
