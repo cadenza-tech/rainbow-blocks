@@ -5,6 +5,31 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.15] - 2026-03-09
+
+### Fixed
+
+- Bash: Fix incorrect comment detection in command/process substitution by properly handling `$#` special variable vs `#` comments
+- Crystal: Fix macro string interpolation not properly tracking nested strings inside braces, causing incorrect brace depth counting
+- Crystal: Fix symbol literal with interpolation not propagating heredoc state, causing incomplete exclusion regions
+- Elixir: Fix `fn`/`end` keyword incorrectly matching method calls (`.fn`), scope resolution (`@fn`), and attribute access patterns
+- Erlang: Fix `fun` in type specifications being incorrectly matched when preceded by `-spec`, `-type`, etc.
+- Fortran: Fix compound `end &` continuation lines not properly skipping bare `&` continuation-only lines
+- Lua: Fix `repeat-until` pairing by allowing `end` to close outer blocks when the topmost block is `repeat`
+- Ruby: Fix loop keywords (`while`, `until`) incorrectly matching method calls (`.while`), scope resolution (`::while`), and variable prefixes (`$while`, `@while`)
+- Verilog: Fix string escape sequence handling incorrectly ending excluded region before the backslash
+
+### Refactored
+
+- Ada: Extract `scanForwardToIs` and `isOrElseShortCircuit` to `adaHelpers.ts`
+- COBOL: Remove redundant `getTokenType` override (base class handles it identically)
+- VHDL: Extract excluded region helpers to `vhdlHelpers.ts`
+
+### Tests
+
+- Improve coverage across 10 parsers and merge duplicate suite names
+- Merge duplicate Edge cases suites in baseParser test
+
 ## [1.1.14] - 2026-03-08
 
 ### Fixed
@@ -671,6 +696,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.15]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.14...v1.1.15
 [1.1.14]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.13...v1.1.14
 [1.1.13]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.12...v1.1.13
 [1.1.12]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.11...v1.1.12
