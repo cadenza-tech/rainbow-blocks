@@ -3,7 +3,7 @@
 import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import { isForIn, isLoopDo, isPostfixConditional, isPostfixRescue, matchCharLiteral, matchHeredoc, matchMacroTemplate } from './crystalExcluded';
-import type { InterpolationHandlers } from './rubyFamilyHelpers';
+import type { HeredocState, InterpolationHandlers } from './rubyFamilyHelpers';
 import {
   isRegexStart,
   matchBacktickString,
@@ -385,17 +385,34 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (next < source.length && /[qQwWiIrx]/.test(source[next]) && next + 1 < source.length && /[^a-zA-Z0-9_ \t]/.test(source[next + 1])) {
       return false;
     }
+    // %<paired_delimiter> without specifier is a percent literal, not modulo
+    // e.g. puts %{text}, raise %(message)
+    if (next < source.length && '({[<'.includes(source[next])) {
+      return false;
+    }
     return true;
   }
 
   // Matches percent literal (%q, %Q, %w, %W, etc)
   private matchPercentLiteral(source: string, pos: number): { end: number } | null {
-    return matchPercentLiteral(source, pos, PERCENT_SPECIFIERS_PATTERN, isCrystalInterpolatingPercent, (s, p) => this.skipInterpolation(s, p));
+    const heredocState: HeredocState = { pendingEnd: -1 };
+    const result = matchPercentLiteral(source, pos, PERCENT_SPECIFIERS_PATTERN, isCrystalInterpolatingPercent, (s, p) =>
+      skipInterpolationShared(s, p, this.interpolationHandlers, heredocState)
+    );
+    if (result && heredocState.pendingEnd > result.end) {
+      return { end: heredocState.pendingEnd };
+    }
+    return result;
   }
 
   // Matches double-quoted string with #{} interpolation
   private matchInterpolatedString(source: string, pos: number): ExcludedRegion {
-    return matchInterpolatedString(source, pos, (s, p) => this.skipInterpolation(s, p));
+    const heredocState: HeredocState = { pendingEnd: -1 };
+    const result = matchInterpolatedString(source, pos, (s, p) => skipInterpolationShared(s, p, this.interpolationHandlers, heredocState));
+    if (heredocState.pendingEnd > result.end) {
+      return { start: result.start, end: heredocState.pendingEnd };
+    }
+    return result;
   }
 
   private get interpolationHandlers(): InterpolationHandlers {
@@ -431,7 +448,12 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Matches backtick command string with #{} interpolation
   private matchBacktickString(source: string, pos: number): ExcludedRegion {
-    return matchBacktickString(source, pos, (s, p) => this.skipInterpolation(s, p));
+    const heredocState: HeredocState = { pendingEnd: -1 };
+    const result = matchBacktickString(source, pos, (s, p) => skipInterpolationShared(s, p, this.interpolationHandlers, heredocState));
+    if (heredocState.pendingEnd > result.end) {
+      return { start: result.start, end: heredocState.pendingEnd };
+    }
+    return result;
   }
 
   // Validates block open keywords, excluding postfix conditionals and loop do

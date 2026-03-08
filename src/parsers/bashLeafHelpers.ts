@@ -13,6 +13,18 @@ export function isCommentStart(source: string, pos: number): boolean {
   return /[ \t\n\r;|&(){}]/.test(prev);
 }
 
+// Checks if '#' at position is part of $# variable (odd consecutive $ count before #)
+// $# → true (argument count), $$# → false ($$ is PID, # is comment), $$$# → true ($$ + $#)
+export function isDollarHashVariable(source: string, pos: number): boolean {
+  let count = 0;
+  let p = pos - 1;
+  while (p >= 0 && source[p] === '$') {
+    count++;
+    p--;
+  }
+  return count > 0 && count % 2 === 1;
+}
+
 // Checks if source matches a whole word at position (word boundary check)
 export function matchesWord(source: string, pos: number, word: string): boolean {
   if (pos + word.length > source.length) return false;

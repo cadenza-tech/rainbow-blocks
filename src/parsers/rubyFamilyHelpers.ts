@@ -5,6 +5,11 @@ import type { ExcludedRegion } from '../types';
 // Callback type for skipping #{} interpolation content
 type SkipInterpolationFn = (source: string, pos: number) => number;
 
+// State for tracking pending heredoc end position across interpolation boundaries
+export interface HeredocState {
+  pendingEnd: number;
+}
+
 // Paired delimiters for percent literals and heredocs
 const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
   '(': ')',
@@ -294,7 +299,7 @@ function isRegexInInterpolation(source: string, pos: number, interpStart: number
 }
 
 // Shared skip logic for #{} interpolation in strings (with heredoc support)
-export function skipInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers): number {
+export function skipInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers, heredocState?: HeredocState): number {
   let depth = 1;
   let i = pos;
   let heredocSkipEnd = -1;
@@ -350,6 +355,10 @@ export function skipInterpolationShared(source: string, pos: number, handlers: I
       }
     }
     i++;
+  }
+  // Communicate pending heredoc to caller when interpolation closes before line break
+  if (heredocSkipEnd > i && heredocState) {
+    heredocState.pendingEnd = Math.max(heredocState.pendingEnd, heredocSkipEnd);
   }
   return i;
 }

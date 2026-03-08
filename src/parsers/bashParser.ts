@@ -2,7 +2,14 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { isCommentStart, matchDollarSingleQuote, matchHeredocBody, matchSingleQuotedString, parseHeredocOperator } from './bashLeafHelpers';
+import {
+  isCommentStart,
+  isDollarHashVariable,
+  matchDollarSingleQuote,
+  matchHeredocBody,
+  matchSingleQuotedString,
+  parseHeredocOperator
+} from './bashLeafHelpers';
 import {
   matchArithmeticBracket,
   matchBacktickCommand,
@@ -95,13 +102,8 @@ export class BashBlockParser extends BaseBlockParser {
     const char = source[pos];
 
     // Single-line comment (not $# special variable or ${# parameter expansion)
-    // Allow $$# as comment: $$ is PID variable, # starts comment
-    if (
-      char === '#' &&
-      isCommentStart(source, pos) &&
-      !this.isParameterExpansion(source, pos) &&
-      !(pos > 0 && source[pos - 1] === '$' && !(pos >= 2 && source[pos - 2] === '$'))
-    ) {
+    // Odd consecutive $ before # means $# variable; even means # starts comment
+    if (char === '#' && isCommentStart(source, pos) && !this.isParameterExpansion(source, pos) && !isDollarHashVariable(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -397,7 +399,12 @@ export class BashBlockParser extends BaseBlockParser {
     // Default: check if preceded by case separator (;;, ;&, ;;&) or `in` keyword
     // to distinguish case patterns from keywords followed by stray )
     let s = position - 1;
-    while (s >= 0 && (source[s] === ' ' || source[s] === '\t' || source[s] === '\n' || source[s] === '\r')) {
+    while (s >= 0) {
+      if (this.isInExcludedRegion(s, excludedRegions)) {
+        s--;
+        continue;
+      }
+      if (source[s] !== ' ' && source[s] !== '\t' && source[s] !== '\n' && source[s] !== '\r') break;
       s--;
     }
     if (s >= 1 && source[s] === ';' && source[s - 1] === ';') {
