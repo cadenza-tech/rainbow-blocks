@@ -64,6 +64,24 @@ end`;
     });
   });
 
+  suite('Test helper methods', () => {
+    test('getTokens should work for minimal parser', () => {
+      const source = 'if x\nelse\nend';
+      const tokens = parser.getTokens(source);
+      assertTokens(tokens, [
+        { value: 'if', type: 'block_open' },
+        { value: 'else', type: 'block_middle' },
+        { value: 'end', type: 'block_close' }
+      ]);
+    });
+
+    test('getExcludedRegions should return empty for minimal parser', () => {
+      const source = 'if x end';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 0);
+    });
+  });
+
   suite('Edge cases', () => {
     test('should handle empty source', () => {
       const pairs = parser.parse('');
@@ -85,27 +103,7 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
       assertIntermediates(pairs[0], ['else']);
     });
-  });
 
-  suite('Test helper methods', () => {
-    test('getTokens should work for minimal parser', () => {
-      const source = 'if x\nelse\nend';
-      const tokens = parser.getTokens(source);
-      assertTokens(tokens, [
-        { value: 'if', type: 'block_open' },
-        { value: 'else', type: 'block_middle' },
-        { value: 'end', type: 'block_close' }
-      ]);
-    });
-
-    test('getExcludedRegions should return empty for minimal parser', () => {
-      const source = 'if x end';
-      const regions = parser.getExcludedRegions(source);
-      assert.strictEqual(regions.length, 0);
-    });
-  });
-
-  suite('Edge cases', () => {
     test('should handle CRLF line endings', () => {
       const source = 'if true\r\nelse\r\nend';
       const pairs = parser.parse(source);
