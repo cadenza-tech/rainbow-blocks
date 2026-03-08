@@ -312,20 +312,26 @@ export class ElixirBlockParser extends BaseBlockParser {
         }
 
         // Track fn...end nesting at depth 0
-        // Exclude fn: (keyword argument syntax)
+        // Exclude fn: (keyword argument syntax), .fn (method call), @fn (module attribute)
         if (
           source.slice(i, i + 2) === 'fn' &&
-          (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
+          (i === 0 || (!/[a-zA-Z0-9_]/.test(source[i - 1]) && source[i - 1] !== '.' && source[i - 1] !== '@')) &&
           (i + 2 >= source.length || !/[a-zA-Z0-9_:]/.test(source[i + 2]))
         ) {
           fnDepth++;
         }
 
         // "end" closes inner blocks or fn
+        // Exclude .end (method call), @end (module attribute)
         if (source.slice(i, i + 3) === 'end') {
           const beforeEnd = i > 0 ? source[i - 1] : ' ';
           const afterEnd = source[i + 3];
-          if (!/[a-zA-Z0-9_]/.test(beforeEnd) && (afterEnd === undefined || !/[a-zA-Z0-9_:]/.test(afterEnd))) {
+          if (
+            !/[a-zA-Z0-9_]/.test(beforeEnd) &&
+            beforeEnd !== '.' &&
+            beforeEnd !== '@' &&
+            (afterEnd === undefined || !/[a-zA-Z0-9_:]/.test(afterEnd))
+          ) {
             if (fnDepth > 0) {
               fnDepth--;
             } else if (innerBlockDepth > 0) {
@@ -344,8 +350,8 @@ export class ElixirBlockParser extends BaseBlockParser {
 
   // Checks if a block keyword that takes "do" starts at position
   private isBlockKeywordAt(source: string, pos: number): boolean {
-    // Must have word boundary before
-    if (pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
+    // Must have word boundary before (also reject . and @ prefixes)
+    if (pos > 0 && (/[a-zA-Z0-9_]/.test(source[pos - 1]) || source[pos - 1] === '.' || source[pos - 1] === '@')) {
       return false;
     }
 

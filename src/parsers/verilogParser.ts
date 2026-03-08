@@ -483,8 +483,9 @@ export class VerilogBlockParser extends BaseBlockParser {
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
         // Don't skip newline - Verilog strings can't span lines
+        // Include the backslash in the excluded region since it's part of the string content
         if (source[i + 1] === '\n' || source[i + 1] === '\r') {
-          return { start: pos, end: i };
+          return { start: pos, end: i + 1 };
         }
         i += 2;
         continue;

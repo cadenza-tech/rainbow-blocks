@@ -235,8 +235,9 @@ export class CrystalBlockParser extends BaseBlockParser {
   private matchSymbolLiteral(source: string, pos: number): ExcludedRegion {
     const nextChar = source[pos + 1];
 
-    // Double-quoted symbol with interpolation support
+    // Double-quoted symbol with interpolation support (propagate heredocState)
     if (nextChar === '"') {
+      const heredocState: HeredocState = { pendingEnd: -1 };
       let i = pos + 2;
       while (i < source.length) {
         if (source[i] === '\\' && i + 1 < source.length) {
@@ -244,13 +245,20 @@ export class CrystalBlockParser extends BaseBlockParser {
           continue;
         }
         if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
-          i = this.skipInterpolation(source, i + 2);
+          i = skipInterpolationShared(source, i + 2, this.interpolationHandlers, heredocState);
           continue;
         }
         if (source[i] === '"') {
-          return { start: pos, end: i + 1 };
+          const end = i + 1;
+          if (heredocState.pendingEnd > end) {
+            return { start: pos, end: heredocState.pendingEnd };
+          }
+          return { start: pos, end };
         }
         i++;
+      }
+      if (heredocState.pendingEnd > i) {
+        return { start: pos, end: heredocState.pendingEnd };
       }
       return { start: pos, end: i };
     }

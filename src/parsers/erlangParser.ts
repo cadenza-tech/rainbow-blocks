@@ -29,7 +29,30 @@ export class ErlangBlockParser extends BaseBlockParser {
     const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
     const lineBefore = source.slice(lineStart, position).trimStart();
     if (/^-[ \t]*(spec|type|callback|opaque)\b/.test(lineBefore)) {
-      return false;
+      // Check if there is a period (declaration separator) between the attribute and this fun
+      // If so, this fun is in a separate declaration, not part of the type
+      const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/);
+      const afterAttr = lineStart + lineBefore.indexOf(attrMatch![0]) + attrMatch![0].length;
+      let foundPeriod = false;
+      for (let j = afterAttr; j < position; j++) {
+        if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
+          if (j + 1 < source.length && source[j + 1] === '.') {
+            j++;
+            continue;
+          }
+          if (j > 0 && source[j - 1] === '.') {
+            continue;
+          }
+          if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
+            continue;
+          }
+          foundPeriod = true;
+          break;
+        }
+      }
+      if (!foundPeriod) {
+        return false;
+      }
     }
 
     // Check if fun is followed by an identifier and '/' (function reference)

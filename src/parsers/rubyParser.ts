@@ -291,6 +291,21 @@ export class RubyBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Reject loop keywords preceded by dot (method calls like obj.while),
+      // :: (scope resolution), @ or $ (variable prefixes)
+      if (loopAbsolutePos > 0) {
+        const prevChar = source[loopAbsolutePos - 1];
+        if (prevChar === '$' || prevChar === '@') {
+          continue;
+        }
+        if (prevChar === ':' && loopAbsolutePos > 1 && source[loopAbsolutePos - 2] === ':') {
+          continue;
+        }
+        if (prevChar === '.' && !(loopAbsolutePos > 1 && source[loopAbsolutePos - 2] === '.')) {
+          continue;
+        }
+      }
+
       // Find the first 'do' after this loop keyword, skipping excluded regions
       const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
       const searchRange = source.slice(afterLoopStart, position + 2);

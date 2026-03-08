@@ -107,6 +107,20 @@ function skipMacroString(source: string, pos: number, quote: string): number {
           i += 2;
           continue;
         }
+        // Skip nested strings inside interpolation to avoid counting braces inside them
+        if (source[i] === '"' || source[i] === "'") {
+          const nestedQuote = source[i];
+          i++;
+          while (i < source.length && source[i] !== nestedQuote) {
+            if (source[i] === '\\' && i + 1 < source.length) {
+              i += 2;
+              continue;
+            }
+            i++;
+          }
+          if (i < source.length) i++;
+          continue;
+        }
         if (source[i] === '{') {
           depth++;
         } else if (source[i] === '}') {

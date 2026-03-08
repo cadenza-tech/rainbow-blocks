@@ -2,7 +2,15 @@
 
 import type { ExcludedRegion } from '../types';
 
-import { findSingleQuoteEnd, isCommentStart, matchDollarSingleQuote, matchesWord, matchHeredocBody, parseHeredocOperator } from './bashLeafHelpers';
+import {
+  findSingleQuoteEnd,
+  isCommentStart,
+  isDollarHashVariable,
+  matchDollarSingleQuote,
+  matchesWord,
+  matchHeredocBody,
+  parseHeredocOperator
+} from './bashLeafHelpers';
 
 // Matches backtick command substitution with limited escape handling
 export function matchBacktickCommand(source: string, pos: number): ExcludedRegion {
@@ -467,8 +475,8 @@ export function matchCommandSubstitution(source: string, pos: number): ExcludedR
       continue;
     }
 
-    // Skip comments (# to end of line, but not $# special variable; allow $$#)
-    if (char === '#' && isCommentStart(source, i) && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
+    // Skip comments (# to end of line, but not $# special variable)
+    if (char === '#' && isCommentStart(source, i) && !isDollarHashVariable(source, i)) {
       while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
         i++;
       }
@@ -634,8 +642,8 @@ export function matchProcessSubstitution(source: string, pos: number): ExcludedR
       continue;
     }
 
-    // Skip comments (# to end of line, but not $# special variable; allow $$#)
-    if (char === '#' && isCommentStart(source, i) && !(i > 0 && source[i - 1] === '$' && !(i >= 2 && source[i - 2] === '$'))) {
+    // Skip comments (# to end of line, but not $# special variable)
+    if (char === '#' && isCommentStart(source, i) && !isDollarHashVariable(source, i)) {
       while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
         i++;
       }

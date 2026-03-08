@@ -291,7 +291,7 @@ export class FortranBlockParser extends BaseBlockParser {
       }
       if (i < source.length && source[i] === '\r') i++;
       if (i < source.length && source[i] === '\n') i++;
-      // Skip comment-only lines between end & and continuation content
+      // Skip comment-only lines and bare & continuation lines between end & and content
       while (i < source.length) {
         let lineContentStart = i;
         while (lineContentStart < source.length && (source[lineContentStart] === ' ' || source[lineContentStart] === '\t')) {
@@ -307,6 +307,24 @@ export class FortranBlockParser extends BaseBlockParser {
           if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
           i = lineEnd;
           continue;
+        }
+        // Bare & continuation line or & with inline comment
+        if (lineContentStart < source.length && source[lineContentStart] === '&') {
+          let afterAmp = lineContentStart + 1;
+          while (afterAmp < source.length && (source[afterAmp] === ' ' || source[afterAmp] === '\t')) {
+            afterAmp++;
+          }
+          // Bare & or & followed by comment
+          if (afterAmp >= source.length || source[afterAmp] === '\n' || source[afterAmp] === '\r' || source[afterAmp] === '!') {
+            let lineEnd = afterAmp;
+            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+              lineEnd++;
+            }
+            if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
+            if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
+            i = lineEnd;
+            continue;
+          }
         }
         break;
       }
@@ -354,6 +372,40 @@ export class FortranBlockParser extends BaseBlockParser {
         }
         if (j < source.length && source[j] === '\r') j++;
         if (j < source.length && source[j] === '\n') j++;
+        // Skip comment-only lines and bare & continuation lines
+        while (j < source.length) {
+          let lineContentStart = j;
+          while (lineContentStart < source.length && (source[lineContentStart] === ' ' || source[lineContentStart] === '\t')) {
+            lineContentStart++;
+          }
+          if (lineContentStart < source.length && source[lineContentStart] === '!') {
+            let lineEnd = lineContentStart;
+            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+              lineEnd++;
+            }
+            if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
+            if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
+            j = lineEnd;
+            continue;
+          }
+          if (lineContentStart < source.length && source[lineContentStart] === '&') {
+            let afterAmp = lineContentStart + 1;
+            while (afterAmp < source.length && (source[afterAmp] === ' ' || source[afterAmp] === '\t')) {
+              afterAmp++;
+            }
+            if (afterAmp >= source.length || source[afterAmp] === '\n' || source[afterAmp] === '\r' || source[afterAmp] === '!') {
+              let lineEnd = afterAmp;
+              while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+                lineEnd++;
+              }
+              if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
+              if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
+              j = lineEnd;
+              continue;
+            }
+          }
+          break;
+        }
         while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
           j++;
         }

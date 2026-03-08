@@ -212,17 +212,14 @@ export class LuaBlockParser extends BaseBlockParser {
   }
 
   // Finds the index of the last non-repeat block in the stack
-  // Only returns a match if the topmost block is not repeat,
-  // preventing end from skipping over unmatched repeat blocks
+  // Scans backward past repeat blocks so end can close enclosing blocks
   private findLastNonRepeatIndex(stack: OpenBlock[]): number {
-    if (stack.length === 0) {
-      return -1;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].token.value !== 'repeat') {
+        return i;
+      }
     }
-    // If the topmost block is repeat, end cannot close it
-    if (stack[stack.length - 1].token.value === 'repeat') {
-      return -1;
-    }
-    return stack.length - 1;
+    return -1;
   }
 
   // Matches Lua regular strings, stopping at unescaped newlines
