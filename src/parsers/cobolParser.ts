@@ -1,6 +1,6 @@
 // COBOL block parser: PERFORM→END-PERFORM, IF→END-IF, EVALUATE→END-EVALUATE
 
-import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token, TokenType } from '../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType } from './parserUtils';
 
@@ -245,18 +245,6 @@ export class CobolBlockParser extends BaseBlockParser {
     }
 
     return tokens;
-  }
-
-  // Returns the token type for a keyword (case-insensitive)
-  protected getTokenType(keyword: string): TokenType {
-    const lowerKeyword = keyword.toLowerCase();
-    if (this.keywords.blockClose.some((k) => k.toLowerCase() === lowerKeyword)) {
-      return 'block_close';
-    }
-    if (this.keywords.blockMiddle.some((k) => k.toLowerCase() === lowerKeyword)) {
-      return 'block_middle';
-    }
-    return 'block_open';
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
