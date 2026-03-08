@@ -1847,6 +1847,12 @@ esac`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'esac');
     });
+
+    test('should recognize case pattern when comment with ) is on preceding line', () => {
+      const source = 'case $x in\n  for|  # comment with )\n  if) echo match;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
   });
 
   suite('Complex real-world scenario', () => {
@@ -2745,6 +2751,18 @@ fi`;
   suite('Edge case: $$# (double dollar + hash)', () => {
     test('should treat $$# as comment start after $$', () => {
       const source = 'echo $$# this is a comment\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should treat $$$# as $$ + $# (not comment)', () => {
+      const source = 'echo $$$#\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should treat $$$$# as $$$$ + comment', () => {
+      const source = 'echo $$$$# if true; then\nif true; then\n  echo ok\nfi';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });

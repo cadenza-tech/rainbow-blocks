@@ -3030,6 +3030,40 @@ end`;
     });
   });
 
+  suite('Regression: heredoc in interpolation closing on opener line', () => {
+    test('should handle heredoc in string interpolation where } follows on same line', () => {
+      const source = '"#{<<-HEREDOC}"\n  if true\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc in backtick interpolation where } follows on same line', () => {
+      const source = '`#{<<-HEREDOC}`\n  if true\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc in percent literal interpolation where } follows on same line', () => {
+      const source = '%Q(#{<<-HEREDOC})\n  if true\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: %{...} percent literal without specifier', () => {
+    test('should treat %{text} as percent literal not modulo', () => {
+      const source = 'puts %{if end}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat %(text) as percent literal not modulo', () => {
+      const source = 'raise %(if end)\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression: double-quoted symbol interpolation', () => {
     test('should exclude do keyword inside interpolation in double-quoted symbol', () => {
       const source = 'x = :"hello #{" do "} world"\nif true\n  1\nend';

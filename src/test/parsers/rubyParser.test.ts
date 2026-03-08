@@ -2630,6 +2630,54 @@ end`;
     });
   });
 
+  suite('Regression: heredoc in interpolation closing on opener line', () => {
+    test('should handle heredoc in string interpolation where } follows on same line', () => {
+      // When heredoc starts inside #{...} and } is on the same line as <<HEREDOC,
+      // the heredoc body extends past the }, so the excluded region must cover it
+      const source = '"#{<<~HEREDOC}"\n  if true\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc in backtick interpolation where } follows on same line', () => {
+      const source = '`#{<<~HEREDOC}`\n  if true\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc in percent literal interpolation where } follows on same line', () => {
+      const source = '%Q(#{<<~HEREDOC})\n  if true\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: %{...} percent literal without specifier', () => {
+    test('should treat %{text} as percent literal not modulo', () => {
+      const source = 'puts %{if end}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat %(text) as percent literal not modulo', () => {
+      const source = 'raise %(if end)\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat %[text] as percent literal not modulo', () => {
+      const source = 'x = %[if end]\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still treat % after number as modulo', () => {
+      const source = 'x = 10 % 3\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Branch coverage: heredoc CRLF line endings in interpolation', () => {
     test('should handle heredoc body skip with CRLF in interpolation', () => {
       const source = '"#{<<~HEREDOC\r\nbody\r\nHEREDOC\r\n}"';
