@@ -1639,5 +1639,19 @@ endmodule`;
     });
   });
 
+  suite('Regression: matchVerilogString backslash-newline excluded region', () => {
+    test('should include backslash in excluded region when followed by newline', () => {
+      const source = '"test\\\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should include backslash in excluded region when followed by CR-LF', () => {
+      const source = '"test\\\r\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });

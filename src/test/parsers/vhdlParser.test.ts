@@ -1530,6 +1530,30 @@ end entity;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'entity', 'end entity');
     });
+
+    test('should reject loop preceded by dot (isValidLoopOpen line 230-231)', () => {
+      // isValidLoopOpen: loop preceded by a dot (hierarchical reference)
+      const source = 'architecture rtl of test is\nbegin\n  inst.loop\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+
+    test('should accept for loop when wait followed by semicolon precedes it (line 344-345)', () => {
+      // isValidLoopOpen: wait; for ... - wait is complete (has semicolon), for is real loop
+      const source = 'process is\nbegin\n  wait; for i in 0 to 3 loop\n    null;\n  end loop;\nend process;';
+      const pairs = parser.parse(source);
+      // for/end loop pair exists; process/end process pair also
+      const loopPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(loopPair, 'should find for loop block');
+    });
+
+    test('should handle use entity with CRLF blank lines in backward scan (line 160-161)', () => {
+      // isValidEntityOpen backward scan: blank line with CRLF (\r\n) causes scanEnd--
+      // entity preceded by blank line with CRLF
+      const source = 'use work.pkg.all;\r\n\r\nentity test is\nend entity test;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
   });
 
   suite('Bug 16: COMPOUND_END_PATTERN newline handling', () => {
@@ -1620,32 +1644,6 @@ end entity;`;
       const source = 'process is\nbegin\n  null;\nend process;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'process', 'end process');
-    });
-  });
-
-  suite('Coverage: uncovered code paths', () => {
-    test('should reject loop preceded by dot (isValidLoopOpen line 230-231)', () => {
-      // isValidLoopOpen: loop preceded by a dot (hierarchical reference)
-      const source = 'architecture rtl of test is\nbegin\n  inst.loop\nend architecture;';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'architecture', 'end architecture');
-    });
-
-    test('should accept for loop when wait followed by semicolon precedes it (line 344-345)', () => {
-      // isValidLoopOpen: wait; for ... - wait is complete (has semicolon), for is real loop
-      const source = 'process is\nbegin\n  wait; for i in 0 to 3 loop\n    null;\n  end loop;\nend process;';
-      const pairs = parser.parse(source);
-      // for/end loop pair exists; process/end process pair also
-      const loopPair = pairs.find((p) => p.openKeyword.value === 'for');
-      assert.ok(loopPair, 'should find for loop block');
-    });
-
-    test('should handle use entity with CRLF blank lines in backward scan (line 160-161)', () => {
-      // isValidEntityOpen backward scan: blank line with CRLF (\r\n) causes scanEnd--
-      // entity preceded by blank line with CRLF
-      const source = 'use work.pkg.all;\r\n\r\nentity test is\nend entity test;';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'entity', 'end entity');
     });
   });
 

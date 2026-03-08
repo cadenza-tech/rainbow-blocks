@@ -1052,6 +1052,31 @@ end`;
         assertSingleBlock(pairs, 'def', 'end');
       });
     });
+
+    test('should handle CRLF line endings', () => {
+      const source = 'if true do\r\n  :ok\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle atom that looks like keyword', () => {
+      const source = `x = :if
+y = :do
+if true do
+  :end
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle keyword in map key position', () => {
+      const source = `%{if: true, do: :ok}
+if true do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Branch coverage', () => {
@@ -1071,6 +1096,72 @@ end`;
       const source = 'if true, do: :ok';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: hasDoKeyword dot and @ prefix exclusion', () => {
+    test('should recognize if-end when Module.if appears inside hasDoKeyword scan', () => {
+      const source = `if SomeModule.if(data) do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should recognize if-end when Module.for appears inside hasDoKeyword scan', () => {
+      const source = `if SomeModule.for(x, y) do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should recognize if-end when Module.fn appears inside hasDoKeyword scan', () => {
+      const source = `if Module.fn(x) do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should recognize if-end when @fn appears inside hasDoKeyword scan', () => {
+      const source = `if @fn do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should recognize defmodule-end when data.end appears inside hasDoKeyword scan', () => {
+      const source = `defmodule M do
+  if data.end do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'defmodule');
+      findBlock(pairs, 'if');
+    });
+
+    test('should recognize defmodule-end when @end appears inside hasDoKeyword scan', () => {
+      const source = `defmodule M do
+  if @end do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'defmodule');
+      findBlock(pairs, 'if');
+    });
+
+    test('should recognize if-end when @if appears inside hasDoKeyword scan', () => {
+      const source = `if @if do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -1459,33 +1550,6 @@ end`;
       assertBlockCount(pairs, 4);
       findBlock(pairs, 'defmodule');
       assertNestLevel(pairs, 'defmodule', 0);
-    });
-  });
-
-  suite('Edge cases', () => {
-    test('should handle CRLF line endings', () => {
-      const source = 'if true do\r\n  :ok\r\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle atom that looks like keyword', () => {
-      const source = `x = :if
-y = :do
-if true do
-  :end
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle keyword in map key position', () => {
-      const source = `%{if: true, do: :ok}
-if true do
-  :ok
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 

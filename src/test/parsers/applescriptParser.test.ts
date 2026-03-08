@@ -409,6 +409,26 @@ end tell`;
     });
   });
 
+  suite('Branch coverage: set/copy before middle keyword', () => {
+    test('should skip compound middle keyword after set command', () => {
+      // Covers applescriptParser.ts lines 269-270: set before block_middle compound keyword
+      const source = `tell application "Finder"
+  set on error to "default"
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip compound middle keyword after copy command', () => {
+      // Covers applescriptParser.ts lines 269-270: copy before block_middle compound keyword
+      const source = `tell application "Finder"
+  copy on error to myVar
+end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Keyword as substring of identifier', () => {
@@ -1500,17 +1520,18 @@ end try`;
   });
 
   suite('Branch coverage: block_middle after set/copy and continuation whitespace', () => {
-    test('should skip block_middle compound keyword after set (lines 268-270)', () => {
-      // 'on error' is a block_middle compound keyword; after 'set ' it should be treated as variable name
-      const source = 'set on error to "default"\ntry\n  error "test"\non error\n  display dialog "err"\nend try';
+    test('should skip block_middle compound keyword after set without to (lines 268-270)', () => {
+      // 'on error' after 'set' without 'to' bypasses isKeywordAsVariableName, reaching lines 268-270
+      const source = 'tell application "Finder"\n  set on error\nend tell';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'try', 'end try');
+      assertSingleBlock(pairs, 'tell', 'end tell');
     });
 
-    test('should skip block_middle compound keyword after copy (lines 268-270)', () => {
-      const source = 'copy on error to myVar\ntry\n  error "test"\non error\n  display dialog "err"\nend try';
+    test('should skip block_middle compound keyword after copy without to (lines 268-270)', () => {
+      // 'on error' after 'copy' without 'to' bypasses isKeywordAsVariableName, reaching lines 268-270
+      const source = 'tell application "Finder"\n  copy on error\nend tell';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'try', 'end try');
+      assertSingleBlock(pairs, 'tell', 'end tell');
     });
 
     test('should handle continuation with trailing whitespace in isAtLogicalLineStart (lines 359-361)', () => {

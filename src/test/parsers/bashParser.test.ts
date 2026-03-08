@@ -1434,6 +1434,55 @@ done`;
         assertNoBlocks(pairs);
       });
     });
+
+    test('should handle CRLF heredoc terminator', () => {
+      const source = 'if true; then\r\n  cat <<EOF\r\nhello\r\nEOF\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle CRLF in case statement', () => {
+      const source = 'case $x in\r\n  a)\r\n    echo ok\r\n    ;;\r\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle empty case statement', () => {
+      const source = 'case $x in\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should handle if/fi on same line after semicolons', () => {
+      const source = 'if true; then echo ok; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle nested case with keywords as patterns', () => {
+      const source = `case $cmd in
+  for|while|until)
+    echo "loop keyword"
+    ;;
+  if|case)
+    echo "conditional"
+    ;;
+esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should recognize block keywords after ) in case body', () => {
+      const source = 'case $x in\n  a) for i in 1 2; do\n       echo $i\n     done\n     ;;\nesac';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      assert.strictEqual(pairs[0].openKeyword.value, 'for');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'done');
+      assert.strictEqual(pairs[0].nestLevel, 1);
+      assert.strictEqual(pairs[1].openKeyword.value, 'case');
+      assert.strictEqual(pairs[1].closeKeyword.value, 'esac');
+      assert.strictEqual(pairs[1].nestLevel, 0);
+    });
   });
 
   suite('Block middle keyword validation', () => {
@@ -1603,6 +1652,26 @@ esac`;
 esac`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Regression: $$$# comment detection inside $() and <()', () => {
+    test('should not treat $$$# as comment inside command substitution', () => {
+      const source = '$(echo $$$#)\nif true; then\n  echo test\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat $$$# as comment inside process substitution', () => {
+      const source = 'cat <(echo $$$#)\nif true; then\n  echo test\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat $$$$$# as comment inside command substitution', () => {
+      const source = '$($$$$$#)\nif true; then\n  echo test\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
     });
   });
 
@@ -1937,57 +2006,6 @@ fi`;
       const source = 'if true; then\n  x=${var:-`if true; then echo 1; fi`}\nfi';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
-    });
-  });
-
-  suite('Edge cases', () => {
-    test('should handle CRLF heredoc terminator', () => {
-      const source = 'if true; then\r\n  cat <<EOF\r\nhello\r\nEOF\r\nfi';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'fi');
-    });
-
-    test('should handle CRLF in case statement', () => {
-      const source = 'case $x in\r\n  a)\r\n    echo ok\r\n    ;;\r\nesac';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'case', 'esac');
-    });
-
-    test('should handle empty case statement', () => {
-      const source = 'case $x in\nesac';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'case', 'esac');
-    });
-
-    test('should handle if/fi on same line after semicolons', () => {
-      const source = 'if true; then echo ok; fi';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'fi');
-    });
-
-    test('should handle nested case with keywords as patterns', () => {
-      const source = `case $cmd in
-  for|while|until)
-    echo "loop keyword"
-    ;;
-  if|case)
-    echo "conditional"
-    ;;
-esac`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'case', 'esac');
-    });
-
-    test('should recognize block keywords after ) in case body', () => {
-      const source = 'case $x in\n  a) for i in 1 2; do\n       echo $i\n     done\n     ;;\nesac';
-      const pairs = parser.parse(source);
-      assert.strictEqual(pairs.length, 2);
-      assert.strictEqual(pairs[0].openKeyword.value, 'for');
-      assert.strictEqual(pairs[0].closeKeyword.value, 'done');
-      assert.strictEqual(pairs[0].nestLevel, 1);
-      assert.strictEqual(pairs[1].openKeyword.value, 'case');
-      assert.strictEqual(pairs[1].closeKeyword.value, 'esac');
-      assert.strictEqual(pairs[1].nestLevel, 0);
     });
   });
 

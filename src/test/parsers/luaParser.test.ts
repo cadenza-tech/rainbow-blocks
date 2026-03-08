@@ -486,6 +486,66 @@ end`;
         assertSingleBlock(pairs, 'for', 'end');
       });
     });
+
+    test('should handle repeat-until with no body', () => {
+      const source = 'repeat until true';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'until');
+    });
+
+    test('should handle CRLF line endings', () => {
+      const source = 'if true then\r\n  x = 1\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle nested long strings with different levels', () => {
+      const source = `x = [==[
+  if true then
+    [[ nested ]]
+  end
+]==]
+function foo()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle do end immediately after for', () => {
+      const source = 'for i=1,10 do end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('Regression: findLastNonRepeatIndex backward scan', () => {
+    test('should close function-end when repeat is on top of stack', () => {
+      const source = `function f()
+  repeat
+    while true do
+    end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'while');
+      findBlock(pairs, 'function');
+    });
+
+    test('should close if-end through multiple unmatched repeat blocks', () => {
+      const source = `if true then
+  repeat
+  repeat
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not close anything when only repeat blocks are on the stack', () => {
+      const source = 'repeat\nrepeat\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   generateCommonTests(config);
@@ -587,38 +647,6 @@ end`;
     test('should return null for non-special characters', () => {
       const regions = parser.getExcludedRegions('x = 1 + 2');
       assert.strictEqual(regions.length, 0);
-    });
-  });
-
-  suite('Edge cases', () => {
-    test('should handle repeat-until with no body', () => {
-      const source = 'repeat until true';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'repeat', 'until');
-    });
-
-    test('should handle CRLF line endings', () => {
-      const source = 'if true then\r\n  x = 1\r\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle nested long strings with different levels', () => {
-      const source = `x = [==[
-  if true then
-    [[ nested ]]
-  end
-]==]
-function foo()
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end');
-    });
-
-    test('should handle do end immediately after for', () => {
-      const source = 'for i=1,10 do end';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'for', 'end');
     });
   });
 

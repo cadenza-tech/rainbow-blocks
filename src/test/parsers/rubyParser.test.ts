@@ -1383,6 +1383,64 @@ end`;
     });
   });
 
+  suite('Regression: isLoopDo loop keyword context validation', () => {
+    test('should treat x.while do as block do, not loop do', () => {
+      const source = `x.while do |y|
+  puts y
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should treat x.until do as block do, not loop do', () => {
+      const source = `x.until do |y|
+  puts y
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should treat x.for do as block do, not loop do', () => {
+      const source = `x.for do |y|
+  puts y
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should treat Module::while do as block do, not loop do', () => {
+      const source = `Module::while do |y|
+  puts y
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should treat @while do as block do, not loop do', () => {
+      const source = `@while do |y|
+  puts y
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should treat $while do as block do, not loop do', () => {
+      const source = `$while do |y|
+  puts y
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still detect real while do as loop do', () => {
+      const source = `while condition do
+  puts "loop"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Coverage: loopDo semicolon and excluded region branches', () => {
@@ -2254,6 +2312,55 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle heredoc with CR-only line endings in terminator scan', () => {
+      // rubyExcluded.ts: heredoc terminator matching with CR line endings
+      const source = 'x = <<~HEREDOC\r  content with if end\rHEREDOC\rif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle two-terminator heredoc (squiggly) with CRLF', () => {
+      // rubyExcluded.ts: multi-terminator heredoc with CRLF
+      const source = 'x = <<~HEREDOC\r\n  begin\r\nHEREDOC\r\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside #{} interpolation with CRLF line endings (lines 651-652)', () => {
+      // rubyParser.ts skipInterpolation: heredocSkipEnd > i && source[i] === '\r' && next === '\n'
+      // CRLF line ending inside #{} where there's a heredoc: i += 2 path
+      const source = '"#{<<-HEREDOC}\r\n  content with }\r\nHEREDOC\r\n"\r\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside #{} interpolation with CR-only line endings (lines 653-655)', () => {
+      // rubyParser.ts skipInterpolation: heredocSkipEnd > i && source[i] === '\r' without '\n'
+      // CR-only path: i++ then jump to heredocSkipEnd
+      const source = '"#{<<-HEREDOC}\r  content with }\rHEREDOC\r"\rif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc opener line with string containing backslash escape (parserUtils line 70)', () => {
+      // findLineCommentAndStringRegions: string with \" escape triggers backslash skip path
+      // The heredoc opener line has a string with escaped quote before <<HEREDOC
+      // The 'if true' inside heredoc is excluded, so no block pair is formed
+      const source = 'foo("say \\"hi\\"", <<HEREDOC)\nif true\nHEREDOC\nif false\nend';
+      const pairs = parser.parse(source);
+      // 'if false' after HEREDOC is the real block opener
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside interpolation where body is skipped at newline (lines 651-659)', () => {
+      // Covers lines 650-659: heredoc skip during skipInterpolation
+      // The heredoc opener is inside #{}, and the } closing brace is AFTER the heredoc body
+      // so the heredoc body skip logic at line break is actually triggered
+      const source = '"#{<<HEREDOC\ncontent\nHEREDOC\n}"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Bug 1: backslash line continuation', () => {
@@ -2383,57 +2490,6 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
       assertIntermediates(pairs[0], ['rescue']);
-    });
-  });
-
-  suite('Coverage: uncovered code paths', () => {
-    test('should handle heredoc with CR-only line endings in terminator scan', () => {
-      // rubyExcluded.ts: heredoc terminator matching with CR line endings
-      const source = 'x = <<~HEREDOC\r  content with if end\rHEREDOC\rif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle two-terminator heredoc (squiggly) with CRLF', () => {
-      // rubyExcluded.ts: multi-terminator heredoc with CRLF
-      const source = 'x = <<~HEREDOC\r\n  begin\r\nHEREDOC\r\nif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle heredoc inside #{} interpolation with CRLF line endings (lines 651-652)', () => {
-      // rubyParser.ts skipInterpolation: heredocSkipEnd > i && source[i] === '\r' && next === '\n'
-      // CRLF line ending inside #{} where there's a heredoc: i += 2 path
-      const source = '"#{<<-HEREDOC}\r\n  content with }\r\nHEREDOC\r\n"\r\nif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle heredoc inside #{} interpolation with CR-only line endings (lines 653-655)', () => {
-      // rubyParser.ts skipInterpolation: heredocSkipEnd > i && source[i] === '\r' without '\n'
-      // CR-only path: i++ then jump to heredocSkipEnd
-      const source = '"#{<<-HEREDOC}\r  content with }\rHEREDOC\r"\rif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle heredoc opener line with string containing backslash escape (parserUtils line 70)', () => {
-      // findLineCommentAndStringRegions: string with \" escape triggers backslash skip path
-      // The heredoc opener line has a string with escaped quote before <<HEREDOC
-      // The 'if true' inside heredoc is excluded, so no block pair is formed
-      const source = 'foo("say \\"hi\\"", <<HEREDOC)\nif true\nHEREDOC\nif false\nend';
-      const pairs = parser.parse(source);
-      // 'if false' after HEREDOC is the real block opener
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle heredoc inside interpolation where body is skipped at newline (lines 651-659)', () => {
-      // Covers lines 650-659: heredoc skip during skipInterpolation
-      // The heredoc opener is inside #{}, and the } closing brace is AFTER the heredoc body
-      // so the heredoc body skip logic at line break is actually triggered
-      const source = '"#{<<HEREDOC\ncontent\nHEREDOC\n}"\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
     });
   });
 
@@ -2682,6 +2738,16 @@ end`;
     test('should handle heredoc body skip with CRLF in interpolation', () => {
       const source = '"#{<<~HEREDOC\r\nbody\r\nHEREDOC\r\n}"';
       const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Branch coverage: CRLF backslash continuation', () => {
+    test('should handle backslash continuation with CRLF line endings', () => {
+      // Covers rubyParser.ts line 153: CRLF pair detection in backslash continuation
+      const source = 'x = 1 \\\r\nif true\r\n  y = 2\r\nend';
+      const pairs = parser.parse(source);
+      // Backslash continuation makes 'if' a postfix modifier (not a block open)
       assertNoBlocks(pairs);
     });
   });

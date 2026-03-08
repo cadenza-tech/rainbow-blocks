@@ -460,6 +460,78 @@ end`;
     });
   });
 
+  suite('Regression: isValidBlockClose bare & and comment-only line skipping', () => {
+    test('should reject end as block close when bare & line separates end & and assignment', () => {
+      const source = `program test
+  end &
+    &
+    = 5
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end as block close when & with comment separates end & and assignment', () => {
+      const source = `program test
+  end &
+    & ! comment
+    = 5
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end(1) as block close when comment line separates end(1) & and assignment', () => {
+      const source = `program test
+  end(1) &
+    ! comment
+    = 5
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end(1) as block close when bare & line separates end(1) & and assignment', () => {
+      const source = `program test
+  end(1) &
+    &
+    = 5
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end as block close when & ! comment line separates end & and assignment', () => {
+      // Covers fortranParser.ts lines 399-400: while loop scans past ! comment text to end of line
+      const source = `program test
+  end &
+  & ! This is a comment
+  = 5
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should handle unterminated string with line break (no & continuation)', () => {
+      // Covers fortranHelpers.ts line 64: isStringContinuation returns false for non-continuation line break
+      const source = `program test
+  x = 'unterminated
+  if (.true.) then
+    y = 1
+  end if
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle CR-only line endings in type declaration check', () => {
+      // Covers fortranHelpers.ts lines 556-557, 618-619: prevLine.endsWith CR handling
+      const source = 'integer :: x\rif (.true.) then\r  y = 1\rend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Concatenated compound end keywords', () => {
@@ -3287,6 +3359,13 @@ end program`;
     test('should not treat end(n) & with trailing spaces as block close', () => {
       // Covers fortranParser.ts lines 353-354: while loop body with whitespace
       const source = 'program test\n  integer :: end(10)\n  end(1) &   \n    = 42\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat end(n) & with & ! comment continuation as block close', () => {
+      // Covers fortranParser.ts lines 399-400: & ! comment line after end(expr) &
+      const source = 'program test\n  integer :: end(10)\n  end(1) &\n  & ! comment\n  = 42\nend program';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
     });

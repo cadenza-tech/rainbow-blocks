@@ -2740,6 +2740,22 @@ end`;
     });
   });
 
+  suite('Branch coverage: prefixed string suffix chars in interpolation', () => {
+    test('should skip suffix chars after closing triple-quoted prefixed string in interpolation', () => {
+      // Covers juliaHelpers.ts line 60: suffix chars after closing """
+      const source = '"$(r"""pattern"""im)"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should skip suffix chars after closing regular prefixed string in interpolation', () => {
+      // Covers juliaHelpers.ts line 76: suffix chars after closing "
+      const source = '"$(r"pattern"im)"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: prefixed string inside interpolation', () => {
     test('should handle raw string inside $() interpolation', () => {
       const source = '"$(r"$end")" \nfunction f()\n  return 1\nend';

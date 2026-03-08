@@ -1717,5 +1717,42 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: fun after period separator on -type line', () => {
+    test('should recognize fun-end after period on same line as -type', () => {
+      const source = '-type handler() :: fun(). fun(X) -> X + 1 end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should still reject fun inside -type declaration without period', () => {
+      const source = '-type my_fun() :: fun((atom()) -> ok).';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still reject fun inside -spec declaration', () => {
+      const source = '-spec my_fun(fun()) -> ok.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Branch coverage: map key keyword filter', () => {
+    test('should filter out block_middle keyword followed by => in map', () => {
+      // Covers erlangParser.ts lines 154-155: block_middle used as map key with =>
+      // block_open keywords are caught by isValidBlockOpen first, so use block_middle
+      const source = 'X = #{after => 5}.\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should filter out block_middle keyword followed by := in map', () => {
+      // Covers erlangParser.ts lines 154-155: block_middle used as map key with :=
+      const source = 'X = #{catch := handler}.\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

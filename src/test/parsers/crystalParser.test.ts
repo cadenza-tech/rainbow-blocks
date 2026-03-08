@@ -1423,6 +1423,33 @@ end`;
     });
   });
 
+  suite('Regression: skipMacroString nested string in interpolation', () => {
+    test('should handle string with closing brace inside macro interpolation', () => {
+      const source = '{% "test #{"}"}" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle string with opening brace inside macro interpolation', () => {
+      const source = '{% "test #{" { "}" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: matchSymbolLiteral heredocState propagation', () => {
+    test('should exclude heredoc inside double-quoted symbol interpolation', () => {
+      const source = `x = :"prefix #{<<-HERE}
+content with end if
+HERE
+"
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Regex after keyword', () => {
@@ -2621,6 +2648,73 @@ end`;
       assertBlockCount(pairs, 2);
       findBlock(pairs, 'while');
     });
+
+    // Lines 290-291: :: scope resolution filter - token preceded by :: is not a keyword
+    test('should not parse do as keyword when preceded by :: scope resolution', () => {
+      // Module::do - 'do' preceded by '::' is a scope resolution, not a block opener
+      const source = 'Module::do\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not parse end as keyword when preceded by :: scope resolution', () => {
+      // MyModule::Class::end - 'end' preceded by '::' is filtered at lines 289-291
+      const source = 'MyModule::Class::end\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Lines 301-303: heredoc opener filter (<<-keyword) - keyword after <<- is not a block keyword
+    test('should not parse end as block keyword when it is a heredoc opener', () => {
+      const source = 'x = <<-end\ncontent\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Lines 304-306: heredoc opener with quoted delimiter (<<-'keyword' or <<-"keyword")
+    // The keyword inside the quoted delimiter is filtered here.
+    // Note: the keyword inside quotes may be in an excluded region (single-char literal),
+    // so this test verifies correct behavior even if the branch fires indirectly.
+    test('should not parse do as block keyword when it is a quoted heredoc opener delimiter', () => {
+      // <<-'do' style heredoc - 'do' between the quotes is the delimiter, not a block keyword
+      const source = "x = <<-'do'\ncontent\ndo\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // Lines 430-438: heredoc inside #{} interpolation with various line endings
+    // The heredoc body is INSIDE the interpolation (closing } comes AFTER heredoc terminator)
+    test('should handle heredoc inside #{} interpolation with LF line endings', () => {
+      // Structure: "#{<<-HEREDOC\nbody\nHEREDOC\n}" - \n fires the else path (line 433-434)
+      const source = '"#{<<-HEREDOC\n  content\nHEREDOC\n}"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc inside #{} interpolation with CRLF line endings', () => {
+      // Structure: "#{<<-HEREDOC\r\nbody\r\nHEREDOC\r\n}" - \r\n fires the CRLF path (line 430-432)
+      const source = '"#{<<-HEREDOC\r\n  content\r\nHEREDOC\r\n}"\r\nif true\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // crystalExcluded.ts lines 107-109: backslash escape inside #{} interpolation in macro string
+    test('should handle backslash escape inside #{} interpolation in macro double-quoted string', () => {
+      // skipMacroString: quote='"', #{} interpolation, then backslash inside interpolation
+      const source = '{% "value: #{x.gsub(/\\n/, " ")}" %}\nif x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    // crystalExcluded.ts lines 451-453: isDoAfterLoop break when do found before position
+    test('should not treat do as loop opener when another do precedes it on same loop line', () => {
+      // isDoAfterLoop: finds a 'do' in searchRange that is NOT at the current position - break
+      // This happens when the loop has two 'do' occurrences but the second is the actual token
+      const source = 'xs.each do |x| do\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      // Result depends on parser; mainly ensure no crash and some valid parse
+      assert.ok(Array.isArray(pairs));
+    });
   });
 
   suite('Bug 23: macro template {% %} comment handling', () => {
@@ -2845,75 +2939,6 @@ end`;
     });
   });
 
-  suite('Coverage: uncovered code paths', () => {
-    // Lines 290-291: :: scope resolution filter - token preceded by :: is not a keyword
-    test('should not parse do as keyword when preceded by :: scope resolution', () => {
-      // Module::do - 'do' preceded by '::' is a scope resolution, not a block opener
-      const source = 'Module::do\nif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should not parse end as keyword when preceded by :: scope resolution', () => {
-      // MyModule::Class::end - 'end' preceded by '::' is filtered at lines 289-291
-      const source = 'MyModule::Class::end\nif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    // Lines 301-303: heredoc opener filter (<<-keyword) - keyword after <<- is not a block keyword
-    test('should not parse end as block keyword when it is a heredoc opener', () => {
-      const source = 'x = <<-end\ncontent\nend\nif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    // Lines 304-306: heredoc opener with quoted delimiter (<<-'keyword' or <<-"keyword")
-    // The keyword inside the quoted delimiter is filtered here.
-    // Note: the keyword inside quotes may be in an excluded region (single-char literal),
-    // so this test verifies correct behavior even if the branch fires indirectly.
-    test('should not parse do as block keyword when it is a quoted heredoc opener delimiter', () => {
-      // <<-'do' style heredoc - 'do' between the quotes is the delimiter, not a block keyword
-      const source = "x = <<-'do'\ncontent\ndo\nif true\nend";
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    // Lines 430-438: heredoc inside #{} interpolation with various line endings
-    // The heredoc body is INSIDE the interpolation (closing } comes AFTER heredoc terminator)
-    test('should handle heredoc inside #{} interpolation with LF line endings', () => {
-      // Structure: "#{<<-HEREDOC\nbody\nHEREDOC\n}" - \n fires the else path (line 433-434)
-      const source = '"#{<<-HEREDOC\n  content\nHEREDOC\n}"\nif true\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle heredoc inside #{} interpolation with CRLF line endings', () => {
-      // Structure: "#{<<-HEREDOC\r\nbody\r\nHEREDOC\r\n}" - \r\n fires the CRLF path (line 430-432)
-      const source = '"#{<<-HEREDOC\r\n  content\r\nHEREDOC\r\n}"\r\nif true\r\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    // crystalExcluded.ts lines 107-109: backslash escape inside #{} interpolation in macro string
-    test('should handle backslash escape inside #{} interpolation in macro double-quoted string', () => {
-      // skipMacroString: quote='"', #{} interpolation, then backslash inside interpolation
-      const source = '{% "value: #{x.gsub(/\\n/, " ")}" %}\nif x\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    // crystalExcluded.ts lines 451-453: isDoAfterLoop break when do found before position
-    test('should not treat do as loop opener when another do precedes it on same loop line', () => {
-      // isDoAfterLoop: finds a 'do' in searchRange that is NOT at the current position - break
-      // This happens when the loop has two 'do' occurrences but the second is the actual token
-      const source = 'xs.each do |x| do\nend\nif true\nend';
-      const pairs = parser.parse(source);
-      // Result depends on parser; mainly ensure no crash and some valid parse
-      assert.ok(Array.isArray(pairs));
-    });
-  });
-
   suite('Coverage: findLogicalLineStart backslash in excluded region', () => {
     test('should not extend logical line through backslash at end of comment', () => {
       // Covers crystalExcluded.ts lines 306-307: backslash in excluded region breaks findLogicalLineStart
@@ -3091,6 +3116,22 @@ end`;
 
     test('should handle simple double-quoted symbol without interpolation', () => {
       const source = 'x = :"hello world"\nif true\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: quoted heredoc opener keyword filter', () => {
+    test('should filter out keyword in single-quoted heredoc opener', () => {
+      // Covers crystalParser.ts lines 330-331: <<-'keyword' heredoc opener filter
+      const source = "x = <<-'do'\nsome text\ndo\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should filter out keyword in double-quoted heredoc opener', () => {
+      // Covers crystalParser.ts lines 330-331: <<-"keyword" heredoc opener filter
+      const source = 'x = <<-"end"\nsome text\nend\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });

@@ -1712,18 +1712,7 @@ end if;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
-  });
 
-  suite('Bug 14: surrogate pair character literal handling', () => {
-    test('should handle surrogate pair character literal without breaking parsing', () => {
-      // U+1D11E (musical symbol G clef) is 2 UTF-16 code units
-      const source = "if '\uD834\uDD1E' = X then\n  null;\nend if;";
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-  });
-
-  suite('Coverage: uncovered code paths', () => {
     test('should handle or else inside nested block in select', () => {
       // isOrElseShortCircuit: statements between or and else prevent short-circuit removal
       const source = `select
@@ -1754,6 +1743,15 @@ end select;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
       assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  suite('Bug 14: surrogate pair character literal handling', () => {
+    test('should handle surrogate pair character literal without breaking parsing', () => {
+      // U+1D11E (musical symbol G clef) is 2 UTF-16 code units
+      const source = "if '\uD834\uDD1E' = X then\n  null;\nend if;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
     });
   });
 

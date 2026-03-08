@@ -723,31 +723,7 @@ end`;
       const pairs = parser.parse('% comment\rif true\rend');
       assertSingleBlock(pairs, 'if', 'end');
     });
-  });
 
-  suite('Coverage: transpose after number', () => {
-    test('should treat apostrophe after number without letter as transpose', () => {
-      const regions = parser.getExcludedRegions("x = 5'");
-      assert.ok(regions.some((r) => r.end - r.start === 1));
-    });
-
-    test('should treat apostrophe after closing bracket as transpose', () => {
-      const regions = parser.getExcludedRegions("x = A(1)'");
-      assert.ok(regions.some((r) => r.end - r.start === 1));
-    });
-  });
-
-  suite('Arguments as function call', () => {
-    test('should not treat arguments(x) in expression as block open', () => {
-      const source = `y = arguments(x);
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-  });
-
-  suite('CR-only line endings', () => {
     test('should handle single-quoted string with CR-only ending', () => {
       const source = "x = 'unterminated\rif true\r  action;\rend";
       const pairs = parser.parse(source);
@@ -770,6 +746,28 @@ end`;
       const source = '%{\rcomment\r%}\rfor i = 1:10\rend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
+  suite('Coverage: transpose after number', () => {
+    test('should treat apostrophe after number without letter as transpose', () => {
+      const regions = parser.getExcludedRegions("x = 5'");
+      assert.ok(regions.some((r) => r.end - r.start === 1));
+    });
+
+    test('should treat apostrophe after closing bracket as transpose', () => {
+      const regions = parser.getExcludedRegions("x = A(1)'");
+      assert.ok(regions.some((r) => r.end - r.start === 1));
+    });
+  });
+
+  suite('Arguments as function call', () => {
+    test('should not treat arguments(x) in expression as block open', () => {
+      const source = `y = arguments(x);
+if true
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 

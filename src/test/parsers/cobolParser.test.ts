@@ -773,6 +773,21 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
+
+    test('should not treat EXEC inside identifier as EXEC block (line 374-375)', () => {
+      // matchExecBlock: pos > 0 && source[pos-1] is word char → return null
+      // LEXEC starts with E at pos where source[pos-1] = 'L'
+      const source = 'LEXEC SQL SELECT 1\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat EXEC preceded by hyphen as EXEC block', () => {
+      // matchExecBlock: preceding character is '-'
+      const source = 'X-EXEC SQL SELECT 1\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
   });
 
   suite('Excluded regions - Compiler directives', () => {
@@ -850,23 +865,6 @@ END-PERFORM`;
       const source = '==IF ELSE END-IF';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
-    });
-  });
-
-  suite('Coverage: uncovered code paths', () => {
-    test('should not treat EXEC inside identifier as EXEC block (line 374-375)', () => {
-      // matchExecBlock: pos > 0 && source[pos-1] is word char → return null
-      // LEXEC starts with E at pos where source[pos-1] = 'L'
-      const source = 'LEXEC SQL SELECT 1\nIF X > 0\nEND-IF';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
-    });
-
-    test('should not treat EXEC preceded by hyphen as EXEC block', () => {
-      // matchExecBlock: preceding character is '-'
-      const source = 'X-EXEC SQL SELECT 1\nIF X > 0\nEND-IF';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
     });
   });
 
