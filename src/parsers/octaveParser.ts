@@ -221,6 +221,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
       return this.matchSingleLineComment(source, pos);
     }
 
+    // Shell escape command: ! to end of line (only at line start)
+    if (char === '!' && this.isAtLineStartWithWhitespace(source, pos)) {
+      return this.matchSingleLineComment(source, pos);
+    }
+
     return null;
   }
 

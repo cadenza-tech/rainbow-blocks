@@ -373,7 +373,7 @@ export class BashBlockParser extends BaseBlockParser {
           }
           const lineStart = findLineStart(source, k);
           const textBefore = source.slice(lineStart, k);
-          if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore)) {
+          if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore) || /\bin[ \t]*$/.test(textBefore)) {
             return true;
           }
           return false;
@@ -391,7 +391,7 @@ export class BashBlockParser extends BaseBlockParser {
     if (k >= 0 && source[k] === '(') {
       const lineStart = findLineStart(source, k);
       const textBefore = source.slice(lineStart, k);
-      if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore)) {
+      if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore) || /\bin[ \t]*$/.test(textBefore)) {
         return true;
       }
     }
