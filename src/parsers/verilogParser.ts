@@ -2,6 +2,16 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import {
+  hasDollarAdjacent,
+  matchAttribute,
+  matchBlockComment,
+  matchDefineDirective,
+  matchEscapedIdentifier,
+  matchUndefDirective,
+  matchVerilogString,
+  trySkipLabel
+} from './verilogHelpers';
 
 // Mapping of close keywords to their valid openers
 const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
@@ -154,18 +164,6 @@ export class VerilogBlockParser extends BaseBlockParser {
     return filtered;
   }
 
-  // Rejects any keyword preceded or followed by $ (part of identifier like $end, fork$sig)
-  private hasDollarAdjacent(source: string, position: number, keyword: string): boolean {
-    if (position > 0 && source[position - 1] === '$') {
-      return true;
-    }
-    const afterPos = position + keyword.length;
-    if (afterPos < source.length && source[afterPos] === '$') {
-      return true;
-    }
-    return false;
-  }
-
   // Validates block open: control keywords need a following 'begin' to be valid
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords preceded by dot (hierarchical reference like inst.begin, .begin(signal))
@@ -179,7 +177,7 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject keywords adjacent to $ (system tasks like $end, identifiers like fork$sig)
-    if (this.hasDollarAdjacent(source, position, keyword)) {
+    if (hasDollarAdjacent(source, position, keyword)) {
       return false;
     }
 
@@ -303,7 +301,7 @@ export class VerilogBlockParser extends BaseBlockParser {
       // Skip labels: identifier followed by ':'
       // Support both regular identifiers and escaped identifiers (\name)
       if (/[a-zA-Z_]/.test(source[i]) || source[i] === '\\') {
-        const labelEnd = this.trySkipLabel(source, i);
+        const labelEnd = trySkipLabel(source, i);
         if (labelEnd > i) {
           i = labelEnd;
           continue;
@@ -367,26 +365,6 @@ export class VerilogBlockParser extends BaseBlockParser {
     return i;
   }
 
-  // Tries to skip a label (identifier: or \escaped_name:), returns new position or original if not a label
-  private trySkipLabel(source: string, pos: number): number {
-    let i = pos;
-    if (source[i] === '\\') {
-      // Escaped identifier: \name terminated by whitespace
-      i++;
-      while (i < source.length && !/\s/.test(source[i])) i++;
-    } else {
-      while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
-    }
-    // Skip whitespace after identifier
-    let afterIdent = i;
-    while (afterIdent < source.length && /[ \t]/.test(source[afterIdent])) afterIdent++;
-    if (afterIdent < source.length && source[afterIdent] === ':' && (afterIdent + 1 >= source.length || source[afterIdent + 1] !== ':')) {
-      return afterIdent + 1;
-    }
-    // Not a label
-    return pos;
-  }
-
   // Validates block close: reject keywords preceded by backtick, dot, or adjacent to $
   protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
     // Reject close keywords preceded by dot (hierarchical reference like inst.end)
@@ -400,7 +378,7 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject keywords adjacent to $ (system tasks like $end, identifiers like end$suffix)
-    if (this.hasDollarAdjacent(source, position, keyword)) {
+    if (hasDollarAdjacent(source, position, keyword)) {
       return false;
     }
 
@@ -436,29 +414,29 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Block comment: /* ... */
     if (char === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
-      return this.matchBlockComment(source, pos);
+      return matchBlockComment(source, pos);
     }
 
     // Double-quoted string
     if (char === '"') {
-      return this.matchVerilogString(source, pos);
+      return matchVerilogString(source, pos);
     }
 
     // `define directive: exclude from keyword scanning (may contain keywords in macro body)
     // Word boundary check prevents matching `defined, `define_WIDTH, etc.
     if (char === '`' && source.slice(pos, pos + 7) === '`define' && (pos + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 7]))) {
-      return this.matchDefineDirective(source, pos);
+      return matchDefineDirective(source, pos);
     }
 
     // `undef directive: exclude to end of line (may contain keyword names)
     // Word boundary check prevents matching `undefine, `undef_FOO, etc.
     if (char === '`' && source.slice(pos + 1, pos + 6) === 'undef' && (pos + 6 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 6]))) {
-      return this.matchUndefDirective(source, pos);
+      return matchUndefDirective(source, pos);
     }
 
     // SystemVerilog escaped identifier: \<chars> terminated by whitespace
     if (char === '\\' && pos + 1 < source.length && /[^\s]/.test(source[pos + 1])) {
-      return this.matchEscapedIdentifier(source, pos);
+      return matchEscapedIdentifier(source, pos);
     }
 
     // SystemVerilog attribute: (* ... *) but not sensitivity list @(*)
@@ -471,151 +449,10 @@ export class VerilogBlockParser extends BaseBlockParser {
       if (j >= 0 && source[j] === '@' && !this.isInExcludedRegion(j, regions)) {
         return null;
       }
-      return this.matchAttribute(source, pos);
+      return matchAttribute(source, pos);
     }
 
     return null;
-  }
-
-  // Matches Verilog string (cannot span multiple lines)
-  private matchVerilogString(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        // Don't skip newline - Verilog strings can't span lines
-        // Include the backslash in the excluded region since it's part of the string content
-        if (source[i + 1] === '\n' || source[i + 1] === '\r') {
-          return { start: pos, end: i + 1 };
-        }
-        i += 2;
-        continue;
-      }
-      if (source[i] === '"') {
-        return { start: pos, end: i + 1 };
-      }
-      // String cannot span multiple lines in Verilog
-      if (source[i] === '\n' || source[i] === '\r') {
-        return { start: pos, end: i };
-      }
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches escaped identifier: \<chars> terminated by whitespace
-  private matchEscapedIdentifier(source: string, pos: number): ExcludedRegion {
-    let i = pos + 1;
-    while (i < source.length && !/\s/.test(source[i])) {
-      i++;
-    }
-    return { start: pos, end: i };
-  }
-
-  // Matches SystemVerilog attribute: (* ... *)
-  private matchAttribute(source: string, pos: number): ExcludedRegion | null {
-    let i = pos + 2;
-    while (i < source.length) {
-      // Skip string literals inside attributes (terminate at newlines like Verilog strings)
-      if (source[i] === '"') {
-        i++;
-        while (i < source.length && source[i] !== '"' && source[i] !== '\n' && source[i] !== '\r') {
-          if (source[i] === '\\' && i + 1 < source.length) {
-            const nextChar = source[i + 1];
-            if (nextChar === '\n' || nextChar === '\r') break;
-            i += 2;
-            continue;
-          }
-          i++;
-        }
-        if (i < source.length && source[i] === '"') i++;
-        continue;
-      }
-      if (source[i] === '*' && i + 1 < source.length && source[i + 1] === ')') {
-        return { start: pos, end: i + 2 };
-      }
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches block comment: /* ... */
-  private matchBlockComment(source: string, pos: number): ExcludedRegion {
-    let i = pos + 2;
-
-    while (i < source.length) {
-      if (source[i] === '*' && i + 1 < source.length && source[i + 1] === '/') {
-        return { start: pos, end: i + 2 };
-      }
-      i++;
-    }
-
-    return { start: pos, end: source.length };
-  }
-
-  // Matches `define directive to end of line, following backslash-newline continuation
-  private matchDefineDirective(source: string, pos: number): ExcludedRegion {
-    let i = pos + 7;
-    while (i < source.length) {
-      // Skip string literals inside define body (backslash escapes apply)
-      if (source[i] === '"') {
-        i++;
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          if (source[i] === '\\' && i + 1 < source.length) {
-            i += 2;
-            continue;
-          }
-          if (source[i] === '"') {
-            i++;
-            break;
-          }
-          i++;
-        }
-        continue;
-      }
-      if (source[i] === '\n') {
-        // Count consecutive backslashes before the newline (skipping CR)
-        let j = i - 1;
-        if (j >= 0 && source[j] === '\r') {
-          j--;
-        }
-        let backslashCount = 0;
-        while (j >= 0 && source[j] === '\\') {
-          backslashCount++;
-          j--;
-        }
-        // Odd number of backslashes means line continuation
-        if (backslashCount % 2 === 1) {
-          i++;
-          continue;
-        }
-        return { start: pos, end: i };
-      }
-      if (source[i] === '\r' && (i + 1 >= source.length || source[i + 1] !== '\n')) {
-        // CR-only line ending
-        let j = i - 1;
-        let backslashCount = 0;
-        while (j >= 0 && source[j] === '\\') {
-          backslashCount++;
-          j--;
-        }
-        if (backslashCount % 2 === 1) {
-          i++;
-          continue;
-        }
-        return { start: pos, end: i };
-      }
-      i++;
-    }
-    return { start: pos, end: source.length };
-  }
-
-  // Matches `undef directive to end of line (always single-line, no continuation)
-  private matchUndefDirective(source: string, pos: number): ExcludedRegion {
-    let i = pos + 6;
-    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-      i++;
-    }
-    return { start: pos, end: i };
   }
 
   // Custom block matching for Verilog-specific pairing rules
