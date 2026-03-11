@@ -367,6 +367,20 @@ end`;
     });
   });
 
+  suite('Excluded regions - Shell escape command', () => {
+    test('should ignore keywords in shell escape command', () => {
+      const source = '!if test -f foo.txt\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ! in middle of line as shell escape', () => {
+      const source = 'x = 1 ! comment\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Edge cases', () => {
     generateEdgeCaseTests(config);
 

@@ -330,6 +330,33 @@ end`;
     });
   });
 
+  suite('Excluded regions - Shell escape command', () => {
+    test('should ignore keywords in shell escape command', () => {
+      const source = '!if test -f foo.txt\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should ignore keywords in shell escape with leading whitespace', () => {
+      const source = '  !for file in *.m\nfor i = 1:10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not treat ! in middle of line as shell escape', () => {
+      const source = 'x = 1 ! comment\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle shell escape as excluded region', () => {
+      const source = '!dir\nif true\nend';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      assert.strictEqual(regions[0].start, 0);
+    });
+  });
+
   suite('Edge cases', () => {
     generateEdgeCaseTests(config);
 

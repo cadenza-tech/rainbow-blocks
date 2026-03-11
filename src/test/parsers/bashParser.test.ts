@@ -4228,6 +4228,26 @@ fi`;
     });
   });
 
+  suite('Regression: POSIX case pattern after in on same line', () => {
+    test('should treat keyword inside (pattern) after in on same line as case pattern', () => {
+      const source = 'case $x in (if) echo yes;; esac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should treat keyword inside (pattern) after in with tab as case pattern', () => {
+      const source = 'case $x in\t(for) echo yes;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should treat keyword inside (pattern) after in with multiple patterns', () => {
+      const source = 'case $x in (if) echo if;; (do) echo do;; esac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
   suite('Branch coverage: tokenize skipping ${ in brace pattern', () => {
     test('should skip { preceded by $ during brace tokenization', () => {
       // Covers bashParser.ts lines 472-473: char === '{' && source[i-1] === '$'
