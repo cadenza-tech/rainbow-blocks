@@ -938,21 +938,7 @@ end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
     });
-  });
 
-  suite('Edge case: @ followed by newline and (* *)', () => {
-    test('should treat @\\n(* attr *) as sensitivity list, not attribute', () => {
-      const source = 'always @\n(* attr *)\nbegin\n  q <= d;\nend';
-      const pairs = parser.parse(source);
-      // The (* attr *) should not be confused with sensitivity list
-      // @\\n should skip the newline and see (* as attribute, treating it as excluded region
-      // begin..end should still be parsed as a block
-      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
-      assert.ok(beginPair);
-    });
-  });
-
-  suite('Bug fixes', () => {
     test('Bug 18: scope resolution :: should not be treated as label colon', () => {
       const source = 'class pkg::my_class;\nbegin\n  x = 1;\nend\nendclass';
       const pairs = parser.parse(source);
@@ -976,6 +962,18 @@ end`;
       const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
       assert.ok(alwaysPair, 'should find always block');
       assert.strictEqual(alwaysPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
+  suite('Edge case: @ followed by newline and (* *)', () => {
+    test('should treat @\\n(* attr *) as sensitivity list, not attribute', () => {
+      const source = 'always @\n(* attr *)\nbegin\n  q <= d;\nend';
+      const pairs = parser.parse(source);
+      // The (* attr *) should not be confused with sensitivity list
+      // @\\n should skip the newline and see (* as attribute, treating it as excluded region
+      // begin..end should still be parsed as a block
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair);
     });
   });
 

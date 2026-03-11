@@ -1231,7 +1231,7 @@ end`;
       });
     });
 
-    suite('Symbol literals', () => {
+    suite('Symbol literal edge cases', () => {
       test('should not treat colon after number as symbol', () => {
         const source = `x = arr[1:end]
 function foo()
@@ -1443,8 +1443,6 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
-
-  generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {
     test('should have correct column numbers', () => {
@@ -2775,4 +2773,6 @@ end`;
       assertSingleBlock(pairs, 'function', 'end');
     });
   });
+
+  generateCommonTests(config);
 });

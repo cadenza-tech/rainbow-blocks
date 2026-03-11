@@ -1450,8 +1450,6 @@ end`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Regex after keyword', () => {
     test('should treat / after if keyword as regex start', () => {
       const source = `if /pattern/
@@ -3136,4 +3134,6 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
+
+  generateCommonTests(config);
 });

@@ -429,8 +429,6 @@ end tell`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Keyword as substring of identifier', () => {
     test('should not match repeat inside repetition', () => {
       const source = `tell application "Finder"
@@ -1566,4 +1564,6 @@ end try`;
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
   });
+
+  generateCommonTests(config);
 });

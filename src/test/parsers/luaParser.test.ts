@@ -548,8 +548,6 @@ end`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Coverage: isDoPartOfLoop edge cases', () => {
     test('should handle do keyword inside string between loop and real do', () => {
       // Tests the excluded region check for do (lines 57-58)
@@ -829,4 +827,6 @@ end`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  generateCommonTests(config);
 });

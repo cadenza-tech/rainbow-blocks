@@ -1165,8 +1165,6 @@ end`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Triple-quoted string escape handling', () => {
     test('should handle backslash escape inside triple-quoted string', () => {
       const source = `x = """hello \\"world\\" end"""
@@ -2885,4 +2883,6 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  generateCommonTests(config);
 });

@@ -532,8 +532,6 @@ end program`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Concatenated compound end keywords', () => {
     test('should parse endif as block close', () => {
       const source = `if (x > 0) then
@@ -1961,6 +1959,62 @@ end type`;
       assertSingleBlock(pairs, 'type', 'end type');
       assertIntermediates(pairs[0], ['contains']);
     });
+
+    test('Bug 7: continuation compound end with inline comment', () => {
+      const pairs = parser.parse('program test\n  print *, "hello"\nend & ! This is a comment\n  program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('Bug 8: isContinuationBlockForm should skip comment lines', () => {
+      const pairs = parser.parse('do i = 1, 10\n  where (mask) &\n    a(i) = b(i)\n  ! This is just a comment\nend do');
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('Bug 9: type(name) function should not create false type block opener', () => {
+      const source = `type(integer) function foo()
+  foo = 42
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('Bug 9: type(real) pure function should not create false type block opener', () => {
+      const source = `type(real) pure function bar(x)
+  bar = x * 2.0
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('Bug 10: else  if with multiple spaces should be treated as intermediate', () => {
+      const source = `if (x > 0) then
+  y = 1
+else  if (x < 0) then
+  y = -1
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('Bug 11: else if should be merged as intermediate keyword', () => {
+      const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse if (x < 0) then\n  a = -1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else if', 'then']);
+    });
+
+    test('Bug 11: else if with continuation should be merged', () => {
+      const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse &\n  if (x < 0) then\n  a = -1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else &\n  if', 'then']);
+    });
+
+    test('Bug 11: isPrecedingContinuationKeyword with leading & on continuation line', () => {
+      const source = 'if (.true.) then\n  x = 1\nelse &\n&  if (.false.) then\n  x = 2\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('then'), 'should have then intermediate');
+    });
   });
 
   suite('Continuation line compound end', () => {
@@ -1997,64 +2051,6 @@ end &
 end function`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end function');
-    });
-  });
-
-  suite('Bug fixes', () => {
-    test('Bug 9: type(name) function should not create false type block opener', () => {
-      const source = `type(integer) function foo()
-  foo = 42
-end function`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end function');
-    });
-
-    test('Bug 9: type(real) pure function should not create false type block opener', () => {
-      const source = `type(real) pure function bar(x)
-  bar = x * 2.0
-end function`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end function');
-    });
-
-    test('Bug 10: else  if with multiple spaces should be treated as intermediate', () => {
-      const source = `if (x > 0) then
-  y = 1
-else  if (x < 0) then
-  y = -1
-end if`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-
-    test('Bug 7: continuation compound end with inline comment', () => {
-      const pairs = parser.parse('program test\n  print *, "hello"\nend & ! This is a comment\n  program');
-      assertSingleBlock(pairs, 'program', 'end program');
-    });
-
-    test('Bug 8: isContinuationBlockForm should skip comment lines', () => {
-      const pairs = parser.parse('do i = 1, 10\n  where (mask) &\n    a(i) = b(i)\n  ! This is just a comment\nend do');
-      assertSingleBlock(pairs, 'do', 'end do');
-    });
-
-    test('Bug 11: else if should be merged as intermediate keyword', () => {
-      const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse if (x < 0) then\n  a = -1\nend if');
-      assertSingleBlock(pairs, 'if', 'end if');
-      assertIntermediates(pairs[0], ['then', 'else if', 'then']);
-    });
-
-    test('Bug 11: else if with continuation should be merged', () => {
-      const pairs = parser.parse('if (x > 0) then\n  a = 1\nelse &\n  if (x < 0) then\n  a = -1\nend if');
-      assertSingleBlock(pairs, 'if', 'end if');
-      assertIntermediates(pairs[0], ['then', 'else &\n  if', 'then']);
-    });
-
-    test('Bug 11: isPrecedingContinuationKeyword with leading & on continuation line', () => {
-      const source = 'if (.true.) then\n  x = 1\nelse &\n&  if (.false.) then\n  x = 2\nend if';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
-      assert.ok(intermediates.includes('then'), 'should have then intermediate');
     });
   });
 
@@ -3568,4 +3564,6 @@ end program`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  generateCommonTests(config);
 });

@@ -499,8 +499,6 @@ end Read;`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Procedure/function declarations without body', () => {
     test('should not treat procedure declaration as block', () => {
       const pairs = parser.parse('procedure Foo;');
@@ -2035,4 +2033,6 @@ end if;`;
       assertIntermediates(pairs[0], ['then']);
     });
   });
+
+  generateCommonTests(config);
 });

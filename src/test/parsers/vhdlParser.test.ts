@@ -651,8 +651,6 @@ end loop;`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Test helper methods - VHDL specific', () => {
     test('getExcludedRegions should return block comment', () => {
       const source = `/* block
@@ -1855,4 +1853,6 @@ end loop;`;
       assertNoBlocks(pairs);
     });
   });
+
+  generateCommonTests(config);
 });

@@ -1354,7 +1354,7 @@ end`;
       });
     });
 
-    suite('CR-only line endings', () => {
+    suite('CR-only line endings in conditionals', () => {
       test('should handle \\r-only line endings in postfix conditional', () => {
         const source = 'x = 1 if condition\rdo_something\rend';
         const pairs = parser.parse(source);
@@ -1440,8 +1440,6 @@ end`;
       assertSingleBlock(pairs, 'while', 'end');
     });
   });
-
-  generateCommonTests(config);
 
   suite('Coverage: loopDo semicolon and excluded region branches', () => {
     test('should handle semicolon before loop do on same line', () => {
@@ -2751,4 +2749,6 @@ end`;
       assertNoBlocks(pairs);
     });
   });
+
+  generateCommonTests(config);
 });
