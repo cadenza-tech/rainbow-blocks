@@ -2,7 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType, findLastOpenerForLoop, getTokenTypeCaseInsensitive } from './parserUtils';
+import { findLastOpenerByType, findLastOpenerForLoop, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
 
 // List of block types that have compound end keywords
@@ -478,36 +478,7 @@ export class VhdlBlockParser extends BaseBlockParser {
       });
     }
 
-    // Process tokens to handle compound keywords
-    const result: Token[] = [];
-
-    for (const token of tokens) {
-      // Check if this token is the start of a compound end
-      const compound = compoundEndPositions.get(token.startOffset);
-      if (compound && token.value.toLowerCase() === 'end') {
-        // Replace with compound keyword
-        result.push({
-          ...token,
-          value: compound.keyword,
-          endOffset: token.startOffset + compound.length,
-          type: 'block_close'
-        });
-        continue;
-      }
-
-      // Check if this token should be skipped (it's the type part of compound end)
-      let shouldSkip = false;
-      for (const [endPos, comp] of compoundEndPositions) {
-        if (token.startOffset > endPos && token.startOffset < endPos + comp.length && token.value.toLowerCase() === comp.endType) {
-          shouldSkip = true;
-          break;
-        }
-      }
-
-      if (!shouldSkip) {
-        result.push(token);
-      }
-    }
+    const { tokens: result } = mergeCompoundEndTokens(tokens, compoundEndPositions);
 
     // Filter out when/else in conditional signal assignments (sig <= val when cond else val)
     return result.filter((token) => {

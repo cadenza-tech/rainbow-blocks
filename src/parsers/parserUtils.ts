@@ -1,6 +1,6 @@
 // Shared utility functions used across multiple parsers
 
-import type { LanguageKeywords, OpenBlock, TokenType } from '../types';
+import type { LanguageKeywords, OpenBlock, Token, TokenType } from '../types';
 
 // Find the last opener in the stack matching the given keyword value
 // Used by Ada, VHDL, Fortran, COBOL, Octave (case-insensitive) and Bash, AppleScript (case-sensitive)
@@ -107,6 +107,47 @@ export function findLineStart(source: string, pos: number): number {
     }
   }
   return 0;
+}
+
+// Merge compound end keywords (e.g., "end if", "end loop") into single tokens
+// Used by Ada, VHDL, and Fortran for compound close keyword handling
+export function mergeCompoundEndTokens(
+  tokens: Token[],
+  compoundEndPositions: Map<number, { keyword: string; length: number; endType: string }>
+): { tokens: Token[]; processedPositions: Set<number> } {
+  const result: Token[] = [];
+  const processedPositions = new Set<number>();
+
+  for (const token of tokens) {
+    // Check if this token is the start of a compound end
+    const compound = compoundEndPositions.get(token.startOffset);
+    if (compound && token.value.toLowerCase() === 'end') {
+      // Replace with compound keyword
+      result.push({
+        ...token,
+        value: compound.keyword,
+        endOffset: token.startOffset + compound.length,
+        type: 'block_close'
+      });
+      processedPositions.add(token.startOffset);
+      continue;
+    }
+
+    // Check if this token should be skipped (it's the type part of compound end)
+    let shouldSkip = false;
+    for (const [endPos, comp] of compoundEndPositions) {
+      if (token.startOffset > endPos && token.startOffset < endPos + comp.length && token.value.toLowerCase() === comp.endType) {
+        shouldSkip = true;
+        break;
+      }
+    }
+
+    if (!shouldSkip) {
+      result.push(token);
+    }
+  }
+
+  return { tokens: result, processedPositions };
 }
 
 // Binary search to check if a position falls within any excluded region

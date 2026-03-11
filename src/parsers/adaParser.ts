@@ -10,7 +10,7 @@ import {
   skipAdaWhitespaceAndComments
 } from './adaHelpers';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive } from './parserUtils';
+import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = ['if', 'loop', 'case', 'select', 'record', 'procedure', 'function', 'package', 'task', 'protected', 'accept'];
@@ -465,36 +465,7 @@ export class AdaBlockParser extends BaseBlockParser {
       });
     }
 
-    // Process tokens to handle compound keywords
-    const result: Token[] = [];
-
-    for (const token of tokens) {
-      // Check if this token is the start of a compound end
-      const compound = compoundEndPositions.get(token.startOffset);
-      if (compound && token.value.toLowerCase() === 'end') {
-        // Replace with compound keyword
-        result.push({
-          ...token,
-          value: compound.keyword,
-          endOffset: token.startOffset + compound.length,
-          type: 'block_close'
-        });
-        continue;
-      }
-
-      // Check if this token should be skipped (it's the type part of compound end)
-      let shouldSkip = false;
-      for (const [endPos, comp] of compoundEndPositions) {
-        if (token.startOffset > endPos && token.startOffset < endPos + comp.length && token.value.toLowerCase() === comp.endType) {
-          shouldSkip = true;
-          break;
-        }
-      }
-
-      if (!shouldSkip) {
-        result.push(token);
-      }
-    }
+    const { tokens: result } = mergeCompoundEndTokens(tokens, compoundEndPositions);
 
     // Filter out 'or else' and 'and then' short-circuit operators
     const filtered: Token[] = [];

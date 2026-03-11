@@ -4,7 +4,6 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import {
   collapseContinuationLines,
-  findInlineCommentIndex,
   findLineEnd,
   isAfterDoubleColon,
   isBlockWhereOrForall,
@@ -13,7 +12,8 @@ import {
   matchElseWhere,
   matchFortranString
 } from './fortranHelpers';
-import { findLastOpenerByType, findLineStart, getTokenTypeCaseInsensitive } from './parserUtils';
+import { isAtLineStartAllowingWhitespace, isValidFortranBlockClose, isValidProcedureOpen } from './fortranValidation';
+import { findLastOpenerByType, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = [
@@ -103,7 +103,7 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     if (lowerKeyword === 'procedure') {
-      return this.isValidProcedureOpen(keyword, source, position, excludedRegions);
+      return isValidProcedureOpen(keyword, source, position, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
     }
 
     // Single-line where/forall: has (condition) followed by statement on same line
@@ -141,51 +141,6 @@ export class FortranBlockParser extends BaseBlockParser {
     if (/^[ \t]*\(/i.test(afterKeyword)) {
       if (isTypeSpecifier(afterKeyword, 0)) {
         return false;
-      }
-    }
-    return true;
-  }
-
-  // Validates 'procedure': rejects type-bound procedure declarations (with ::)
-  private isValidProcedureOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let j = position + keyword.length;
-    while (j < source.length) {
-      const lineEnd = findLineEnd(source, j);
-      const lineContent = source.slice(j, lineEnd);
-      // Strip inline comment before checking for continuation & and ::
-      let trimmedLine = lineContent.trimEnd();
-      const commentPos = findInlineCommentIndex(trimmedLine);
-      if (commentPos >= 0) {
-        trimmedLine = trimmedLine.slice(0, commentPos).trimEnd();
-      }
-      // Skip comment-only lines (empty after stripping comment)
-      if (trimmedLine.trimStart().length === 0 && commentPos >= 0) {
-        j = lineEnd;
-        if (j < source.length && source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
-          j += 2;
-        } else if (j < source.length) {
-          j++;
-        }
-        continue;
-      }
-      let colonSearchIdx = 0;
-      while (colonSearchIdx < lineContent.length - 1) {
-        const colonIdx = lineContent.indexOf('::', colonSearchIdx);
-        if (colonIdx < 0) break;
-        if (!this.isInExcludedRegion(j + colonIdx, excludedRegions)) {
-          return false;
-        }
-        colonSearchIdx = colonIdx + 2;
-      }
-      if (!trimmedLine.endsWith('&')) {
-        break;
-      }
-      // Skip past line break (\r\n, \n, or standalone \r)
-      j = lineEnd;
-      if (j < source.length && source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
-        j += 2;
-      } else if (j < source.length) {
-        j++;
       }
     }
     return true;
@@ -268,176 +223,15 @@ export class FortranBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Validates block close keywords
-  // Rejects 'end' used as variable name (followed by = but not ==)
   protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
-    if (keyword.toLowerCase() !== 'end') {
-      return true;
-    }
-    let i = position + keyword.length;
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
-    }
-    // end%component is derived type component access, not block close
-    if (i < source.length && source[i] === '%') {
-      return false;
-    }
-    // Handle & continuation: end &\n  = ... (assignment across lines)
-    if (i < source.length && source[i] === '&') {
-      i++;
-      // Skip to next line
-      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-        i++;
-      }
-      if (i < source.length && source[i] === '\r') i++;
-      if (i < source.length && source[i] === '\n') i++;
-      // Skip comment-only lines and bare & continuation lines between end & and content
-      while (i < source.length) {
-        let lineContentStart = i;
-        while (lineContentStart < source.length && (source[lineContentStart] === ' ' || source[lineContentStart] === '\t')) {
-          lineContentStart++;
-        }
-        if (lineContentStart < source.length && source[lineContentStart] === '!') {
-          // Comment-only line: skip to end of line
-          let lineEnd = lineContentStart;
-          while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-            lineEnd++;
-          }
-          if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
-          if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
-          i = lineEnd;
-          continue;
-        }
-        // Bare & continuation line or & with inline comment
-        if (lineContentStart < source.length && source[lineContentStart] === '&') {
-          let afterAmp = lineContentStart + 1;
-          while (afterAmp < source.length && (source[afterAmp] === ' ' || source[afterAmp] === '\t')) {
-            afterAmp++;
-          }
-          // Bare & or & followed by comment
-          if (afterAmp >= source.length || source[afterAmp] === '\n' || source[afterAmp] === '\r' || source[afterAmp] === '!') {
-            let lineEnd = afterAmp;
-            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-              lineEnd++;
-            }
-            if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
-            if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
-            i = lineEnd;
-            continue;
-          }
-        }
-        break;
-      }
-      // Skip whitespace on next line
-      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-        i++;
-      }
-      // Skip optional & continuation marker on the next line
-      if (i < source.length && source[i] === '&') {
-        i++;
-        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-          i++;
-        }
-      }
-    }
-    // end &\n%component (derived type component access across continuation)
-    if (i < source.length && source[i] === '%') {
-      return false;
-    }
-    // end = ... (assignment) but not end == ... (comparison)
-    if (i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
-      return false;
-    }
-    // end(1) = ... or end(1)(2) = ... (array element/section assignment)
-    if (i < source.length && source[i] === '(') {
-      let j = i;
-      // Skip consecutive parenthesized groups: end(1)(2)(3)
-      while (j < source.length && source[j] === '(') {
-        let depth = 1;
-        j++;
-        while (j < source.length && depth > 0) {
-          if (source[j] === '(') depth++;
-          else if (source[j] === ')') depth--;
-          j++;
-        }
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
-          j++;
-        }
-      }
-      // Handle & continuation after paren: end(1) &\n  = value
-      if (j < source.length && source[j] === '&') {
-        j++;
-        while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
-          j++;
-        }
-        if (j < source.length && source[j] === '\r') j++;
-        if (j < source.length && source[j] === '\n') j++;
-        // Skip comment-only lines and bare & continuation lines
-        while (j < source.length) {
-          let lineContentStart = j;
-          while (lineContentStart < source.length && (source[lineContentStart] === ' ' || source[lineContentStart] === '\t')) {
-            lineContentStart++;
-          }
-          if (lineContentStart < source.length && source[lineContentStart] === '!') {
-            let lineEnd = lineContentStart;
-            while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-              lineEnd++;
-            }
-            if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
-            if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
-            j = lineEnd;
-            continue;
-          }
-          if (lineContentStart < source.length && source[lineContentStart] === '&') {
-            let afterAmp = lineContentStart + 1;
-            while (afterAmp < source.length && (source[afterAmp] === ' ' || source[afterAmp] === '\t')) {
-              afterAmp++;
-            }
-            if (afterAmp >= source.length || source[afterAmp] === '\n' || source[afterAmp] === '\r' || source[afterAmp] === '!') {
-              let lineEnd = afterAmp;
-              while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-                lineEnd++;
-              }
-              if (lineEnd < source.length && source[lineEnd] === '\r') lineEnd++;
-              if (lineEnd < source.length && source[lineEnd] === '\n') lineEnd++;
-              j = lineEnd;
-              continue;
-            }
-          }
-          break;
-        }
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
-          j++;
-        }
-        if (j < source.length && source[j] === '&') {
-          j++;
-          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
-            j++;
-          }
-        }
-      }
-      if (j < source.length && source[j] === '=' && (j + 1 >= source.length || source[j + 1] !== '=')) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // Checks if position is at line start allowing leading whitespace (for # preprocessor)
-  private isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
-    if (pos === 0) return true;
-    let i = pos - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
-      i--;
-    }
-    return i < 0 || source[i] === '\n' || source[i] === '\r';
+    return isValidFortranBlockClose(keyword, source, position);
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
     // C preprocessor directive: # at line start (after optional whitespace)
-    if (char === '#' && this.isAtLineStartAllowingWhitespace(source, pos)) {
+    if (char === '#' && isAtLineStartAllowingWhitespace(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -613,38 +407,7 @@ export class FortranBlockParser extends BaseBlockParser {
       mergedTokens.push(current);
     }
 
-    // Process tokens to handle compound keywords
-    const result: Token[] = [];
-    const processedCompoundPositions = new Set<number>();
-
-    for (const token of mergedTokens) {
-      // Check if this token is the start of a compound end
-      const compound = compoundEndPositions.get(token.startOffset);
-      if (compound && token.value.toLowerCase() === 'end') {
-        // Replace with compound keyword
-        result.push({
-          ...token,
-          value: compound.keyword,
-          endOffset: token.startOffset + compound.length,
-          type: 'block_close'
-        });
-        processedCompoundPositions.add(token.startOffset);
-        continue;
-      }
-
-      // Check if this token should be skipped (it's the type part of compound end)
-      let shouldSkip = false;
-      for (const [endPos, comp] of compoundEndPositions) {
-        if (token.startOffset > endPos && token.startOffset < endPos + comp.length && token.value.toLowerCase() === comp.endType) {
-          shouldSkip = true;
-          break;
-        }
-      }
-
-      if (!shouldSkip) {
-        result.push(token);
-      }
-    }
+    const { tokens: result, processedPositions: processedCompoundPositions } = mergeCompoundEndTokens(mergedTokens, compoundEndPositions);
 
     // Add concatenated compound end keywords (e.g., enddo, endif) that had no
     // matching 'end' token because \b word boundary doesn't match inside them
