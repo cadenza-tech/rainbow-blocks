@@ -5,6 +5,26 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.16] - 2026-03-12
+
+### Fixed
+
+- Bash: Fix POSIX case patterns (e.g., `(pattern)`) being incorrectly treated as block structure
+- MATLAB: Fix shell escape commands (`!command`) not being excluded from keyword detection
+- Octave: Fix shell escape commands (`!command`) not being excluded from keyword detection
+
+### Refactored
+
+- Bash: Extract shared subshell scanning loop from `matchCommandSubstitution` and `matchProcessSubstitution` into `scanSubshellBody` in `bashStringHelpers.ts`
+- Verilog: Extract 8 pure functions (`hasDollarAdjacent`, `matchVerilogString`, `matchEscapedIdentifier`, `matchAttribute`, `matchBlockComment`, `matchDefineDirective`, `matchUndefDirective`, `trySkipLabel`) to `verilogHelpers.ts`
+- Fortran: Extract validation methods (`isValidFortranBlockClose`, `isValidProcedureOpen`, `isAtLineStartAllowingWhitespace`) to `fortranValidation.ts`
+- Ada/VHDL/Fortran: Extract shared compound-end merge loop to `mergeCompoundEndTokens` in `parserUtils.ts`
+- Tests: Merge duplicate test suites and relocate `generateCommonTests` to file end across 10 test files
+
+### Tests
+
+- Add regression tests for Bash, MATLAB, and Octave parser fixes
+
 ## [1.1.15] - 2026-03-09
 
 ### Fixed
@@ -696,6 +716,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.16]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.15...v1.1.16
 [1.1.15]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.14...v1.1.15
 [1.1.14]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.13...v1.1.14
 [1.1.13]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.12...v1.1.13
