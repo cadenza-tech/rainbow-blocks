@@ -380,7 +380,7 @@ export function matchBashDoubleQuote(source: string, pos: number): ExcludedRegio
 }
 
 // Finds end of double-quoted string with Bash-aware handling for $(), ${}, single quotes, and backticks
-// Used inside matchCommandSubstitution and matchProcessSubstitution where nested constructs matter
+// Used inside scanSubshellBody where nested constructs matter
 function findBashDoubleQuoteEnd(source: string, pos: number): number {
   let i = pos + 1;
   while (i < source.length) {
@@ -423,16 +423,16 @@ function findBashDoubleQuoteEnd(source: string, pos: number): number {
   return source.length;
 }
 
-// Matches command substitution $(...) with nested parentheses
-// Tracks case/esac nesting so `)` in case patterns doesn't close prematurely
-export function matchCommandSubstitution(source: string, pos: number): ExcludedRegion {
-  let i = pos + 2;
+// Shared scanning loop for command substitution $(...) and process substitution <(...) / >(...)
+// Tracks parenthesis depth, case/esac nesting, heredocs, strings, and comments
+interface SubshellScanConfig {
+  readonly initialPos: number;
+  readonly regionStart: number;
+}
 
-  // Check for arithmetic expansion $((...))
-  if (source[i] === '(') {
-    return matchArithmeticExpansion(source, pos);
-  }
-
+function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedRegion {
+  const { initialPos, regionStart } = config;
+  let i = initialPos;
   let depth = 1;
   let caseDepth = 0;
   const pendingHeredocs: { stripTabs: boolean; terminator: string }[] = [];
@@ -520,7 +520,7 @@ export function matchCommandSubstitution(source: string, pos: number): ExcludedR
       }
     }
 
-    // Track case/esac nesting to avoid `)` in case patterns closing `$(...)`
+    // Track case/esac nesting to avoid `)` in case patterns closing the substitution
     // Skip $case/$esac (variable names, not keywords)
     if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'case')) {
       caseDepth++;
@@ -537,13 +537,13 @@ export function matchCommandSubstitution(source: string, pos: number): ExcludedR
       depth++;
     } else if (char === ')') {
       // Inside a case block, `)` that doesn't reduce paren depth below
-      // the command substitution boundary is a case pattern terminator
+      // the substitution boundary is a case pattern terminator
       if (caseDepth > 0 && depth === 1) {
         i++;
         continue;
       }
       depth--;
-      // Flush pending heredocs when closing $() before a newline is encountered
+      // Flush pending heredocs when closing before a newline is encountered
       if (depth === 0 && pendingHeredocs.length > 0) {
         i++;
         // Find the next newline after the closing )
@@ -560,164 +560,36 @@ export function matchCommandSubstitution(source: string, pos: number): ExcludedR
             bodyStart = body ? body.end : bodyStart;
           }
           // Exclude the trailing newline so isAtCommandPosition can see the line boundary
-          if (bodyStart > pos && source[bodyStart - 1] === '\n') {
+          if (bodyStart > regionStart && source[bodyStart - 1] === '\n') {
             bodyStart--;
-            if (bodyStart > pos && source[bodyStart - 1] === '\r') {
+            if (bodyStart > regionStart && source[bodyStart - 1] === '\r') {
               bodyStart--;
             }
           }
-          return { start: pos, end: bodyStart };
+          return { start: regionStart, end: bodyStart };
         }
         pendingHeredocs.length = 0;
-        return { start: pos, end: i };
+        return { start: regionStart, end: i };
       }
     }
     i++;
   }
 
-  return { start: pos, end: i };
+  return { start: regionStart, end: i };
+}
+
+// Matches command substitution $(...) with nested parentheses
+// Tracks case/esac nesting so `)` in case patterns doesn't close prematurely
+export function matchCommandSubstitution(source: string, pos: number): ExcludedRegion {
+  // Check for arithmetic expansion $((...))
+  if (pos + 2 < source.length && source[pos + 2] === '(') {
+    return matchArithmeticExpansion(source, pos);
+  }
+
+  return scanSubshellBody(source, { initialPos: pos + 2, regionStart: pos });
 }
 
 // Matches process substitution <(...) or >(...) with nested parens
 export function matchProcessSubstitution(source: string, pos: number): ExcludedRegion {
-  let i = pos + 1;
-  let depth = 1;
-  let caseDepth = 0;
-  const pendingHeredocs: { stripTabs: boolean; terminator: string }[] = [];
-
-  while (i < source.length && depth > 0) {
-    const char = source[i];
-
-    // At newline, skip pending heredoc bodies (multiple heredocs on same line)
-    if ((char === '\n' || char === '\r') && pendingHeredocs.length > 0) {
-      let bodyStart = i + 1;
-      if (char === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
-        bodyStart++;
-      }
-      for (const hd of pendingHeredocs) {
-        const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator);
-        bodyStart = body ? body.end : bodyStart;
-      }
-      pendingHeredocs.length = 0;
-      i = bodyStart;
-      continue;
-    }
-
-    // Skip double-quoted strings (Bash-aware: handles $(), ${}, backticks)
-    if (char === '"') {
-      i = findBashDoubleQuoteEnd(source, i);
-      continue;
-    }
-    // Skip $'...' ANSI-C quoting (must check before single quote)
-    if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
-      const region = matchDollarSingleQuote(source, i);
-      i = region.end;
-      continue;
-    }
-
-    if (char === "'") {
-      const stringEnd = findSingleQuoteEnd(source, i);
-      i = stringEnd;
-      continue;
-    }
-
-    // Skip nested command substitution
-    if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
-      const nested = matchCommandSubstitution(source, i);
-      i = nested.end;
-      continue;
-    }
-
-    // Skip parameter expansion ${...}
-    if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-      const nested = matchParameterExpansion(source, i);
-      i = nested.end;
-      continue;
-    }
-
-    // Skip backtick command substitution
-    if (char === '`') {
-      const region = matchBacktickCommand(source, i);
-      i = region.end;
-      continue;
-    }
-
-    // Skip comments (# to end of line, but not $# special variable)
-    if (char === '#' && isCommentStart(source, i) && !isDollarHashVariable(source, i)) {
-      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-        i++;
-      }
-      continue;
-    }
-
-    // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
-    if (
-      char === '<' &&
-      i + 1 < source.length &&
-      source[i + 1] === '<' &&
-      (i + 2 >= source.length || source[i + 2] !== '<') &&
-      (i === 0 || source[i - 1] !== '<')
-    ) {
-      const heredoc = parseHeredocOperator(source, i);
-      if (heredoc) {
-        pendingHeredocs.push({ stripTabs: heredoc.stripTabs, terminator: heredoc.terminator });
-        i += heredoc.matchLength;
-        continue;
-      }
-    }
-
-    // Track case/esac nesting to avoid `)` in case patterns closing process substitution
-    // Skip $case/$esac (variable names, not keywords)
-    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'case')) {
-      caseDepth++;
-      i += 4;
-      continue;
-    }
-    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'esac')) {
-      if (caseDepth > 0) caseDepth--;
-      i += 4;
-      continue;
-    }
-
-    if (char === '(') {
-      depth++;
-    } else if (char === ')') {
-      if (caseDepth > 0 && depth === 1) {
-        i++;
-        continue;
-      }
-      depth--;
-      // Flush pending heredocs when closing >() or <() before a newline is encountered
-      if (depth === 0 && pendingHeredocs.length > 0) {
-        i++;
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        if (i < source.length) {
-          let bodyStart = i + 1;
-          if (source[i] === '\r' && bodyStart < source.length && source[bodyStart] === '\n') {
-            bodyStart++;
-          }
-          for (const hd of pendingHeredocs) {
-            const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator);
-            bodyStart = body ? body.end : bodyStart;
-          }
-          // Exclude the trailing newline so isAtCommandPosition can see the line boundary
-          if (bodyStart > pos && source[bodyStart - 1] === '\n') {
-            bodyStart--;
-            if (bodyStart > pos && source[bodyStart - 1] === '\r') {
-              bodyStart--;
-            }
-          }
-          return { start: pos - 1, end: bodyStart };
-        }
-        pendingHeredocs.length = 0;
-        return { start: pos - 1, end: i };
-      }
-    }
-    i++;
-  }
-
-  // Include the preceding < or > in the excluded region
-  return { start: pos - 1, end: i };
+  return scanSubshellBody(source, { initialPos: pos + 1, regionStart: pos - 1 });
 }
