@@ -31,8 +31,8 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (/^-[ \t]*(spec|type|callback|opaque)\b/.test(lineBefore)) {
       // Check if there is a period (declaration separator) between the attribute and this fun
       // If so, this fun is in a separate declaration, not part of the type
-      const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/);
-      const afterAttr = lineStart + lineBefore.indexOf(attrMatch![0]) + attrMatch![0].length;
+      const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/) as RegExpMatchArray;
+      const afterAttr = lineStart + lineBefore.indexOf(attrMatch[0]) + attrMatch[0].length;
       let foundPeriod = false;
       for (let j = afterAttr; j < position; j++) {
         if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
