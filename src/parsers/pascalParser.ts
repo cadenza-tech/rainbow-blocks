@@ -2,7 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType } from './parserUtils';
+import { findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 
 export class PascalBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -482,7 +482,7 @@ export class PascalBlockParser extends BaseBlockParser {
             }
           } else {
             // end closes any block except repeat
-            const nonRepeatIndex = this.findLastNonRepeatIndex(stack);
+            const nonRepeatIndex = findLastNonRepeatIndex(stack);
             if (nonRepeatIndex >= 0) {
               const openBlock = stack.splice(nonRepeatIndex, 1)[0];
               pairs.push({
@@ -499,16 +499,5 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     return pairs;
-  }
-
-  // Finds the index of the last non-repeat block in the stack
-  // Scans backward, skipping repeat blocks (which can only be closed by until)
-  private findLastNonRepeatIndex(stack: OpenBlock[]): number {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      if (stack[i].token.value !== 'repeat') {
-        return i;
-      }
-    }
-    return -1;
   }
 }

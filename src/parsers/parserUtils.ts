@@ -99,6 +99,17 @@ export function findLastOpenerForLoop(stack: OpenBlock[]): number {
   return -1;
 }
 
+// Find the last non-repeat block in the stack
+// Used by Lua and Pascal where 'end' closes any block except 'repeat' (which is closed by 'until')
+export function findLastNonRepeatIndex(stack: OpenBlock[]): number {
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i].token.value !== 'repeat') {
+      return i;
+    }
+  }
+  return -1;
+}
+
 // Find the start of the line containing the given position
 export function findLineStart(source: string, pos: number): number {
   for (let i = pos - 1; i >= 0; i--) {
