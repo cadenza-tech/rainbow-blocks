@@ -837,6 +837,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should exclude heredoc body inside double-quoted symbol interpolation', () => {
+      // Regression: matchSymbolLiteral did not propagate heredocState,
+      // so heredoc body keywords were incorrectly detected as block tokens
+      const source = `x = :"#{<<~HEREDOC}"
+  end
+HEREDOC
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Hash key syntax (keyword:)', () => {

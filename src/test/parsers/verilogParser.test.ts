@@ -1150,6 +1150,22 @@ endmodule`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
     });
+
+    test('should not let backslash-newline inside define string skip past newline', () => {
+      // Regression: matchDefineDirective string handler was doing i += 2 for backslash
+      // followed by newline, jumping past the line boundary into the next line.
+      // The backslash also triggers define line continuation, so the define extends.
+      // With even backslashes (\\<LF>), define does NOT continue.
+      const source = '`define X "test\\\\\n module m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not let backslash-CRLF inside define string skip past newline', () => {
+      const source = '`define X "test\\\\\r\n module m;\r\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
   });
 
   suite('Bug 1: Backtick-prefixed non-control keywords', () => {

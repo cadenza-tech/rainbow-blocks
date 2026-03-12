@@ -2202,6 +2202,20 @@ end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
     });
+
+    test('should not treat dot-preceded loop keyword as loop opener', () => {
+      // Regression: isLoopDo did not filter dot-preceded keywords,
+      // so obj.while do was incorrectly treated as loop do
+      const source = 'obj.while do |x|\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not treat scope-resolved loop keyword as loop opener', () => {
+      const source = 'Mod::while do |x|\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
   });
 
   suite('Coverage: skipRegexInterpolation backslash escape', () => {

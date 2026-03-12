@@ -2089,6 +2089,20 @@ end function`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
     });
+
+    test('should not treat component%end as block close', () => {
+      // Regression: isValidFortranBlockClose only checked for end%component (forward),
+      // not component%end (backward), so x%end was incorrectly treated as block close
+      const source = 'program test\n  y = x%end + 1\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat component% end (with space) as block close', () => {
+      const source = 'program test\n  y = x% end + 1\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
   });
 
   suite('Uncovered line coverage - isTypeSpecifier', () => {

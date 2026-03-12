@@ -412,6 +412,23 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should not close heredoc at mid-line triple quotes', () => {
+      // Regression: matchTripleQuotedString closed at any """ not just line-start """
+      const source = `x = """
+content """ still inside
+"""
+def foo do
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not close single-quoted heredoc at mid-line triple quotes', () => {
+      const source = "x = '''\ncontent ''' still inside\n'''\ndef foo do\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Excluded regions - Sigils', () => {
