@@ -65,10 +65,18 @@ export function isValidProcedureOpen(
 }
 
 // Validates block close keywords
-// Rejects 'end' used as variable name (followed by = but not ==)
+// Rejects 'end' used as variable name (followed by = but not ==) or component access (% before end)
 export function isValidFortranBlockClose(keyword: string, source: string, position: number): boolean {
   if (keyword.toLowerCase() !== 'end') {
     return true;
+  }
+  // component%end is derived type component access, not block close
+  let j = position - 1;
+  while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
+    j--;
+  }
+  if (j >= 0 && source[j] === '%') {
+    return false;
   }
   let i = position + keyword.length;
   while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {

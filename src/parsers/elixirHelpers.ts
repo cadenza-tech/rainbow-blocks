@@ -134,11 +134,26 @@ export function matchElixirCharlist(source: string, pos: number, skipInterpolati
   return { start: pos, end: i };
 }
 
+// Checks if position is at line start allowing leading whitespace
+function isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
+  if (pos === 0) return true;
+  let i = pos - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  return i < 0 || source[i] === '\n' || source[i] === '\r';
+}
+
 // Matches triple-quoted string (heredoc) with #{} interpolation for """ and '''
 export function matchTripleQuotedString(source: string, pos: number, delimiter: string, skipInterpolation: SkipInterpolationFn): ExcludedRegion {
   // Both """ and ''' support interpolation in Elixir
   let i = pos + 3;
+  // Track whether we've passed a newline (heredoc mode vs single-line triple quote)
+  let isHeredoc = false;
   while (i < source.length) {
+    if (source[i] === '\n' || source[i] === '\r') {
+      isHeredoc = true;
+    }
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
       continue;
@@ -148,7 +163,7 @@ export function matchTripleQuotedString(source: string, pos: number, delimiter: 
       i = skipInterpolation(source, i + 2);
       continue;
     }
-    if (source.slice(i, i + 3) === delimiter) {
+    if (source.slice(i, i + 3) === delimiter && (!isHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
       return { start: pos, end: i + 3 };
     }
     i++;
@@ -159,7 +174,11 @@ export function matchTripleQuotedString(source: string, pos: number, delimiter: 
 // Skips a triple-quoted string (heredoc) inside interpolation, handling escapes and nested interpolation
 export function skipNestedTripleQuotedString(source: string, pos: number, delimiter: string, skipInterpolation: SkipInterpolationFn): number {
   let i = pos + 3;
+  let isHeredoc = false;
   while (i < source.length) {
+    if (source[i] === '\n' || source[i] === '\r') {
+      isHeredoc = true;
+    }
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
       continue;
@@ -168,7 +187,7 @@ export function skipNestedTripleQuotedString(source: string, pos: number, delimi
       i = skipInterpolation(source, i + 2);
       continue;
     }
-    if (source.slice(i, i + 3) === delimiter) {
+    if (source.slice(i, i + 3) === delimiter && (!isHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
       return i + 3;
     }
     i++;
@@ -318,7 +337,11 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
     const tripleDelim = source.slice(delimiterPos, delimiterPos + 3);
     const isLowercase = /[a-z]/.test(nextChar);
     let i = delimiterPos + 3;
+    let isSigilHeredoc = false;
     while (i < source.length) {
+      if (source[i] === '\n' || source[i] === '\r') {
+        isSigilHeredoc = true;
+      }
       // Handle escape sequences for lowercase sigils
       if (isLowercase && source[i] === '\\' && i + 1 < source.length) {
         i += 2;
@@ -329,7 +352,7 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
         i = skipInterpolation(source, i + 2);
         continue;
       }
-      if (source.slice(i, i + 3) === tripleDelim) {
+      if (source.slice(i, i + 3) === tripleDelim && (!isSigilHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
         // Skip optional modifiers after closing
         let end = i + 3;
         while (end < source.length && /[a-zA-Z]/.test(source[end])) {
