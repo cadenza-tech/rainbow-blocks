@@ -4,6 +4,8 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType, findLastOpenerForLoop, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
+import type { VhdlValidationCallbacks } from './vhdlValidation';
+import { isInSignalAssignment, isValidEntityOrConfigOpen, isValidForOpen, isValidFuncProcOpen, isValidLoopOpen } from './vhdlValidation';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = [
@@ -29,8 +31,7 @@ const COMPOUND_END_TYPES = [
 // Only allow spaces/tabs between 'end' and the type keyword (same line only)
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
-// Keywords that can be followed by 'loop' or 'generate'
-const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
+// Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
 export class VhdlBlockParser extends BaseBlockParser {
@@ -58,12 +59,20 @@ export class VhdlBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'elsif', 'when', 'then', 'is', 'begin']
   };
 
+  private get validationCallbacks(): VhdlValidationCallbacks {
+    return {
+      isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
+      findExcludedRegionAt: (pos, regions) => this.findExcludedRegionAt(pos, regions)
+    };
+  }
+
   // Validates if 'loop' keyword is a valid block opener
   // 'loop' is invalid if preceded by 'for' or 'while' on the same line
   // (because the 'for' or 'while' is the actual block opener for 'end loop')
   // 'generate' is always valid because we handle 'for/while/if generate' specially in matchBlocks
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerKeyword = keyword.toLowerCase();
+    const cb = this.validationCallbacks;
 
     // Reject keywords preceded by '.' (library path like work.process or work . process)
     let dotPos = position - 1;
@@ -75,302 +84,22 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
 
     if (lowerKeyword === 'for') {
-      return this.isValidForOpen(source, position, excludedRegions);
+      return isValidForOpen(source, position, excludedRegions, cb);
     }
 
     if (lowerKeyword === 'entity' || lowerKeyword === 'configuration') {
-      return this.isValidEntityOrConfigOpen(lowerKeyword, source, position, excludedRegions);
+      return isValidEntityOrConfigOpen(lowerKeyword, source, position, excludedRegions, cb);
     }
 
     if (lowerKeyword === 'function' || lowerKeyword === 'procedure') {
-      return this.isValidFuncProcOpen(keyword, source, position, excludedRegions);
+      return isValidFuncProcOpen(keyword, source, position, excludedRegions, cb);
     }
 
     if (lowerKeyword === 'loop') {
-      return this.isValidLoopOpen(source, position, excludedRegions);
+      return isValidLoopOpen(source, position, excludedRegions, cb);
     }
 
     return true;
-  }
-
-  // Validates 'for' keyword: rejects 'wait for' timing statements
-  private isValidForOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const textBefore = source.slice(0, position).toLowerCase();
-    const lastNewline = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
-    const lineStart = lastNewline + 1;
-    const rawLineBefore = textBefore.slice(lineStart);
-    const lineBefore = rawLineBefore.trimStart();
-    const trimOffset = rawLineBefore.length - lineBefore.length;
-    // Strip trailing comments (-- ...) before checking for wait
-    const lineBeforeNoComment = this.stripTrailingComment(lineBefore, lineStart + trimOffset, excludedRegions);
-    if (this.isWaitBeforeFor(lineBeforeNoComment, lineStart, rawLineBefore, excludedRegions)) {
-      return false;
-    }
-    // Check previous lines for 'wait' (multi-line wait for, skip blank lines)
-    if (/^[ \t]*$/.test(lineBefore) && lastNewline > 0) {
-      let scanEnd = lastNewline;
-      // Skip the \r in \r\n pairs
-      if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
-        scanEnd--;
-      }
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const prevNl = Math.max(textBefore.lastIndexOf('\n', scanEnd - 1), textBefore.lastIndexOf('\r', scanEnd - 1));
-        const rawPrevLine = textBefore.slice(prevNl + 1, scanEnd);
-        const prevLine = rawPrevLine.trimStart();
-        if (/^[ \t]*$/.test(prevLine)) {
-          if (prevNl <= 0) break;
-          scanEnd = prevNl;
-          if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
-            scanEnd--;
-          }
-          continue;
-        }
-        const prevTrimOffset = rawPrevLine.length - prevLine.length;
-        const prevLineNoComment = this.stripTrailingComment(prevLine, prevNl + 1 + prevTrimOffset, excludedRegions);
-        if (this.isWaitBeforeFor(prevLineNoComment, prevNl + 1, rawPrevLine, excludedRegions)) {
-          return false;
-        }
-        break;
-      }
-    }
-    return true;
-  }
-
-  // Validates 'entity'/'configuration': rejects 'use entity', 'label: entity' direct instantiation
-  private isValidEntityOrConfigOpen(lowerKeyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const textBefore = source.slice(0, position).toLowerCase();
-    const lastNl = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
-    const rawLineBefore = textBefore.slice(lastNl + 1);
-    const lineBefore = rawLineBefore.trimStart();
-    const trimOffset = rawLineBefore.length - lineBefore.length;
-    const lineBeforeNoComment = this.stripTrailingComment(lineBefore, lastNl + 1 + trimOffset, excludedRegions);
-    if (/\buse[ \t]+$/.test(lineBeforeNoComment)) {
-      return false;
-    }
-    // Check previous lines for 'use' (multi-line use entity/configuration)
-    if (/^[ \t]*$/.test(lineBeforeNoComment) && lastNl > 0) {
-      let scanEnd = lastNl;
-      if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
-        scanEnd--;
-      }
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const prevNl = Math.max(textBefore.lastIndexOf('\n', scanEnd - 1), textBefore.lastIndexOf('\r', scanEnd - 1));
-        const prevLine = textBefore.slice(prevNl + 1, scanEnd);
-        const trimmedPrev = prevLine.trimStart();
-        const prevTrimOffset = prevLine.length - trimmedPrev.length;
-        if (trimmedPrev.trim().length === 0) {
-          if (prevNl <= 0) break;
-          scanEnd = prevNl;
-          if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
-            scanEnd--;
-          }
-          continue;
-        }
-        const prevNoComment = this.stripTrailingComment(trimmedPrev, prevNl + 1 + prevTrimOffset, excludedRegions);
-        const useMatch = prevNoComment.match(/\buse[ \t]*$/);
-        if (useMatch && useMatch.index !== undefined) {
-          // Check that the 'use' is not inside an excluded region (e.g., comment)
-          const useOffset = prevNl + 1 + prevTrimOffset + useMatch.index;
-          if (!this.isInExcludedRegion(useOffset, excludedRegions)) {
-            return false;
-          }
-        }
-        break;
-      }
-    }
-    if (lowerKeyword === 'entity') {
-      const colonMatch = lineBeforeNoComment.match(/:[ \t]*$/);
-      if (colonMatch) {
-        const colonOffset = lastNl + 1 + trimOffset + (lineBeforeNoComment.length - colonMatch[0].length);
-        if (!this.isInExcludedRegion(colonOffset, excludedRegions)) {
-          return false;
-        }
-      }
-      if (/^[ \t]*$/.test(lineBeforeNoComment) && lastNl > 0) {
-        // Skip the \r in \r\n pair to avoid finding the same line ending
-        let searchEnd = lastNl - 1;
-        if (searchEnd >= 0 && textBefore[searchEnd] === '\r') {
-          searchEnd--;
-        }
-        const prevNl = Math.max(textBefore.lastIndexOf('\n', searchEnd), textBefore.lastIndexOf('\r', searchEnd));
-        let prevLineEnd = lastNl;
-        if (prevLineEnd > 0 && textBefore[prevLineEnd - 1] === '\r') {
-          prevLineEnd--;
-        }
-        const prevLine = textBefore.slice(prevNl + 1, prevLineEnd);
-        const prevColonMatch = prevLine.match(/:[ \t]*$/);
-        if (prevColonMatch) {
-          const prevColonOffset = prevNl + 1 + (prevLine.length - prevColonMatch[0].length);
-          if (!this.isInExcludedRegion(prevColonOffset, excludedRegions)) {
-            return false;
-          }
-        }
-      }
-    }
-    return true;
-  }
-
-  // Validates 'function'/'procedure': rejects declarations (ending with ;) that are not blocks
-  private isValidFuncProcOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let j = position + keyword.length;
-    let parenDepth = 0;
-    while (j < source.length) {
-      if (this.isInExcludedRegion(j, excludedRegions)) {
-        j++;
-        continue;
-      }
-      if (source[j] === '(') parenDepth++;
-      else if (source[j] === ')') parenDepth--;
-      else if (parenDepth === 0) {
-        if (source[j] === ';') return false;
-        const twoChars = source.slice(j, j + 2).toLowerCase();
-        if (
-          twoChars === 'is' &&
-          (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) &&
-          (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))
-        ) {
-          return true;
-        }
-      }
-      j++;
-    }
-    return false;
-  }
-
-  // Validates 'loop': checks for prefix keywords (for/while) and rejects standalone 'loop' in 'end loop'
-  private isValidLoopOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Reject 'loop' preceded by a dot (e.g., record.loop or record . loop)
-    let dotCheck = position - 1;
-    while (dotCheck >= 0 && (source[dotCheck] === ' ' || source[dotCheck] === '\t')) {
-      dotCheck--;
-    }
-    if (dotCheck >= 0 && source[dotCheck] === '.') {
-      return false;
-    }
-
-    // Look backwards across multiple lines to find if a prefix keyword precedes this
-    const textBefore = source.slice(0, position).toLowerCase();
-    // Split on \r\n, \r, or \n to handle all line ending types
-    const lines = textBefore.split(/\r\n|\r|\n/);
-    const maxLines = Math.min(lines.length, 5);
-
-    // Calculate absolute offsets for each line
-    let lineStartOffset = textBefore.length;
-    for (let idx = 0; idx < maxLines; idx++) {
-      const lineIdx = lines.length - 1 - idx;
-      const lineText = lines[lineIdx];
-      if (idx > 0) {
-        // Account for the line terminator (1 for \n or \r, 2 for \r\n)
-        if (lineStartOffset >= 2 && source[lineStartOffset - 2] === '\r' && source[lineStartOffset - 1] === '\n') {
-          lineStartOffset -= 2;
-        } else {
-          lineStartOffset -= 1;
-        }
-      }
-      lineStartOffset -= lineText.length;
-
-      for (const prefix of LOOP_PREFIX_KEYWORDS) {
-        const pattern = new RegExp(`\\b${prefix}\\b`, 'g');
-        for (const prefixMatch of lineText.matchAll(pattern)) {
-          const absolutePos = lineStartOffset + prefixMatch.index;
-          if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
-            continue;
-          }
-          // Check if 'generate' appears between the for/while and 'loop' (not in excluded region)
-          // Must check all lines between prefix and loop, since generate may be on a different line
-          const textBetween = source.slice(absolutePos, position).toLowerCase();
-          const generatePattern = /\bgenerate\b/g;
-          let isGeneratePrefix = false;
-          for (const genMatch of textBetween.matchAll(generatePattern)) {
-            const genAbsPos = absolutePos + genMatch.index;
-            if (!this.isInExcludedRegion(genAbsPos, excludedRegions)) {
-              isGeneratePrefix = true;
-              break;
-            }
-          }
-          if (isGeneratePrefix) {
-            continue;
-          }
-          // Check if 'for' is part of a 'wait for' timing statement (not a loop prefix)
-          if (prefix === 'for' && !this.isValidForOpen(source, absolutePos, excludedRegions)) {
-            continue;
-          }
-          // If the line also contains 'loop' not in excluded region, the for/while is already paired
-          // Skip 'loop' that is part of 'end loop' (not a real loop opener)
-          const loopPattern = /\bloop\b/g;
-          for (const loopMatch of lineText.matchAll(loopPattern)) {
-            const loopAbsPos = lineStartOffset + loopMatch.index;
-            if (this.isInExcludedRegion(loopAbsPos, excludedRegions)) {
-              continue;
-            }
-            // Check if this 'loop' is preceded by 'end' (part of 'end loop')
-            const beforeLoop = lineText.slice(0, loopMatch.index).trimEnd();
-            if (/\bend$/i.test(beforeLoop)) {
-              continue;
-            }
-            return true;
-          }
-          return false;
-        }
-      }
-
-      // Stop at a previous statement (indicated by semicolon not in excluded region)
-      if (idx > 0) {
-        for (let ci = 0; ci < lineText.length; ci++) {
-          if (lineText[ci] === ';' && !this.isInExcludedRegion(lineStartOffset + ci, excludedRegions)) {
-            return true;
-          }
-        }
-      }
-    }
-
-    return true;
-  }
-
-  // Strips trailing comment content from a line using excluded regions
-  // textAbsOffset is the absolute offset where lineText starts in the source
-  private stripTrailingComment(lineText: string, textAbsOffset: number, excludedRegions: ExcludedRegion[]): string {
-    for (let ci = 0; ci < lineText.length - 1; ci++) {
-      if (lineText[ci] === '-' && lineText[ci + 1] === '-') {
-        const absPos = textAbsOffset + ci;
-        // Only strip if this is the start of a comment (excluded region starts here)
-        // not if we're inside a string (excluded region starts before here)
-        const region = this.findExcludedRegionAt(absPos, excludedRegions);
-        if (region && region.start === absPos) {
-          return lineText.slice(0, ci).trimEnd();
-        }
-      }
-    }
-    return lineText;
-  }
-
-  // Checks if 'wait' at the end of line text is a real wait statement
-  // (not inside an excluded region like a string or comment)
-  // Finds the LAST valid wait on the line, since earlier waits may be terminated by semicolons
-  private isWaitBeforeFor(trimmedLineText: string, lineAbsOffset: number, rawLineText: string, excludedRegions: ExcludedRegion[]): boolean {
-    const trimOffset = rawLineText.length - rawLineText.trimStart().length;
-    const waitPattern = /\bwait\b/gi;
-    let lastUnterminatedWait = false;
-    for (const match of trimmedLineText.matchAll(waitPattern)) {
-      const waitAbsPos = lineAbsOffset + trimOffset + match.index;
-      if (this.isInExcludedRegion(waitAbsPos, excludedRegions)) {
-        continue;
-      }
-      // Check if this wait is terminated by a semicolon
-      const afterWait = trimmedLineText.slice(match.index + 4);
-      let terminated = false;
-      for (let ci = 0; ci < afterWait.length; ci++) {
-        if (afterWait[ci] === ';') {
-          const semiAbsPos = waitAbsPos + 4 + ci;
-          if (!this.isInExcludedRegion(semiAbsPos, excludedRegions)) {
-            terminated = true;
-            break;
-          }
-        }
-      }
-      lastUnterminatedWait = !terminated;
-    }
-    return lastUnterminatedWait;
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
@@ -481,92 +210,13 @@ export class VhdlBlockParser extends BaseBlockParser {
     const { tokens: result } = mergeCompoundEndTokens(tokens, compoundEndPositions);
 
     // Filter out when/else in conditional signal assignments (sig <= val when cond else val)
+    const cb = this.validationCallbacks;
     return result.filter((token) => {
       if (token.type !== 'block_middle') return true;
       const kw = token.value.toLowerCase();
       if (kw !== 'when' && kw !== 'else') return true;
-      return !this.isInSignalAssignment(source, token.startOffset, excludedRegions, kw);
+      return !isInSignalAssignment(source, token.startOffset, excludedRegions, kw, cb);
     });
-  }
-
-  // Checks if position is within a signal assignment (has <= before it in the same statement)
-  // keyword parameter indicates which keyword ('when' or 'else') is being checked
-  private isInSignalAssignment(source: string, position: number, excludedRegions: ExcludedRegion[], keyword: string): boolean {
-    // Search backwards for <= or statement/block boundaries
-    const lowerSource = source.toLowerCase();
-    let i = position - 1;
-    let foundWhen = false;
-    while (i >= 0) {
-      // Skip over excluded regions (comments, strings)
-      const region = this.findExcludedRegionAt(i, excludedRegions);
-      if (region) {
-        i = region.start - 1;
-        continue;
-      }
-      const ch = source[i];
-      if (ch === ';') return false;
-      // Track 'when' keyword presence (conditional signal assignments require when before else)
-      if (i >= 3) {
-        const whenSlice = lowerSource.slice(i - 3, i + 1);
-        if (
-          whenSlice === 'when' &&
-          (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
-          (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-        ) {
-          foundWhen = true;
-        }
-      }
-      if (ch === '=' && i > 0 && source[i - 1] === '<') {
-        // For 'when': finding <= is sufficient (first when in conditional assignment)
-        // For 'else': require a 'when' between <= and else
-        // If scanning for 'else' and no 'when' found yet, this <= may be a comparison
-        // operator (e.g., `sig <= '1' when x <= 5 else '0'`), so continue scanning
-        if (keyword === 'when' || foundWhen) {
-          return true;
-        }
-        // Skip past the < of <= and continue scanning for the real signal assignment <=
-        i -= 2;
-        continue;
-      }
-      // Port/generic map association: => (e.g., sig => val when cond else other)
-      if (ch === '>' && i > 0 && source[i - 1] === '=') {
-        return keyword === 'when' || foundWhen;
-      }
-      // Variable assignment :=
-      if (ch === '=' && i > 0 && source[i - 1] === ':') {
-        return keyword === 'when' || foundWhen;
-      }
-      // 'return' starts a conditional expression context (return X when C else Y)
-      if (i >= 5) {
-        const retSlice = lowerSource.slice(i - 5, i + 1);
-        if (
-          retSlice === 'return' &&
-          (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
-          (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-        ) {
-          return keyword === 'when' || foundWhen;
-        }
-      }
-      // Stop at block boundary keywords that start a new context
-      // Note: 'else'/'elsif' are NOT boundaries here because chained conditional
-      // signal assignments use else (e.g., sig <= a when c1 else b when c2 else c;)
-      // The 'then' keyword already acts as a boundary for if branches.
-      for (const boundary of ['then', 'begin', 'loop', 'generate', 'is', 'end']) {
-        const len = boundary.length;
-        if (i >= len - 1) {
-          const start = i - len + 1;
-          if (
-            lowerSource.slice(start, start + len) === boundary &&
-            (start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) &&
-            (start + len >= source.length || !/[a-zA-Z0-9_]/.test(source[start + len]))
-          ) {
-            return false;
-          }
-        }
-      }
-      i--;
-    }
-    return false;
   }
 
   // Custom matching to handle compound end keywords
