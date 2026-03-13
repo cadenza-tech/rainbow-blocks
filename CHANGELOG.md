@@ -5,6 +5,26 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.17] - 2026-03-13
+
+### Fixed
+
+- Verilog: Fix `matchDefineDirective` string handler skipping past newline with `i += 2`
+- Ruby: Fix `matchSymbolLiteral` missing `HeredocState` propagation
+- Fortran: Fix `isValidFortranBlockClose` missing backward `%` check for `component%end`
+- Crystal: Fix `isLoopDo` missing dot/scope/variable-prefix checks
+- Elixir: Fix triple-quoted string closing `"""` not requiring line-start in heredoc mode
+
+### Refactored
+
+- Lua/Pascal: Extract shared `findLastNonRepeatIndex` to `parserUtils.ts`
+- Ada: Extract 10 validation methods to `adaValidation.ts` with `AdaValidationCallbacks` interface
+- VHDL: Extract 7 validation methods to `vhdlValidation.ts` with `VhdlValidationCallbacks` interface
+
+### Tests
+
+- Add regression tests across Verilog, Ruby, Fortran, Crystal, and Elixir parsers
+
 ## [1.1.16] - 2026-03-12
 
 ### Fixed
@@ -716,6 +736,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.17]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.16...v1.1.17
 [1.1.16]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.15...v1.1.16
 [1.1.15]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.14...v1.1.15
 [1.1.14]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.13...v1.1.14
