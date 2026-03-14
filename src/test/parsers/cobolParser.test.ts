@@ -380,6 +380,18 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
+
+    test('should skip >> compiler directive inside EXEC block', () => {
+      const source = 'EXEC SQL\n>>IF END-EXEC\nSELECT X\nEND-EXEC\nIF Y > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not detect keywords adjacent to Unicode letters', () => {
+      const source = 'caf\u00E9IF X\nIF Y > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
   });
 
   suite('END-keyword in comment', () => {
@@ -1190,6 +1202,54 @@ END-PERFORM`;
       const source = 'EXEC SQL\n\tEND-EXEC\nEND-EXEC\nIF X > 0\nEND-IF';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Regression: D/d debug indicator with adjacent alphanumeric in fixed format', () => {
+    test('should treat D followed by digits at column 7 as debug line in fixed format', () => {
+      const pairs = parser.parse('000100D100 IF CONDITION\n000200D200 END-IF\n       PERFORM\n         DISPLAY "Hello"\n       END-PERFORM');
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should treat d followed by digits at column 7 as debug line in fixed format', () => {
+      const pairs = parser.parse('000100d100 IF CONDITION\n000200d200 END-IF\n       PERFORM\n         DISPLAY "Hello"\n       END-PERFORM');
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still reject D followed by alphanumeric in free-format context', () => {
+      // Sequence area is all spaces (no digits), so this could be free-format
+      const pairs = parser.parse('      DIVIDE X BY Y\n       IF X > 0\n       END-IF');
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Branch coverage: hyphenated identifiers', () => {
+    test('should skip keyword preceded by hyphen', () => {
+      // Covers lines 120-121: keyword preceded by '-' is part of a hyphenated identifier
+      const source = 'MOVE X-IF TO Y\nIF CONDITION\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should skip keyword followed by hyphen', () => {
+      // Covers lines 124-125: keyword followed by '-' is part of a hyphenated identifier
+      const source = 'MOVE IF-FLAG TO Y\nIF CONDITION\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should skip PERFORM preceded by hyphen', () => {
+      // Covers lines 120-121 for PERFORM keyword
+      const source = 'MOVE X-PERFORM TO Y\nPERFORM\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should skip PERFORM followed by hyphen', () => {
+      // Covers lines 124-125 for PERFORM keyword
+      const source = 'MOVE PERFORM-COUNT TO Y\nPERFORM\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
   });
 

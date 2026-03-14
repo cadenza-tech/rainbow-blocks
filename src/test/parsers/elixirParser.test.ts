@@ -1094,6 +1094,25 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not treat else? as block middle keyword', () => {
+      const source = 'if else?(x) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat catch! as block middle keyword', () => {
+      const source = 'try do\n  catch!(err)\nrescue\n  e -> e\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should not tokenize keywords preceded by ? as block tokens', () => {
+      const pairs = parser.parse('if true do\n  x = ?end\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Branch coverage', () => {
@@ -2898,6 +2917,209 @@ end`;
       const source = 'Kernel.if(true, do: 1)';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: ? and ! identifier suffixes', () => {
+    test('should not treat fn? as fn keyword', () => {
+      const pairs = parser.parse('if fn?(x) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat end? as end keyword', () => {
+      const pairs = parser.parse('if end?(data) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat end! as end keyword', () => {
+      const pairs = parser.parse('if end!(data) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: skipNestedSigil heredoc line-start check', () => {
+    test('should not close heredoc sigil at mid-line triple quotes in interpolation', () => {
+      const pairs = parser.parse('"#{~s"""\nfoo """ bar\n"""}";\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: ?X character literal handling', () => {
+    test('should not treat ?# as comment start', () => {
+      const pairs = parser.parse('x = ?#\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?" as string start', () => {
+      const pairs = parser.parse('x = ?"\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test("should not treat ?' as charlist start", () => {
+      const pairs = parser.parse("x = ?'\nif true do\n  1\nend");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?~ as sigil start', () => {
+      const pairs = parser.parse('x = ?~\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?} inside interpolation without closing interpolation', () => {
+      const pairs = parser.parse('"#{?}}"\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?{ inside interpolation without incrementing depth', () => {
+      const pairs = parser.parse('"#{?{}"\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ?# inside interpolation without triggering comment', () => {
+      const pairs = parser.parse('"#{?# + 1}"\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test("should handle ?' inside interpolation without triggering string", () => {
+      const pairs = parser.parse('"#{?\'}"\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escape character literal ?\\n', () => {
+      const pairs = parser.parse('x = ?\\n\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ? after identifier as character literal', () => {
+      const pairs = parser.parse('if valid? do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?# as excluded region', () => {
+      const regions = parser.getExcludedRegions('x = ?# + 1');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end - regions[0].start, 2);
+    });
+
+    test('should handle ?\\\\ escape as excluded region', () => {
+      const regions = parser.getExcludedRegions('x = ?\\\\ + 1');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end - regions[0].start, 3);
+    });
+  });
+
+  suite('Coverage: ?\\xNN hex escape character literal', () => {
+    test('should treat ?\\xNN as excluded region', () => {
+      // Triggers skipCharLiteral hex escape path (elixirParser lines 173-179)
+      const regions = parser.getExcludedRegions('x = ?\\x41 + 1');
+      assert.strictEqual(regions.length, 1);
+      // ?\\x41 = 5 chars: ?, \\, x, 4, 1
+      assert.strictEqual(regions[0].start, 4);
+      assert.strictEqual(regions[0].end, 9);
+    });
+
+    test('should not treat ?\\xNN as keyword when followed by block keyword', () => {
+      const pairs = parser.parse('x = ?\\x41\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?\\xN single hex digit', () => {
+      const regions = parser.getExcludedRegions('?\\xA');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 4);
+    });
+  });
+
+  suite('Coverage: ?\\u unicode escape character literal', () => {
+    test('should treat ?\\u{NNNN} as excluded region', () => {
+      // Triggers skipCharLiteral unicode escape with braces (elixirParser lines 182-190)
+      const regions = parser.getExcludedRegions('x = ?\\u{1F600} + 1');
+      assert.strictEqual(regions.length, 1);
+      // ?\\u{1F600} = ?, \\, u, {, 1, F, 6, 0, 0, } = 10 chars
+      assert.strictEqual(regions[0].start, 4);
+      assert.strictEqual(regions[0].end, 14);
+    });
+
+    test('should handle ?\\u{NNNN} followed by block keyword', () => {
+      const pairs = parser.parse('x = ?\\u{0041}\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat ?\\uNNNN (without braces) as excluded region', () => {
+      // Triggers skipCharLiteral unicode escape without braces (elixirParser lines 192-198)
+      const regions = parser.getExcludedRegions('x = ?\\u0041 + 1');
+      assert.strictEqual(regions.length, 1);
+      // ?\\u0041 = ?, \\, u, 0, 0, 4, 1 = 7 chars
+      assert.strictEqual(regions[0].start, 4);
+      assert.strictEqual(regions[0].end, 11);
+    });
+
+    test('should handle ?\\uNNNN followed by block keyword', () => {
+      const pairs = parser.parse('x = ?\\u0041\nif true do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: ?keyword character literal prefix filtering', () => {
+    test('should filter end preceded by ? after identifier (tokenize lines 257-258)', () => {
+      // When ? is preceded by alphanumeric (like foo?end), it is NOT a character literal
+      // so end is tokenized but then filtered by the ? prefix check in tokenize
+      // foo?end: ? is preceded by 'o', so tryMatchExcludedRegion skips char literal detection
+      // \bend\b matches end after ?, and tokenize filter rejects it at lines 256-258
+      const tokens = parser.getTokens('foo?end');
+      assert.strictEqual(tokens.length, 0);
+    });
+
+    test('should filter if preceded by ? after identifier from tokenize', () => {
+      // valid?if: ? preceded by 'd', not a character literal, so 'if' is tokenized then filtered
+      const tokens = parser.getTokens('valid?if');
+      assert.strictEqual(tokens.length, 0);
+    });
+
+    test('should not treat foo?end as block close in block matching', () => {
+      // ?end inside block body should not close the if-end block
+      const pairs = parser.parse('if true do\n  x = foo?end\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Coverage: matchCharacterLiteral returns null (lines 159-160)', () => {
+    test('should not treat ? followed by space as character literal', () => {
+      // ? followed by space: skipCharLiteral returns pos (space is not valid char literal)
+      // matchCharacterLiteral returns null (lines 159-160)
+      const regions = parser.getExcludedRegions('x = ? + 1');
+      // No excluded region for '? ' since it's not a valid character literal
+      // Check that '?' doesn't create an excluded region
+      const qPos = 4;
+      const hasRegionAtQ = regions.some((r) => r.start === qPos);
+      assert.strictEqual(hasRegionAtQ, false);
+    });
+
+    test('should not treat ?\\n (backslash-newline) as character literal', () => {
+      // ?\<newline> is not a valid character literal (line 170 returns pos)
+      // matchCharacterLiteral returns null (lines 159-160)
+      const regions = parser.getExcludedRegions('x = ?\\\n1');
+      // The ?\ followed by newline should not create a char literal excluded region
+      const qPos = 4;
+      const regionAtQ = regions.find((r) => r.start === qPos);
+      assert.strictEqual(regionAtQ, undefined);
+    });
+  });
+
+  suite('Coverage: isBlockKeywordAt rejects ? and ! suffixed keywords', () => {
+    test('should not count if? as inner block keyword in hasDoKeyword scan', () => {
+      // Triggers isBlockKeywordAt ? boundary check (elixirParser line 456)
+      // if? is a function name, not a block keyword; should not increment innerBlockDepth
+      const pairs = parser.parse('if if?(x) do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not count for! as inner block keyword in hasDoKeyword scan', () => {
+      // Triggers isBlockKeywordAt ! boundary check (elixirParser line 456)
+      // for! is a function name, not a block keyword
+      const pairs = parser.parse('if for!(items) do\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 

@@ -351,6 +351,46 @@ end tell`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
+
+    test('should skip keywords inside chevron/guillemet syntax', () => {
+      const source = `tell application "Script Editor"
+  set scriptObj to \u00ABscript end\u00BB
+  tell scriptObj
+    run
+  end tell
+end tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outerTell = pairs.find((p) => p.openKeyword.line === 0);
+      assert.ok(outerTell);
+      assert.strictEqual(outerTell.closeKeyword.value, 'end tell');
+      assert.strictEqual(outerTell.closeKeyword.line, 5);
+    });
+
+    test('should skip if keyword inside chevron syntax', () => {
+      const source = `if x > 0 then
+  set y to \u00ABconstant if true\u00BB
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+    });
+
+    test('should handle unterminated chevron syntax', () => {
+      const source = `tell application "X"
+  set x to \u00ABdata end tell
+end tell`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect chevron as excluded region', () => {
+      const source = 'set x to \u00ABclass furl\u00BB';
+      const regions = parser.getExcludedRegions(source);
+      const chevronRegion = regions.find((r) => source[r.start] === '\u00AB');
+      assert.ok(chevronRegion);
+      assert.strictEqual(source.slice(chevronRegion.start, chevronRegion.end), '\u00ABclass furl\u00BB');
+    });
   });
 
   suite('Edge cases', () => {
@@ -406,6 +446,38 @@ end tell`;
 end tell`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 5);
+    });
+
+    test('should not treat NOT sign inside comment as line continuation', () => {
+      const source = 'if true then -- \u00AC\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat NOT sign inside comment as backward line continuation', () => {
+      const source = 'x = 1 -- \u00AC\nscript myScript\n  property x : 1\nend script';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'script', 'end script');
+    });
+
+    test('should skip comments when scanning for continuation in isAtLogicalLineStart', () => {
+      const pairs = parser.parse('set x to \u00AC -- comment\non run\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip comments when scanning for continuation in findLogicalLineEnd', () => {
+      const pairs = parser.parse('if \u00AC -- comment\ntrue then x + 1');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip comments when scanning for continuation in findLogicalLineStart', () => {
+      const pairs = parser.parse('set \u00AC -- comment\nscript\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect set variable pattern when comment with continuation precedes line', () => {
+      const pairs = parser.parse('-- comment \u00AC\nset repeat to 5');
+      assertNoBlocks(pairs);
     });
   });
 
@@ -1562,6 +1634,68 @@ end try`;
       const source = 'tell application "Finder"\n  get name\nend \u00AC\n\u00AC\ntell';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Regression: Unicode adjacency check in tokenize', () => {
+    test('should not detect keywords adjacent to Unicode letters', () => {
+      const pairs = parser.parse('\u03B1tell application "Finder"\n  activate\nend tell');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect compound keywords adjacent to Unicode letters', () => {
+      const pairs = parser.parse('\u03B1end tell');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect keywords not adjacent to Unicode letters', () => {
+      const pairs = parser.parse('tell application "Finder"\n  activate\nend tell');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Regression: pipe-delimited identifiers', () => {
+    test('should exclude keywords inside pipe-delimited identifiers', () => {
+      const pairs = parser.parse('tell application "Finder"\n  set x to |end|\nend tell');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should exclude block open keywords inside pipe-delimited identifiers', () => {
+      const pairs = parser.parse('tell application "Finder"\n  set x to |tell|\nend tell');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should exclude keywords inside pipe-delimited identifiers with if', () => {
+      const pairs = parser.parse('if true then\n  set x to |if|\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle unterminated pipe-delimited identifier', () => {
+      const pairs = parser.parse('tell application "Finder"\n  set x to |end\nend tell');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Branch coverage: line continuation inside comment', () => {
+    test('should not follow continuation character inside comment (findLogicalLineEnd)', () => {
+      // Covers line 509: ¬ inside excluded region (comment) should not continue to next line
+      const source = 'if true then -- comment \u00AC\n  set x to 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not follow continuation character inside comment (findLogicalLineStart)', () => {
+      // Covers line 561: ¬ inside excluded region (comment) should not merge with previous line
+      const source = '-- comment \u00AC\nif true then\n  set x to 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle findLogicalLineStart with non-newline character before line', () => {
+      // Covers line 534: prevChar is not newline/CR, breaking the while loop
+      const source = 'if true then\n  set x to 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
     });
   });
 

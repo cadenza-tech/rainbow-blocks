@@ -317,6 +317,16 @@ endmodule`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
     });
+
+    test('should handle block comments inside define directive', () => {
+      const pairs = parser.parse('`define MACRO /* multi-line\ncomment */ value\nmodule test;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle unterminated string inside attribute across newlines', () => {
+      const pairs = parser.parse('(* attr = "abc\n" *) module test;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
   });
 
   suite('Edge cases', () => {
@@ -406,6 +416,12 @@ module test;
 endmodule`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+
+    test('should not leak string backslash into define continuation check', () => {
+      const source = '`define X "test\\"\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
     });
   });
 
@@ -1664,6 +1680,100 @@ endmodule`;
       const source = '"test\\\r\nmodule m;\nendmodule';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: delay expression with exponent notation', () => {
+    test('should handle delay expression with exponent notation', () => {
+      const pairs = parser.parse('always #1.5e-3 begin\n  clk = ~clk;\nend');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle delay expression with uppercase exponent', () => {
+      const pairs = parser.parse('always #2.0E+6 begin\n  clk = ~clk;\nend');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle delay expression with exponent without sign', () => {
+      const pairs = parser.parse('always #1e3 begin\n  clk = ~clk;\nend');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Coverage: matchAttribute string terminated by CRLF with stray quote', () => {
+    test('should handle attribute string terminated by CRLF newline', () => {
+      // Lines 71-72: string inside attribute terminated by \r\n (CRLF)
+      const source = '(* attr = "unterminated\r\n*) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle attribute string terminated by CRLF with stray closing quote', () => {
+      // Lines 72, 76-78: string terminated by CRLF, then whitespace, then stray closing quote
+      // After CRLF, the code skips whitespace and checks for stray "
+      const source = '(* attr = "unterminated\r\n  " *) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle attribute string terminated by LF with stray closing quote after spaces', () => {
+      // Lines 74-78: string terminated by LF (not CRLF), skip whitespace, stray "
+      const source = '(* attr = "unterminated\n\t" *) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle attribute string terminated by LF without stray closing quote', () => {
+      // Lines 74-78: string terminated by LF, whitespace but no stray quote
+      const source = '(* attr = "unterminated\n*) module test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Coverage: matchDefineDirective backslash-newline inside string literal', () => {
+    test('should end define at backslash-newline inside string literal', () => {
+      // Lines 130-134: backslash before newline inside string in define body
+      // The string is unterminated; define ends at the backslash position
+      const source = '`define MSG "hello\\\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should end define at backslash-CR inside string literal', () => {
+      // Lines 129-133: backslash before \r inside string in define body
+      const source = '`define MSG "hello\\\rmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Coverage: matchUndefDirective single-line matching', () => {
+    test('should exclude undef directive content up to end of line', () => {
+      // Lines 197-199: matchUndefDirective scans from pos+6 to newline
+      const source = '`undef MY_MACRO\nmodule test;\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const undefRegion = regions.find((r) => source.slice(r.start, r.start + 6) === '`undef');
+      assert.ok(undefRegion, '`undef should create an excluded region');
+      assert.strictEqual(undefRegion.start, 0);
+      // Region should end at the newline (pos 15), not include it
+      assert.strictEqual(undefRegion.end, 15);
+    });
+
+    test('should handle undef with CR-only line ending', () => {
+      // Lines 197-199: matchUndefDirective stops at \r
+      const source = '`undef FOO\rmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle undef at end of file without newline', () => {
+      // Lines 197-199: matchUndefDirective reaches end of source
+      const source = 'module test;\nendmodule\n`undef TAIL_MACRO';
+      const regions = parser.getExcludedRegions(source);
+      const undefRegion = regions.find((r) => source.slice(r.start, r.start + 6) === '`undef');
+      assert.ok(undefRegion, '`undef should create an excluded region');
+      assert.strictEqual(undefRegion.end, source.length);
     });
   });
 

@@ -409,6 +409,24 @@ endif`;
       const ifPair = findBlock(pairs, 'if');
       assert.ok(ifPair.closeKeyword.value.toLowerCase().includes('endif'));
     });
+
+    test('should handle concatenated endwhere in continuation block form', () => {
+      const source = 'where (a > 0) &\n  b = 1\nendwhere';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'endwhere');
+    });
+
+    test('should handle leading & on continuation line before opening paren', () => {
+      const source = 'where &\n  &(mask > 0)\n  a = 1\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('should not detect keywords adjacent to Unicode letters', () => {
+      const source = 'variable caf\u00E9do : integer\ndo i = 1, 10\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
   });
 
   suite('Type-bound procedure declarations', () => {
@@ -3576,6 +3594,15 @@ end program`;
       const source = 'program test\r\n  integer &\r\n  :: x\r\n  if (.true.) then\r\n    y = 1\r\n  end if\r\nend program';
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: isValidIfOpen parenthesis depth tracking', () => {
+    test('should not treat if with then inside parentheses as block if', () => {
+      const pairs = parser.parse(
+        'program test\n  integer :: then\n  if (func(then) > 0) print *, "found"\n  if (y > 0) then\n    z = 1\n  end if\nend program'
+      );
+      assertBlockCount(pairs, 2); // program/end program + if/end if
     });
   });
 

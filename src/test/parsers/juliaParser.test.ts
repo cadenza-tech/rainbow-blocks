@@ -860,6 +860,11 @@ end`;
       assert.strictEqual(source.slice(regions[1].start, regions[1].end), ':end');
       assert.strictEqual(source.slice(regions[2].start, regions[2].end), ':for');
     });
+
+    test('should not consume word characters after ! in symbol literal', () => {
+      const pairs = parser.parse('if true\n  :push!end');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Prefixed string boundary', () => {
@@ -1366,6 +1371,19 @@ end`;
         const regions = parser.getExcludedRegions(source);
         assert.ok(regions.some((r) => source.slice(r.start, r.end) === ':foo'));
       });
+    });
+
+    test('should not let char literal escape skip past newline', () => {
+      // '\<newline> should terminate char literal at newline, not skip past it
+      const source = "c = '\\\nfunction foo()\nbegin\nend\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should recognize backtick command result as indexable for end keyword', () => {
+      const source = 'function foo()\n  x = `cmd`[end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 
@@ -2249,6 +2267,12 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should treat dot-adjoint as transpose operator', () => {
+      // A.' is the broadcasted adjoint/transpose operator; the ' should not start a char literal
+      const pairs = parser.parse("x = A.'\nfunction f()\nend");
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   suite('Coverage: new bug fix code paths', () => {
@@ -2771,6 +2795,28 @@ end`;
       const source = '"$("hello")" \nfunction f()\n  return 1\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Branch coverage: Unicode adjacent keywords', () => {
+    test('should skip keyword preceded by Unicode letter', () => {
+      // Covers lines 42-43: Unicode letter before keyword filters it out
+      const source = '\u03B1end';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.length, 0);
+    });
+
+    test('should skip keyword followed by Unicode letter', () => {
+      // Covers lines 46-47: Unicode letter after keyword filters it out
+      const source = 'end\u03B2';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.length, 0);
+    });
+
+    test('should parse keyword not adjacent to Unicode letters', () => {
+      const source = 'if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 

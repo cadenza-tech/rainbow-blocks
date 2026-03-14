@@ -462,6 +462,12 @@ end`;
       assertBlockCount(pairs, 5);
     });
 
+    test('should detect forward declaration with comment before parenthesized parent', () => {
+      const source = 'begin\n  type TFoo = class { forward }(TBase);\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
     test('should handle unterminated string at end of line', () => {
       const source = `begin
   x := 'unterminated
@@ -1641,6 +1647,45 @@ end`;
       const source = 'BEGIN\nEND';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: Unicode adjacency check in tokenize', () => {
+    test('should not detect keywords adjacent to Unicode letters', () => {
+      const pairs = parser.parse('\u03B1begin\n  x := 1;\n\u03B1end');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect case-insensitive keywords adjacent to Unicode letters', () => {
+      const pairs = parser.parse('\u03B1Begin\n  x := 1;\n\u03B1End');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect keywords not adjacent to Unicode letters', () => {
+      const pairs = parser.parse('begin\n  x := 1;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: interface and object forward declarations with parent', () => {
+    test('should not treat interface(Parent) forward declaration as block opener', () => {
+      const pairs = parser.parse('type\n  IFoo = interface(IUnknown);\nbegin\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat object(Parent) forward declaration as block opener', () => {
+      const pairs = parser.parse('type\n  TObj = object(TBase);\nbegin\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still treat interface with body as block opener', () => {
+      const pairs = parser.parse('type\n  IFoo = interface(IUnknown)\n    procedure DoSomething;\n  end;');
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+
+    test('should still treat object with body as block opener', () => {
+      const pairs = parser.parse('type\n  TObj = object(TBase)\n    X: Integer;\n  end;');
+      assertSingleBlock(pairs, 'object', 'end');
     });
   });
 

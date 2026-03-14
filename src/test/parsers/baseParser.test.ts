@@ -206,6 +206,30 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
+    test('should not match keyword adjacent to non-BMP Unicode letter before (surrogate pair)', () => {
+      // U+1D400 Mathematical Bold Capital A is a non-BMP letter (surrogate pair in UTF-16)
+      // Covers isAdjacentToUnicodeLetter lines 280-281: low surrogate before keyword
+      const source = '\uD835\uDC00end\nif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match keyword adjacent to non-BMP Unicode letter after (surrogate pair)', () => {
+      // U+1D400 Mathematical Bold Capital A after keyword
+      // Covers isAdjacentToUnicodeLetter lines 293-294: high surrogate after keyword
+      const source = 'end\uD835\uDC00\nif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should match keyword adjacent to non-BMP non-letter (emoji surrogate pair)', () => {
+      // U+1F600 Grinning Face is not a letter (\p{L} returns false)
+      // Surrogate pair before keyword should not prevent match
+      const source = 'if\n\uD83D\uDE00end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
     test('should handle CR-only line endings', () => {
       const source = 'if true\rdo\r  x\rend\rend';
       const pairs = parser.parse(source);

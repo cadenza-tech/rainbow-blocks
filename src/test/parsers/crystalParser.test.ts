@@ -245,6 +245,11 @@ end`;
       const pairs = parser.parse("x = '\\101'\nif true\nend");
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not let char literal fallback escape skip past newline', () => {
+      const pairs = parser.parse("if true\n  x = '\\\nend");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Excluded regions - Heredocs', () => {
@@ -349,6 +354,11 @@ if true
 end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
+    });
+
+    test('should treat %= as compound assignment not percent literal', () => {
+      const pairs = parser.parse('if true\n  x %= 5\nend');
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -600,6 +610,11 @@ end`;
 if true
 end`;
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close macro template when single brace precedes }}', () => {
+      const pairs = parser.parse('{{ a{b}}}\nif true\n  puts 1\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
@@ -1366,6 +1381,11 @@ end`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'def', 'end');
       });
+    });
+
+    test('should not treat even backslashes before newline as line continuation', () => {
+      const pairs = parser.parse('x = 1 \\\\\nif true\n  puts 1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -2891,22 +2911,25 @@ end`;
   });
 
   suite('Bug 29: heredoc trailing whitespace on terminator line', () => {
-    test('should match terminator with trailing spaces', () => {
+    test('should not match terminator with trailing spaces', () => {
       const source = 'x = <<-EOF\n  if true\nEOF   \nif x\nend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      // EOF with trailing spaces should NOT match - heredoc is unterminated
+      assertNoBlocks(pairs);
     });
 
-    test('should match terminator with trailing tab', () => {
+    test('should not match terminator with trailing tab', () => {
       const source = 'x = <<-EOF\n  if true\nEOF\t\nif x\nend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      // EOF with trailing tab should NOT match - heredoc is unterminated
+      assertNoBlocks(pairs);
     });
 
-    test('should match indented terminator with trailing whitespace', () => {
+    test('should not match indented terminator with trailing whitespace', () => {
       const source = 'x = <<-EOF\n  if true\n  EOF  \nif x\nend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      // EOF with trailing spaces should NOT match even with leading indentation
+      assertNoBlocks(pairs);
     });
   });
 
@@ -3083,6 +3106,12 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not match heredoc terminator with trailing whitespace', () => {
+      const pairs = parser.parse('x = <<-EOF\n  content\nEOF   \ndef foo\nend');
+      // EOF with trailing spaces should NOT match - heredoc is unterminated
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Regression: heredoc in interpolation closing on opener line', () => {
@@ -3133,6 +3162,13 @@ end`;
     });
   });
 
+  suite('Regression: non-paired percent literal without specifier', () => {
+    test('should exclude keywords inside non-paired percent literal after identifier', () => {
+      const pairs = parser.parse('puts %|if end|\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Branch coverage: quoted heredoc opener keyword filter', () => {
     test('should filter out keyword in single-quoted heredoc opener', () => {
       // Covers crystalParser.ts lines 330-331: <<-'keyword' heredoc opener filter
@@ -3144,6 +3180,104 @@ end`;
     test('should filter out keyword in double-quoted heredoc opener', () => {
       // Covers crystalParser.ts lines 330-331: <<-"keyword" heredoc opener filter
       const source = 'x = <<-"end"\nsome text\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: ?# and ?/ character literals in interpolation', () => {
+    test('should not treat ?# as comment start inside interpolation', () => {
+      const pairs = parser.parse('"#{?# }"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?/ as regex start inside interpolation', () => {
+      const pairs = parser.parse('"#{?/}"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?% as percent literal start inside interpolation', () => {
+      const pairs = parser.parse('"#{?%}"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?< as heredoc operator inside interpolation', () => {
+      const pairs = parser.parse('"#{?<}"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: char literal \\u{ newline handling', () => {
+    test('should not scan past newline in \\u{ escape', () => {
+      // '\\u{ followed by newline is invalid char literal, should not hide keywords on next lines
+      const pairs = parser.parse("'\\u{\n}'\nif true\n  1\nend");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: macro template interpolation with escaped nested string', () => {
+    test('should handle escaped character in nested string inside macro interpolation', () => {
+      // Covers crystalExcluded.ts lines 115-117: escape inside nested string in macro interpolation
+      const source = '{% "hello #{"\\\\"}" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escaped character in single-quoted nested string inside macro interpolation', () => {
+      // Covers crystalExcluded.ts lines 115-117: escape in single-quoted nested string
+      const source = '{% "hello #{\'\\\\\'}" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: do preceded by variable prefix', () => {
+    test('should not treat do as loop separator when while is preceded by $', () => {
+      // Covers crystalExcluded.ts lines 489-490: $while should not be a loop keyword
+      const source = '$while do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not treat do as loop separator when for is preceded by @', () => {
+      // Covers crystalExcluded.ts lines 489-490: @for should not be a loop keyword
+      const source = '@for do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
+  suite('Coverage: double-quoted symbol with heredoc in interpolation', () => {
+    test('should extend excluded region when heredoc extends past closing quote', () => {
+      // Covers crystalParser.ts lines 258-259: heredocState.pendingEnd > end in matchSymbolLiteral
+      // The heredoc body contains a " before the EOF terminator, so the symbol's closing "
+      // is found inside the heredoc body. heredocState.pendingEnd (after EOF) > end (after ").
+      const source = ':"#{<<-EOF}\nheredoc with " inside\nEOF\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should extend excluded region for unterminated symbol when heredoc extends past EOF', () => {
+      // Covers crystalParser.ts lines 265-266: heredocState.pendingEnd > i in matchSymbolLiteral
+      // Unterminated double-quoted symbol: no closing " found, but heredoc in interpolation
+      // extends past where the scan reaches EOF. heredocState.pendingEnd > i (source.length).
+      const source = ':"#{<<-EOF}\nheredoc body\nEOF';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: keyword in quoted heredoc opener', () => {
+    test('should not treat keyword in single-quoted heredoc opener as block keyword', () => {
+      // Covers crystalParser.ts lines 334-335: <<-'end' filter in tokenize
+      const source = "x = <<-'end'\nheredoc body\nend\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat keyword in double-quoted heredoc opener as block keyword', () => {
+      // Covers crystalParser.ts lines 334-335: <<-"do" filter in tokenize
+      const source = 'x = <<-"do"\nheredoc body\ndo\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });

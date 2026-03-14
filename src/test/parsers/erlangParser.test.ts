@@ -447,6 +447,11 @@ end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 5);
     });
+
+    test('should not filter keywords after .. range operator', () => {
+      const pairs = parser.parse('begin\n  1..begin ok end\nend');
+      assertBlockCount(pairs, 2);
+    });
   });
 
   suite('Fun references', () => {
@@ -1597,6 +1602,24 @@ bar() -> fun() -> ok end.`;
       const source = 'F = fun\n  (X) -> X + 1\nend.';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should not suppress fun after arithmetic subtraction with callback', () => {
+      const source = 'foo() ->\n  X = total() - callback(Y),\n  F = fun() -> ok end,\n  F.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should not suppress fun after arithmetic subtraction with opaque', () => {
+      const source = 'baz() ->\n  X = B - opaque(mask),\n  F = fun() -> ok end,\n  F.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should still suppress fun inside real -callback declaration', () => {
+      const source = '-callback init(Args :: term()) -> fun(() -> ok).';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 

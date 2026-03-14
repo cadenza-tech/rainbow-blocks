@@ -218,6 +218,12 @@ end;`;
       assertSingleBlock(pairs, 'begin', 'end');
       assertIntermediates(pairs[0], ['exception', 'when']);
     });
+
+    test('should keep or and else as intermediates in select block', () => {
+      const pairs = parser.parse('select\n  accept Entry1;\nor\nelse\n  null;\nend select;');
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or', 'else']);
+    });
   });
 
   suite('Nested blocks', () => {
@@ -284,6 +290,16 @@ end if;`;
 if Condition then
 end if;`;
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should treat tick before paren as qualified expression not character literal', () => {
+      const pairs = parser.parse("if Integer'(X) > 0 then\n  null;\nend if;");
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should handle four-quote character literal followed by keyword', () => {
+      const pairs = parser.parse("if '''' = X then\n  null;\nend if;");
       assertSingleBlock(pairs, 'if', 'end if');
     });
   });
@@ -410,6 +426,12 @@ end Hello;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end procedure');
       assert.strictEqual(pairs[0].intermediates.length, 2); // is, begin
+    });
+
+    test('should detect unterminated string with doubled-quote at end', () => {
+      const source = 'Put("test""");\nif True then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
     });
   });
 
@@ -2031,6 +2053,128 @@ end if;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
       assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  suite('Regression: multi-line for representation clause', () => {
+    test('should not treat multi-line for representation clause as loop', () => {
+      const pairs = parser.parse('procedure P is\n  for Color\n    use (Red => 0, Green => 1, Blue => 2);\nbegin\n  null;\nend P;');
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Regression: Unicode adjacency in tokenize', () => {
+    test('should not detect keywords adjacent to Unicode letters', () => {
+      const pairs = parser.parse('\u03B1end\nif True then\n  null;\nend if;');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: matchCharacterLiteral qualified expression', () => {
+    test('should treat tick before ( preceded by identifier as attribute tick, not character literal', () => {
+      // Integer'(X) is a qualified expression: the tick before ( preceded by identifier
+      // matchCharacterLiteral should return { start: pos, end: pos + 1 } (lines 41-42)
+      const source = "if Integer'(X) > 0 then\n  null;\nend if;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should treat tick before ( in qualified expression without disrupting parsing', () => {
+      // Another qualified expression pattern: Type_Name'(Value)
+      const source = "procedure P is\nbegin\n  X := My_Type'(42);\nend P;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should handle qualified expression where char after ( is tick', () => {
+      // Covers adaHelpers.ts lines 41-42: matchCharacterLiteral sees '(' pattern
+      // where source[pos+1]='(' and source[pos+2]="'" and pos-1 is identifier char
+      // T'('x') is a qualified expression T'( followed by char literal 'x' and )
+      const source = "if T'('x') = C then\n  null;\nend if;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: isOrElseShortCircuit with non-excluded comment', () => {
+    test('should skip -- comment between or and else when not in excluded region', () => {
+      // isOrElseShortCircuit scans between or end offset and else start offset
+      // Lines 73-79: encounters -- comment that is NOT in the excluded regions set
+      // (because isOrElseShortCircuit gets isInExcluded callback that checks parser excluded regions,
+      // but the comment between or/else tokens is in the raw source gap)
+      const source = 'if A or -- inline comment\nelse B then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // or and else should be removed as short-circuit operator; only then remains
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should return false from isOrElseShortCircuit when non-whitespace non-comment exists', () => {
+      // Line 78: return false when non-whitespace, non-comment character found between or and else
+      // In a select block, statements between or and else prevent short-circuit detection
+      const source = 'select\n  accept A;\nor\n  X := 1;\nelse\n  null;\nend select;';
+      const pairs = parser.parse(source);
+      const selectPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(selectPair);
+      const intermediates = selectPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('or'));
+      assert.ok(intermediates.includes('else'));
+    });
+  });
+
+  suite('Coverage: or else backward scan through excluded region', () => {
+    test('should scan backward through comment before or to find semicolon in select', () => {
+      // Lines 277-284: backward scan from 'or' hits an excluded region (comment)
+      // before finding ';'. The code calls findExcludedRegionAt and skips the region.
+      const source = 'select\n  accept A; -- comment before or\nor\n  delay 1.0;\nelse\n  null;\nend select;';
+      const pairs = parser.parse(source);
+      const selectPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(selectPair);
+      const intermediates = selectPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('or'));
+      assert.ok(intermediates.includes('else'));
+    });
+
+    test('should scan backward through string literal before or in select context', () => {
+      // Lines 277-284: backward scan crosses a string excluded region before finding ;
+      const source = 'select\n  accept A;\n  Put("msg"); -- done\nor\nelse\n  null;\nend select;';
+      const pairs = parser.parse(source);
+      const selectPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(selectPair);
+      const intermediates = selectPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('or'));
+      assert.ok(intermediates.includes('else'));
+    });
+  });
+
+  suite('Coverage: and then backward scan findExcludedRegionAt null branch', () => {
+    test('should handle backward scan where isInExcludedRegion is true but findExcludedRegionAt returns null', () => {
+      // Lines 304-305: the else branch when findExcludedRegionAt returns null
+      // This is a defensive fallback. We exercise the normal region-skipping path
+      // and also ensure the j-- fallback works by having a character at the boundary
+      // of an excluded region where binary search behavior may differ between the two methods.
+      const source = 'if X > 0 and -- comment\nthen Y > 0 then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  suite('Coverage: isValidForOpen non-identifier after for', () => {
+    test('should treat for followed by non-identifier as valid block open', () => {
+      // Covers adaValidation.ts lines 188-189: isValidForOpen returns true
+      // when for is not followed by an identifier (e.g., followed by a number)
+      const source = 'for 123';
+      const pairs = parser.parse(source);
+      // for is treated as valid block open but has no matching end
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat for at end of source as valid block open', () => {
+      // Covers adaValidation.ts lines 188-189: i >= source.length branch
+      const source = 'for';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 

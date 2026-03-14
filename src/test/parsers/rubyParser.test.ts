@@ -629,6 +629,11 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should treat %= as compound assignment not percent literal', () => {
+      const pairs = parser.parse('if true\n  x %= 5\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Excluded regions - Backtick strings', () => {
@@ -1366,6 +1371,14 @@ end`;
       });
     });
 
+    test('should not treat double backslash before newline as line continuation', () => {
+      // Even number of backslashes = escaped backslashes, not continuation
+      const source = 'begin \\\\\nrescue\n  nil\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
     suite('CR-only line endings in conditionals', () => {
       test('should handle \\r-only line endings in postfix conditional', () => {
         const source = 'x = 1 if condition\rdo_something\rend';
@@ -1378,6 +1391,26 @@ end`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'if', 'end');
       });
+    });
+
+    test('should not let \\x hex escape in char literal skip past newline', () => {
+      const pairs = parser.parse('?\\x\ndo\nend');
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not let \\u unicode escape in char literal skip past newline', () => {
+      const pairs = parser.parse('?\\u\ndo\nend');
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not treat $/ as regex start', () => {
+      const pairs = parser.parse('puts $/\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?{ character literal inside string interpolation', () => {
+      const pairs = parser.parse('"#{?{}" + do_something\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -2744,6 +2777,13 @@ end`;
     });
   });
 
+  suite('Regression: non-paired percent literal without specifier', () => {
+    test('should exclude keywords inside non-paired percent literal after identifier', () => {
+      const pairs = parser.parse('puts %|if end|\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Branch coverage: heredoc CRLF line endings in interpolation', () => {
     test('should handle heredoc body skip with CRLF in interpolation', () => {
       const source = '"#{<<~HEREDOC\r\nbody\r\nHEREDOC\r\n}"';
@@ -2759,6 +2799,177 @@ end`;
       const pairs = parser.parse(source);
       // Backslash continuation makes 'if' a postfix modifier (not a block open)
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: percent literal on heredoc opener line', () => {
+    test('should not treat << inside percent literal on heredoc line as heredoc', () => {
+      const pairs = parser.parse('x = <<EOF + %w[<<BAR]\ncontent\nEOF\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: character literal in interpolation', () => {
+    test("should handle character literal ?' inside string interpolation", () => {
+      const pairs = parser.parse('"#{?\'}";\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: << shift operator vs heredoc in tokenize filter', () => {
+    test('should not filter keyword after << shift operator', () => {
+      const pairs = parser.parse('1 <<if true\n  2\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: ?# and ?/ character literals in interpolation', () => {
+    test('should not treat ?# as comment start inside interpolation', () => {
+      const pairs = parser.parse('"#{?# }"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?/ as regex start inside interpolation', () => {
+      const pairs = parser.parse('"#{?/}"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?% as percent literal start inside interpolation', () => {
+      const pairs = parser.parse('"#{?%}"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?< as heredoc operator inside interpolation', () => {
+      const pairs = parser.parse('"#{?<}"\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: isPostfixRescue missing not/and/or', () => {
+    test('should not treat rescue after not as postfix', () => {
+      const pairs = parser.parse('begin\n  not rescue nil\nend');
+      const block = findBlock(pairs, 'begin');
+      assertIntermediates(block, ['rescue']);
+    });
+
+    test('should not treat rescue after and as postfix', () => {
+      const pairs = parser.parse('begin\n  x and rescue nil\nend');
+      const block = findBlock(pairs, 'begin');
+      assertIntermediates(block, ['rescue']);
+    });
+
+    test('should not treat rescue after or as postfix', () => {
+      const pairs = parser.parse('begin\n  x or rescue nil\nend');
+      const block = findBlock(pairs, 'begin');
+      assertIntermediates(block, ['rescue']);
+    });
+  });
+
+  suite('Regression: ?\\u{ unterminated escape', () => {
+    test('should cover ?\\u{ in excluded region', () => {
+      const regions = parser.getExcludedRegions('?\\u{');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end - regions[0].start, 4);
+    });
+  });
+
+  suite('Coverage: findLineCommentAndStringRegions percent literal and regex paths', () => {
+    test('should handle paired percent literal with backslash escape on heredoc opener line', () => {
+      // Triggers skipPairedPercentLiteral backslash escape path (parserUtils lines 52-54)
+      // The %w[...] contains a backslash escape inside paired delimiters
+      const source = 'x = <<HEREDOC, %w[a\\ b c]\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle paired percent literal with nested open delimiter on heredoc opener line', () => {
+      // Triggers skipPairedPercentLiteral nested depth++ path (parserUtils line 56)
+      // %w(a (b) c) has nested parentheses inside the paired delimiter
+      const source = 'x = <<HEREDOC, %w(a (b) c)\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle non-paired percent literal with backslash escape on heredoc opener line', () => {
+      // Triggers non-paired delimiter percent literal path (parserUtils lines 123-131)
+      // %|...| uses pipe as non-paired delimiter, with a backslash escape inside
+      const source = 'x = <<HEREDOC, %|a\\|b|\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle non-paired percent literal without specifier on heredoc opener line', () => {
+      // Triggers non-paired delimiter percent literal path (parserUtils lines 123-131)
+      // %!...! uses exclamation mark as non-paired delimiter
+      const source = 'x = <<HEREDOC, %!hello!\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle regex literal on heredoc opener line', () => {
+      // Triggers regex literal path (parserUtils lines 140-152)
+      // /.../ regex on the same line as heredoc opener
+      const source = 'x = <<HEREDOC if /pattern/\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle regex literal with backslash escape on heredoc opener line', () => {
+      // Triggers regex literal backslash escape path (parserUtils lines 143-146)
+      // /.../ regex with escaped slash inside
+      const source = 'x = <<HEREDOC if /pat\\/tern/\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat << inside regex literal on heredoc opener line as heredoc', () => {
+      // Regex literal on the heredoc opener line contains <<FOO which should be excluded
+      const source = 'x = <<HEREDOC, /<<FOO/\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat << inside non-paired percent literal on heredoc opener line as heredoc', () => {
+      // Non-paired percent literal on heredoc line contains <<BAR
+      const source = 'x = <<HEREDOC, %|<<BAR|\n  content\nHEREDOC\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: heredoc identifier with backtick quote', () => {
+    test('should filter keyword used as backtick-quoted heredoc identifier', () => {
+      // Covers rubyParser.ts lines 101-102: backtick closing quote after heredoc identifier
+      const source = 'x = <<`end`\necho hello\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: heredoc identifier with CRLF', () => {
+    test('should filter heredoc keyword with CRLF line ending', () => {
+      // Covers rubyParser.ts line 111: CRLF line ending in heredoc tokenize filter
+      const source = 'x = <<end\r\nheredoc body\r\nend\r\nif true\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: unterminated double-quoted symbol', () => {
+    test('should handle unterminated double-quoted symbol literal', () => {
+      // Covers rubyParser.ts lines 595-596: unterminated :"..." symbol
+      const source = ':"unterminated symbol';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+    });
+  });
+
+  suite('Branch coverage: character literal in regex interpolation', () => {
+    test('should handle ?-prefixed special characters in regex interpolation', () => {
+      // Covers rubyFamilyHelpers.ts lines 406, 408-410: character literal in skipRegexInterpolationShared
+      const source = "/#{?'}/\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 

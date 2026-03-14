@@ -1483,6 +1483,11 @@ esac`;
       assert.strictEqual(pairs[1].closeKeyword.value, 'esac');
       assert.strictEqual(pairs[1].nestLevel, 0);
     });
+
+    test('should not treat even backslashes before newline as line continuation', () => {
+      const pairs = parser.parse('echo \\\\\nif true; then\necho ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
   });
 
   suite('Block middle keyword validation', () => {
@@ -4116,6 +4121,11 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
 
+    test('should handle CR-only line endings in heredoc inside command substitution', () => {
+      const pairs = parser.parse('x=$(cat <<EOF)\rbody\rEOF\rif true; then\r  echo ok\rfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
     test('should handle heredoc in command substitution at end of input', () => {
       // Heredoc pending but no newline after ) - lines 557-558
       const source = 'if true; then\n  x=$(cat <<EOF)';
@@ -4274,6 +4284,67 @@ fi`;
 
     test('should not treat <<< as heredoc inside <()', () => {
       const source = 'diff <(cat <<<EOF) file.txt\nif true; then\n  echo hello\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: isParameterExpansion true branch via heredoc gap', () => {
+    test('should not treat # in parameter expansion as comment when encountered in heredoc gap scan', () => {
+      // Covers bashParser.ts lines 174-175: isParameterExpansion returns true
+      // In a heredoc gap, ${#var} appears; the gap scan visits # after $ is processed
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'cat <<EOF ${#x}\nheredoc body\nEOF\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: isAtCommandPosition after backtick', () => {
+    test('should treat keyword as command position after backtick on same line', () => {
+      // Covers bashParser.ts lines 288-289: backtick check in isAtCommandPosition
+      // A backtick that is NOT part of an excluded region (orphan backtick scenario)
+      const source = '`echo hello` && if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: isCasePattern with ( preceded by ;; or in', () => {
+    test('should detect case pattern with ( preceded by ;; on same line', () => {
+      // Covers bashParser.ts lines 403-408: isCasePattern with ( preceded by ;; text
+      const source = 'case $x in\n  a) echo a;; (for)\n    echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect case pattern with ( preceded by ;& on same line', () => {
+      // Covers bashParser.ts lines 403-408: textBefore matches /;&[ \t]*$/
+      const source = 'case $x in\n  a) echo a;& (while)\n    echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect case pattern with ( preceded by ;;& on same line', () => {
+      // Covers bashParser.ts lines 403-408: textBefore matches /;;&[ \t]*$/
+      const source = 'case $x in\n  a) echo a;;& (until)\n    echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect case pattern with ( preceded by in keyword on same line', () => {
+      // Covers bashParser.ts lines 403-408: textBefore matches /\bin[ \t]*$/
+      const source = 'case $x in (for)\n    echo matched;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Coverage: tokenize skipping ${ parameter expansion brace', () => {
+    test('should skip { preceded by $ in brace pattern matching', () => {
+      // Covers bashParser.ts lines 483-484: char === '{' && i > 0 && source[i - 1] === '$'
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
+      const source = 'if true; then\n  echo ${PATH}\nfi';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });

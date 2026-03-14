@@ -797,6 +797,18 @@ endfunction`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'endfunction');
     });
+
+    test('should not treat if followed by assignment as block open', () => {
+      // In Octave, keywords can be used as variable names when followed by assignment
+      const pairs = parser.parse('if = 5;\nfor i = 1:10\n  disp(i);\nend');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should treat single quote after Unicode variable as transpose', () => {
+      // Unicode letters before ' should be recognized as identifier chars (transpose, not string)
+      const pairs = parser.parse("\u03B8'\nif true\nend");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Coverage: unwind_protect_cleanup mismatched opener', () => {

@@ -516,6 +516,11 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
     });
+
+    test('should not treat Unicode-adjacent for as loop keyword in isDoPartOfLoop', () => {
+      const pairs = parser.parse('\u03B1for = 1\ndo\n  x = 1\nend');
+      assertSingleBlock(pairs, 'do', 'end');
+    });
   });
 
   suite('Regression: findLastNonRepeatIndex backward scan', () => {
@@ -825,6 +830,124 @@ end`;
       const source = 'for i in a do\nend\nfor j in b do\nend';
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Coverage: isDoPartOfLoop otherBlockDepth tracking', () => {
+    test('should handle do after for with function containing for inside', () => {
+      // Exercises otherBlockDepth tracking (lines 64-71):
+      // Inner function opens otherBlockDepth, inner for/do/end are skipped,
+      // end of function closes otherBlockDepth
+      const source = `for i = 1, 10 do
+  function foo()
+    for j = 1, 5 do
+    end
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      // Inner for-end (inside function)
+      const innerFor = pairs.find((p) => p.openKeyword.value === 'for' && p.nestLevel === 2);
+      assert.ok(innerFor, 'inner for block should exist at nest level 2');
+      // function-end
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.nestLevel, 1);
+      // Outer for-end
+      const outerFor = pairs.find((p) => p.openKeyword.value === 'for' && p.nestLevel === 0);
+      assert.ok(outerFor, 'outer for block should exist at nest level 0');
+    });
+
+    test('should handle do after while with if containing while inside', () => {
+      // if opens otherBlockDepth, inner while/do are skipped, end closes otherBlockDepth
+      const source = `while cond do
+  if true then
+    while inner do
+    end
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should handle do after for with repeat-until containing for inside', () => {
+      // repeat opens otherBlockDepth, inner for/do are skipped, until closes otherBlockDepth
+      const source = `for i = 1, 10 do
+  repeat
+    for j = 1, 5 do
+    end
+  until true
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should handle Unicode-adjacent keyword inside loop scan', () => {
+      // Tests isAdjacentToUnicodeLetter check inside inner match loop (lines 59-61)
+      // The Unicode-prefixed "for" should be skipped as adjacent to Unicode letter
+      const source = '\u00E9for = 1\nfor i = 1, 10 do\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'for');
+    });
+
+    test('should skip Unicode-adjacent keyword in inner scan between for and do', () => {
+      // Covers lines 60-61: isAdjacentToUnicodeLetter inside inner match loop
+      // Between outer for and do, the inner scan encounters end preceded by Unicode letter
+      const source = 'for i = \u00E9end, 10 do\n  print(i)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'for');
+    });
+
+    test('should track otherBlockDepth for function containing loop between for and do', () => {
+      // Covers lines 65, 67, 69-71: otherBlockDepth tracking in inner scan
+      // Between outer for and do, function opens otherBlockDepth, inner for/do are skipped
+      const source = 'for i = 1, (function() for j=1,2 do end return 1 end)() do\n  print(i)\nend';
+      const pairs = parser.parse(source);
+      // Outer for-do-end should be detected as a single for loop
+      const forBlock = pairs.find((p) => p.openKeyword.value === 'for' && p.nestLevel === 0);
+      assert.ok(forBlock, 'outer for block should exist');
+    });
+  });
+
+  suite('Coverage: unterminated long string in comment', () => {
+    test('should handle unterminated multi-line comment --[[ without closing ]]', () => {
+      // Covers line 177: matchLongString returns { start: pos, end: source.length }
+      // when long string [[ is never closed
+      const source = '--[[ unterminated';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should handle unterminated long string [[ as standalone excluded region', () => {
+      // Covers line 177: unterminated long string without closing ]]
+      const source = 'x = [[ unterminated string with if end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      const longStrRegion = regions.find((r) => r.start === 4);
+      assert.ok(longStrRegion);
+      assert.strictEqual(longStrRegion.end, source.length);
+    });
+  });
+
+  suite('Regression: \\z escape with \\v and \\f whitespace', () => {
+    test('should handle \\z escape with \\v whitespace', () => {
+      const pairs = parser.parse('x = "hello\\z\v\n  world"\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle \\z escape with \\f whitespace', () => {
+      const pairs = parser.parse('x = "hello\\z\f\n  world"\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle \\z escape with mixed \\v \\f \\t \\n whitespace', () => {
+      const pairs = parser.parse('x = "hello\\z\v\f\t\n  world"\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 

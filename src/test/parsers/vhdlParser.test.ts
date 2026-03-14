@@ -333,6 +333,13 @@ end if;`;
       assert.strictEqual(regions[1].end - regions[1].start, 4);
       assert.strictEqual(regions[2].end - regions[2].start, 3);
     });
+
+    test('should handle surrogate pair in character literal', () => {
+      const regions = parser.getExcludedRegions("'\u{1F600}'");
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 4);
+    });
   });
 
   suite('Case insensitivity', () => {
@@ -438,6 +445,12 @@ end process;`;
       const pairs = parser.parse(source);
       // end process doesn't match if, but fallback to last opener
       assertSingleBlock(pairs, 'if', 'end process');
+    });
+
+    test('should not detect keywords adjacent to Unicode letters', () => {
+      const source = 'variable caf\u00E9entity : integer;\nentity test is\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
     });
 
     suite('Standalone loop', () => {
@@ -1851,6 +1864,32 @@ end loop;`;
       const source = 'my_inst: entity work.my_entity';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: multiple for loops on same line', () => {
+    test('should handle multiple for loops on the same line', () => {
+      const pairs = parser.parse('for a in 0 to 3 loop null; end loop; for b in 0 to 7\nloop\n  null;\nend loop;');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle multiple while loops on the same line', () => {
+      const pairs = parser.parse('while a loop null; end loop; while b\nloop\n  null;\nend loop;');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle for and while loops on the same line', () => {
+      const pairs = parser.parse('for a in 0 to 3 loop null; end loop; while b\nloop\n  null;\nend loop;');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Branch coverage: character literal at end of source', () => {
+    test('should handle single quote at end of source', () => {
+      // Covers vhdlHelpers.ts line 48: pos + 1 >= source.length
+      const source = "signal x : std_logic := '";
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => r.end - r.start === 1));
     });
   });
 

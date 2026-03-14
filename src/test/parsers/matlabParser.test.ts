@@ -474,6 +474,17 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
     });
+
+    test('should treat quote after Unicode identifier as transpose', () => {
+      const source = "function r = f(x)\n  r = \u03B8'; if true, end\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat keyword after transpose as struct field access', () => {
+      const pairs = parser.parse("A.'\nif true\nend");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('end as array index', () => {
@@ -1012,6 +1023,14 @@ end`;
       // "test\" ends at the first " (backslash is literal), then ;\nif true\nend is code
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not treat keyword after non-continuation transpose as dot access', () => {
+      // A.' is the non-conjugate transpose operator, not a line continuation
+      // The transpose creates an excluded region starting with A (not .), so
+      // isPrecededByDot should not skip the newline after it
+      const pairs = parser.parse("function result = myFunc(A)\n  B = A.'\n  if size(B, 1) > 1\n    result = B;\n  end\nend");
+      assertBlockCount(pairs, 2);
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
@@ -1202,6 +1221,17 @@ end`;
       // % comment creates excluded region ending at \n position (LF-only)
       // When scanning backward from 'end', the newline check finds the comment region
       const source = 'function f\n  x = obj. % field\nend;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Branch coverage: isPrecededByDot with CRLF continuation', () => {
+    test('should skip CRLF newline after line continuation when checking dot precedence', () => {
+      // Covers lines 168-169: isPrecededByDot with CRLF and nlStart check
+      // The ... continuation on line 2 ends before \r\n, and isPrecededByDot must handle
+      // the CRLF pair to find the dot on the previous line
+      const source = 'function f\n  x = obj. ...\r\n    end;\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
