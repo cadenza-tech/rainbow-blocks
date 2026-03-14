@@ -5,6 +5,79 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.18] - 2026-03-15
+
+### Fixed
+
+- Ada: Fix qualified expression `type_name'(expr)` misidentified as character literal
+- Ada: Fix character literal containing single quote (`''''`)
+- Ada: Fix `or` in `select` blocks incorrectly merged as short-circuit `or else`
+- Ada: Fix `for` attribute/use clause detection to handle whitespace and comments between identifier parts
+- Ada: Fix unterminated string detection for doubled-quote escapes
+- AppleScript: Exclude pipe-delimited identifiers (`|identifier|`) from keyword matching
+- AppleScript: Exclude chevron/guillemet syntax (`«...»`) from keyword matching
+- AppleScript: Fix line continuation (`¬`) handling to skip excluded regions (comments)
+- Bash: Fix backslash line continuation counting (even number of backslashes means no continuation)
+- Bash: Fix CR-only line ending handling in subshell body scanning
+- COBOL: Fix debug indicator (`D`/`d`) at column 7 in fixed-format to always treat as comment when sequence area has digits
+- COBOL: Handle `>>` compiler directives inside EXEC block
+- Crystal: Fix macro template `}}` closing when single brace depth is 1
+- Crystal: Fix char literal `\u{XXXX}` form to stop scanning at newline
+- Crystal: Fix heredoc terminator matching to use `trimStart()` instead of `trim()`
+- Crystal: Fix single-quoted string escape to not skip past newline
+- Crystal: Handle `%=` as compound assignment operator (not a percent literal)
+- Crystal: Handle non-paired delimiter percent literals (e.g., `%|text|`)
+- Elixir: Add character literal (`?x`, `?\escape`, `?\xNN`, `?\uNNNN`) as excluded region
+- Elixir: Handle character literal inside string interpolation
+- Elixir: Fix triple-quoted sigil closing to require line-start position in heredoc mode
+- Elixir: Fix atom literal to not consume `@` character
+- Elixir: Reject identifiers ending with `?` or `!` as block keywords (e.g., `fn?`, `if!`, `end?`)
+- Elixir: Handle `?` prefix before keywords as character literal
+- Elixir: Fix `fn`/`end` and `do:` keyword boundary to include `?` and `!` characters
+- Erlang: Require `-attribute` to be at line start for module attribute detection
+- Erlang: Allow `..` range operator before keywords (not treated as record field access)
+- Fortran: Fix `isContinuationBlockForm` to allow optional space in `end where`/`end forall`
+- Fortran: Handle `&` continuation line leading whitespace and `&` prefix in `isBlockWhereOrForall`
+- Fortran: Fix `isValidIfOpen` to track parenthesis depth (don't match `then` inside parentheses)
+- Julia: Handle broadcasted adjoint `A.'` as transpose operator
+- Julia: Fix char literal and `matchQuotedString` to not let escape skip past newline
+- Julia: Fix `isIndexingContext` to include backtick in preceding character pattern
+- Julia: Fix symbol literal `!` to only appear at end of identifier
+- Lua: Track non-loop block openers (`function`, `if`, `repeat`) when matching `do` to `for`/`while` loops
+- Lua: Handle `\v` and `\f` whitespace in `\z` escape sequence
+- MATLAB: Fix `isPrecededByDot` to only skip `...` line continuation excluded regions
+- MATLAB: Handle Unicode characters before `'` as transpose operator
+- Octave: Extend `isValidBlockOpen` assignment rejection to all block open keywords (not just `do`)
+- Octave: Handle Unicode characters before `'` as transpose operator
+- Pascal: Extend forward declaration detection to `interface` and `object` (not just `class`)
+- Pascal: Skip comments between keyword and `(` in forward declaration detection
+- Ruby: Fix heredoc identifier filtering to verify actual heredoc (distinguish `<<` shift operator)
+- Ruby: Fix character literal hex/unicode escape scanning (`?\uNNNN`, `?\xNN`, `?\u{NNNN}`)
+- Ruby: Add `not`, `and`, `or` to preceding block keywords for postfix detection
+- Ruby: Handle `%=` as compound assignment operator (not a percent literal)
+- Ruby: Handle non-paired delimiter percent literals (e.g., `%|text|`)
+- Ruby: Handle character literals with special chars (`?'`, `?"`, `?{`, etc.) in interpolation scanning
+- Ruby/Crystal: Fix backslash line continuation counting (even number of backslashes means no continuation)
+- Ruby/Crystal: Fix string escape handling in `findLineCommentAndStringRegions`
+- Ruby/Crystal: Handle percent literals and regex literals in `findLineCommentAndStringRegions`
+- Verilog: Fix attribute string handling when terminated by newline
+- Verilog: Handle block comments inside `` `define `` directive body
+- Verilog: Fix backslash-newline inside string in `` `define `` directive
+- Verilog: Handle exponent notation (e.g., `1.5e-3`) in numeric literal skipping
+- VHDL: Fix character literal to handle surrogate pairs (codepoints > U+FFFF)
+- VHDL: Fix `isValidLoopOpen` to track paired loop positions (avoid double-counting)
+- Base parser: Fix `isAdjacentToUnicodeLetter` to handle surrogate pairs (codepoints > U+FFFF)
+- Ada, AppleScript, COBOL, Fortran, Lua, Pascal, VHDL: Handle Unicode letter adjacency in tokenize to prevent false keyword matches (e.g., `αend`)
+
+### Tests
+
+- Add regression tests across 17 parsers
+
+### Changed
+
+- Update Node.js from 24.13.1 to 24.14.0
+- Update Yarn from 4.12.0 to 4.13.0
+
 ## [1.1.17] - 2026-03-13
 
 ### Fixed
@@ -736,6 +809,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.18]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.17...v1.1.18
 [1.1.17]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.16...v1.1.17
 [1.1.16]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.15...v1.1.16
 [1.1.15]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.14...v1.1.15
