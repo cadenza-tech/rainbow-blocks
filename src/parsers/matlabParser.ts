@@ -145,10 +145,10 @@ export class MatlabBlockParser extends BaseBlockParser {
   protected isPrecededByDot(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
-      // Skip excluded regions backward (handles ... line continuations)
+      // Skip excluded regions backward only for ... line continuations
       if (excludedRegions) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region) {
+        if (region && source[region.start] === '.') {
           i = region.start - 1;
           continue;
         }
@@ -157,17 +157,19 @@ export class MatlabBlockParser extends BaseBlockParser {
         i--;
         continue;
       }
-      // Skip newlines that are immediately after an excluded region (e.g., ... continuation)
+      // Skip newlines that are immediately after an excluded region that is a ... line continuation
       // matchSingleLineComment sets region.end to the newline position, so check if any
-      // excluded region ends exactly at this newline position
+      // excluded region ends exactly at this newline position AND starts with '.' (continuation)
       if ((source[i] === '\n' || source[i] === '\r') && excludedRegions) {
         let nlStart = i;
         if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') {
           nlStart = i - 1;
         }
+        const regionBeforeNl = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+        const regionBeforeLf = this.findExcludedRegionAt(i > 0 ? i - 1 : 0, excludedRegions);
         if (
-          this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions)?.end === nlStart ||
-          this.findExcludedRegionAt(i > 0 ? i - 1 : 0, excludedRegions)?.end === i
+          (regionBeforeNl?.end === nlStart && source[regionBeforeNl.start] === '.') ||
+          (regionBeforeLf?.end === i && source[regionBeforeLf.start] === '.')
         ) {
           i = nlStart - 1;
           continue;
@@ -339,7 +341,7 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Check if this is a transpose operator (after identifier, number, ], }, or .)
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         // If immediately followed by a letter, it's more likely a string
         if (/[0-9]/.test(prevChar)) {

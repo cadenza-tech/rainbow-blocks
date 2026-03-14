@@ -55,17 +55,16 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         continue;
       }
       if (source.slice(i, i + 2) === '}}') {
-        if (singleBraceDepth > 0) {
-          if (singleBraceDepth >= 2) {
-            // Both braces close single { inside the template, not the template itself
-            singleBraceDepth -= 2;
-            i += 2;
-            continue;
-          }
-          // singleBraceDepth === 1: first } closes the single {, second } needs re-evaluation
-          singleBraceDepth = 0;
-          i += 1;
+        if (singleBraceDepth >= 2) {
+          // Both braces close single { inside the template, not the template itself
+          singleBraceDepth -= 2;
+          i += 2;
           continue;
+        }
+        if (singleBraceDepth === 1) {
+          // First } closes the single {, second } is part of }} template closer
+          singleBraceDepth = 0;
+          // Fall through to template close logic below (don't skip)
         }
         depth--;
         if (depth === 0) {
@@ -157,7 +156,7 @@ export function matchCharLiteral(source: string, pos: number): ExcludedRegion | 
       if (i < source.length && source[i] === '{') {
         // \u{XXXX} form
         i++;
-        while (i < source.length && source[i] !== '}') {
+        while (i < source.length && source[i] !== '}' && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
         if (i < source.length) i++; // skip '}'
@@ -267,7 +266,7 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     const line = source.slice(contentLineStart, contentLineEnd);
 
     // Crystal <<- always allows indented terminators (strip whitespace)
-    const trimmedLine = line.trim();
+    const trimmedLine = line.trimStart();
 
     if (trimmedLine === terminators[terminatorIndex].terminator) {
       terminatorIndex++;
@@ -315,6 +314,17 @@ function findLogicalLineStart(source: string, position: number, excludedRegions:
       checkPos--;
     }
     if (checkPos > 0 && source[checkPos - 1] === '\\') {
+      // Count consecutive backslashes before newline
+      let bsCount = 0;
+      let bsPos = checkPos - 1;
+      while (bsPos >= 0 && source[bsPos] === '\\') {
+        bsCount++;
+        bsPos--;
+      }
+      // Even number of backslashes means they are all escaped (not continuation)
+      if (bsCount % 2 === 0) {
+        break;
+      }
       if (isInExcludedRegion(checkPos - 1, excludedRegions)) {
         break;
       }

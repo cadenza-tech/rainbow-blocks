@@ -44,7 +44,11 @@ export function matchVhdlString(source: string, pos: number): ExcludedRegion {
 export function matchVhdlCharacterLiteral(source: string, pos: number): ExcludedRegion {
   // Character literal is 'x' where x is a single character
   // It could also be an attribute tick, so we need to be careful
-  if (pos + 2 < source.length && source[pos + 2] === "'") {
+  // Handle surrogate pairs (codepoints > U+FFFF use 2 UTF-16 code units)
+  if (pos + 1 >= source.length) return { start: pos, end: pos + 1 };
+  const codePoint = source.codePointAt(pos + 1);
+  const charLen = codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+  if (pos + 1 + charLen < source.length && source[pos + 1 + charLen] === "'") {
     // Qualified expression: type_name'(expr) — tick before '(' preceded by identifier
     // is not a character literal, treat as attribute tick
     if (source[pos + 1] === '(' && pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
@@ -54,7 +58,7 @@ export function matchVhdlCharacterLiteral(source: string, pos: number): Excluded
     if (source[pos + 1] === "'" && pos + 3 < source.length && source[pos + 3] === "'") {
       return { start: pos, end: pos + 4 };
     }
-    return { start: pos, end: pos + 3 };
+    return { start: pos, end: pos + 1 + charLen + 1 };
   }
   // Attribute tick: skip the attribute name to avoid matching keywords
   let i = pos + 1;

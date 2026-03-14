@@ -106,6 +106,19 @@ export class ErlangBlockParser extends BaseBlockParser {
         if (this.isInExcludedRegion(match.index, excludedRegions)) {
           continue;
         }
+        // Verify the '-' is at the start of a line (module attributes must be at line start)
+        const dashPos = match.index;
+        let atLineStart = dashPos === 0;
+        if (!atLineStart) {
+          let k = dashPos - 1;
+          while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+            k--;
+          }
+          atLineStart = k < 0 || source[k] === '\n' || source[k] === '\r';
+        }
+        if (!atLineStart) {
+          continue;
+        }
         lastAttr = match.index;
       }
       if (lastAttr >= 0) {
@@ -154,8 +167,11 @@ export class ErlangBlockParser extends BaseBlockParser {
         return false;
       }
       // Reject keywords preceded by '.' (record field access like Rec#state.end)
+      // But allow '..' range operator (Erlang/OTP 26+)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
-        return false;
+        if (token.startOffset < 2 || source[token.startOffset - 2] !== '.') {
+          return false;
+        }
       }
       // Reject keywords preceded by '?' (macro invocations like ?begin, ?end)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {

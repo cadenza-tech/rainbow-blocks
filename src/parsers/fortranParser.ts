@@ -149,6 +149,7 @@ export class FortranBlockParser extends BaseBlockParser {
   // Validates 'if': checks for 'then' keyword handling & continuation lines
   private isValidIfOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position + keyword.length;
+    let parenDepth = 0;
     while (i < source.length) {
       // Skip excluded regions
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -157,8 +158,21 @@ export class FortranBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Check for 'then' keyword
+      // Track parenthesis depth
+      if (source[i] === '(') {
+        parenDepth++;
+        i++;
+        continue;
+      }
+      if (source[i] === ')') {
+        parenDepth--;
+        i++;
+        continue;
+      }
+
+      // Check for 'then' keyword only at top-level (not inside parentheses)
       if (
+        parenDepth === 0 &&
         source.slice(i, i + 4).toLowerCase() === 'then' &&
         (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
         (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
@@ -322,6 +336,11 @@ export class FortranBlockParser extends BaseBlockParser {
       }
 
       const keyword = keywordMatch[1];
+
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, keyword.length)) {
+        continue;
+      }
+
       const type = getTokenTypeCaseInsensitive(keyword, this.keywords);
 
       // Skip keywords on variable declaration lines (after ::)

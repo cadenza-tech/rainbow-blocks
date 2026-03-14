@@ -35,6 +35,15 @@ export function matchCharacterLiteral(source: string, pos: number): ExcludedRegi
     const codePoint = source.codePointAt(pos + 1);
     const charLen = codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
     if (pos + 1 + charLen < source.length && source[pos + 1 + charLen] === "'") {
+      // Qualified expression: type_name'(expr) -- tick before '(' preceded by identifier
+      // is not a character literal, treat as attribute tick
+      if (source[pos + 1] === '(' && pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
+        return { start: pos, end: pos + 1 };
+      }
+      // Character literal containing single quote: '''' (four single quotes)
+      if (source[pos + 1] === "'" && pos + 3 < source.length && source[pos + 3] === "'") {
+        return { start: pos, end: pos + 4 };
+      }
       return { start: pos, end: pos + 1 + charLen + 1 };
     }
   }

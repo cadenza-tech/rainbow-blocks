@@ -89,11 +89,34 @@ export class RubyBlockParser extends BaseBlockParser {
 
     return tokens.filter((token) => {
       // Filter out keywords in heredoc identifiers (<<end, <<-do, <<~if, <<'end', <<"do", etc.)
+      // Only filter when the << is actually a heredoc (excluded region starts after opener line), not a shift operator
       if (token.startOffset >= 2) {
         const prefixStart = Math.max(0, token.startOffset - 4);
         const prefix = source.slice(prefixStart, token.startOffset);
         if (/<<[~-]?\\?['"`]?$/.test(prefix)) {
-          return false;
+          // Find the position after the opener line's newline
+          let lineEnd = token.endOffset;
+          // Skip past optional closing quote of the heredoc identifier
+          if (lineEnd < source.length && (source[lineEnd] === "'" || source[lineEnd] === '"' || source[lineEnd] === '`')) {
+            lineEnd++;
+          }
+          // Find the actual end of the line
+          while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+            lineEnd++;
+          }
+          // Calculate contentStart (position after newline)
+          let contentStart = lineEnd;
+          if (contentStart < source.length) {
+            if (source[contentStart] === '\r' && contentStart + 1 < source.length && source[contentStart + 1] === '\n') {
+              contentStart += 2;
+            } else {
+              contentStart++;
+            }
+          }
+          // Only filter if this was a real heredoc (its body starts an excluded region)
+          if (excludedRegions.some((r) => r.start === contentStart)) {
+            return false;
+          }
         }
       }
       // Filter out dot-preceded tokens (method calls like obj.end, obj.class)
@@ -157,8 +180,19 @@ export class RubyBlockParser extends BaseBlockParser {
       if (prevChar === '\n' && checkPos > 0 && source[checkPos - 1] === '\r') {
         checkPos--;
       }
-      // Check if line ends with backslash
+      // Check if line ends with backslash (count consecutive backslashes for even/odd check)
       if (checkPos > 0 && source[checkPos - 1] === '\\') {
+        // Count consecutive backslashes before newline
+        let bsCount = 0;
+        let bsPos = checkPos - 1;
+        while (bsPos >= 0 && source[bsPos] === '\\') {
+          bsCount++;
+          bsPos--;
+        }
+        // Even number of backslashes means they are all escaped (not continuation)
+        if (bsCount % 2 === 0) {
+          break;
+        }
         // Skip if the backslash is inside an excluded region (e.g., comment ending with \)
         if (excludedRegions && this.isInExcludedRegion(checkPos - 1, excludedRegions)) {
           break;
@@ -191,7 +225,7 @@ export class RubyBlockParser extends BaseBlockParser {
     let before = source.slice(sliceStart, position).replace(/\\\r?\n|\\\r/g, ' ');
     before = before.trim();
     if (before.length === 0) return false;
-    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in'];
+    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
     for (const kw of blockKeywords) {
       if (before === kw || before.endsWith(` ${kw}`) || before.endsWith(`\t${kw}`)) {
         return false;
@@ -421,17 +455,25 @@ export class RubyBlockParser extends BaseBlockParser {
                   break;
                 }
               }
-              return { start: pos, end: closeIdx >= 0 ? closeIdx + 1 : pos + 3 };
+              return { start: pos, end: closeIdx >= 0 ? closeIdx + 1 : pos + 4 };
             }
-            return { start: pos, end: Math.min(pos + 7, source.length) };
+            // Scan up to 4 hex digits, stopping at newlines and non-hex characters
+            let uEnd = pos + 3;
+            const uMax = Math.min(pos + 7, source.length);
+            while (uEnd < uMax && /[0-9a-fA-F]/.test(source[uEnd]) && source[uEnd] !== '\n' && source[uEnd] !== '\r') {
+              uEnd++;
+            }
+            return { start: pos, end: uEnd };
           }
           // \xN or \xNN (4 or 5 chars: ?\xN or ?\xNN)
           if (escChar === 'x') {
-            let hexEnd = pos + 4;
-            if (hexEnd < source.length && /[0-9a-fA-F]/.test(source[hexEnd])) {
+            // Scan up to 2 hex digits, stopping at newlines and non-hex characters
+            let hexEnd = pos + 3;
+            const hexMax = Math.min(pos + 5, source.length);
+            while (hexEnd < hexMax && /[0-9a-fA-F]/.test(source[hexEnd]) && source[hexEnd] !== '\n' && source[hexEnd] !== '\r') {
               hexEnd++;
             }
-            return { start: pos, end: Math.min(hexEnd, source.length) };
+            return { start: pos, end: hexEnd };
           }
           return { start: pos, end: pos + 3 };
         }
@@ -624,6 +666,15 @@ export class RubyBlockParser extends BaseBlockParser {
     // %<paired_delimiter> without specifier is a percent literal, not modulo
     // e.g. puts %{text}, raise %(message)
     if (next < source.length && '({[<'.includes(source[next])) {
+      return false;
+    }
+    // %= is always compound assignment, not a percent literal
+    if (next < source.length && source[next] === '=') {
+      return true;
+    }
+    // Non-paired delimiter without specifier is also a percent literal
+    // e.g. puts %|text|, %~text~
+    if (next < source.length && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
       return false;
     }
     return true;

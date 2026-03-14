@@ -180,6 +180,9 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
   const lines = textBefore.split(/\r\n|\r|\n/);
   const maxLines = Math.min(lines.length, 5);
 
+  // Track loop positions that have been paired with a preceding for/while
+  const pairedLoopPositions = new Set<number>();
+
   // Calculate absolute offsets for each line
   let lineStartOffset = textBefore.length;
   for (let idx = 0; idx < maxLines; idx++) {
@@ -222,8 +225,9 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
           continue;
         }
         // If the line also contains 'loop' not in excluded region, the for/while is already paired
-        // Skip 'loop' that is part of 'end loop' (not a real loop opener)
+        // Skip 'loop' that is part of 'end loop' (not a real loop opener) or already paired
         const loopPattern = /\bloop\b/g;
+        let foundPairedLoop = false;
         for (const loopMatch of lineText.matchAll(loopPattern)) {
           const loopAbsPos = lineStartOffset + loopMatch.index;
           if (callbacks.isInExcludedRegion(loopAbsPos, excludedRegions)) {
@@ -234,7 +238,16 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
           if (/\bend$/i.test(beforeLoop)) {
             continue;
           }
-          return true;
+          // Skip loop positions already paired with a previous for/while
+          if (pairedLoopPositions.has(loopAbsPos)) {
+            continue;
+          }
+          pairedLoopPositions.add(loopAbsPos);
+          foundPairedLoop = true;
+          break;
+        }
+        if (foundPairedLoop) {
+          continue;
         }
         return false;
       }

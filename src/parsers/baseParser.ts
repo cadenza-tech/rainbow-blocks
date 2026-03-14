@@ -270,15 +270,32 @@ export abstract class BaseBlockParser {
 
   // Checks if a keyword match is adjacent to a non-ASCII Unicode letter
   // JavaScript \b treats non-ASCII letters as non-word characters, causing false matches like `αend`
+  // Handles surrogate pairs for characters outside the BMP (codepoints > U+FFFF)
   protected isAdjacentToUnicodeLetter(source: string, startOffset: number, keywordLength: number): boolean {
     if (startOffset > 0) {
       const before = source[startOffset - 1];
-      if (!/\w/.test(before) && /\p{L}/u.test(before)) return true;
+      if (!/\w/.test(before)) {
+        // Handle surrogate pairs: low surrogate preceded by high surrogate
+        if (startOffset >= 2 && before >= '\uDC00' && before <= '\uDFFF') {
+          const cp = source.codePointAt(startOffset - 2);
+          if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) return true;
+        } else if (/\p{L}/u.test(before)) {
+          return true;
+        }
+      }
     }
     const afterPos = startOffset + keywordLength;
     if (afterPos < source.length) {
       const after = source[afterPos];
-      if (!/\w/.test(after) && /\p{L}/u.test(after)) return true;
+      if (!/\w/.test(after)) {
+        // Handle surrogate pairs: high surrogate followed by low surrogate
+        if (afterPos + 1 < source.length && after >= '\uD800' && after <= '\uDBFF') {
+          const cp = source.codePointAt(afterPos);
+          if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) return true;
+        } else if (/\p{L}/u.test(after)) {
+          return true;
+        }
+      }
     }
     return false;
   }

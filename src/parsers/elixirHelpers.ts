@@ -83,7 +83,7 @@ export function matchAtomLiteral(source: string, pos: number, skipInterpolation:
   let i = pos + 1;
   while (i < source.length) {
     const char = source[i];
-    if (/[a-zA-Z0-9_!?@]/.test(char)) {
+    if (/[a-zA-Z0-9_!?]/.test(char)) {
       i++;
       continue;
     }
@@ -251,7 +251,11 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
   ) {
     const tripleDelim = openDelimiter.repeat(3);
     let j = delimiterPos + 3;
+    let isHeredoc = false;
     while (j < source.length) {
+      if (source[j] === '\n' || source[j] === '\r') {
+        isHeredoc = true;
+      }
       if (isLowercase && source[j] === '\\' && j + 1 < source.length) {
         j += 2;
         continue;
@@ -260,7 +264,7 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
         j = skipInterpolation(source, j + 2);
         continue;
       }
-      if (source.slice(j, j + 3) === tripleDelim) {
+      if (source.slice(j, j + 3) === tripleDelim && (!isHeredoc || isAtLineStartAllowingWhitespace(source, j))) {
         j += 3;
         // Skip optional modifiers
         while (j < source.length && /[a-zA-Z]/.test(source[j])) {

@@ -163,7 +163,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (i < 0) return false;
     const prevChar = source[i];
     // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing
-    if (/[a-zA-Z0-9_)\]}'"]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
+    if (/[a-zA-Z0-9_)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
     // Everything else (operators, (, [, =, comma, newline, etc.) -> array construction
     return false;
   }
@@ -481,12 +481,17 @@ export class JuliaBlockParser extends BaseBlockParser {
 
     // Determine if this is an identifier symbol or operator symbol
     if (/[\w]/.test(firstChar) || firstChar.charCodeAt(0) > 127) {
-      // Identifier symbol: consume only word characters and Unicode
+      // Identifier symbol: consume word characters, Unicode, and trailing !
       while (i < source.length) {
         const char = source[i];
-        if (/[\w!]/.test(char) || char.charCodeAt(0) > 127) {
+        if (/[\w]/.test(char) || char.charCodeAt(0) > 127) {
           i++;
           continue;
+        }
+        // ! can only appear at the end of a Julia identifier
+        if (char === '!') {
+          i++;
+          break;
         }
         break;
       }
@@ -524,6 +529,10 @@ export class JuliaBlockParser extends BaseBlockParser {
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
+        // Don't let escape skip past newline - character literals can't span lines
+        if (source[i + 1] === '\n' || source[i + 1] === '\r') {
+          break;
+        }
         i += 2;
         continue;
       }

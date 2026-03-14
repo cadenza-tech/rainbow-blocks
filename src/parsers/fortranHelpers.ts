@@ -381,7 +381,7 @@ function isContinuationBlockForm(source: string, ampPos: number): boolean {
     break;
   }
   // If next line starts with 'end where' or 'end forall', it's block form
-  if (i < source.length && /^end[ \t]+(where|forall)\b/i.test(source.slice(i))) {
+  if (i < source.length && /^end[ \t]*(where|forall)\b/i.test(source.slice(i))) {
     return true;
   }
   // If next line starts with 'end' (other), this was single-line spread
@@ -419,6 +419,13 @@ export function isBlockWhereOrForall(source: string, position: number, keyword: 
       if (i < source.length && source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
         i += 2;
       } else if (i < source.length) {
+        i++;
+      }
+      // Skip leading whitespace and & on continuation line (Fortran free-form)
+      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+        i++;
+      }
+      if (i < source.length && source[i] === '&') {
         i++;
       }
       continue;

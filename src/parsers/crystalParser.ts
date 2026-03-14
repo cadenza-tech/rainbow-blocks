@@ -155,6 +155,10 @@ export class CrystalBlockParser extends BaseBlockParser {
       let j = pos + 1;
       while (j < source.length && source[j] !== "'" && source[j] !== '\n' && source[j] !== '\r') {
         if (source[j] === '\\' && j + 1 < source.length) {
+          // Don't skip past newline
+          if (source[j + 1] === '\n' || source[j + 1] === '\r') {
+            break;
+          }
           j += 2;
           continue;
         }
@@ -396,6 +400,15 @@ export class CrystalBlockParser extends BaseBlockParser {
     // %<paired_delimiter> without specifier is a percent literal, not modulo
     // e.g. puts %{text}, raise %(message)
     if (next < source.length && '({[<'.includes(source[next])) {
+      return false;
+    }
+    // %= is always compound assignment, not a percent literal
+    if (next < source.length && source[next] === '=') {
+      return true;
+    }
+    // Non-paired delimiter without specifier is also a percent literal
+    // e.g. puts %|text|, %~text~
+    if (next < source.length && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
       return false;
     }
     return true;

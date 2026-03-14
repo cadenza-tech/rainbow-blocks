@@ -565,6 +565,8 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
             if (bodyStart > regionStart && source[bodyStart - 1] === '\r') {
               bodyStart--;
             }
+          } else if (bodyStart > regionStart && source[bodyStart - 1] === '\r') {
+            bodyStart--;
           }
           return { start: regionStart, end: bodyStart };
         }

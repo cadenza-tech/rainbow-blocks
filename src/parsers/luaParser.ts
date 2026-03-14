@@ -35,15 +35,20 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isInExcludedRegion(loopAbsolutePos, excludedRegions)) {
         continue;
       }
+      if (this.isAdjacentToUnicodeLetter(source, loopAbsolutePos, loopMatch[0].length)) {
+        continue;
+      }
 
       // Find the matching 'do' for this loop keyword, accounting for nested loops
       // Each nested for/while consumes one do, so we track nesting
+      // Also track other block openers (function, if, repeat) that can contain standalone do
       const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
       const searchRange = source.slice(afterLoopStart, position + 2);
-      const doAndLoopPattern = /\b(do|for|while)\b/g;
-      const matches = [...searchRange.matchAll(doAndLoopPattern)];
+      const blockPattern = /\b(do|for|while|function|if|repeat|end|until)\b/g;
+      const matches = [...searchRange.matchAll(blockPattern)];
 
       let nestedLoopDepth = 0;
+      let otherBlockDepth = 0;
       let foundOurDo = false;
 
       for (const innerMatch of matches) {
@@ -51,8 +56,20 @@ export class LuaBlockParser extends BaseBlockParser {
         if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
           continue;
         }
+        if (this.isAdjacentToUnicodeLetter(source, absolutePos, innerMatch[0].length)) {
+          continue;
+        }
         const word = innerMatch[1];
-        if (word === 'for' || word === 'while') {
+        // Track non-loop block openers (function, if, repeat) that can contain standalone do
+        if (word === 'function' || word === 'if' || word === 'repeat') {
+          otherBlockDepth++;
+        } else if ((word === 'end' || word === 'until') && otherBlockDepth > 0) {
+          otherBlockDepth--;
+        } else if (otherBlockDepth > 0) {
+          // Inside a non-loop block, skip for/while/do
+          // biome-ignore lint/complexity/noUselessContinue: explicit skip for readability
+          continue;
+        } else if (word === 'for' || word === 'while') {
           // Nested loop found; its do will be consumed by this nested loop
           nestedLoopDepth++;
         } else if (word === 'do') {
@@ -223,7 +240,10 @@ export class LuaBlockParser extends BaseBlockParser {
         // \z skips following whitespace including newlines
         if (next === 'z') {
           i += 2;
-          while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+          while (
+            i < source.length &&
+            (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\v' || source[i] === '\f')
+          ) {
             i++;
           }
           continue;

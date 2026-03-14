@@ -8,8 +8,8 @@ export function isTransposeOperator(source: string, pos: number): boolean {
 
   const prevChar = source[pos - 1];
 
-  // Transpose follows closing brackets
-  if (prevChar === ')' || prevChar === ']' || prevChar === '}') {
+  // Transpose follows closing brackets or dot (broadcasted adjoint: A.')
+  if (prevChar === ')' || prevChar === ']' || prevChar === '}' || prevChar === '.') {
     return true;
   }
 
@@ -31,12 +31,17 @@ export function skipCharLiteral(source: string, pos: number): number {
   let i = pos + 1;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
+      // Don't let escape skip past newline - character literals can't span lines
+      if (source[i + 1] === '\n' || source[i + 1] === '\r') {
+        return i;
+      }
       i += 2;
       continue;
     }
     if (source[i] === "'") {
       return i + 1;
     }
+    // Character literals don't span lines
     if (source[i] === '\n' || source[i] === '\r') {
       return i;
     }

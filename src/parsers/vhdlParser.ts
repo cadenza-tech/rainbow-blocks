@@ -189,6 +189,11 @@ export class VhdlBlockParser extends BaseBlockParser {
       }
 
       const keyword = keywordMatch[1];
+
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, keyword.length)) {
+        continue;
+      }
+
       const type = getTokenTypeCaseInsensitive(keyword, this.keywords);
 
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {

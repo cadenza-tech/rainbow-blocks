@@ -180,14 +180,39 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   if (isInsideParens(source, position, excludedRegions, callbacks)) {
     return false;
   }
-  const afterFor = source.slice(position + 3);
-  // for X'Attribute use ... (attribute representation clause)
-  // Also handles dotted names like Pkg.Type'Size
-  if (/^[ \t]+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*[ \t]*'/.test(afterFor)) {
+  // Scan forward past the identifier (and dots, whitespace, newlines, comments)
+  // looking for 'use' keyword or attribute tick "'"
+  let i = skipAdaWhitespaceAndComments(source, position + 3);
+  // Expect an identifier
+  if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) {
+    return true;
+  }
+  // Skip identifier
+  while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
+    i++;
+  }
+  // Continue past dotted names (Pkg.Type.Component) with whitespace/comments between parts
+  while (i < source.length) {
+    const j = skipAdaWhitespaceAndComments(source, i);
+    if (j < source.length && source[j] === '.') {
+      i = skipAdaWhitespaceAndComments(source, j + 1);
+      // Skip identifier after dot
+      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
+        i++;
+      }
+    } else {
+      i = j;
+      break;
+    }
+  }
+  // Skip whitespace/comments after the full name
+  i = skipAdaWhitespaceAndComments(source, i);
+  // Check for attribute tick (for X'Attribute use ...)
+  if (i < source.length && source[i] === "'") {
     return false;
   }
-  // for T use record ... end record; or for Color use (...);
-  if (/^[ \t]+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*[ \t]+use\b/i.test(afterFor)) {
+  // Check for 'use' keyword (for T use record ... / for Color use (...))
+  if (isAdaWordAt(source, i, 'use')) {
     return false;
   }
   return true;
@@ -308,8 +333,16 @@ function hasUnterminatedStringAfterParen(
   if (j < source.length && source[j] === '"') {
     const region = callbacks.findExcludedRegionAt(j, excludedRegions);
     if (region) {
-      // Terminated string ends with closing quote and has at least 2 chars
-      const isTerminated = region.end > region.start + 1 && source[region.end - 1] === '"';
+      // Count consecutive quotes at the end of the region (starting from region.end - 1)
+      // Odd count = last quote is a closing quote (terminated)
+      // Even count = all quotes are doubled-quote escapes (unterminated)
+      let quoteCount = 0;
+      let qi = region.end - 1;
+      while (qi > region.start && source[qi] === '"') {
+        quoteCount++;
+        qi--;
+      }
+      const isTerminated = region.end > region.start + 1 && quoteCount > 0 && quoteCount % 2 === 1;
       return !isTerminated;
     }
   }

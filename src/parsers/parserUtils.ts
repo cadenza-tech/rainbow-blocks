@@ -35,6 +35,33 @@ export function getTokenTypeCaseInsensitive(keyword: string, keywords: LanguageK
   return 'block_open';
 }
 
+// Paired delimiters for percent literals in line-level scanning
+const LINE_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+  '<': '>'
+};
+
+// Skip a paired-delimiter percent literal body with nesting support
+function skipPairedPercentLiteral(lineContent: string, pos: number, openChar: string, closeChar: string): number {
+  let depth = 1;
+  let j = pos;
+  while (j < lineContent.length && depth > 0) {
+    if (lineContent[j] === '\\' && j + 1 < lineContent.length) {
+      j += 2;
+      continue;
+    }
+    if (lineContent[j] === openChar) {
+      depth++;
+    } else if (lineContent[j] === closeChar) {
+      depth--;
+    }
+    j++;
+  }
+  return j;
+}
+
 // Find line comment and string regions in a single line (for Ruby/Crystal heredoc indent detection)
 export function findLineCommentAndStringRegions(
   lineContent: string,
@@ -67,7 +94,56 @@ export function findLineCommentAndStringRegions(
       const start = i;
       i++;
       while (i < lineContent.length && lineContent[i] !== ch) {
-        if (lineContent[i] === '\\') i++;
+        if (lineContent[i] === '\\' && i + 1 < lineContent.length) {
+          i += 2;
+          continue;
+        }
+        i++;
+      }
+      if (i < lineContent.length) i++;
+      regions.push({ start, end: i });
+      continue;
+    }
+    // Percent literals (%w[...], %Q{...}, %|...|, etc.)
+    if (ch === '%' && (i === 0 || !/[a-zA-Z0-9_]/.test(lineContent[i - 1]))) {
+      let j = i + 1;
+      // Optional specifier letter (q, Q, w, W, i, I, r, x, s)
+      if (j < lineContent.length && /[a-zA-Z]/.test(lineContent[j])) {
+        j++;
+      }
+      if (j < lineContent.length) {
+        const delimChar = lineContent[j];
+        // Skip alphanumeric or whitespace delimiters (not valid percent literal)
+        if (!/[a-zA-Z0-9\s]/.test(delimChar)) {
+          const start = i;
+          j++;
+          if (delimChar in LINE_PAIRED_DELIMITERS) {
+            j = skipPairedPercentLiteral(lineContent, j, delimChar, LINE_PAIRED_DELIMITERS[delimChar]);
+          } else {
+            while (j < lineContent.length && lineContent[j] !== delimChar) {
+              if (lineContent[j] === '\\' && j + 1 < lineContent.length) {
+                j += 2;
+                continue;
+              }
+              j++;
+            }
+            if (j < lineContent.length) j++;
+          }
+          regions.push({ start, end: j });
+          i = j;
+          continue;
+        }
+      }
+    }
+    // Regex literal (/.../), not preceded by identifier/number/bracket
+    if (ch === '/' && (i === 0 || !/[a-zA-Z0-9_)\]}"'`]/.test(lineContent[i - 1]))) {
+      const start = i;
+      i++;
+      while (i < lineContent.length && lineContent[i] !== '/') {
+        if (lineContent[i] === '\\' && i + 1 < lineContent.length) {
+          i += 2;
+          continue;
+        }
         i++;
       }
       if (i < lineContent.length) i++;

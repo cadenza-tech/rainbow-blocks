@@ -74,7 +74,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Check if this keyword is used as a variable/property name
     // Patterns: 'set X to', 'copy X to', 'get X', 'X of Y', 'Y's X'
-    if (this.isKeywordAsVariableName(source, position, keyword)) {
+    if (this.isKeywordAsVariableName(source, position, keyword, undefined, excludedRegions)) {
       return false;
     }
 
@@ -95,7 +95,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     // Find end of logical line (following ¬ continuations)
-    const lineEnd = this.findLogicalLineEnd(source, position + keyword.length);
+    const lineEnd = this.findLogicalLineEnd(source, position + keyword.length, excludedRegions);
 
     // Search for 'then' after 'if', skipping excluded regions
     let i = position + keyword.length;
@@ -157,6 +157,30 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return this.matchQuotedString(source, pos, '"');
     }
 
+    // Pipe-delimited identifier: |identifier|
+    if (char === '|') {
+      let j = pos + 1;
+      while (j < source.length && source[j] !== '|' && source[j] !== '\n' && source[j] !== '\r') {
+        j++;
+      }
+      if (j < source.length && source[j] === '|') {
+        return { start: pos, end: j + 1 };
+      }
+      return { start: pos, end: j };
+    }
+
+    // Chevron/guillemet syntax: \u00AB...\u00BB (raw Apple Events, data constants, class/property references)
+    if (char === '\u00AB') {
+      let j = pos + 1;
+      while (j < source.length && source[j] !== '\u00BB') {
+        j++;
+      }
+      if (j < source.length) {
+        return { start: pos, end: j + 1 };
+      }
+      return { start: pos, end: source.length };
+    }
+
     return null;
   }
 
@@ -206,7 +230,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const compoundResult = this.tryMatchCompoundKeywordToken(source, lowerSource, i, excludedRegions, newlinePositions);
       if (compoundResult) {
         if (compoundResult.token) {
-          tokens.push(compoundResult.token);
+          if (!this.isAdjacentToUnicodeLetter(source, compoundResult.token.startOffset, compoundResult.nextPos - compoundResult.token.startOffset)) {
+            tokens.push(compoundResult.token);
+          }
         }
         i = compoundResult.nextPos;
         continue;
@@ -216,7 +242,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const singleResult = this.tryMatchSingleKeywordToken(source, lowerSource, i, excludedRegions, newlinePositions);
       if (singleResult) {
         if (singleResult.token) {
-          tokens.push(singleResult.token);
+          if (
+            !this.isAdjacentToUnicodeLetter(source, singleResult.token.startOffset, singleResult.token.endOffset - singleResult.token.startOffset)
+          ) {
+            tokens.push(singleResult.token);
+          }
         }
         i = singleResult.nextPos;
         continue;
@@ -233,7 +263,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     source: string,
     lowerSource: string,
     i: number,
-    _excludedRegions: ExcludedRegion[],
+    excludedRegions: ExcludedRegion[],
     newlinePositions: number[]
   ): { nextPos: number; token?: Token } | null {
     for (const keyword of COMPOUND_KEYWORDS) {
@@ -248,18 +278,18 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const type = this.getTokenType(keyword);
 
       // Check if compound close keyword is used as a variable name
-      if (type === 'block_close' && this.isKeywordAsVariableName(source, i, source.slice(i, flexMatch), lowerSource)) {
+      if (type === 'block_close' && this.isKeywordAsVariableName(source, i, source.slice(i, flexMatch), lowerSource, excludedRegions)) {
         return { nextPos: flexMatch };
       }
 
       // Check if compound middle keyword is used as a variable name
-      if (type === 'block_middle' && this.isKeywordAsVariableName(source, i, source.slice(i, flexMatch), lowerSource)) {
+      if (type === 'block_middle' && this.isKeywordAsVariableName(source, i, source.slice(i, flexMatch), lowerSource, excludedRegions)) {
         return { nextPos: flexMatch };
       }
 
       // Check if compound middle keyword is used in set/copy/possessive patterns
       if (type === 'block_middle') {
-        const ls = this.findLogicalLineStart(source, i);
+        const ls = this.findLogicalLineStart(source, i, excludedRegions);
         const lineBefore = source
           .slice(ls, i)
           .toLowerCase()
@@ -272,7 +302,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       // Check if compound open keyword is used as a variable name
       if (type === 'block_open') {
-        const ls = this.findLogicalLineStart(source, i);
+        const ls = this.findLogicalLineStart(source, i, excludedRegions);
         const lineBefore = source
           .slice(ls, i)
           .toLowerCase()
@@ -326,12 +356,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
 
       // Check if 'end' is used as a variable/property name
-      if (type === 'block_close' && keyword === 'end' && this.isKeywordAsVariableName(source, i, keyword, lowerSource)) {
+      if (type === 'block_close' && keyword === 'end' && this.isKeywordAsVariableName(source, i, keyword, lowerSource, excludedRegions)) {
         return { nextPos: endPos };
       }
 
       // Check if middle keyword is used as a variable/property name
-      if (type === 'block_middle' && this.isKeywordAsVariableName(source, i, keyword, lowerSource)) {
+      if (type === 'block_middle' && this.isKeywordAsVariableName(source, i, keyword, lowerSource, excludedRegions)) {
         return { nextPos: endPos };
       }
 
@@ -359,7 +389,19 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
         prevEnd--;
       }
-      if (prevEnd >= 0 && source[prevEnd] === '\u00AC') {
+      // Skip excluded regions backward (e.g., single-line comments like "-- comment")
+      while (prevEnd >= 0) {
+        const region = this.findExcludedRegionAt(prevEnd, excludedRegions);
+        if (region) {
+          prevEnd = region.start - 1;
+          while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+            prevEnd--;
+          }
+          continue;
+        }
+        break;
+      }
+      if (prevEnd >= 0 && source[prevEnd] === '\u00AC' && !this.isInExcludedRegion(prevEnd, excludedRegions)) {
         return false;
       }
     }
@@ -436,7 +478,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
   // Checks if 'tell' is followed by 'to' on the same line (one-liner form)
   // Find the end of a logical line, following ¬ (U+00AC) line continuations
-  private findLogicalLineEnd(source: string, position: number): number {
+  private findLogicalLineEnd(source: string, position: number, excludedRegions?: ExcludedRegion[]): number {
     let lineEnd = position;
     while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
       lineEnd++;
@@ -448,7 +490,23 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       while (checkPos > position && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
         checkPos--;
       }
+      // Skip excluded regions backward (e.g., single-line comments like "-- comment")
+      if (excludedRegions) {
+        while (checkPos > position) {
+          const region = this.findExcludedRegionAt(checkPos, excludedRegions);
+          if (region) {
+            checkPos = region.start - 1;
+            while (checkPos > position && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
+              checkPos--;
+            }
+            continue;
+          }
+          break;
+        }
+      }
       if (source[checkPos] !== '\u00AC') break;
+      // Skip if the ¬ is inside an excluded region (e.g., single-line comment)
+      if (excludedRegions && this.isInExcludedRegion(checkPos, excludedRegions)) break;
       // Skip newline (\n, \r\n, or \r)
       if (lineEnd < source.length && source[lineEnd] === '\r') {
         lineEnd++;
@@ -465,7 +523,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   }
 
   // Find the start of a logical line, following ¬ (U+00AC) line continuations backward
-  private findLogicalLineStart(source: string, position: number): number {
+  private findLogicalLineStart(source: string, position: number, excludedRegions?: ExcludedRegion[]): number {
     let lineStart = position;
     while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
       lineStart--;
@@ -484,7 +542,23 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       while (contentEnd >= 0 && (source[contentEnd] === ' ' || source[contentEnd] === '\t')) {
         contentEnd--;
       }
+      // Skip excluded regions backward (e.g., single-line comments like "-- comment")
+      if (excludedRegions) {
+        while (contentEnd >= 0) {
+          const region = this.findExcludedRegionAt(contentEnd, excludedRegions);
+          if (region) {
+            contentEnd = region.start - 1;
+            while (contentEnd >= 0 && (source[contentEnd] === ' ' || source[contentEnd] === '\t')) {
+              contentEnd--;
+            }
+            continue;
+          }
+          break;
+        }
+      }
       if (contentEnd < 0 || source[contentEnd] !== '\u00AC') break;
+      // Skip if the ¬ is inside an excluded region (e.g., single-line comment)
+      if (excludedRegions && this.isInExcludedRegion(contentEnd, excludedRegions)) break;
       // Go to start of previous line
       let prevLineStart = contentEnd;
       while (prevLineStart > 0 && source[prevLineStart - 1] !== '\n' && source[prevLineStart - 1] !== '\r') {
@@ -496,7 +570,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   }
 
   private isTellToOneLiner(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const lineEnd = this.findLogicalLineEnd(source, position + 4);
+    const lineEnd = this.findLogicalLineEnd(source, position + 4, excludedRegions);
 
     let i = position + 4;
     while (i < lineEnd) {
@@ -520,7 +594,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   // Checks if a keyword is used inside an 'if ... then' condition
   // e.g., 'if tell then' uses 'tell' as a condition value, not a block opener
   private isInsideIfCondition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const lineStart = this.findLogicalLineStart(source, position);
+    const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
     const lower = source.toLowerCase();
     // Replace excluded regions with spaces before continuation normalization to preserve indices
     let rawBefore = lower.slice(lineStart, position);
@@ -539,7 +613,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return false;
     }
     // Check if 'then' appears after this keyword on the same logical line
-    const lineEnd = this.findLogicalLineEnd(source, position);
+    const lineEnd = this.findLogicalLineEnd(source, position, excludedRegions);
     let i = position + 4; // skip past 'tell'
     while (i < lineEnd) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -557,10 +631,16 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
   // Checks if a block keyword is being used as a variable name
   // e.g., 'set repeat to 5', 'set script to "test"', 'copy tell to x'
-  private isKeywordAsVariableName(source: string, position: number, keyword: string, lowerSource?: string): boolean {
+  private isKeywordAsVariableName(
+    source: string,
+    position: number,
+    keyword: string,
+    lowerSource?: string,
+    excludedRegions?: ExcludedRegion[]
+  ): boolean {
     const lower = lowerSource ?? source.toLowerCase();
     // Find start of logical line (following ¬ continuations backward)
-    const lineStart = this.findLogicalLineStart(source, position);
+    const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
     // Normalize ¬ continuations to spaces so regexes match across line breaks
     const lineBefore = lower
       .slice(lineStart, position)

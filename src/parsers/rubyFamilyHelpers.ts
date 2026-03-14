@@ -19,7 +19,7 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 };
 
 // Characters that indicate the preceding / is division, not regex
-const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`]/;
+const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$]/;
 
 // Returns the matching close delimiter for an open delimiter
 function getMatchingDelimiter(open: string): string | null {
@@ -308,6 +308,24 @@ export function skipInterpolationShared(source: string, pos: number, handlers: I
       i += 2;
       continue;
     }
+    // Character literal: ?', ?", ?`, ?{, ?}, ?#, ?/, ?%, ?<
+    if (
+      (source[i] === "'" ||
+        source[i] === '"' ||
+        source[i] === '`' ||
+        source[i] === '{' ||
+        source[i] === '}' ||
+        source[i] === '#' ||
+        source[i] === '/' ||
+        source[i] === '%' ||
+        source[i] === '<') &&
+      i > pos &&
+      source[i - 1] === '?' &&
+      (i - 1 === pos || !/\w/.test(source[i - 2]))
+    ) {
+      i++;
+      continue;
+    }
     // Handle # line comments (but not #{} interpolation)
     if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
       while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
@@ -370,6 +388,24 @@ export function skipRegexInterpolationShared(source: string, pos: number, handle
   while (i < source.length && depth > 0) {
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
+      continue;
+    }
+    // Character literal: ?', ?", ?`, ?{, ?}, ?#, ?/, ?%, ?<
+    if (
+      (source[i] === "'" ||
+        source[i] === '"' ||
+        source[i] === '`' ||
+        source[i] === '{' ||
+        source[i] === '}' ||
+        source[i] === '#' ||
+        source[i] === '/' ||
+        source[i] === '%' ||
+        source[i] === '<') &&
+      i > pos &&
+      source[i - 1] === '?' &&
+      (i - 1 === pos || !/\w/.test(source[i - 2]))
+    ) {
+      i++;
       continue;
     }
     // Handle # line comments (but not #{} interpolation)

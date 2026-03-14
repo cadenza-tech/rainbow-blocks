@@ -64,7 +64,22 @@ export function matchAttribute(source: string, pos: number): ExcludedRegion {
         }
         i++;
       }
-      if (i < source.length && source[i] === '"') i++;
+      if (i < source.length && source[i] === '"') {
+        i++;
+      } else if (i < source.length && (source[i] === '\n' || source[i] === '\r')) {
+        // String terminated by newline: skip newline and any stray closing quote
+        if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+          i += 2;
+        } else {
+          i++;
+        }
+        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+          i++;
+        }
+        if (i < source.length && source[i] === '"') {
+          i++;
+        }
+      }
       continue;
     }
     if (source[i] === '*' && i + 1 < source.length && source[i + 1] === ')') {
@@ -93,13 +108,30 @@ export function matchBlockComment(source: string, pos: number): ExcludedRegion {
 export function matchDefineDirective(source: string, pos: number): ExcludedRegion {
   let i = pos + 7;
   while (i < source.length) {
+    // Skip block comments inside define body
+    if (source[i] === '/' && i + 1 < source.length && source[i + 1] === '*') {
+      i += 2;
+      while (i < source.length) {
+        if (source[i] === '*' && i + 1 < source.length && source[i + 1] === '/') {
+          i += 2;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
     // Skip string literals inside define body (backslash escapes apply)
     if (source[i] === '"') {
       i++;
       while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
         if (source[i] === '\\' && i + 1 < source.length) {
           const nextChar = source[i + 1];
-          if (nextChar === '\n' || nextChar === '\r') break;
+          if (nextChar === '\n' || nextChar === '\r') {
+            // Backslash before newline inside string: string is unterminated
+            // The backslash is part of the string content, not a define continuation
+            // End the define at this newline
+            return { start: pos, end: i + 1 };
+          }
           i += 2;
           continue;
         }
@@ -109,6 +141,7 @@ export function matchDefineDirective(source: string, pos: number): ExcludedRegio
         }
         i++;
       }
+      // After exiting string, if we stopped at newline, the outer loop handles it
       continue;
     }
     if (source[i] === '\n') {

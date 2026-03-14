@@ -70,15 +70,22 @@ export class PascalBlockParser extends BaseBlockParser {
       }
     }
 
-    // Forward declaration with parent: class(TParent);
+    // Forward declaration with parent: class(TParent);, interface(IUnknown);, object(TBase);
     // Handle nested parentheses like class(TBase(TParam))
-    if (keyword === 'class') {
-      const afterClass = source.slice(position + keyword.length);
-      if (/^[ \t]*\(/.test(afterClass)) {
+    if (keyword === 'class' || keyword === 'interface' || keyword === 'object') {
+      // Skip whitespace and comments between keyword and '('
+      {
         let j = position + keyword.length;
-        // Skip leading whitespace (including newlines) to find '('
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-          j++;
+        while (j < source.length) {
+          if (this.isInExcludedRegion(j, excludedRegions)) {
+            j++;
+            continue;
+          }
+          if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+            j++;
+            continue;
+          }
+          break;
         }
         if (j < source.length && source[j] === '(') {
           let parenDepth = 1;
@@ -392,6 +399,12 @@ export class PascalBlockParser extends BaseBlockParser {
 
       // Normalize to lowercase for type lookup
       const keyword = match[1].toLowerCase();
+
+      // JavaScript \b only handles ASCII word boundaries, so check for adjacent Unicode letters
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, keyword.length)) {
+        continue;
+      }
+
       const type = this.getTokenType(keyword);
 
       // Validate block open keywords

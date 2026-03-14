@@ -208,6 +208,17 @@ export class BashBlockParser extends BaseBlockParser {
         beforeNewline--;
       }
       if (beforeNewline >= 0 && source[beforeNewline] === '\\') {
+        // Count consecutive backslashes before newline
+        let bsCount = 0;
+        let bsPos = beforeNewline;
+        while (bsPos >= 0 && source[bsPos] === '\\') {
+          bsCount++;
+          bsPos--;
+        }
+        // Even number of backslashes means they are all escaped (not continuation)
+        if (bsCount % 2 === 0) {
+          return true;
+        }
         // Backslash continuation: skip \ and continue scanning the previous line
         i = beforeNewline - 1;
         while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {

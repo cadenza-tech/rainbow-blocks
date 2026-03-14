@@ -49,6 +49,12 @@ export class ElixirBlockParser extends BaseBlockParser {
     const char = source[pos];
     const skipInterpolationBound = this.skipInterpolation.bind(this);
 
+    // Character literal: ?x, ?\escape, ?\xNN, ?\uNNNN, ?\u{NNNN}
+    if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_]/.test(source[pos - 1]))) {
+      const result = this.matchCharacterLiteral(source, pos);
+      if (result) return result;
+    }
+
     // Single-line comment
     if (char === '#') {
       return this.matchSingleLineComment(source, pos);
@@ -98,6 +104,14 @@ export class ElixirBlockParser extends BaseBlockParser {
         i += 2;
         continue;
       }
+      // Character literal: ?x (Elixir character literal)
+      if (source[i] === '?' && i + 1 < source.length && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
+        const charLitEnd = this.skipCharLiteral(source, i);
+        if (charLitEnd > i) {
+          i = charLitEnd;
+          continue;
+        }
+      }
       if (source[i] === '{') {
         depth++;
       } else if (source[i] === '}') {
@@ -136,8 +150,71 @@ export class ElixirBlockParser extends BaseBlockParser {
     return i;
   }
 
+  // Matches Elixir character literal: ?x, ?\escape, ?\xNN, ?\uNNNN, ?\u{NNNN}
+  private matchCharacterLiteral(source: string, pos: number): ExcludedRegion | null {
+    const end = this.skipCharLiteral(source, pos);
+    if (end > pos) {
+      return { start: pos, end };
+    }
+    return null;
+  }
+
+  // Returns the end position after a character literal at pos, or pos if not valid
+  private skipCharLiteral(source: string, pos: number): number {
+    if (pos + 1 >= source.length) return pos;
+    const nextChar = source[pos + 1];
+    // ?\<escape>
+    if (nextChar === '\\' && pos + 2 < source.length) {
+      const escChar = source[pos + 2];
+      // ?\<newline> is not a valid character literal
+      if (escChar === '\n' || escChar === '\r') return pos;
+      // ?\xNN - hex escape
+      if (escChar === 'x') {
+        let i = pos + 3;
+        const limit = Math.min(i + 2, source.length);
+        while (i < limit && /[0-9a-fA-F]/.test(source[i])) {
+          i++;
+        }
+        return i;
+      }
+      // ?\u{NNNN} or ?\uNNNN - unicode escape
+      if (escChar === 'u') {
+        if (pos + 3 < source.length && source[pos + 3] === '{') {
+          let i = pos + 4;
+          while (i < source.length && /[0-9a-fA-F]/.test(source[i])) {
+            i++;
+          }
+          if (i < source.length && source[i] === '}') {
+            i++;
+          }
+          return i;
+        }
+        let i = pos + 3;
+        const limit = Math.min(i + 4, source.length);
+        while (i < limit && /[0-9a-fA-F]/.test(source[i])) {
+          i++;
+        }
+        return i;
+      }
+      // Basic escape: ?\n, ?\t, ?\\, ?\s, etc
+      return pos + 3;
+    }
+    // ?<whitespace/newline> is not a character literal
+    if (nextChar === '\n' || nextChar === '\r' || nextChar === ' ' || nextChar === '\t') return pos;
+    // ?x where x is any printable character (handle surrogate pairs)
+    const code = source.codePointAt(pos + 1);
+    const charLen = code !== undefined && code > 0xffff ? 2 : 1;
+    return pos + 1 + charLen;
+  }
+
   // Validates block open keywords, excluding do: one-liners and keyword arguments
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Reject identifiers ending with ? or ! (e.g., fn?, if!, end?)
+    const afterKeyword = source[position + keyword.length];
+    if (afterKeyword === '?' || afterKeyword === '!') {
+      return false;
+    }
+
     // Check for keyword argument (e.g., if:)
     if (this.isKeywordArgument(source, position + keyword.length)) {
       return false;
@@ -175,15 +252,32 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '@') {
         return false;
       }
+      // Character literal prefix: ?end, ?else, etc. are character literals, not keywords
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {
+        return false;
+      }
       if (token.type === 'block_middle' && token.endOffset < source.length && source[token.endOffset] === ':') {
         return false;
+      }
+      // Reject middle keywords with ? or ! suffix (e.g., else?, catch!, after! are function names)
+      if (token.type === 'block_middle' && token.endOffset < source.length) {
+        const afterChar = source[token.endOffset];
+        if (afterChar === '?' || afterChar === '!') {
+          return false;
+        }
       }
       return true;
     });
   }
 
-  // Validates block close keywords, rejecting keyword arguments (e.g., end:)
+  // Validates block close keywords, rejecting keyword arguments (e.g., end:) and ?/! suffixes (e.g., end?, end!)
   protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    // Reject identifiers ending with ? or ! (e.g., end?, end!)
+    const afterKeyword = source[position + keyword.length];
+    if (afterKeyword === '?' || afterKeyword === '!') {
+      return false;
+    }
+
     if (this.isKeywordArgument(source, position + keyword.length)) {
       return false;
     }
@@ -316,7 +410,7 @@ export class ElixirBlockParser extends BaseBlockParser {
         if (
           source.slice(i, i + 2) === 'fn' &&
           (i === 0 || (!/[a-zA-Z0-9_]/.test(source[i - 1]) && source[i - 1] !== '.' && source[i - 1] !== '@')) &&
-          (i + 2 >= source.length || !/[a-zA-Z0-9_:]/.test(source[i + 2]))
+          (i + 2 >= source.length || !/[a-zA-Z0-9_:?!]/.test(source[i + 2]))
         ) {
           fnDepth++;
         }
@@ -330,7 +424,7 @@ export class ElixirBlockParser extends BaseBlockParser {
             !/[a-zA-Z0-9_]/.test(beforeEnd) &&
             beforeEnd !== '.' &&
             beforeEnd !== '@' &&
-            (afterEnd === undefined || !/[a-zA-Z0-9_:]/.test(afterEnd))
+            (afterEnd === undefined || !/[a-zA-Z0-9_:?!]/.test(afterEnd))
           ) {
             if (fnDepth > 0) {
               fnDepth--;
@@ -359,7 +453,7 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (source.startsWith(kw, pos)) {
         const afterKw = source[pos + kw.length];
         // Must have word boundary after, and not be a keyword argument (e.g. for:)
-        if (afterKw === undefined || (!/[a-zA-Z0-9_]/.test(afterKw) && afterKw !== ':')) {
+        if (afterKw === undefined || (!/[a-zA-Z0-9_]/.test(afterKw) && afterKw !== ':' && afterKw !== '?' && afterKw !== '!')) {
           return true;
         }
       }

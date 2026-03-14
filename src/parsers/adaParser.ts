@@ -164,6 +164,12 @@ export class AdaBlockParser extends BaseBlockParser {
       }
 
       const keyword = keywordMatch[1];
+
+      // JavaScript \b only handles ASCII word boundaries, so check for adjacent Unicode letters
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, keyword.length)) {
+        continue;
+      }
+
       const type = getTokenTypeCaseInsensitive(keyword, this.keywords);
 
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {
@@ -262,7 +268,23 @@ export class AdaBlockParser extends BaseBlockParser {
       // To distinguish: check if only whitespace/comments exist between 'or' and 'else' in source.
       if (lowerValue === 'else' && filtered.length > 0 && filtered[filtered.length - 1].value.toLowerCase() === 'or') {
         const orToken = filtered[filtered.length - 1];
-        if (isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, (pos) => this.isInExcludedRegion(pos, excludedRegions))) {
+        // In select blocks, 'or' is preceded by ';' (statement-level keyword, not short-circuit)
+        let prevPos = orToken.startOffset - 1;
+        while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+          prevPos--;
+        }
+        while (prevPos >= 0 && this.isInExcludedRegion(prevPos, excludedRegions)) {
+          const region = this.findExcludedRegionAt(prevPos, excludedRegions);
+          if (region) {
+            prevPos = region.start - 1;
+            while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+              prevPos--;
+            }
+          }
+        }
+        if (prevPos >= 0 && source[prevPos] === ';') {
+          // 'or' follows a statement (select block context), keep both as intermediates
+        } else if (isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, (pos) => this.isInExcludedRegion(pos, excludedRegions))) {
           filtered.pop();
           continue;
         }

@@ -61,12 +61,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch', 'unwind_protect_cleanup']
   };
 
-  // Reject 'do' used as a variable name (do = 1, do += 1, but not do == 1)
+  // Reject block open keywords used as variable names (do = 1, if = 5, etc.)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (keyword === 'do') {
-      if (this.isFollowedByAssignment(source, position + keyword.length)) {
-        return false;
-      }
+    if (this.isFollowedByAssignment(source, position + keyword.length)) {
+      return false;
     }
     return super.isValidBlockOpen(keyword, source, position, excludedRegions);
   }
@@ -292,7 +290,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Check if single quote is a transpose operator (after identifier, number, ], }, or .)
     if (quote === "'" && pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         if (/[0-9]/.test(prevChar)) {
           const nextChar = source[pos + 1];

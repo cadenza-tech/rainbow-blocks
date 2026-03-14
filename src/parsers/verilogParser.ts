@@ -354,6 +354,14 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     if (i < source.length && /[0-9]/.test(source[i])) {
       while (i < source.length && /[0-9_.]/.test(source[i])) i++;
+      // Handle exponent notation (e.g., 1.5e-3, 2.0E+6)
+      if (i < source.length && (source[i] === 'e' || source[i] === 'E')) {
+        i++;
+        if (i < source.length && (source[i] === '+' || source[i] === '-')) {
+          i++;
+        }
+        while (i < source.length && /[0-9_]/.test(source[i])) i++;
+      }
       // Skip time unit (e.g., ns, ps)
       while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
       return i;

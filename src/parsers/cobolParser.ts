@@ -216,6 +216,11 @@ export class CobolBlockParser extends BaseBlockParser {
       const keyword = match[1];
       const endOffset = startOffset + keyword.length;
 
+      // Skip keywords adjacent to Unicode letters
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, keyword.length)) {
+        continue;
+      }
+
       // Skip keywords that are part of hyphenated identifiers
       // COBOL identifiers use hyphens (e.g., PERFORM-COUNT, END-IF-FLAG)
       if (startOffset > 0 && source[startOffset - 1] === '-') {
@@ -266,9 +271,14 @@ export class CobolBlockParser extends BaseBlockParser {
         const sequenceArea = source.slice(lineStart, pos);
         if (/^[\d \t]*$/.test(sequenceArea)) {
           if (char === 'D' || char === 'd') {
-            const nextChar = pos + 1 < source.length ? source[pos + 1] : '';
-            if (/[a-zA-Z0-9_-]/.test(nextChar)) {
-              return null;
+            // In fixed-format (sequence area contains at least one digit),
+            // D/d at column 7 is always a debug indicator regardless of what follows
+            const hasDigit = /\d/.test(sequenceArea);
+            if (!hasDigit) {
+              const nextChar = pos + 1 < source.length ? source[pos + 1] : '';
+              if (/[a-zA-Z0-9_-]/.test(nextChar)) {
+                return null;
+              }
             }
           }
           return this.matchSingleLineComment(source, pos);
@@ -401,6 +411,14 @@ export class CobolBlockParser extends BaseBlockParser {
           continue;
         }
         i = lineStart;
+        continue;
+      }
+      // Skip >> compiler directives inside EXEC block
+      if (ch === '>' && i + 1 < source.length && source[i + 1] === '>') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
         continue;
       }
       // Skip *> inline comments inside EXEC block
