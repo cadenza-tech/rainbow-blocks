@@ -5,6 +5,74 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.19] - 2026-03-16
+
+### Fixed
+
+- Ada: Fix character literal spanning across newlines
+- Ada: Fix `entry` with `is abstract`/`is separate`/`is new`/`is null`/`is <>` incorrectly treated as block opener
+- Ada: Fix multiple `type`/`subtype` declarations on the same line (semicolon-separated)
+- Ada: Fix `is` after discriminant list closing paren to scan previous lines for `type`/`subtype`
+- Ada: Fix parenthesis depth tracking for semicolons inside discriminant parts
+- Ada: Fix Ada 2012 expression function `is (expr)` incorrectly treated as block body
+- AppleScript: Fix double-quoted strings to be single-line (stop scanning at newline)
+- AppleScript: Fix content detection after `then` to treat strings, pipes, and chevrons as real content
+- AppleScript: Fix `on error` to only match at logical line start
+- AppleScript: Fix compound keyword matching to skip comments after continuation character
+- AppleScript: Fix compound keyword matching to require newline after continuation character
+- AppleScript: Fix excluded region overlap handling in logical line start detection
+- Bash: Fix command starters (`then`, `do`, `else`, etc.) validated for position context
+- Bash: Fix block close keywords (`fi`, `done`, `esac`) validated for position context
+- Bash: Fix `{` command grouping to require valid command position or function definition context
+- Bash: Fix heredoc delimiter pattern to accept numeric-only delimiters (e.g., `<<123`)
+- Bash: Fix double-quote handling inside `${}` parameter expansion to use quote-toggling model
+- COBOL: Fix Unicode adjacency check for keywords consistent with tokenize
+- COBOL: Fix PERFORM followed immediately by END-PERFORM incorrectly rejected
+- COBOL: Fix PERFORM paragraph call heuristics to handle `UNTIL`/`VARYING`/`WITH` after second word
+- COBOL: Fix debug indicator `D`/`d` handling in free-format COBOL
+- COBOL: Add END-EXECUTE keyword support in EXEC blocks
+- COBOL: Fix inline comment stripping to include `>>` compiler directives
+- Crystal: Fix macro template `{}` handling when single brace depth closes
+- Crystal: Fix char literal `\u{` to stop at CR line ending
+- Crystal: Fix postfix conditional and rescue whitespace normalization for tabs
+- Elixir: Fix sigil `~` preceded by identifier characters incorrectly treated as sigil start
+- Elixir: Fix `end` preceded by `..` range operator incorrectly treated as block close
+- Elixir: Fix character literal `?\` at end of source
+- Elixir: Fix `fn...end` and inner block nesting inside `hasDoKeyword` scan
+- Erlang: Fix macro-prefixed identifiers (`?MODULE`) not recognized in fun references
+- Erlang: Fix `end` as map key detection to check `#{` and `,` context with comment skipping
+- Erlang: Fix quoted atom to terminate at backslash followed by newline
+- Fortran: Fix compound end keywords (`enddo`, `endif`, etc.) used as variables, subscripted arrays, or component access
+- Fortran: Add `isInsideParentheses` check to reject block keywords inside function arguments
+- Fortran: Fix continuation line handling for parenthesis depth tracking
+- Julia: Fix char literal escape to correctly advance past newline
+- Julia: Fix prefixed strings so only `b"..."` processes backslash escapes
+- Julia: Fix `isInsideBrackets` to return false inside parenthesized expressions
+- Lua: Fix nested loop `do...end` tracking to consume corresponding `end` keyword
+- Lua: Fix standalone `do` inside non-loop blocks tracked correctly during loop scan
+- MATLAB: Fix `classdef` section keywords to validate following content (newline, EOF, `(`, or comment)
+- MATLAB: Fix transpose detection after consecutive quotes (`A''`)
+- MATLAB: Fix Unicode letter check to use `\p{L}` instead of `charCodeAt > 127`
+- Octave: Add `endarguments`, `endspmd`, and `arguments` keywords
+- Octave: Add `isCommentChar` override to recognize `#` as comment prefix
+- Pascal: Fix `case TypeName of` to allow `of` on a separate line
+- Pascal: Fix `class of` detection to skip excluded regions between `class` and `of`
+- Pascal: Fix asm `end:` label detection to skip excluded regions between `end` and `:`
+- Pascal: Fix asm regions to remove overlapping inner excluded regions
+- Pascal: Fix `isInsideRecord` depth tracking to stop at unmatched block openers
+- Ruby: Add regex flags `n`, `e`, `s`, `u` for encoding options
+- Ruby: Fix division preceders to include `/` (regex after `/` is division)
+- Ruby: Fix postfix conditional and rescue whitespace normalization for tabs
+- Ruby: Fix character literal `\C-` at source boundary
+- Ruby: Fix CRLF handling in `findLogicalLineStart` for backslash continuation
+- Verilog: Fix `default` intermediate to only attach to `case`/`casex`/`casez` blocks
+- VHDL: Add `units` keyword for physical type definitions
+- VHDL: Fix `end` preceded by `.` (hierarchical reference) incorrectly treated as block close
+- VHDL: Fix loop prefix (`for`/`while`) preceded by `.` incorrectly matched
+- VHDL: Fix case branch arrow (`when choice =>`) incorrectly detected as port map association
+- VHDL: Fix `wait` preceded by `.` incorrectly treated as wait keyword
+- VHDL: Fix loop validation to search between prefix and position instead of same line only
+
 ## [1.1.18] - 2026-03-15
 
 ### Fixed
@@ -809,6 +877,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.19]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.18...v1.1.19
 [1.1.18]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.17...v1.1.18
 [1.1.17]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.16...v1.1.17
 [1.1.16]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.15...v1.1.16
