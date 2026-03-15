@@ -1237,5 +1237,66 @@ end`;
     });
   });
 
+  suite('Coverage: isCommentChar', () => {
+    test('should return false for % in MATLAB (isCommentChar is not used for comment detection)', () => {
+      // Covers matlabParser.ts lines 250-251: isCommentChar always returns false in MATLAB
+      // isCommentChar is called from isValidBlockOpen for classdef section keywords
+      // In MATLAB, % is handled by tryMatchExcludedRegion, not isCommentChar
+      // A classdef section keyword followed by a non-%, non-newline, non-( character
+      // that is also not a comment char (isCommentChar returns false) should be rejected
+      const source = `classdef MyClass
+  properties + 1
+  end
+end`;
+      const pairs = parser.parse(source);
+      // properties is followed by '+', which is not newline/(/comment,
+      // so isCommentChar('+') returns false, and the keyword is rejected
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+
+    test('should reject classdef section keyword followed by operator', () => {
+      // Covers lines 61, 63-64: isCommentChar returns false for non-comment chars
+      const source = `classdef MyClass
+  methods - 1
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+
+    test('should accept classdef section keyword followed by % comment', () => {
+      // Line 60: source[nextPos] !== '%' check - when it IS %, the condition short-circuits
+      const source = `classdef MyClass
+  properties % with access
+    Value
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'properties');
+    });
+  });
+
+  suite('Coverage: isInsideParensOrBrackets curly brace depth', () => {
+    test('should track curly brace depth correctly for nested braces', () => {
+      // Covers matlabParser.ts lines 185-186: braceDepth-- path
+      const source = `function f
+  x = {{end}};
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Coverage: isPrecededByDot CRLF line continuation', () => {
+    test('should handle CRLF line endings with ... continuation in isPrecededByDot', () => {
+      // Covers matlabParser.ts lines 185-186: CRLF handling in isPrecededByDot
+      // obj. followed by ... continuation with CRLF, then end keyword
+      const source = 'function f\r\n  x = obj. ...\r\n    end;\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

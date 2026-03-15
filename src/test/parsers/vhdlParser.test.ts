@@ -1893,5 +1893,193 @@ end loop;`;
     });
   });
 
+  suite('Coverage: isValidBlockClose dot-preceded end', () => {
+    test('should reject end preceded by dot as hierarchical reference', () => {
+      // Covers vhdlParser.ts lines 114-115: isValidBlockClose returns false
+      // when end is preceded by '.'
+      const source = 'entity test is\n  signal x : integer := inst.end;\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+
+    test('should reject end preceded by dot with spaces', () => {
+      // Covers vhdlParser.ts lines 110-114: dot with whitespace before end
+      const source = 'entity test is\n  signal x : integer := inst . end;\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+  });
+
+  suite('Coverage: tokenize isValidBlockClose rejection', () => {
+    test('should skip close keyword rejected by isValidBlockClose in tokenize', () => {
+      // Covers vhdlParser.ts lines 218-219: tokenize skips block_close
+      // when isValidBlockClose returns false
+      const source = 'architecture rtl of test is\nbegin\n  signal x : integer := inst.end;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
+  suite('Coverage: isValidLoopOpen dot-preceded loop', () => {
+    test('should reject loop preceded by dot in isValidLoopOpen', () => {
+      // Covers vhdlValidation.ts lines 174-175: isValidLoopOpen returns false
+      // when loop is preceded by '.'
+      const source = 'architecture rtl of test is\nbegin\n  x := rec.loop;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
+  suite('Coverage: loop prefix preceded by dot', () => {
+    test('should reject for preceded by dot when validating loop', () => {
+      // Covers vhdlValidation.ts lines 214-215: prefix keyword preceded by '.'
+      // is skipped as hierarchical reference
+      const source = 'architecture rtl of test is\nbegin\n  inst.for loop\n    null;\n  end loop;\nend architecture;';
+      const pairs = parser.parse(source);
+      // inst.for is rejected as prefix, so loop should be standalone
+      findBlock(pairs, 'loop');
+    });
+
+    test('should reject while preceded by dot when validating loop', () => {
+      // Covers vhdlValidation.ts lines 210-214: while preceded by dot with spaces
+      const source = 'architecture rtl of test is\nbegin\n  inst . while loop\n    null;\n  end loop;\nend architecture;';
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'loop');
+    });
+  });
+
+  suite('Coverage: end loop between for/while and loop position', () => {
+    test('should skip end loop between for and loop when validating standalone loop', () => {
+      // Covers vhdlValidation.ts lines 252-253: 'end loop' found between
+      // for/while prefix and the loop being validated is skipped
+      const source = 'for i in 0 to 3 loop null; end loop; for j in 0 to 7\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should track paired loop positions to avoid double-counting', () => {
+      // Covers vhdlValidation.ts lines 256-257: pairedLoopPositions
+      // prevents the same loop from being counted twice
+      const source = 'for a in 0 to 3 loop null; end loop; while b loop null; end loop; for c in 0 to 3\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+  });
+
+  suite('Coverage: isCaseBranchArrow excluded region skip', () => {
+    test('should skip excluded region when scanning for case branch arrow', () => {
+      // Covers vhdlValidation.ts lines 331-333, 385-387: isCaseBranchArrow
+      // encounters excluded region and skips over it
+      const source =
+        "architecture rtl of test is\nbegin\n  inst: entity work.comp\n    port map (\n      a => sig1 when sel = '1' else sig2\n    );\nend architecture;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+
+    test('should skip comment between when and => in case branch detection', () => {
+      // Covers vhdlValidation.ts lines 385-387: findExcludedRegionAt
+      // returns a region during isCaseBranchArrow backward scan
+      const source =
+        'architecture rtl of test is\nbegin\n  inst: entity work.comp\n    port map (\n      a => sig1 when "string" -- comment\n      else sig2\n    );\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
+  suite('Coverage: isCaseBranchArrow when detection', () => {
+    test('should detect when keyword before => in case branch', () => {
+      // Covers vhdlValidation.ts lines 394-395: isCaseBranchArrow finds 'when'
+      // and returns true, causing isInSignalAssignment to skip the =>
+      const source = 'case sel is\n  when "00" =>\n    sig <= a when cond else b;\n  when others =>\n    null;\nend case;';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assert.ok(casePair);
+      // when should be intermediate of case, not consumed by signal assignment detection
+      assertIntermediates(casePair, ['is', 'when', 'when']);
+    });
+  });
+
+  suite('Coverage: isCaseBranchArrow reaching start of source', () => {
+    test('should return false when isCaseBranchArrow reaches start of source', () => {
+      // Covers vhdlValidation.ts lines 413-414: backward scan in
+      // isCaseBranchArrow reaches j < 0 and returns false
+      const source = 'a => sig when cond else other;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: isWaitBeforeFor dot-preceded wait', () => {
+    test('should not treat rec.wait as wait keyword before for', () => {
+      // Covers vhdlValidation.ts lines 463-464: wait preceded by '.'
+      // is rejected as hierarchical reference
+      const source = 'process is\nbegin\n  rec.wait for i in 0 to 3 loop\n    null;\n  end loop;\nend process;';
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'for');
+    });
+
+    test('should not treat rec . wait (with spaces) as wait keyword before for', () => {
+      // Covers vhdlValidation.ts lines 459-463: wait preceded by dot with spaces
+      const source = 'process is\nbegin\n  rec . wait for i in 0 to 3 loop\n    null;\n  end loop;\nend process;';
+      const pairs = parser.parse(source);
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Coverage: isValidForOpen blank line at start of file', () => {
+    test('should break blank-line scan when reaching start of file', () => {
+      // Covers vhdlValidation.ts line 39: prevNl <= 0 break
+      // when scanning blank lines reaches the beginning of the file
+      const source = '\n\nfor i in 0 to 3 loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  suite('Coverage: isValidEntityOrConfigOpen blank line at start of file', () => {
+    test('should break blank-line scan when reaching start of file for entity', () => {
+      // Covers vhdlValidation.ts line 86: prevNl <= 0 break
+      // in isValidEntityOrConfigOpen blank-line scanning
+      const source = '\n\nentity test is\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+  });
+
+  suite('Coverage: isCaseBranchArrow semicolon boundary', () => {
+    test('should stop at semicolon in isCaseBranchArrow scan', () => {
+      // Covers vhdlValidation.ts line 389: semicolon encountered
+      // during backward scan returns false
+      const source = 'architecture rtl of test is\nbegin\n  null; inst: entity work.comp\n    port map (\n      a => b\n    );\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
+  suite('Coverage: isCaseBranchArrow when at word boundary', () => {
+    test('should not match when inside longer identifier in isCaseBranchArrow', () => {
+      // Covers vhdlValidation.ts line 393: when boundary check
+      // where adjacent character is alphanumeric (e.g., "whenever")
+      const source = 'architecture rtl of test is\nbegin\n  inst: entity work.comp\n    port map (\n      whenever => sig\n    );\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
+  suite('Coverage: isCaseBranchArrow TRUE branch in isInSignalAssignment', () => {
+    test('should skip case branch => when scanning backward for signal assignment', () => {
+      // Covers vhdlValidation.ts lines 331-333: isCaseBranchArrow returns true
+      // causing isInSignalAssignment to skip past the => and continue scanning
+      // when choice2 => is preceded by when (making it a case branch arrow)
+      // The else on the last line scans backward, encounters =>, isCaseBranchArrow
+      // finds when before it and returns true, then scan continues past =>
+      const source = 'case sel is\n  when choice =>\n    when choice2 =>\n      null;\nend case;';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assert.ok(casePair);
+      assertIntermediates(casePair, ['is', 'when', 'when']);
+    });
+  });
+
   generateCommonTests(config);
 });

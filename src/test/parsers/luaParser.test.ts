@@ -910,6 +910,26 @@ end`;
     });
   });
 
+  suite('Branch coverage: standalone do inside non-loop block in loop scan', () => {
+    test('should handle standalone do inside function between for and its do', () => {
+      // Covers luaParser.ts lines 85-86: otherBlockDepth > 0, word === 'do',
+      // pendingLoopDo === 0 -> otherBlockDepth++ (standalone do inside function)
+      // Between outer for and its do, function contains a standalone do...end
+      const source = 'for i = 1, (function() do end return 1 end)() do\n  print(i)\nend';
+      const pairs = parser.parse(source);
+      const forBlock = pairs.find((p) => p.openKeyword.value === 'for' && p.nestLevel === 0);
+      assert.ok(forBlock, 'outer for block should exist');
+    });
+
+    test('should handle standalone do inside if block between while and its do', () => {
+      // Same branch: standalone do inside if block, no pending loop do
+      const source = 'while (function() if true then do end end return true end)() do\n  x = 1\nend';
+      const pairs = parser.parse(source);
+      const whileBlock = pairs.find((p) => p.openKeyword.value === 'while' && p.nestLevel === 0);
+      assert.ok(whileBlock, 'outer while block should exist');
+    });
+  });
+
   suite('Coverage: unterminated long string in comment', () => {
     test('should handle unterminated multi-line comment --[[ without closing ]]', () => {
       // Covers line 177: matchLongString returns { start: pos, end: source.length }

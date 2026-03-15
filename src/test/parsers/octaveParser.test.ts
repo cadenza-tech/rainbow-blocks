@@ -1129,5 +1129,46 @@ end`;
     });
   });
 
+  suite('Coverage: isCommentChar', () => {
+    test('should accept classdef section keyword followed by # comment (Octave)', () => {
+      // Covers octaveParser.ts lines 71-72: isCommentChar returns true for '#'
+      // In MATLAB, isCommentChar always returns false, but Octave overrides it
+      // isCommentChar is called from isValidBlockOpen in the parent class (matlabParser)
+      // when checking if a classdef section keyword is followed by valid content
+      const source = `classdef MyClass
+  properties # Octave comment
+    Value
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'properties');
+    });
+
+    test('should accept classdef section keyword followed by % comment (Octave)', () => {
+      // Covers octaveParser.ts line 71: isCommentChar returns true for '%'
+      const source = `classdef MyClass
+  methods % MATLAB-style comment
+    function f(obj)
+    end
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'methods');
+    });
+
+    test('should reject classdef section keyword followed by operator (Octave)', () => {
+      // Verifies that isCommentChar returns false for non-comment chars
+      // even in Octave, triggering the rejection at lines 63-64 of matlabParser.ts
+      const source = `classdef MyClass
+  properties + 1
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

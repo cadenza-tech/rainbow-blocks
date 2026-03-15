@@ -409,8 +409,8 @@ end tell`;
   activate
 end tell`;
       const pairs = parser.parse(source);
-      // Unterminated string extends to EOF
-      assertNoBlocks(pairs);
+      // Unterminated string ends at newline (AppleScript strings are single-line)
+      assertSingleBlock(pairs, 'tell', 'end tell');
     });
 
     test('should handle unterminated block comment', () => {
@@ -1696,6 +1696,135 @@ end try`;
       const source = 'if true then\n  set x to 1\nend if';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Branch coverage: possessive form before compound open keyword', () => {
+    test('should skip compound open keyword with timeout after possessive form', () => {
+      // Covers lines 338-339 (block_open branch): possessive pattern 's before compound open keyword
+      const source = 'get app\'s with timeout\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip compound open keyword using terms from after possessive form', () => {
+      const source = 'get app\'s using terms from\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip compound middle keyword on error after possessive form (set/copy branch)', () => {
+      // Covers line 325 possessive branch for block_middle
+      const source = "try\n  get app's on error\non error errMsg\n  display dialog errMsg\nend try";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+
+    test('should skip compound middle keyword else if after set command', () => {
+      // Covers line 325 set branch for block_middle
+      const source = 'if true then\n  set else if to 5\nelse\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should skip compound open keyword with transaction after copy', () => {
+      // Covers lines 338-339: copy before compound block_open keyword
+      const source = 'tell application "Finder"\n  copy with transaction to myVar\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Branch coverage: comment skip after continuation in compound keyword', () => {
+    test('should skip single-line comment between compound keyword words after continuation', () => {
+      // Covers lines 760-764: single-line comment (--) after continuation char between compound keyword words
+      const source = 'tell application "Finder"\n  activate\nend \u00AC -- comment\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip single-line comment after continuation in else if compound keyword', () => {
+      const source = 'if x = 1 then\n  beep\nelse \u00AC -- remark\nif x = 2 then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if']);
+    });
+
+    test('should skip block comment between compound keyword words after continuation', () => {
+      // Covers lines 766-783: block comment (* *) after continuation char between compound keyword words
+      const source = 'tell application "Finder"\n  activate\nend \u00AC (* block comment *)\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip nested block comment after continuation in compound keyword', () => {
+      // Covers nested block comment path in lines 770-778
+      const source = 'tell application "Finder"\n  activate\nend \u00AC (* outer (* inner *) *)\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should skip block comment after continuation in on error compound keyword', () => {
+      const source = 'try\n  beep\non \u00AC (* handler *)\nerror errMsg\n  log errMsg\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+  });
+
+  suite('Branch coverage: matchCompoundKeyword no newline after continuation', () => {
+    test('should reject compound keyword when continuation has no following newline', () => {
+      // Covers lines 793-794: continuation char followed by comment that consumes the rest of string
+      // end \u00AC -- comment (no newline) -> matchCompoundKeyword returns -1
+      const source = 'tell application "Finder"\n  activate\nend \u00AC-- no newline';
+      const pairs = parser.parse(source);
+      // 'end' as generic close matches 'tell', but it is NOT 'end tell'
+      assertSingleBlock(pairs, 'tell', 'end');
+    });
+
+    test('should reject compound keyword when continuation followed by block comment without newline', () => {
+      // Covers lines 793-794 via the block comment path: after skipping comment, no newline found
+      const source = 'tell application "Finder"\n  activate\nend \u00AC(* comment *)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end');
+    });
+  });
+
+  suite('Branch coverage: block comment after then in isValidBlockOpen', () => {
+    test('should skip block comment region after then and treat as multi-line if', () => {
+      // Covers line 132 branch: block comment (* *) after then is treated as comment (not content)
+      const source = 'if x > 0 then (* block comment *)\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should skip block comment after then on continuation line', () => {
+      const source = 'if x > 0 then (* explanation *) \u00AC\n(* more *)\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: set/copy pattern for compound block_middle keyword', () => {
+    test('should skip compound block_middle keyword after set without to', () => {
+      // Covers applescriptParser.ts line 325: set/copy pattern check for compound block_middle
+      // 'else if' is a compound block_middle keyword; 'set ' prefix matches the regex
+      // but isKeywordAsVariableName returns false (no 'to' after 'else if')
+      const source = 'if true then\n  set else if = 5\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: block comment whitespace in continuation between compound keyword words', () => {
+    test('should skip whitespace after block comment in continuation between compound keyword words', () => {
+      // Covers applescriptParser.ts line 780: whitespace skip after block comment
+      // between words of compound keyword separated by continuation character
+      const source = 'tell application "Finder"\n  get name\nend \u00AC(* comment *) \ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
     });
   });
 

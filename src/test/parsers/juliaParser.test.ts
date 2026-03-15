@@ -1119,8 +1119,9 @@ end`;
         assertSingleBlock(pairs, 'function', 'end');
       });
 
-      test('should handle escape sequences in prefixed triple-quoted strings', () => {
-        const source = 'x = raw"""\ntest\\"""\n"""\nfunction foo()\nend';
+      test('should not process backslash escapes in raw prefixed triple-quoted strings', () => {
+        // In raw strings, backslash does not escape - \""" is backslash then closing """
+        const source = 'x = raw"""\ntest\\\n"""\nfunction foo()\nend';
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'function', 'end');
       });
@@ -2817,6 +2818,77 @@ end`;
       const source = 'if true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: skipCharLiteral escape before newline', () => {
+    test('should handle backslash-newline in char literal inside interpolation (LF)', () => {
+      // Covers juliaHelpers.ts lines 36-37: escape char followed by \n returns i + 1
+      // skipCharLiteral is called inside $() interpolation for char literals
+      const source = '"$(\'\\\n42)"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle backslash-CR in char literal inside interpolation', () => {
+      // Covers juliaHelpers.ts lines 36-37: escape char followed by \r returns i + 1
+      const source = '"$(\'\\\r42)"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Branch coverage: skipPrefixedStringInInterpolation with escapes', () => {
+    test('should handle backslash escape in b-prefixed triple-quoted string inside interpolation', () => {
+      // Covers juliaHelpers.ts lines 60-62: hasEscapes=true, triple-quoted, backslash escape
+      const source = '"$(b"""test\\nmore""")"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should handle backslash escape in b-prefixed regular string inside interpolation', () => {
+      // Covers juliaHelpers.ts lines 76-78: hasEscapes=true, regular, backslash escape
+      const source = '"$(b"test\\nmore")"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Branch coverage: matchPrefixedTripleQuotedString backslash escape', () => {
+    test('should skip backslash escape in b-prefixed triple-quoted string', () => {
+      // Covers juliaParser.ts lines 439-440: hasEscapes=true && source[i]==='\\' branch
+      const source = 'x = b"""test\\"""more"""\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      // The b"""...""" region should include the escaped quote
+      const bRegion = regions.find((r) => source.slice(r.start, r.start + 4) === 'b"""');
+      assert.ok(bRegion, 'b-prefixed triple-quoted string region should exist');
+      assert.ok(bRegion.end > source.indexOf('more'), 'Region should extend past the escaped quote');
+    });
+
+    test('should handle multiple backslash escapes in b-prefixed triple-quoted string', () => {
+      // Additional coverage for hasEscapes continue path
+      const source = 'x = b"""\\n\\t\\r"""\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: hasBlockOpenerBetween and hasForBetween boundary', () => {
+    test('should check boundary at start of source in hasBlockOpenerBetween', () => {
+      // Covers juliaParser.ts lines 182-183: before is ' ' (i===0 case), after boundary check
+      const source = '(begin\n  1\nend, for x in 1:3\n  x\nend)';
+      const pairs = parser.parse(source);
+      // begin is a block opener, so for/if at depth 0 is allowed as block expression
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should check boundary at end of source in hasForBetween', () => {
+      // Covers juliaParser.ts lines 222-223: after is ' ' (at end of source)
+      const source = '(x for x in 1:10 if x > 5)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 

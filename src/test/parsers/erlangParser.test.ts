@@ -1760,6 +1760,41 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Branch coverage: end map key with comment in backward scan', () => {
+    test('should skip comment when scanning backward from end map key to #{', () => {
+      // Covers erlangParser.ts lines 180-182: findExcludedRegionAt returns a region
+      // during backward scan from 'end' used as map key.
+      // The comment between #{ and end is skipped via excluded region jump.
+      const source = '#{%comment\nend => value}.\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip multi-word comment when scanning backward from end map key', () => {
+      // Comment with spaces between #{ and end on next line
+      const source = '#{  % a long comment\n  end => value}.\nbegin\n  ok\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Branch coverage: atom with backslash-newline terminates', () => {
+    test('should terminate atom at backslash followed by LF', () => {
+      // Covers erlangParser.ts lines 452-453: backslash before \n in quoted atom
+      // Atom 'abc\ terminates at the backslash-newline, then begin/end detected
+      const source = "'abc\\\nbegin\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should terminate atom at backslash followed by CR', () => {
+      // Covers erlangParser.ts lines 452-453: backslash before \r in quoted atom
+      const source = "'abc\\\rbegin\rend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Branch coverage: map key keyword filter', () => {
     test('should filter out block_middle keyword followed by => in map', () => {
       // Covers erlangParser.ts lines 154-155: block_middle used as map key with =>

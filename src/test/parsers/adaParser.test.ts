@@ -1,4 +1,5 @@
 import * as assert from 'node:assert';
+import { isOrElseShortCircuit } from '../../parsers/adaHelpers';
 import { AdaBlockParser } from '../../parsers/adaParser';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
@@ -2175,6 +2176,107 @@ end if;`;
       const source = 'for';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: entry with is followed by non-body keywords', () => {
+    test('should not treat entry with is abstract as block opener', () => {
+      // Covers adaParser.ts lines 71-72: entry is abstract
+      const source = 'protected type Obj is\n  entry E is abstract;\nend Obj;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+
+    test('should not treat entry with is separate as block opener', () => {
+      // Covers adaParser.ts lines 71-72: entry is separate
+      const source = 'protected type Obj is\n  entry E is separate;\nend Obj;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+
+    test('should not treat entry with is new as block opener', () => {
+      // Covers adaParser.ts lines 71-72: entry is new
+      const source = 'protected type Obj is\n  entry E is new Generic_Entry;\nend Obj;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+
+    test('should not treat entry with is null as block opener', () => {
+      // Covers adaParser.ts lines 71-72: entry is null
+      const source = 'protected type Obj is\n  entry E is null;\nend Obj;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'protected', 'end');
+    });
+  });
+
+  suite('Coverage: entry with is <> generic default', () => {
+    test('should not treat entry with is <> as block opener', () => {
+      // Covers adaParser.ts lines 73-75: entry is <>
+      const source = 'generic\n  with entry E is <>;\nprocedure P is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Coverage: type/subtype after semicolon on same line skips is', () => {
+    test('should skip is when type appears after semicolon on same line', () => {
+      // Covers adaParser.ts lines 217-218: type after semicolon
+      // Line starts with "type", has ";", then another "type" before "is"
+      const source = 'type A is (X); type B is range 1 .. 10;\nif True then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should skip is when subtype appears after semicolon on same line', () => {
+      // Covers adaParser.ts lines 217-218: subtype after semicolon
+      const source = 'type A is (X); subtype S is Integer range 1 .. 10;\nif True then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Coverage: Ada 2012 expression function', () => {
+    test('should not treat expression function as block opener', () => {
+      // Covers adaValidation.ts lines 94-95: function is (expr)
+      const source = 'function Is_Positive(X : Integer) return Boolean is (X > 0);\nif True then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat expression function with complex expression as block opener', () => {
+      // Covers adaValidation.ts lines 94-95: function is (expr) with nested parens
+      const source = 'function Add(A, B : Integer) return Integer is (A + B);\nprocedure P is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
+  suite('Coverage: isOrElseShortCircuit direct tests', () => {
+    test('should return false when single dash appears between or and else', () => {
+      // Covers adaHelpers.ts line 80: non-whitespace, non-comment char
+      const source = 'or - else';
+      const result = isOrElseShortCircuit(source, 2, 4, () => false);
+      assert.strictEqual(result, false);
+    });
+
+    test('should skip -- comment and return true', () => {
+      // Covers adaHelpers.ts lines 75, 77-78: comment detection within isOrElseShortCircuit
+      const source = 'or -- comment\n else';
+      const result = isOrElseShortCircuit(source, 2, 15, () => false);
+      assert.strictEqual(result, true);
+    });
+
+    test('should return false when non-whitespace char follows comment', () => {
+      // Covers adaHelpers.ts lines 75, 77-78, 80: comment then non-whitespace
+      const source = 'or -- comment\nX else';
+      const result = isOrElseShortCircuit(source, 2, 16, () => false);
+      assert.strictEqual(result, false);
+    });
+
+    test('should return true when only whitespace exists between or and else', () => {
+      const source = 'or   else';
+      const result = isOrElseShortCircuit(source, 2, 5, () => false);
+      assert.strictEqual(result, true);
     });
   });
 

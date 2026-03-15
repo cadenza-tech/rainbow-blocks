@@ -991,12 +991,14 @@ fi`;
         assertSingleBlock(pairs, '{', '}');
       });
 
-      test('should not treat } and ${ inside string as parameter expansion', () => {
+      test('should handle quote toggling with ${ inside double-quoted string', () => {
+        // In Bash, " inside ${ } toggles the quote context
+        // The } on the last line closes the expansion, not the brace group
         const source = `{
   echo "} \${"
 }`;
         const pairs = parser.parse(source);
-        assertSingleBlock(pairs, '{', '}');
+        assertNoBlocks(pairs);
       });
     });
 
@@ -4345,6 +4347,144 @@ fi`;
       // Covers bashParser.ts lines 483-484: char === '{' && i > 0 && source[i - 1] === '$'
       // biome-ignore lint/suspicious/noTemplateCurlyInString: bash syntax in test string
       const source = 'if true; then\n  echo ${PATH}\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Coverage: isAtCommandPosition command starter preceded by backtick, {, }', () => {
+    test('should recognize keyword after command starter preceded by backtick', () => {
+      // Covers line 310 branch: source[p] === '`' for commandStarters
+      // Backward from `if`: skip space -> find `then` text -> p scans past space to backtick
+      const source = '`cmd` then if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize keyword after command starter preceded by opening brace', () => {
+      // Covers line 310 branch: source[p] === '{' for commandStarters
+      // Backward from `if`: find `do` text -> p scans to `{`
+      const source = '{ do if true; then\n  echo ok\nfi; }';
+      const pairs = parser.parse(source);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if'));
+    });
+
+    test('should recognize keyword after command starter preceded by closing brace', () => {
+      // Covers line 310 branch: source[p] === '}' for commandStarters
+      // Backward from `if`: find `else` text -> p scans to `}`
+      const source = '{ echo x; } else if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if'));
+    });
+  });
+
+  suite('Coverage: isAtCommandPosition block close preceded by backtick, {, }', () => {
+    test('should recognize keyword after block close preceded by backtick', () => {
+      // Covers line 325 branch: source[p] === '`' for blockCloseKws
+      // Backward from `if`: skip space -> find `fi` text -> p scans past space to backtick
+      const source = '`cmd` fi if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize keyword after block close preceded by opening brace', () => {
+      // Covers line 325 branch: source[p] === '{' for blockCloseKws
+      // Backward from `for`: find `done` text -> p scans to `{`
+      const source = '{ done for y in 1; do\n  echo $y\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should recognize keyword after block close preceded by closing brace', () => {
+      // Covers line 325 branch: source[p] === '}' for blockCloseKws
+      // Backward from `if`: find `esac` text -> p scans to `}`
+      const source = '{ echo a; } esac if true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if'));
+    });
+  });
+
+  suite('Coverage: isCasePattern backward scan completions', () => {
+    test('should handle case pattern where backward scan finds separator between ( and keyword', () => {
+      // The backward paren scan finds ( but hasUnexcludedSeparator is true, returns false
+      // Then continues searching but no more ( found
+      const source = '(echo; for x in 1 2; do\n  echo $x\ndone)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should handle case pattern on same line as in keyword', () => {
+      // The case pattern ( is preceded by `in ` on the same line
+      // Backward scan finds ( at depth 0, textBefore matches `\bin[ \t]*$`
+      const source = 'case $x in (for) echo match;; esac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Coverage: tokenize function definition { not at command position', () => {
+    test('should recognize { after ) in excluded region as function-like definition', () => {
+      // Covers bashParser.ts lines 507-508: { preceded by ) when not at command position
+      // x=$(cmd) creates excluded region; isAtCommandPosition skips over ) to `=` (not separator)
+      // but the simpler function def check at lines 503-508 finds ) directly
+      const source = 'x=$(cmd) {\n  echo test\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should recognize { after command substitution with assignment as function-like', () => {
+      // y=$(echo hello) { ... } -- same path with longer command substitution
+      const source = 'y=$(echo hello) {\n  echo inside\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Coverage: tokenize { not at command position and not function def', () => {
+    test('should not treat { after string as command grouping', () => {
+      // Covers bashParser.ts lines 524-525: !isFuncDef continue
+      // { after "text" is not at command position (isAtCommandPosition scans past excluded region)
+      // and not a function def (source[j] = " which is not ) or identifier char)
+      const source = 'echo "text" {\n  echo test\n}\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat { after dollar sign as command grouping', () => {
+      // source[j] = $ which is in the special char set, not ) or identifier
+      const source = 'echo $ {\n  echo test\n}\nfor i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Coverage: scanSubshellBody heredoc handling edge cases', () => {
+    test('should handle heredoc body at newline in command substitution', () => {
+      // Exercises scanSubshellBody line 447: heredoc body processing at newline
+      // Heredoc operator detected inside $(), newline triggers flush
+      const source = 'x=$(cat <<MARKER\nthis is content\nMARKER\n)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle multiple heredocs inside command substitution at newline', () => {
+      // Multiple heredocs in $(), both resolved at newline
+      const source = 'x=$(cat <<EOF1 <<EOF2\nbody1\nEOF1\nbody2\nEOF2\n)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle heredoc flushed at close paren in command substitution', () => {
+      // Exercises scanSubshellBody line 556: heredoc body processing at close paren
+      // Heredoc operator found on same line as ), flush happens at )
+      const source = 'x=$(cat <<MARKER) && echo after\ncontent\nMARKER\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle heredoc flushed at close paren in process substitution', () => {
+      // Same path but via process substitution <()
+      const source = 'diff <(cat <<MARKER) file\ncontent\nMARKER\nif true; then\n  echo ok\nfi';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });

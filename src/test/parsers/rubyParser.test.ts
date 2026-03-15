@@ -2973,5 +2973,66 @@ end`;
     });
   });
 
+  suite('Branch coverage: character literal \\C-x at source boundary', () => {
+    test('should handle ?\\C- at end of source with no character after dash', () => {
+      // Covers rubyParser.ts lines 445-446: pos + 4 < source.length is false
+      // ?\C- with no character after the dash, only 4 chars total
+      const source = '?\\C-';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 4);
+    });
+
+    test('should not affect block parsing when ?\\C- is at end of source', () => {
+      const source = 'if true\nend\n?\\C-';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: unterminated symbol with heredoc extending past end', () => {
+    test('should extend symbol excluded region when heredoc pendingEnd exceeds source length', () => {
+      // Covers rubyParser.ts lines 598-599: heredocState.pendingEnd > i in unterminated symbol
+      // An unterminated :"..." symbol where interpolation contains heredoc
+      // that extends past the end of the scanning loop
+      const source = ':"#{<<~EOF}\nheredoc body\nEOF';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      // The symbol region should extend to cover the heredoc body
+      const symbolRegion = regions.find((r) => r.start === 0);
+      assert.ok(symbolRegion !== undefined);
+      assert.ok(symbolRegion.end > 10);
+    });
+  });
+
+  suite('Branch coverage: CRLF in findLogicalLineStart', () => {
+    test('should follow backslash continuation across CRLF line endings', () => {
+      // Covers rubyParser.ts line 176: prevChar === '\\n' && checkPos > 0 && source[checkPos - 1] === '\\r'
+      // Backslash continuation with CRLF should merge logical lines
+      const source = 'x = 1 +\\\r\n2 if true\nend';
+      const pairs = parser.parse(source);
+      // "x = 1 + 2 if true" has content before 'if', so it's postfix
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle multiple backslash continuations with CRLF', () => {
+      const source = 'x = 1 +\\\r\n2 +\\\r\n3 if true\nend';
+      const pairs = parser.parse(source);
+      // Postfix if on continued line
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Branch coverage: character literal ? at start of string interpolation', () => {
+    test('should handle ?-prefixed char literal at the very start of interpolation', () => {
+      // Covers rubyFamilyHelpers.ts line 324: i - 1 === pos branch in skipInterpolationShared
+      // When ? is the very first char inside #{...}, i - 1 === pos is true
+      const source = '"#{?\'}" if true\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

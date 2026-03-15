@@ -3123,5 +3123,131 @@ end`;
     });
   });
 
+  suite('Regression: sigil boundary check for identifier-adjacent tilde', () => {
+    test('should not treat tilde after identifier as sigil start', () => {
+      const pairs = parser.parse('x = str~r/def foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat tilde after digit as sigil start', () => {
+      const pairs = parser.parse('x = 1~s(def foo do)\ndef bar do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat tilde after operator as sigil start', () => {
+      const pairs = parser.parse('x = ~r/def foo do/\ndef bar do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat tilde at start of source as sigil start', () => {
+      const pairs = parser.parse('~r/pattern/\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat tilde after paren as sigil start', () => {
+      const pairs = parser.parse('f(~r/end/)\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Branch coverage: isValidBlockClose rejects end preceded by range operator', () => {
+    test('should not treat end preceded by .. as block close', () => {
+      // Covers elixirParser.ts lines 288-289: position >= 2 && source[position-1] === '.' && source[position-2] === '.'
+      const pairs = parser.parse('x = 1..end');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still match end when not preceded by range operator', () => {
+      const pairs = parser.parse('if true do\n  x = 1..10\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: isDoColonOneLiner returns false for non-do-block keywords', () => {
+    test('should not check do: for fn keyword', () => {
+      // Covers elixirParser.ts lines 496-497: keyword not in doColonKeywords
+      // fn is a block open keyword but NOT in doColonKeywords, so isDoColonOneLiner returns false early
+      const pairs = parser.parse('fn -> :ok end');
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+  });
+
+  suite('Branch coverage: skipCharLiteral edge cases', () => {
+    test('should handle ? at end of source', () => {
+      // Covers elixirParser.ts line 164: pos + 1 >= source.length
+      const regions = parser.getExcludedRegions('x = ?');
+      // ? at end of source is not a valid char literal, no region created
+      const qPos = 4;
+      const hasRegionAtQ = regions.some((r) => r.start === qPos);
+      assert.strictEqual(hasRegionAtQ, false);
+    });
+
+    test('should handle ?\\ at end of source', () => {
+      // Covers elixirParser.ts line 168: pos + 2 >= source.length (backslash escape at end)
+      const regions = parser.getExcludedRegions('x = ?\\');
+      // ?\\ at end of source: backslash but no escape char, not a valid char literal
+      const qPos = 4;
+      const hasRegionAtQ = regions.some((r) => r.start === qPos);
+      assert.strictEqual(hasRegionAtQ, false);
+    });
+
+    test('should handle surrogate pair character literal', () => {
+      // Covers elixirParser.ts line 207: code > 0xFFFF surrogate pair
+      // U+1F600 (grinning face) is a surrogate pair, charLen = 2
+      const emoji = '\u{1F600}';
+      const source = `x = ?${emoji}\nif true do\n  :ok\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat surrogate pair character as excluded region with correct size', () => {
+      // Covers elixirParser.ts line 207: code > 0xFFFF, charLen = 2
+      const emoji = '\u{1F600}';
+      const source = `?${emoji}`;
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      // ? (1 char) + emoji (2 code units) = end at 3
+      assert.strictEqual(regions[0].end, 3);
+    });
+  });
+
+  suite('Branch coverage: end tracking inside hasDoKeyword scan', () => {
+    test('should ignore .end method call inside do keyword scan', () => {
+      // Covers elixirParser.ts line 428: source.slice(i, i + 3) === 'end' where beforeEnd === '.'
+      // .end should not decrement inner block or fn depth
+      const pairs = parser.parse('if list.end do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should ignore @end module attribute inside do keyword scan', () => {
+      // Covers elixirParser.ts line 428: beforeEnd === '@'
+      // @end should not decrement depth counters
+      const pairs = parser.parse('if @end do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: end with identifier suffix inside hasDoKeyword scan', () => {
+    test('should ignore endpoint (end followed by identifier chars) inside do keyword scan', () => {
+      // Covers elixirParser.ts line 428: afterEnd matches /[a-zA-Z0-9_:?!]/
+      // "endpoint" contains "end" but afterEnd = 'p' is a word char, so it's not a block end
+      const pairs = parser.parse('if endpoint do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should ignore end? method inside do keyword scan', () => {
+      // Covers elixirParser.ts line 428: afterEnd === '?'
+      const pairs = parser.parse('if end?(x) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should ignore end! method inside do keyword scan', () => {
+      // Covers elixirParser.ts line 428: afterEnd === '!'
+      const pairs = parser.parse('if end!(x) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

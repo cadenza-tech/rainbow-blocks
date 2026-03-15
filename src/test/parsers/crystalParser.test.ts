@@ -3213,6 +3213,18 @@ end`;
       const pairs = parser.parse("'\\u{\n}'\nif true\n  1\nend");
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not match char literal across CR line ending in \\u{ escape', () => {
+      // '\\u{ followed by CR then closing quote should not span across lines
+      const pairs = parser.parse("'\\u{\r'\ndef x\nend");
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match char literal across CRLF in \\u{ escape', () => {
+      // '\\u{ followed by CRLF then closing quote should not span across lines
+      const pairs = parser.parse("'\\u{\r\n'\ndef x\nend");
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Branch coverage: macro template interpolation with escaped nested string', () => {
@@ -3278,6 +3290,23 @@ end`;
     test('should not treat keyword in double-quoted heredoc opener as block keyword', () => {
       // Covers crystalParser.ts lines 334-335: <<-"do" filter in tokenize
       const source = 'x = <<-"do"\nheredoc body\ndo\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: character literal ? at start of interpolation', () => {
+    test('should handle ?-prefixed char literal at the very start of string interpolation', () => {
+      // Covers rubyFamilyHelpers.ts line 324: i - 1 === pos branch in skipInterpolationShared
+      // When ? is the very first char inside #{...}, i - 1 === pos is true
+      const source = '"#{?\'}" + if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?{ at start of interpolation without incrementing depth', () => {
+      // ? followed by { at interpolation start: should not affect brace depth
+      const source = '"#{?{}" + if true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });

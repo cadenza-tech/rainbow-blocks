@@ -1253,5 +1253,143 @@ END-PERFORM`;
     });
   });
 
+  suite('Branch coverage: PERFORM followed by END-PERFORM', () => {
+    test('should accept PERFORM immediately followed by END-PERFORM', () => {
+      // Covers line 145: word === `end-${lowerKeyword}` branch in computeValidPositions
+      // When the next word after PERFORM is END-PERFORM, it should not be rejected
+      // as a paragraph call, because it is the matching closer
+      const source = 'PERFORM END-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should accept PERFORM with content between it and END-PERFORM', () => {
+      // The END-PERFORM-as-next-word path still works in a multiline context
+      const source = 'PERFORM\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Branch coverage: isFixedFormatCommentLine with non-sequence-area prefix', () => {
+    test('should not treat line as comment when sequence area contains alphabetic chars inside EXEC block', () => {
+      // Covers lines 369-370: sequenceArea fails /^[\d \t]*$/ test inside isFixedFormatCommentLine
+      // called from matchExecBlock when a newline triggers the comment-line check
+      // The sequence area "abcdef" contains alphabetic characters, so it is not a valid
+      // fixed-format sequence area; the line is not treated as a comment
+      const source = 'EXEC SQL\nabcdef*END-EXEC in comment\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat line as comment when sequence area has special chars inside EXEC block', () => {
+      // Covers lines 369-370: sequenceArea with non-digit/non-space/non-tab content
+      const source = 'EXEC SQL\n@#$%^&*comment line\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Branch coverage: D/d debug indicator in isFixedFormatCommentLine inside EXEC block', () => {
+    test('should treat D at column 7 as debug line when sequence area has digits inside EXEC block', () => {
+      // Covers lines 374-381: D at column 7, hasDigit = true (fixed format confirmed)
+      // The D line is treated as a comment and skipped; END-EXEC after it closes the block
+      const source = 'EXEC SQL\n000100D DEBUG IF END-EXEC\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat D at column 7 as debug line when followed by alphanumeric in free format inside EXEC block', () => {
+      // Covers lines 374-381: D at column 7, hasDigit = false (free format), nextChar is alphanumeric
+      // In free-format (no digits in sequence area), D followed by alphanumeric is NOT a debug indicator
+      const source = 'EXEC SQL\n      DISPLAY X\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should treat D at column 7 as debug line when not followed by alphanumeric in free format inside EXEC block', () => {
+      // Covers lines 374-381: D at column 7, hasDigit = false, nextChar is space (not alphanumeric)
+      // D followed by a space is treated as debug indicator even without digits in sequence area
+      const source = 'EXEC SQL\n      D END-EXEC in debug\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should treat d at column 7 as debug line when followed by alphanumeric in fixed format inside EXEC block', () => {
+      // Covers lines 374-381: lowercase d at column 7, hasDigit = true (fixed format)
+      // With digits in sequence area, d is always a debug indicator regardless of what follows
+      const source = 'EXEC SQL\n000100d100 END-EXEC in debug\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should treat D at column 7 as debug line when D is last char in source inside EXEC block', () => {
+      // Covers branch 126 (line 376): i + 1 >= source.length -> nextChar = ''
+      // D at column 7, no digits in sequence area (free format), D is last char of source
+      // Empty string does not match /[a-zA-Z0-9_-]/, so D is treated as debug indicator
+      const source = 'EXEC SQL\n      D';
+      const regions = parser.getExcludedRegions(source);
+      // The entire source is one EXEC excluded region (unterminated, extends to source.length)
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+  });
+
+  suite('Branch coverage: END-EXECUTE support in matchExecBlock', () => {
+    test('should match EXEC block closed with END-EXECUTE', () => {
+      // Covers lines 482-487: END-EXECUTE keyword matching in matchExecBlock
+      const source = 'EXEC SQL\n  SELECT * FROM TABLE\nEND-EXECUTE\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should match EXECUTE block closed with END-EXECUTE', () => {
+      // Covers lines 482-487: END-EXECUTE with EXECUTE opener
+      const source = 'EXECUTE SQL\n  DELETE FROM TABLE\nEND-EXECUTE\nPERFORM\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should match lowercase end-execute', () => {
+      // Covers lines 482-487: case-insensitive END-EXECUTE
+      const source = 'exec sql\n  select * from table\nend-execute\nif x > 0\nend-if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end-if');
+    });
+
+    test('should not match END-EXECUTE as part of identifier (preceded by word char)', () => {
+      // Covers line 482: beforeOk check -- END-EXECUTE preceded by a word character
+      const source = 'EXEC SQL\n  SELECT 1\nXEND-EXECUTE\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not match END-EXECUTE as part of identifier (followed by word char)', () => {
+      // Covers line 483: afterOk check -- END-EXECUTE followed by a word character
+      const source = 'EXEC SQL\n  SELECT 1\nEND-EXECUTEX\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should match END-EXECUTE at end of source', () => {
+      // Covers line 483: afterOk when i + 11 >= source.length
+      const source = 'EXEC SQL SELECT 1 END-EXECUTE';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should match END-EXECUTE at start of source within EXEC block', () => {
+      // Covers line 482: beforeOk when i === 0 (though unlikely in practice)
+      // The EXEC starts at the beginning, and END-EXECUTE appears right after newline
+      const source = 'EXEC SQL\nEND-EXECUTE';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+  });
+
   generateCommonTests(config);
 });

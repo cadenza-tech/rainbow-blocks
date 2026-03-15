@@ -1650,6 +1650,101 @@ end`;
     });
   });
 
+  suite('isInsideRecord returns false at depth 0 for non-record block openers', () => {
+    test('should not treat case after bare class as inside record', () => {
+      // Backward scan from case: finds class at depth 0, returns false
+      // class without = is not a block opener, so case is a standalone block
+      const source = `TFoo = class
+  case X of
+    1: DoOne;
+  end;
+end`;
+      const pairs = parser.parse(source);
+      // class...end and case...end
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'class');
+      findBlock(pairs, 'case');
+    });
+
+    test('should not treat case after bare interface as inside record', () => {
+      // Backward scan from case: finds interface at depth 0, returns false
+      const source = `IFoo = interface
+  case X of
+    1: DoOne;
+  end;
+end`;
+      const pairs = parser.parse(source);
+      // interface...end and case...end
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'interface');
+      findBlock(pairs, 'case');
+    });
+
+    test('should not treat case after bare try as inside record', () => {
+      // Backward scan from case: finds try at depth 0, returns false
+      const source = `try
+  case X of
+    1: DoOne;
+  end;
+except
+  HandleError;
+end`;
+      const pairs = parser.parse(source);
+      // try...end and case...end
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'try');
+      findBlock(pairs, 'case');
+    });
+
+    test('should not treat case after bare asm as inside record', () => {
+      // Backward scan from case: finds asm at depth 0, returns false
+      const source = `asm
+  mov ax, bx
+end;
+case X of
+  1: DoOne;
+end`;
+      const pairs = parser.parse(source);
+      // asm...end and case...end
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'asm');
+      findBlock(pairs, 'case');
+    });
+  });
+
+  suite('Asm end label with excluded region before colon', () => {
+    test('should skip excluded region between end and colon in asm label', () => {
+      // Lines 233-236: comment between 'end' and ':' in asm block
+      const source = `asm
+  end{comment}:
+  nop
+end;
+begin
+  x := 1;
+end.`;
+      const pairs = parser.parse(source);
+      // 'end{comment}:' is a label (end + brace comment + colon), so it should be skipped
+      // The real 'end' closes the asm block
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should skip paren-star comment between end and colon in asm label', () => {
+      const source = `asm
+  end(* label *)  :
+  nop
+end;
+begin
+  x := 1;
+end.`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin' && p.closeKeyword.value === 'end'));
+    });
+  });
+
   suite('Regression: Unicode adjacency check in tokenize', () => {
     test('should not detect keywords adjacent to Unicode letters', () => {
       const pairs = parser.parse('\u03B1begin\n  x := 1;\n\u03B1end');

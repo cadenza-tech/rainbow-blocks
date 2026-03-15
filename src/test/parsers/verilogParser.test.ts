@@ -1777,5 +1777,36 @@ endmodule`;
     });
   });
 
+  suite('Coverage: trySkipLabel escaped identifier reaching EOF', () => {
+    test('should handle escaped identifier label at end of source without whitespace', () => {
+      // Covers verilogHelpers.ts lines 197-199: trySkipLabel escaped path
+      // where the while loop exits because i reaches source.length
+      const source = 'always \\label_at_eof';
+      const pairs = parser.parse(source);
+      // always cannot find begin after the escaped identifier, so it is rejected
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Coverage: default intermediate skipping non-case blocks', () => {
+    test('should not attach default to begin block when no case block exists', () => {
+      // Covers verilogParser.ts lines 489-490: default found as middle keyword
+      // but the opener is begin (not case/casex/casez), so continue skips it
+      const source = 'begin\n  default: x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'default should not attach to begin block');
+    });
+
+    test('should not attach default to module block when no case block exists', () => {
+      // Covers verilogParser.ts lines 489-490: default scans stack but finds
+      // only module (not case), so continues and exhausts all openers
+      const source = 'module test;\n  default: x = 1;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'default should not attach to module block');
+    });
+  });
+
   generateCommonTests(config);
 });
