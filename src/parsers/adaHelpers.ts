@@ -34,7 +34,9 @@ export function matchCharacterLiteral(source: string, pos: number): ExcludedRegi
   if (pos + 1 < source.length) {
     const codePoint = source.codePointAt(pos + 1);
     const charLen = codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
-    if (pos + 1 + charLen < source.length && source[pos + 1 + charLen] === "'") {
+    // Character literals cannot span lines - reject if character between ticks is a newline
+    const innerChar = source[pos + 1];
+    if (pos + 1 + charLen < source.length && source[pos + 1 + charLen] === "'" && innerChar !== '\n' && innerChar !== '\r') {
       // Qualified expression: type_name'(expr) -- tick before '(' preceded by identifier
       // is not a character literal, treat as attribute tick
       if (source[pos + 1] === '(' && pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {

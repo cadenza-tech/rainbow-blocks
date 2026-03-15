@@ -80,8 +80,8 @@ export class ElixirBlockParser extends BaseBlockParser {
       return matchElixirCharlist(source, pos, skipInterpolationBound);
     }
 
-    // Sigil (~r, ~s, ~w, etc)
-    if (char === '~' && pos + 1 < source.length) {
+    // Sigil (~r, ~s, ~w, etc) - must not be preceded by identifier characters
+    if (char === '~' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_]/.test(source[pos - 1]))) {
       const result = matchSigil(source, pos, skipInterpolationBound);
       if (result) return result;
     }
@@ -137,7 +137,7 @@ export class ElixirBlockParser extends BaseBlockParser {
           i++;
         }
         continue;
-      } else if (source[i] === '~' && i + 1 < source.length && /[a-zA-Z]/.test(source[i + 1])) {
+      } else if (source[i] === '~' && i + 1 < source.length && /[a-zA-Z]/.test(source[i + 1]) && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
         // Skip sigil inside interpolation (e.g. ~s(}))
         const sigilEnd = skipNestedSigil(source, i, skipInterpolationBound);
         if (sigilEnd > i) {
@@ -164,7 +164,8 @@ export class ElixirBlockParser extends BaseBlockParser {
     if (pos + 1 >= source.length) return pos;
     const nextChar = source[pos + 1];
     // ?\<escape>
-    if (nextChar === '\\' && pos + 2 < source.length) {
+    if (nextChar === '\\') {
+      if (pos + 2 >= source.length) return pos;
       const escChar = source[pos + 2];
       // ?\<newline> is not a valid character literal
       if (escChar === '\n' || escChar === '\r') return pos;
@@ -281,6 +282,12 @@ export class ElixirBlockParser extends BaseBlockParser {
     if (this.isKeywordArgument(source, position + keyword.length)) {
       return false;
     }
+
+    // Reject 'end' preceded by '..' range operator (e.g., 1..end)
+    if (position >= 2 && source[position - 1] === '.' && source[position - 2] === '.') {
+      return false;
+    }
+
     return true;
   }
 
@@ -489,11 +496,12 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Find "do" on the same line, tracking bracket/paren/brace depth
+    // Find "do" on the same line, tracking bracket/paren/brace depth and inner block/fn nesting
     let i = position + keyword.length;
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
+    let innerBlockDepth = 0;
 
     while (i < source.length) {
       // Skip excluded regions (strings, comments, etc) before checking for newline
@@ -513,8 +521,37 @@ export class ElixirBlockParser extends BaseBlockParser {
       else if (ch === '{') braceDepth++;
       else if (ch === '}') braceDepth--;
 
-      // Only look for "do" outside all brackets
+      // Only look for "do" and inner blocks outside all brackets
       if (parenDepth !== 0 || bracketDepth !== 0 || braceDepth !== 0) {
+        i++;
+        continue;
+      }
+
+      // Track fn...end nesting and inner block keyword nesting
+      if (/[a-zA-Z_]/.test(ch)) {
+        const wordMatch = source.slice(i).match(/^[a-zA-Z_]\w*/);
+        if (wordMatch) {
+          const word = wordMatch[0];
+          if (word === 'fn') {
+            innerBlockDepth++;
+            i += word.length;
+            continue;
+          }
+          if (word === 'end' && innerBlockDepth > 0) {
+            innerBlockDepth--;
+            i += word.length;
+            continue;
+          }
+          if (this.isBlockKeywordAt(source, i)) {
+            innerBlockDepth++;
+            i += word.length;
+            continue;
+          }
+        }
+      }
+
+      // Skip do/do: that belongs to inner blocks
+      if (innerBlockDepth > 0) {
         i++;
         continue;
       }

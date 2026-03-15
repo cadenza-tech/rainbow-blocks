@@ -299,12 +299,17 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     // After shell keywords that introduce a new command context
+    // The keyword itself must be at a valid position (not a command argument like "echo then")
     const commandStarters = ['then', 'do', 'else', 'elif', 'time', 'coproc'];
     for (const kw of commandStarters) {
       const kwStart = i - kw.length + 1;
       if (kwStart >= 0 && source.slice(kwStart, i + 1) === kw) {
         if (kwStart === 0 || !/[a-zA-Z0-9_]/.test(source[kwStart - 1])) {
-          return true;
+          let p = kwStart - 1;
+          while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
+          if (p < 0 || ';|&\n\r()'.includes(source[p]) || source[p] === '`' || source[p] === '{' || source[p] === '}') {
+            return true;
+          }
         }
       }
     }
@@ -315,7 +320,11 @@ export class BashBlockParser extends BaseBlockParser {
       const kwStart = i - kw.length + 1;
       if (kwStart >= 0 && source.slice(kwStart, i + 1) === kw) {
         if (kwStart === 0 || !/[a-zA-Z0-9_]/.test(source[kwStart - 1])) {
-          return true;
+          let p = kwStart - 1;
+          while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
+          if (p < 0 || ';|&\n\r()'.includes(source[p]) || source[p] === '`' || source[p] === '{' || source[p] === '}') {
+            return true;
+          }
         }
       }
     }
@@ -483,11 +492,37 @@ export class BashBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Command grouping '{' must be followed by whitespace
+      // Command grouping '{' must be followed by whitespace and at valid position
       if (char === '{') {
         const nextChar = source[i + 1];
         if (nextChar !== undefined && nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r') {
           continue;
+        }
+        if (!this.isAtCommandPosition(source, i, excludedRegions)) {
+          // Allow { in function definitions: "function name {" or "name() {"
+          let j = i - 1;
+          while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+          let isFuncDef = false;
+          if (j >= 0 && source[j] === ')') {
+            // name() { ... }
+            isFuncDef = true;
+          } else if (j >= 0 && /[^\s;|&(){}<>$`"'\\#]/.test(source[j])) {
+            // Check for "function name {" (Bash allows hyphens, dots, colons, etc. in function names)
+            while (j >= 0 && /[^\s;|&(){}<>$`"'\\#]/.test(source[j])) j--;
+            let k = j;
+            while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+            if (
+              k >= 7 &&
+              source.slice(k - 7, k + 1) === 'function' &&
+              (k - 8 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 8])) &&
+              this.isAtCommandPosition(source, k - 7, excludedRegions)
+            ) {
+              isFuncDef = true;
+            }
+          }
+          if (!isFuncDef) {
+            continue;
+          }
         }
       }
 

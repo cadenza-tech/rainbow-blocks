@@ -45,6 +45,23 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (/\S/.test(textBefore)) {
         return false;
       }
+      // Reject if followed by operator or punctuation (used as variable, not section keyword)
+      // Valid section keywords are followed by newline, EOF, '(' (attribute list), or comment (% or #)
+      let nextPos = position + keyword.length;
+      while (nextPos < source.length && (source[nextPos] === ' ' || source[nextPos] === '\t')) {
+        nextPos++;
+      }
+      if (
+        nextPos < source.length &&
+        !this.isInExcludedRegion(nextPos, excludedRegions) &&
+        source[nextPos] !== '\n' &&
+        source[nextPos] !== '\r' &&
+        source[nextPos] !== '(' &&
+        source[nextPos] !== '%' &&
+        !this.isCommentChar(source[nextPos])
+      ) {
+        return false;
+      }
     }
     return true;
   }
@@ -228,6 +245,11 @@ export class MatlabBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch']
   };
 
+  // Checks if a character is a comment prefix (overridden in Octave to include #)
+  protected isCommentChar(_char: string): boolean {
+    return false;
+  }
+
   // Checks if position is at line start allowing leading whitespace
   protected isAtLineStartWithWhitespace(source: string, pos: number): boolean {
     if (pos === 0) return true;
@@ -341,16 +363,20 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Check if this is a transpose operator (after identifier, number, ], }, or .)
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
+      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || /\p{L}/u.test(prevChar)) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         // If immediately followed by a letter, it's more likely a string
         if (/[0-9]/.test(prevChar)) {
-          const nextChar = source[pos + 1];
+          const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
           if (nextChar && /[a-zA-Z_]/.test(nextChar)) {
             // Fall through to string matching
           } else {
             return { start: pos, end: pos + 1 };
           }
+        } else if (prevChar === "'") {
+          // Quote immediately after another quote: still transpose
+          // A'' = two transposes, each ' follows a value (result of prior transpose)
+          return { start: pos, end: pos + 1 };
         } else {
           // This is transpose, not string - return minimal region
           return { start: pos, end: pos + 1 };

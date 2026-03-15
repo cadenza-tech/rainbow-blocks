@@ -1,7 +1,7 @@
 // Ada block parser: procedure, function, if, loop, case with compound end keywords
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
-import { isOrElseShortCircuit, matchAdaString, matchCharacterLiteral, scanForwardToIs } from './adaHelpers';
+import { isOrElseShortCircuit, matchAdaString, matchCharacterLiteral, scanForwardToIs, skipAdaWhitespaceAndComments } from './adaHelpers';
 import type { AdaValidationCallbacks } from './adaValidation';
 import {
   isInsideParens,
@@ -63,7 +63,17 @@ export class AdaBlockParser extends BaseBlockParser {
     const cb = this.validationCallbacks;
 
     if (lowerKeyword === 'entry') {
-      return scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions)) >= 0;
+      const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions));
+      if (isPos < 0) return false;
+      const k = skipAdaWhitespaceAndComments(source, isPos + 2);
+      const afterIs = source.slice(k).match(/^([a-zA-Z_]\w*)/);
+      if (afterIs && ['abstract', 'separate', 'new', 'null'].includes(afterIs[1].toLowerCase())) {
+        return false;
+      }
+      if (k < source.length && source[k] === '<' && k + 1 < source.length && source[k + 1] === '>') {
+        return false;
+      }
+      return true;
     }
 
     if (lowerKeyword === 'task') {
@@ -182,20 +192,34 @@ export class AdaBlockParser extends BaseBlockParser {
         const lineStart = findLineStart(source, startOffset);
         const lineBefore = source.slice(lineStart, startOffset).toLowerCase().trimStart();
         if (/^(type|subtype)\b/.test(lineBefore)) {
-          // Only skip if no ';' between type/subtype and this 'is' on the same line
-          let hasSemicolon = false;
+          // Find the last top-level semicolon before this 'is' on the same line
+          // to handle multiple type declarations on one line
+          let lastSemiPos = -1;
+          let parenDepth = 0;
           for (let si = lineStart; si < startOffset; si++) {
-            if (source[si] === ';' && !this.isInExcludedRegion(si, excludedRegions)) {
-              hasSemicolon = true;
-              break;
+            if (this.isInExcludedRegion(si, excludedRegions)) continue;
+            if (source[si] === '(') parenDepth++;
+            else if (source[si] === ')') parenDepth--;
+            else if (source[si] === ';' && parenDepth === 0) {
+              lastSemiPos = si;
             }
           }
-          if (!hasSemicolon) {
+          if (lastSemiPos < 0) {
+            // No semicolon → the type/subtype at line start applies to this 'is'
+            continue;
+          }
+          // Check if there's a type/subtype after the last semicolon
+          const afterSemi = source
+            .slice(lastSemiPos + 1, startOffset)
+            .toLowerCase()
+            .trimStart();
+          if (/^(type|subtype)\b/.test(afterSemi)) {
             continue;
           }
         }
         // Check previous lines if current line has only whitespace before 'is'
-        if (lineBefore.length === 0) {
+        // or if 'is' follows a closing paren from a discriminant list
+        if (lineBefore.length === 0 || /\)\s*$/.test(lineBefore)) {
           let scanPos = lineStart - 1;
           // Skip line terminator (\n, \r\n, or \r)
           if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
@@ -220,7 +244,12 @@ export class AdaBlockParser extends BaseBlockParser {
                 isTypeDecl = true;
                 typeDeclStart = prevStart;
               }
-              break;
+              // Continue scanning past continuation lines (discriminant lists)
+              scanPos = prevStart - 1;
+              if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+              if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+              if (isTypeDecl) break;
+              continue;
             }
             // Move past line terminator to previous line
             scanPos = prevStart - 1;
@@ -228,10 +257,15 @@ export class AdaBlockParser extends BaseBlockParser {
             if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
           }
           // Only skip if no ';' between type/subtype and this 'is'
+          // Track parenthesis depth so semicolons inside discriminant parts are ignored
           if (isTypeDecl) {
             let hasSemicolon = false;
+            let parenDepth = 0;
             for (let si = typeDeclStart; si < startOffset; si++) {
-              if (source[si] === ';' && !this.isInExcludedRegion(si, excludedRegions)) {
+              if (this.isInExcludedRegion(si, excludedRegions)) continue;
+              if (source[si] === '(') parenDepth++;
+              else if (source[si] === ')') parenDepth--;
+              else if (source[si] === ';' && parenDepth === 0) {
                 hasSemicolon = true;
                 break;
               }
@@ -280,6 +314,8 @@ export class AdaBlockParser extends BaseBlockParser {
             while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
               prevPos--;
             }
+          } else {
+            prevPos--;
           }
         }
         if (prevPos >= 0 && source[prevPos] === ';') {

@@ -70,8 +70,8 @@ export function matchArithmeticBracket(source: string, pos: number): ExcludedReg
 
 // Matches heredoc: <<EOF, <<'EOF', <<"EOF", <<-EOF, <<-'EOF', <<-"EOF"
 export function matchHeredoc(source: string, pos: number): ExcludedRegion | null {
-  // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, etc.
-  const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])(.*?)\2|([A-Za-z_][A-Za-z0-9_\-.]*))(?=[^A-Za-z0-9_\-.]|$)/;
+  // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, and numeric-only
+  const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])(.*?)\2|([A-Za-z_0-9][A-Za-z0-9_\-.]*))(?=[^A-Za-z0-9_\-.]|$)/;
   const match = source.slice(pos).match(heredocPattern);
 
   if (!match) return null;
@@ -308,15 +308,11 @@ export function matchBashDoubleQuote(source: string, pos: number): ExcludedRegio
           j += 2;
           continue;
         }
-        // Nested double-quoted string: use full Bash-aware scanner to handle $(), ${}, backticks
+        // In bash, " inside ${} toggles the quoting context (quote-toggling model)
+        // "${x:-"default"}" - the inner " toggles off outer quoting, } still closes expansion
         if (source[j] === '"') {
-          const endPos = findBashDoubleQuoteEnd(source, j);
-          if (endPos >= j + 2 && source[endPos - 1] === '"') {
-            j = endPos;
-            continue;
-          }
-          // No matching close quote — this " likely ends the outer string
-          break;
+          j++;
+          continue;
         }
         // Single-quoted string (no escapes in bash single quotes)
         if (source[j] === "'") {

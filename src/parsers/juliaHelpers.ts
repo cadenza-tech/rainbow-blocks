@@ -33,7 +33,7 @@ export function skipCharLiteral(source: string, pos: number): number {
     if (source[i] === '\\' && i + 1 < source.length) {
       // Don't let escape skip past newline - character literals can't span lines
       if (source[i + 1] === '\n' || source[i + 1] === '\r') {
-        return i;
+        return i + 1;
       }
       i += 2;
       continue;
@@ -50,13 +50,13 @@ export function skipCharLiteral(source: string, pos: number): number {
   return i;
 }
 
-// Skips a prefixed string (no interpolation) inside interpolation
-export function skipPrefixedStringInInterpolation(source: string, pos: number): number {
+// Skips a prefixed string (no interpolation except b"...") inside interpolation
+export function skipPrefixedStringInInterpolation(source: string, pos: number, hasEscapes = false): number {
   // Check for triple-quoted prefixed string
   if (source.slice(pos, pos + 3) === '"""') {
     let i = pos + 3;
     while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
+      if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
         i += 2;
         continue;
       }
@@ -72,7 +72,7 @@ export function skipPrefixedStringInInterpolation(source: string, pos: number): 
   // Regular prefixed string
   let i = pos + 1;
   while (i < source.length) {
-    if (source[i] === '\\' && i + 1 < source.length) {
+    if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
       i += 2;
       continue;
     }
@@ -107,7 +107,7 @@ export function skipNestedJuliaString(source: string, pos: number): number {
     }
     return i;
   }
-  // Regular single-quoted string
+  // Regular double-quoted string
   let i = pos + 1;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
@@ -221,7 +221,8 @@ export function skipJuliaInterpolation(source: string, pos: number): number {
         }
         prefixStart++;
         if (prefixStart < i && /[a-zA-Z]/.test(source[prefixStart])) {
-          i = skipPrefixedStringInInterpolation(source, i);
+          const prefixText = source.slice(prefixStart, i);
+          i = skipPrefixedStringInInterpolation(source, i, prefixText === 'b');
           continue;
         }
       }

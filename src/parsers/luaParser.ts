@@ -48,8 +48,12 @@ export class LuaBlockParser extends BaseBlockParser {
       const matches = [...searchRange.matchAll(blockPattern)];
 
       let nestedLoopDepth = 0;
+      // Track nested loop do...end blocks that need their end consumed
+      let nestedLoopEndDepth = 0;
       let otherBlockDepth = 0;
       let foundOurDo = false;
+      // Track pending for/while inside non-loop blocks that await their do keyword
+      let pendingLoopDo = 0;
 
       for (const innerMatch of matches) {
         const absolutePos = afterLoopStart + innerMatch.index;
@@ -65,10 +69,25 @@ export class LuaBlockParser extends BaseBlockParser {
           otherBlockDepth++;
         } else if ((word === 'end' || word === 'until') && otherBlockDepth > 0) {
           otherBlockDepth--;
+          if (otherBlockDepth === 0) {
+            pendingLoopDo = 0;
+          }
         } else if (otherBlockDepth > 0) {
-          // Inside a non-loop block, skip for/while/do
-          // biome-ignore lint/complexity/noUselessContinue: explicit skip for readability
-          continue;
+          // Inside a non-loop block, track sub-blocks so their end keywords
+          // don't prematurely close the outer scope
+          if (word === 'for' || word === 'while') {
+            otherBlockDepth++;
+            pendingLoopDo++;
+          } else if (word === 'do') {
+            if (pendingLoopDo > 0) {
+              pendingLoopDo--;
+            } else {
+              otherBlockDepth++;
+            }
+          }
+        } else if ((word === 'end' || word === 'until') && nestedLoopEndDepth > 0) {
+          // Consume end that closes a nested loop's do...end block
+          nestedLoopEndDepth--;
         } else if (word === 'for' || word === 'while') {
           // Nested loop found; its do will be consumed by this nested loop
           nestedLoopDepth++;
@@ -76,6 +95,7 @@ export class LuaBlockParser extends BaseBlockParser {
           if (nestedLoopDepth > 0) {
             // This do belongs to a nested loop
             nestedLoopDepth--;
+            nestedLoopEndDepth++;
           } else if (absolutePos === position) {
             // This is our do, and it belongs to this loop
             foundOurDo = true;

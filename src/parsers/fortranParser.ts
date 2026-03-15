@@ -432,6 +432,10 @@ export class FortranBlockParser extends BaseBlockParser {
     // matching 'end' token because \b word boundary doesn't match inside them
     for (const [pos, compound] of compoundEndPositions) {
       if (!processedCompoundPositions.has(pos)) {
+        // Validate concatenated compound end keywords (reject variable assignments like enddo = 10)
+        if (!isValidFortranBlockClose(compound.keyword, source, pos)) {
+          continue;
+        }
         const { line, column } = this.getLineAndColumn(pos, newlinePositions);
         result.push({
           type: 'block_close',

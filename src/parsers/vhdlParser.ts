@@ -24,7 +24,8 @@ const COMPOUND_END_TYPES = [
   'record',
   'configuration',
   'protected',
-  'for'
+  'for',
+  'units'
 ];
 
 // Pattern to match compound end keywords (case insensitive)
@@ -53,7 +54,8 @@ export class VhdlBlockParser extends BaseBlockParser {
       'block',
       'record',
       'configuration',
-      'protected'
+      'protected',
+      'units'
     ],
     blockClose: ['end'],
     blockMiddle: ['else', 'elsif', 'when', 'then', 'is', 'begin']
@@ -99,6 +101,18 @@ export class VhdlBlockParser extends BaseBlockParser {
       return isValidLoopOpen(source, position, excludedRegions, cb);
     }
 
+    return true;
+  }
+
+  protected isValidBlockClose(_keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    // Reject 'end' preceded by '.' (hierarchical reference like inst.end)
+    let dotPos = position - 1;
+    while (dotPos >= 0 && (source[dotPos] === ' ' || source[dotPos] === '\t')) {
+      dotPos--;
+    }
+    if (dotPos >= 0 && source[dotPos] === '.') {
+      return false;
+    }
     return true;
   }
 
@@ -160,7 +174,7 @@ export class VhdlBlockParser extends BaseBlockParser {
     while (match !== null) {
       const pos = match.index;
       // Check if in excluded region
-      if (!this.isInExcludedRegion(pos, excludedRegions)) {
+      if (!this.isInExcludedRegion(pos, excludedRegions) && this.isValidBlockClose(match[0], source, pos, excludedRegions)) {
         const fullMatch = match[0];
         const endType = match[1].toLowerCase();
         compoundEndPositions.set(pos, {
@@ -197,6 +211,10 @@ export class VhdlBlockParser extends BaseBlockParser {
       const type = getTokenTypeCaseInsensitive(keyword, this.keywords);
 
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      if (type === 'block_close' && !this.isValidBlockClose(keyword, source, startOffset, excludedRegions)) {
         continue;
       }
 

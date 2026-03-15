@@ -26,7 +26,8 @@ export class PascalBlockParser extends BaseBlockParser {
       }
       // Tagless variant: case TypeName of (identifier followed by 'of', no colon)
       // TypeName can be qualified (e.g., Types.MyEnum)
-      if (/^[ \t]+[a-zA-Z_][\w.]*[ \t]+of\b/i.test(afterCase)) {
+      // 'of' may appear on a separate line
+      if (/^[ \t]+[a-zA-Z_][\w.]*\s+of\b/i.test(afterCase)) {
         // Check if we're inside a record block by scanning backward
         if (this.isInsideRecord(source, position, excludedRegions)) {
           return false;
@@ -42,10 +43,22 @@ export class PascalBlockParser extends BaseBlockParser {
       return true;
     }
 
-    // 'class of' is a class reference type, not a block
+    // 'class of' is a class reference type, not a block (same line only)
     if (keyword === 'class') {
-      const afterClass = source.slice(position + keyword.length);
-      if (/^[ \t]+of\b/i.test(afterClass)) {
+      let j = position + keyword.length;
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          j++;
+          continue;
+        }
+        if (source[j] === '\n' || source[j] === '\r') break;
+        if (source[j] === ' ' || source[j] === '\t') {
+          j++;
+          continue;
+        }
+        break;
+      }
+      if (j + 2 <= source.length && /^of\b/i.test(source.slice(j, j + 3))) {
         return false;
       }
     }
@@ -214,9 +227,18 @@ export class PascalBlockParser extends BaseBlockParser {
         }
 
         // Skip end: (assembly label) - check if followed by colon
+        // Skip whitespace and excluded regions (comments) between 'end' and ':'
         let checkPos = endPos + 3;
-        while (checkPos < source.length && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
-          checkPos++;
+        while (checkPos < source.length) {
+          if (this.isInExcludedRegion(checkPos, regions)) {
+            checkPos++;
+            continue;
+          }
+          if (source[checkPos] === ' ' || source[checkPos] === '\t') {
+            checkPos++;
+            continue;
+          }
+          break;
         }
         if (checkPos < source.length && source[checkPos] === ':') {
           continue;
@@ -234,8 +256,16 @@ export class PascalBlockParser extends BaseBlockParser {
       }
     }
 
-    // Merge asm regions into the main regions array and re-sort
+    // Merge asm regions into the main regions array
+    // Remove inner regions that overlap with asm body to prevent binary search failure
     if (asmRegions.length > 0) {
+      for (const asmRegion of asmRegions) {
+        for (let ri = regions.length - 1; ri >= 0; ri--) {
+          if (regions[ri].start >= asmRegion.start && regions[ri].end <= asmRegion.end) {
+            regions.splice(ri, 1);
+          }
+        }
+      }
       regions.push(...asmRegions);
       regions.sort((a, b) => a.start - b.start);
     }
@@ -289,6 +319,7 @@ export class PascalBlockParser extends BaseBlockParser {
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
         if (depth > 0) depth--;
+        else return false;
         i -= 5;
         continue;
       }
@@ -332,6 +363,7 @@ export class PascalBlockParser extends BaseBlockParser {
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
         if (depth > 0) depth--;
+        else return false;
         i -= 5;
         continue;
       }
@@ -343,6 +375,7 @@ export class PascalBlockParser extends BaseBlockParser {
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
         if (depth > 0) depth--;
+        else return false;
         i -= 9;
         continue;
       }
@@ -354,13 +387,12 @@ export class PascalBlockParser extends BaseBlockParser {
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
         if (depth > 0) depth--;
+        else return false;
         i -= 3;
         continue;
       }
-      // Note: 'case' is NOT tracked here because variant case (inside record/object)
-      // has no matching 'end', while standalone case does. Treating both the same
-      // causes incorrect depth tracking when a standalone case follows a record
-      // that contains a variant case.
+      // Note: 'case' is NOT tracked here because variant case (inside record/object) has no matching 'end'
+      // Tracking case would cause variant case to consume the record's 'end', breaking depth accounting
       // 'asm' closes an 'end'
       if (
         i >= 2 &&
@@ -369,6 +401,7 @@ export class PascalBlockParser extends BaseBlockParser {
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
         if (depth > 0) depth--;
+        else return false;
         i -= 3;
         continue;
       }

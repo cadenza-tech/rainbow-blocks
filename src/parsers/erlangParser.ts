@@ -59,16 +59,17 @@ export class ErlangBlockParser extends BaseBlockParser {
     const afterFun = source.slice(position + 3);
     // fun Module:Function/Arity or fun Function/Arity
     // Module can be a quoted atom: fun 'my.module':func/N
-    const atomOrIdent = "(?:[a-zA-Z_][a-zA-Z0-9_]*|'(?:[^'\\\\\\n\\r]|\\\\.)*')";
+    // Module/Function can be a macro: fun ?MODULE:handler/N, fun ?MY_FUNC/N
+    const atomOrIdent = "(?:\\??[a-zA-Z_][a-zA-Z0-9_]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
     const funRefModPattern = new RegExp(`^[ \\t]+${atomOrIdent}[ \\t]*:[ \\t]*${atomOrIdent}[ \\t]*/[ \\t]*\\d`);
     if (funRefModPattern.test(afterFun)) {
       return false;
     }
-    if (/^[ \t]+[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\/[ \t]*\d/.test(afterFun)) {
+    if (/^[ \t]+\??[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\/[ \t]*\d/.test(afterFun)) {
       return false;
     }
-    // fun 'quoted-atom'/Arity (function reference without module prefix)
-    const quotedFunRef = /^[ \t]+'(?:[^'\\\n\r]|\\.)*'[ \t]*\/[ \t]*\d/;
+    // fun 'quoted-atom'/Arity or fun ?'quoted-atom'/Arity (function reference without module prefix)
+    const quotedFunRef = /^[ \t]+\??'(?:[^'\\\n\r]|\\.)*'[ \t]*\/[ \t]*\d/;
     if (quotedFunRef.test(afterFun)) {
       return false;
     }
@@ -162,8 +163,34 @@ export class ErlangBlockParser extends BaseBlockParser {
       const afterToken = source.slice(token.endOffset);
       // Allow at most one line break to handle multi-line map expressions
       // Also skip trailing comments (% ...) before line break
-      // Exempt block_close tokens (end) to support block expressions as map keys
-      if (token.type !== 'block_close' && /^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
+      // Filter keywords used as map keys (followed by => or :=)
+      // For block_close (end), only filter when it's a bare map key (directly after #{)
+      if (token.type === 'block_close') {
+        if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
+          // Check if 'end' is a map key (preceded by #{ or by comma/whitespace inside a map)
+          // Skip whitespace, newlines, and excluded regions (comments) backward
+          let k = token.startOffset - 1;
+          while (k >= 0) {
+            if (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r') {
+              k--;
+              continue;
+            }
+            const region = this.findExcludedRegionAt(k, excludedRegions);
+            if (region) {
+              k = region.start - 1;
+              continue;
+            }
+            break;
+          }
+          if (k >= 0 && source[k] === '{' && k > 0 && source[k - 1] === '#') {
+            return false;
+          }
+          // Also filter 'end' preceded by comma (non-first map key)
+          if (k >= 0 && source[k] === ',') {
+            return false;
+          }
+        }
+      } else if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
         return false;
       }
       // Reject keywords preceded by '.' (record field access like Rec#state.end)
@@ -420,6 +447,10 @@ export class ErlangBlockParser extends BaseBlockParser {
           continue;
         }
 
+        // Atoms cannot span lines - backslash before newline terminates
+        if (escChar === '\n' || escChar === '\r') {
+          return { start: pos, end: i };
+        }
         // Basic escape: \n, \t, \\, \', etc
         i += 2;
         continue;

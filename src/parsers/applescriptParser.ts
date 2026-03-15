@@ -121,12 +121,21 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
     if (thenPos >= 0) {
       // Check if there's non-excluded content after 'then' on the same line
+      // Comments are not content, but strings, pipes, and chevrons ARE content
       let j = thenPos + 4;
       while (j < lineEnd) {
         const region = this.findExcludedRegionAt(j, excludedRegions);
         if (region) {
-          j = region.end;
-          continue;
+          // Only skip comments (-- and (* *)), not strings/pipes/chevrons
+          if (
+            source[region.start] === '-' ||
+            (source[region.start] === '(' && region.start + 1 < source.length && source[region.start + 1] === '*')
+          ) {
+            j = region.end;
+            continue;
+          }
+          // Non-comment excluded region (string, pipe, chevron) is real content -> single-line if
+          return false;
         }
         if (source[j] !== ' ' && source[j] !== '\t' && source[j] !== '\r' && source[j] !== '\n' && source[j] !== '\u00AC') {
           // Non-whitespace, non-excluded content after 'then' -> single-line if
@@ -152,9 +161,20 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return this.matchNestedComment(source, pos);
     }
 
-    // Double-quoted string
+    // Double-quoted string with backslash escaping (AppleScript strings are single-line)
     if (char === '"') {
-      return this.matchQuotedString(source, pos, '"');
+      let j = pos + 1;
+      while (j < source.length && source[j] !== '"' && source[j] !== '\n' && source[j] !== '\r') {
+        if (source[j] === '\\' && j + 1 < source.length && source[j + 1] !== '\n' && source[j + 1] !== '\r') {
+          j += 2;
+          continue;
+        }
+        j++;
+      }
+      if (j < source.length && source[j] === '"') {
+        return { start: pos, end: j + 1 };
+      }
+      return { start: pos, end: j };
     }
 
     // Pipe-delimited identifier: |identifier|
@@ -285,6 +305,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Check if compound middle keyword is used as a variable name
       if (type === 'block_middle' && this.isKeywordAsVariableName(source, i, source.slice(i, flexMatch), lowerSource, excludedRegions)) {
         return { nextPos: flexMatch };
+      }
+
+      // 'on error' is only a keyword at logical line start (like single-word 'on')
+      if (type === 'block_middle' && keyword === 'on error') {
+        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: flexMatch };
+        }
       }
 
       // Check if compound middle keyword is used in set/copy/possessive patterns
@@ -432,7 +459,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         case 'block_middle':
           // 'on error' outside a try block is a standalone handler (block_open)
           if (token.value === 'on error') {
-            // Only treat as intermediate if the stack top is 'try'
+            // Only treat as intermediate if try is the direct parent (top of stack)
             if (stack.length > 0 && stack[stack.length - 1].token.value === 'try') {
               stack[stack.length - 1].intermediates.push(token);
               break;
@@ -599,9 +626,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // Replace excluded regions with spaces before continuation normalization to preserve indices
     let rawBefore = lower.slice(lineStart, position);
     for (const region of excludedRegions) {
-      if (region.start >= lineStart && region.end <= position) {
-        const relStart = region.start - lineStart;
-        const relEnd = region.end - lineStart;
+      const overlapStart = Math.max(region.start, lineStart);
+      const overlapEnd = Math.min(region.end, position);
+      if (overlapStart < overlapEnd) {
+        const relStart = overlapStart - lineStart;
+        const relEnd = overlapEnd - lineStart;
         rawBefore = rawBefore.slice(0, relStart) + ' '.repeat(relEnd - relStart) + rawBefore.slice(relEnd);
       }
     }
@@ -721,17 +750,48 @@ export class ApplescriptBlockParser extends BaseBlockParser {
             j++;
           }
         }
-        // Handle continuation character(s) followed by optional whitespace, newline, then optional whitespace
+        // Handle continuation character(s) followed by optional whitespace/comments, newline, then optional whitespace
         while (j < lowerSource.length && lowerSource[j] === '\u00AC') {
           j++;
           while (j < lowerSource.length && (lowerSource[j] === ' ' || lowerSource[j] === '\t')) {
             j++;
           }
+          // Skip single-line comment (-- to end of line) after continuation
+          if (j + 1 < lowerSource.length && lowerSource[j] === '-' && lowerSource[j + 1] === '-') {
+            while (j < lowerSource.length && lowerSource[j] !== '\r' && lowerSource[j] !== '\n') {
+              j++;
+            }
+          }
+          // Skip block comment (* *) after continuation
+          while (j + 1 < lowerSource.length && lowerSource[j] === '(' && lowerSource[j + 1] === '*') {
+            let commentDepth = 1;
+            j += 2;
+            while (j < lowerSource.length && commentDepth > 0) {
+              if (j + 1 < lowerSource.length && lowerSource[j] === '(' && lowerSource[j + 1] === '*') {
+                commentDepth++;
+                j += 2;
+              } else if (j + 1 < lowerSource.length && lowerSource[j] === '*' && lowerSource[j + 1] === ')') {
+                commentDepth--;
+                j += 2;
+              } else {
+                j++;
+              }
+            }
+            while (j < lowerSource.length && (lowerSource[j] === ' ' || lowerSource[j] === '\t')) {
+              j++;
+            }
+          }
+          let foundNewline = false;
           if (j < lowerSource.length && lowerSource[j] === '\r') {
             j++;
+            foundNewline = true;
           }
           if (j < lowerSource.length && lowerSource[j] === '\n') {
             j++;
+            foundNewline = true;
+          }
+          if (!foundNewline) {
+            return -1;
           }
           while (j < lowerSource.length && (lowerSource[j] === ' ' || lowerSource[j] === '\t')) {
             j++;

@@ -62,9 +62,10 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
           continue;
         }
         if (singleBraceDepth === 1) {
-          // First } closes the single {, second } is part of }} template closer
+          // First } closes the single {, advance past it and continue
           singleBraceDepth = 0;
-          // Fall through to template close logic below (don't skip)
+          i++;
+          continue;
         }
         depth--;
         if (depth === 0) {
@@ -159,7 +160,7 @@ export function matchCharLiteral(source: string, pos: number): ExcludedRegion | 
         while (i < source.length && source[i] !== '}' && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
-        if (i < source.length) i++; // skip '}'
+        if (i < source.length && source[i] === '}') i++; // skip '}'
       } else {
         // \uXXXX form (4 hex digits)
         const end = Math.min(i + 4, source.length);
@@ -376,8 +377,9 @@ export function isPostfixConditional(source: string, position: number, excludedR
   // Block keyword before means not postfix
   const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
 
+  const normalizedBefore = beforeKeyword.replace(/[ \t]+/g, ' ');
   for (const kw of precedingBlockKeywords) {
-    if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`) || beforeKeyword.endsWith(`\t${kw}`)) {
+    if (normalizedBefore === kw || normalizedBefore.endsWith(` ${kw}`)) {
       return false;
     }
   }
@@ -425,8 +427,9 @@ export function isPostfixRescue(source: string, position: number, excludedRegion
   before = before.trim();
   if (before.length === 0) return false;
   const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
+  const normalizedRescueBefore = before.replace(/[ \t]+/g, ' ');
   for (const kw of blockKeywords) {
-    if (before === kw || before.endsWith(` ${kw}`) || before.endsWith(`\t${kw}`)) {
+    if (normalizedRescueBefore === kw || normalizedRescueBefore.endsWith(` ${kw}`)) {
       return false;
     }
   }

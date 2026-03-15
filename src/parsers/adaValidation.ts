@@ -89,6 +89,10 @@ export function isValidSubprogramOpen(
   if (k < source.length && source[k] === '<' && k + 1 < source.length && source[k + 1] === '>') {
     return false;
   }
+  // 'is (expr)' is an Ada 2012 expression function, not a block body
+  if (k < source.length && source[k] === '(') {
+    return false;
+  }
   return true;
 }
 

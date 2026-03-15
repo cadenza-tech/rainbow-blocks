@@ -92,6 +92,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Checks if position is inside any brackets (for for/if comprehension check)
+  // Returns true only when the keyword is directly inside [] without intervening ()
   private isInsideBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
@@ -108,14 +109,11 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === ')') {
         parenDepth++;
       } else if (char === '(') {
-        if (parenDepth === 0 && bracketDepth === 0) {
-          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
-            return false;
-          }
-          parenDepth--;
-        } else {
-          parenDepth--;
+        if (parenDepth === 0) {
+          // Inside a parenthesized expression, not directly in brackets
+          return false;
         }
+        parenDepth--;
       }
     }
     return false;
@@ -172,7 +170,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Used to distinguish a[f(end)] (lastindex) from [f(begin...end)] (block close)
   private hasBlockOpenerBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
     // Exclude 'for' and 'if' since they are themselves subject to parenthesis rejection
-    // Only count block openers like begin, function, struct, etc.
+    // Only count block openers like 'begin', 'function', 'struct', etc.
     const blockOpeners = this.keywords.blockOpen.filter((kw) => kw !== 'for' && kw !== 'if');
     for (let i = start; i < end; i++) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -412,8 +410,8 @@ export class JuliaBlockParser extends BaseBlockParser {
         if (source.slice(prefixEnd, prefixEnd + 3) === '"""') {
           return this.matchPrefixedTripleQuotedString(source, pos, prefixLength);
         }
-        // Regular prefixed string (no interpolation, raw content)
-        let stringEnd = this.findPrefixedStringEnd(source, prefixEnd + 1, '"');
+        // Regular prefixed string (no interpolation, raw content except b"...")
+        let stringEnd = this.findPrefixedStringEnd(source, prefixEnd + 1, '"', prefix === 'b');
         // Consume string macro suffix characters (e.g., custom"content"end)
         while (stringEnd < source.length && /[a-zA-Z0-9_]/.test(source[stringEnd])) {
           stringEnd++;
@@ -430,12 +428,14 @@ export class JuliaBlockParser extends BaseBlockParser {
     return this.keywords.blockOpen.includes(word) || this.keywords.blockClose.includes(word) || this.keywords.blockMiddle.includes(word);
   }
 
-  // Matches prefixed triple-quoted string (no interpolation, raw content)
+  // Matches prefixed triple-quoted string (no interpolation, raw content except b"...")
   private matchPrefixedTripleQuotedString(source: string, pos: number, prefixLength: number): ExcludedRegion {
+    const prefix = source.slice(pos, pos + prefixLength);
+    const hasEscapes = prefix === 'b';
     let i = pos + prefixLength + 3;
 
     while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
+      if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
         i += 2;
         continue;
       }
@@ -453,11 +453,11 @@ export class JuliaBlockParser extends BaseBlockParser {
     return { start: pos, end: source.length };
   }
 
-  // Finds the end of a prefixed string (no interpolation, raw content)
-  private findPrefixedStringEnd(source: string, start: number, quote: string): number {
+  // Finds the end of a prefixed string (no interpolation, raw content except b"...")
+  private findPrefixedStringEnd(source: string, start: number, quote: string, hasEscapes = false): number {
     let i = start;
     while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
+      if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
         i += 2;
         continue;
       }
@@ -531,6 +531,7 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (source[i] === '\\' && i + 1 < source.length) {
         // Don't let escape skip past newline - character literals can't span lines
         if (source[i + 1] === '\n' || source[i + 1] === '\r') {
+          i++;
           break;
         }
         i += 2;

@@ -123,6 +123,10 @@ export class CobolBlockParser extends BaseBlockParser {
       if (end < source.length && source[end] === '-') {
         continue;
       }
+      // Skip keywords adjacent to Unicode letters (consistent with tokenize)
+      if (this.isAdjacentToUnicodeLetter(source, pos, match[0].length)) {
+        continue;
+      }
       const isClose = match[0].length > lowerKeyword.length;
       if (isClose) {
         closerPositions.add(pos);
@@ -137,20 +141,29 @@ export class CobolBlockParser extends BaseBlockParser {
           const nextWord = afterInner.match(/^[ \t]+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
           if (nextWord) {
             const word = nextWord[1].toLowerCase();
-            if (word !== 'until' && word !== 'varying' && word !== 'with' && word !== 'times') {
+            if (word === `end-${lowerKeyword}`) {
+              // The next word is the matching END-PERFORM closer, not a paragraph name
+            } else if (word !== 'until' && word !== 'varying' && word !== 'with' && word !== 'times') {
               const afterNextWord = afterInner.slice(nextWord[0].length);
               // Check for PERFORM <variable> TIMES pattern
               const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
               if (secondWord && secondWord[1].toLowerCase() === 'times') {
                 // PERFORM <variable> TIMES → structured block, accept
-              } else if (secondWord && (secondWord[1].toLowerCase() === 'thru' || secondWord[1].toLowerCase() === 'through')) {
-                // PERFORM para THRU para → paragraph range call, reject
+              } else if (
+                secondWord &&
+                (secondWord[1].toLowerCase() === 'thru' ||
+                  secondWord[1].toLowerCase() === 'through' ||
+                  secondWord[1].toLowerCase() === 'until' ||
+                  secondWord[1].toLowerCase() === 'varying' ||
+                  secondWord[1].toLowerCase() === 'with')
+              ) {
+                // PERFORM para THRU/THROUGH/UNTIL/VARYING/WITH → paragraph call with iteration, reject
                 continue;
               } else {
                 // Check if only whitespace/newline/period follows the first word (paragraph call)
                 // If there's more content on the same line, it's likely a block PERFORM with inline statements
                 // Strip inline COBOL comments (*>) before checking
-                const afterNextWordNoComment = afterNextWord.replace(/\*>.*/, '');
+                const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/, '');
                 const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
                 if (!hasMoreContent) {
                   continue;
@@ -352,7 +365,21 @@ export class CobolBlockParser extends BaseBlockParser {
     }
     // Validate columns 1-6 look like fixed-format sequence area
     const sequenceArea = source.slice(lineStart, i);
-    return /^[\d \t]*$/.test(sequenceArea);
+    if (!/^[\d \t]*$/.test(sequenceArea)) {
+      return false;
+    }
+    // D/d special handling: in free-format (no digits in sequence area),
+    // only treat as comment if next char is not alphanumeric
+    if (indicator === 'D' || indicator === 'd') {
+      const hasDigit = /\d/.test(sequenceArea);
+      if (!hasDigit) {
+        const nextChar = i + 1 < source.length ? source[i + 1] : '';
+        if (/[a-zA-Z0-9_-]/.test(nextChar)) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   // Matches COBOL string with specified quote character
@@ -448,7 +475,18 @@ export class CobolBlockParser extends BaseBlockParser {
         }
         continue;
       }
-      // Check for END-EXEC keyword
+      // Check for END-EXECUTE keyword (11 chars, must check before END-EXEC)
+      if ((ch === 'E' || ch === 'e') && i + 10 < source.length) {
+        const candidate11 = source.slice(i, i + 11).toUpperCase();
+        if (candidate11 === 'END-EXECUTE') {
+          const beforeOk = i === 0 || !/[a-zA-Z0-9_-]/.test(source[i - 1]);
+          const afterOk = i + 11 >= source.length || !/[a-zA-Z0-9_-]/.test(source[i + 11]);
+          if (beforeOk && afterOk) {
+            return { start: pos, end: i + 11 };
+          }
+        }
+      }
+      // Check for END-EXEC keyword (8 chars)
       if ((ch === 'E' || ch === 'e') && i + 7 < source.length) {
         const candidate = source.slice(i, i + 8).toUpperCase();
         if (candidate === 'END-EXEC') {

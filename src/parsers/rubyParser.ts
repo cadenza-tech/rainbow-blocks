@@ -18,7 +18,7 @@ import {
 } from './rubyFamilyHelpers';
 
 // Valid Ruby regex flags
-const REGEX_FLAGS_PATTERN = /[imxo]/;
+const REGEX_FLAGS_PATTERN = /[imxonesu]/;
 
 // Valid specifiers for percent literals
 const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrsx]/;
@@ -226,8 +226,9 @@ export class RubyBlockParser extends BaseBlockParser {
     before = before.trim();
     if (before.length === 0) return false;
     const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
+    const normalizedRescueBefore = before.replace(/[ \t]+/g, ' ');
     for (const kw of blockKeywords) {
-      if (before === kw || before.endsWith(` ${kw}`) || before.endsWith(`\t${kw}`)) {
+      if (normalizedRescueBefore === kw || normalizedRescueBefore.endsWith(` ${kw}`)) {
         return false;
       }
     }
@@ -261,8 +262,9 @@ export class RubyBlockParser extends BaseBlockParser {
     // Block keyword before means not postfix
     const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
 
+    const normalizedBefore = beforeKeyword.replace(/[ \t]+/g, ' ');
     for (const kw of precedingBlockKeywords) {
-      if (beforeKeyword === kw || beforeKeyword.endsWith(` ${kw}`) || beforeKeyword.endsWith(`\t${kw}`)) {
+      if (normalizedBefore === kw || normalizedBefore.endsWith(` ${kw}`)) {
         return false;
       }
     }
@@ -440,6 +442,7 @@ export class RubyBlockParser extends BaseBlockParser {
             if (pos + 4 < source.length) {
               return { start: pos, end: pos + 5 };
             }
+            return { start: pos, end: pos + 4 };
           }
           // \uXXXX (7 chars: ?\uXXXX) or \u{...} (variable)
           if (escChar === 'u') {

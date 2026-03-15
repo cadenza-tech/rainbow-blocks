@@ -19,7 +19,7 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 };
 
 // Characters that indicate the preceding / is division, not regex
-const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$]/;
+const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$/]/;
 
 // Returns the matching close delimiter for an open delimiter
 function getMatchingDelimiter(open: string): string | null {

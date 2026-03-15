@@ -478,11 +478,16 @@ export class VerilogBlockParser extends BaseBlockParser {
         case 'block_middle': {
           if (stack.length > 0) {
             const isPreprocessorMiddle = token.value.startsWith('`');
+            const isCaseMiddle = token.value === 'default';
             // Find the correct block to attach this intermediate to
             for (let si = stack.length - 1; si >= 0; si--) {
               const openerValue = stack[si].token.value;
               const isPreprocessorBlock = openerValue.startsWith('`');
               if (isPreprocessorMiddle === isPreprocessorBlock) {
+                // 'default' only attaches to case/casex/casez blocks
+                if (isCaseMiddle && openerValue !== 'case' && openerValue !== 'casex' && openerValue !== 'casez') {
+                  continue;
+                }
                 stack[si].intermediates.push(token);
                 break;
               }

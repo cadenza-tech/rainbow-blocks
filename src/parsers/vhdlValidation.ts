@@ -205,6 +205,14 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
         if (callbacks.isInExcludedRegion(absolutePos, excludedRegions)) {
           continue;
         }
+        // Reject prefix keyword preceded by '.' (hierarchical reference like inst.for)
+        let prefixDotCheck = absolutePos - 1;
+        while (prefixDotCheck >= 0 && (source[prefixDotCheck] === ' ' || source[prefixDotCheck] === '\t')) {
+          prefixDotCheck--;
+        }
+        if (prefixDotCheck >= 0 && source[prefixDotCheck] === '.') {
+          continue;
+        }
         // Check if 'generate' appears between the for/while and 'loop' (not in excluded region)
         // Must check all lines between prefix and loop, since generate may be on a different line
         const textBetween = source.slice(absolutePos, position).toLowerCase();
@@ -224,18 +232,23 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
         if (prefix === 'for' && !isValidForOpen(source, absolutePos, excludedRegions, callbacks)) {
           continue;
         }
-        // If the line also contains 'loop' not in excluded region, the for/while is already paired
-        // Skip 'loop' that is part of 'end loop' (not a real loop opener) or already paired
+        // Check if there's a 'loop' between this for/while and our loop position (already paired)
+        // Search the text between the prefix and our position, not just the same line
+        const searchStart = absolutePos + prefix.length;
+        const textBetweenPrefixAndLoop = source.slice(searchStart, position).toLowerCase();
         const loopPattern = /\bloop\b/g;
         let foundPairedLoop = false;
-        for (const loopMatch of lineText.matchAll(loopPattern)) {
-          const loopAbsPos = lineStartOffset + loopMatch.index;
+        for (const loopMatch of textBetweenPrefixAndLoop.matchAll(loopPattern)) {
+          const loopAbsPos = searchStart + loopMatch.index;
           if (callbacks.isInExcludedRegion(loopAbsPos, excludedRegions)) {
             continue;
           }
           // Check if this 'loop' is preceded by 'end' (part of 'end loop')
-          const beforeLoop = lineText.slice(0, loopMatch.index).trimEnd();
-          if (/\bend$/i.test(beforeLoop)) {
+          const beforeLoopText = source
+            .slice(Math.max(0, loopAbsPos - 10), loopAbsPos)
+            .trimEnd()
+            .toLowerCase();
+          if (/\bend$/.test(beforeLoopText)) {
             continue;
           }
           // Skip loop positions already paired with a previous for/while
@@ -312,7 +325,12 @@ export function isInSignalAssignment(
       continue;
     }
     // Port/generic map association: => (e.g., sig => val when cond else other)
+    // But NOT case branch arrow (when choice =>)
     if (ch === '>' && i > 0 && source[i - 1] === '=') {
+      if (isCaseBranchArrow(source, i - 1, lowerSource, excludedRegions, callbacks)) {
+        i -= 2;
+        continue;
+      }
       return keyword === 'when' || foundWhen;
     }
     // Variable assignment :=
@@ -348,6 +366,49 @@ export function isInSignalAssignment(
       }
     }
     i--;
+  }
+  return false;
+}
+
+// Checks if => at position is part of a case branch (preceded by 'when' keyword)
+function isCaseBranchArrow(
+  source: string,
+  eqPos: number,
+  lowerSource: string,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  let j = eqPos - 1;
+  while (j >= 0) {
+    const rj = callbacks.findExcludedRegionAt(j, excludedRegions);
+    if (rj) {
+      j = rj.start - 1;
+      continue;
+    }
+    const c = source[j];
+    if (c === ';') return false;
+    // Check for 'when' keyword (4 chars ending at j)
+    if (j >= 3) {
+      const slice = lowerSource.slice(j - 3, j + 1);
+      if (slice === 'when' && (j - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[j - 4])) && (j + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 1]))) {
+        return true;
+      }
+    }
+    // Stop at block boundary keywords
+    for (const boundary of ['then', 'begin', 'is', 'end']) {
+      const len = boundary.length;
+      if (j >= len - 1) {
+        const start = j - len + 1;
+        if (
+          lowerSource.slice(start, start + len) === boundary &&
+          (start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) &&
+          (start + len >= source.length || !/[a-zA-Z0-9_]/.test(source[start + len]))
+        ) {
+          return false;
+        }
+      }
+    }
+    j--;
   }
   return false;
 }
@@ -390,6 +451,15 @@ function isWaitBeforeFor(
   for (const match of trimmedLineText.matchAll(waitPattern)) {
     const waitAbsPos = lineAbsOffset + trimOffset + match.index;
     if (callbacks.isInExcludedRegion(waitAbsPos, excludedRegions)) {
+      continue;
+    }
+    // Reject wait preceded by '.' (hierarchical reference like rec.wait)
+    const waitPosInRaw = waitAbsPos - lineAbsOffset;
+    let waitDotCheck = waitPosInRaw - 1;
+    while (waitDotCheck >= 0 && (rawLineText[waitDotCheck] === ' ' || rawLineText[waitDotCheck] === '\t')) {
+      waitDotCheck--;
+    }
+    if (waitDotCheck >= 0 && rawLineText[waitDotCheck] === '.') {
       continue;
     }
     // Check if this wait is terminated by a semicolon

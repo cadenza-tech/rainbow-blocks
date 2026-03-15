@@ -19,6 +19,8 @@ const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   endproperties: 'properties',
   endevents: 'events',
   endenumeration: 'enumeration',
+  endarguments: 'arguments',
+  endspmd: 'spmd',
   until: 'do'
 };
 
@@ -39,6 +41,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
       'properties',
       'events',
       'enumeration',
+      'arguments',
       'unwind_protect'
     ],
     blockClose: [
@@ -56,10 +59,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
       'endmethods',
       'endproperties',
       'endevents',
-      'endenumeration'
+      'endenumeration',
+      'endarguments',
+      'endspmd'
     ],
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch', 'unwind_protect_cleanup']
   };
+
+  // Octave uses # as a comment character in addition to %
+  protected override isCommentChar(char: string): boolean {
+    return char === '#' || char === '%';
+  }
 
   // Reject block open keywords used as variable names (do = 1, if = 5, etc.)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -290,15 +300,19 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Check if single quote is a transpose operator (after identifier, number, ], }, or .)
     if (quote === "'" && pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
+      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || /\p{L}/u.test(prevChar)) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         if (/[0-9]/.test(prevChar)) {
-          const nextChar = source[pos + 1];
+          const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
           if (nextChar && /[a-zA-Z_]/.test(nextChar)) {
             // Fall through to string matching
           } else {
             return { start: pos, end: pos + 1 };
           }
+        } else if (prevChar === "'") {
+          // Quote immediately after another quote: still transpose
+          // A'' = two transposes, each ' follows a value (result of prior transpose)
+          return { start: pos, end: pos + 1 };
         } else {
           return { start: pos, end: pos + 1 };
         }
