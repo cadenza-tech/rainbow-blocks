@@ -54,6 +54,33 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   return true;
 }
 
+// Validates 'while' keyword: rejects 'wait while' (not a loop construct)
+export function isValidWhileOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
+  let i = position - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    i--;
+  }
+  // Skip excluded regions backward (comments between wait and while)
+  while (i >= 0 && callbacks.isInExcludedRegion(i, excludedRegions)) {
+    const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+    if (region) {
+      i = region.start - 1;
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+        i--;
+      }
+    } else {
+      i--;
+    }
+  }
+  if (i >= 3) {
+    const candidate = source.slice(i - 3, i + 1).toLowerCase();
+    if (candidate === 'wait' && (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Validates 'entity'/'configuration': rejects 'use entity', 'label: entity' direct instantiation
 export function isValidEntityOrConfigOpen(
   lowerKeyword: string,
@@ -262,6 +289,22 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
         if (foundPairedLoop) {
           continue;
         }
+        // Check if a semicolon terminates the for/while before reaching our loop
+        const prefixEnd = absolutePos + prefix.length;
+        const textFromPrefixToLoop = source.slice(prefixEnd, position);
+        let foundSemicolon = false;
+        for (let si = 0; si < textFromPrefixToLoop.length; si++) {
+          if (textFromPrefixToLoop[si] === ';') {
+            const semiAbsPos = prefixEnd + si;
+            if (!callbacks.isInExcludedRegion(semiAbsPos, excludedRegions)) {
+              foundSemicolon = true;
+              break;
+            }
+          }
+        }
+        if (foundSemicolon) {
+          continue;
+        }
         return false;
       }
     }
@@ -409,6 +452,25 @@ function isCaseBranchArrow(
       }
     }
     j--;
+  }
+  return false;
+}
+
+// Checks if position is inside parenthesized expression (port map, generic map, function call)
+// Scans backward from position to find unmatched '('
+export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
+  let depth = 0;
+  for (let i = position - 1; i >= 0; i--) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
+    const ch = source[i];
+    if (ch === ')') {
+      depth++;
+    } else if (ch === '(') {
+      if (depth === 0) {
+        return true;
+      }
+      depth--;
+    }
   }
   return false;
 }

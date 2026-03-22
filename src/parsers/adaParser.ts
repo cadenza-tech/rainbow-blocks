@@ -18,7 +18,7 @@ import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
-const COMPOUND_END_TYPES = ['if', 'loop', 'case', 'select', 'record', 'procedure', 'function', 'package', 'task', 'protected', 'accept'];
+const COMPOUND_END_TYPES = ['if', 'loop', 'case', 'select', 'record', 'procedure', 'function', 'package', 'task', 'protected', 'accept', 'entry'];
 
 // Keywords that can precede 'begin' and are closed together with it
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
@@ -217,15 +217,25 @@ export class AdaBlockParser extends BaseBlockParser {
             continue;
           }
         }
-        // Check previous lines if current line has only whitespace before 'is'
-        // or if 'is' follows a closing paren from a discriminant list
-        if (lineBefore.length === 0 || /\)\s*$/.test(lineBefore)) {
+        // Check previous lines if current line has only whitespace before 'is',
+        // or if 'is' follows a closing paren from a discriminant list,
+        // or if lineBefore has unmatched closing parens (multi-line discriminant)
+        let lineParenDepth = 0;
+        for (const ch of lineBefore) {
+          if (ch === '(') lineParenDepth++;
+          if (ch === ')') lineParenDepth--;
+        }
+        const hasUnmatchedCloseParen = lineParenDepth < 0;
+        if (lineBefore.length === 0 || /^\(.*\)\s*$/.test(lineBefore) || hasUnmatchedCloseParen) {
           let scanPos = lineStart - 1;
           // Skip line terminator (\n, \r\n, or \r)
           if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
           if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
           let isTypeDecl = false;
           let typeDeclStart = -1;
+          // Track paren depth for multi-line discriminant lists
+          // Positive means we're inside a parenthesized group scanning backward
+          let scanParenDepth = hasUnmatchedCloseParen ? -lineParenDepth : 0;
           while (scanPos >= 0) {
             const prevStart = findLineStart(source, scanPos);
             const prevLine = source
@@ -240,11 +250,22 @@ export class AdaBlockParser extends BaseBlockParser {
                 if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
                 continue;
               }
+              // Track paren depth for multi-line discriminant lists
+              // Use absolute positions to skip excluded regions (comments, strings)
+              for (let ci = prevStart; ci <= scanPos && ci < source.length; ci++) {
+                if (this.isInExcludedRegion(ci, excludedRegions)) continue;
+                if (source[ci] === ')') scanParenDepth++;
+                if (source[ci] === '(') scanParenDepth--;
+              }
               if (/^(type|subtype)\b/.test(prevLine)) {
                 isTypeDecl = true;
                 typeDeclStart = prevStart;
               }
-              // Continue scanning past continuation lines (discriminant lists)
+              // Stop scanning at lines that are not type declaration continuations
+              // Continue if inside parenthesized discriminant (scanParenDepth > 0) or line starts with (
+              if (!isTypeDecl && scanParenDepth <= 0 && !/^\(/.test(prevLine)) {
+                break;
+              }
               scanPos = prevStart - 1;
               if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
               if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
@@ -256,21 +277,31 @@ export class AdaBlockParser extends BaseBlockParser {
             if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
             if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
           }
-          // Only skip if no ';' between type/subtype and this 'is'
+          // Only skip if no ';' or new declaration keyword between type/subtype and this 'is'
           // Track parenthesis depth so semicolons inside discriminant parts are ignored
           if (isTypeDecl) {
-            let hasSemicolon = false;
+            let hasSeparator = false;
             let parenDepth = 0;
             for (let si = typeDeclStart; si < startOffset; si++) {
               if (this.isInExcludedRegion(si, excludedRegions)) continue;
               if (source[si] === '(') parenDepth++;
               else if (source[si] === ')') parenDepth--;
-              else if (source[si] === ';' && parenDepth === 0) {
-                hasSemicolon = true;
-                break;
+              else if (parenDepth === 0) {
+                if (source[si] === ';') {
+                  hasSeparator = true;
+                  break;
+                }
+                // Check for declaration keywords that start a new statement
+                if (/[a-zA-Z]/i.test(source[si]) && (si === 0 || !/[a-zA-Z0-9_]/i.test(source[si - 1]))) {
+                  const word = source.slice(si, si + 15).toLowerCase();
+                  if (/^(procedure|function|package|task|protected|entry|begin|case|select|loop|for|while|declare|record|if|accept)\b/.test(word)) {
+                    hasSeparator = true;
+                    break;
+                  }
+                }
               }
             }
-            if (!hasSemicolon) {
+            if (!hasSeparator) {
               continue;
             }
           }
@@ -318,8 +349,13 @@ export class AdaBlockParser extends BaseBlockParser {
             prevPos--;
           }
         }
-        if (prevPos >= 0 && source[prevPos] === ';') {
-          // 'or' follows a statement (select block context), keep both as intermediates
+        const selectStart = prevPos - 5;
+        const atSelectKeyword =
+          prevPos >= 5 &&
+          source.slice(selectStart, prevPos + 1).toLowerCase() === 'select' &&
+          (selectStart === 0 || !/[a-zA-Z0-9_]/.test(source[selectStart - 1]));
+        if (prevPos >= 0 && (source[prevPos] === ';' || atSelectKeyword)) {
+          // 'or' follows a statement or 'select' keyword (select block context), keep both as intermediates
         } else if (isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, (pos) => this.isInExcludedRegion(pos, excludedRegions))) {
           filtered.pop();
           continue;

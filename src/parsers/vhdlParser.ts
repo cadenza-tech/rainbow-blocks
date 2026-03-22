@@ -5,7 +5,15 @@ import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType, findLastOpenerForLoop, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
 import type { VhdlValidationCallbacks } from './vhdlValidation';
-import { isInSignalAssignment, isValidEntityOrConfigOpen, isValidForOpen, isValidFuncProcOpen, isValidLoopOpen } from './vhdlValidation';
+import {
+  isInSignalAssignment,
+  isInsideParens,
+  isValidEntityOrConfigOpen,
+  isValidForOpen,
+  isValidFuncProcOpen,
+  isValidLoopOpen,
+  isValidWhileOpen
+} from './vhdlValidation';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = [
@@ -30,7 +38,8 @@ const COMPOUND_END_TYPES = [
 
 // Pattern to match compound end keywords (case insensitive)
 // Only allow spaces/tabs between 'end' and the type keyword (same line only)
-const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
+// Pattern includes 'postponed process' for 'end postponed process' syntax
+const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(postponed[ \\t]+process|${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 // Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
@@ -85,6 +94,11 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject keywords inside parenthesized expressions (port maps, generic maps, function calls)
+    if (isInsideParens(source, position, excludedRegions, cb)) {
+      return false;
+    }
+
     if (lowerKeyword === 'for') {
       return isValidForOpen(source, position, excludedRegions, cb);
     }
@@ -99,6 +113,11 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     if (lowerKeyword === 'loop') {
       return isValidLoopOpen(source, position, excludedRegions, cb);
+    }
+
+    // Reject 'while' preceded by 'wait' (wait while is not a block construct)
+    if (lowerKeyword === 'while') {
+      return isValidWhileOpen(source, position, excludedRegions, cb);
     }
 
     return true;
@@ -176,7 +195,9 @@ export class VhdlBlockParser extends BaseBlockParser {
       // Check if in excluded region
       if (!this.isInExcludedRegion(pos, excludedRegions) && this.isValidBlockClose(match[0], source, pos, excludedRegions)) {
         const fullMatch = match[0];
-        const endType = match[1].toLowerCase();
+        // Use last word for multi-word matches like 'postponed process' -> 'process'
+        const endTypeParts = match[1].toLowerCase().split(/[ \t]+/);
+        const endType = endTypeParts[endTypeParts.length - 1];
         compoundEndPositions.set(pos, {
           keyword: fullMatch, // Preserve original case
           length: fullMatch.length,
@@ -274,7 +295,7 @@ export class VhdlBlockParser extends BaseBlockParser {
           const closeValue = token.value.toLowerCase();
 
           // Check if it's a compound end
-          const compoundMatch = closeValue.match(/^end[ \t]+(\S+)/);
+          const compoundMatch = closeValue.match(/^end[ \t]+(?:\S+[ \t]+)*(\S+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
 

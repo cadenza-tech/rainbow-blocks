@@ -58,9 +58,12 @@ export function isValidSubprogramOpen(
   let scanPos = position - 1;
   while (scanPos >= 0) {
     const ch = source[scanPos];
-    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+    if (ch === ' ' || ch === '\t') {
       scanPos--;
       continue;
+    }
+    if (ch === '\n' || ch === '\r') {
+      break;
     }
     if (callbacks.isInExcludedRegion(scanPos, excludedRegions)) {
       scanPos--;

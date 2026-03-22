@@ -48,7 +48,8 @@ export function matchVhdlCharacterLiteral(source: string, pos: number): Excluded
   if (pos + 1 >= source.length) return { start: pos, end: pos + 1 };
   const codePoint = source.codePointAt(pos + 1);
   const charLen = codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
-  if (pos + 1 + charLen < source.length && source[pos + 1 + charLen] === "'") {
+  const innerChar = source[pos + 1];
+  if (pos + 1 + charLen < source.length && source[pos + 1 + charLen] === "'" && innerChar !== '\n' && innerChar !== '\r') {
     // Qualified expression: type_name'(expr) — tick before '(' preceded by identifier
     // is not a character literal, treat as attribute tick
     if (source[pos + 1] === '(' && pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) {
