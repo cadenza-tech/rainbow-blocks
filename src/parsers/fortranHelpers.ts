@@ -421,12 +421,39 @@ export function isBlockWhereOrForall(source: string, position: number, keyword: 
       } else if (i < source.length) {
         i++;
       }
-      // Skip leading whitespace and & on continuation line (Fortran free-form)
-      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-        i++;
-      }
-      if (i < source.length && source[i] === '&') {
-        i++;
+      // Process continuation lines: skip whitespace, leading &, comment-only lines, blank lines
+      while (i < source.length) {
+        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+          i++;
+        }
+        if (i < source.length && source[i] === '&') {
+          i++;
+          while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+            i++;
+          }
+        }
+        // Comment-only continuation line: skip to end and process next line
+        if (i < source.length && source[i] === '!') {
+          while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+            i++;
+          }
+          if (i < source.length && source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+            i += 2;
+          } else if (i < source.length) {
+            i++;
+          }
+          continue;
+        }
+        // Bare continuation line (empty after &): skip newline and process next line
+        if (i < source.length && (source[i] === '\n' || source[i] === '\r')) {
+          if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+            i += 2;
+          } else {
+            i++;
+          }
+          continue;
+        }
+        break;
       }
       continue;
     }
@@ -668,7 +695,9 @@ export function matchElseWhere(source: string, afterElse: number, excludedRegion
     }
   }
   // Continuation: &[optional comment]\n[optional comment lines][optional &] where
-  const contMatch = afterElseText.match(/^([ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*![^\r\n]*(?:\r\n|\r|\n))*[ \t]*&?[ \t]*)(where)\b/i);
+  const contMatch = afterElseText.match(
+    /^([ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)(?:\r\n|\r|\n))*[ \t]*&?[ \t]*)(where)\b/i
+  );
   if (contMatch) {
     const whereStart = afterElse + contMatch[1].length;
     if (!isInExcludedRegion(whereStart, excludedRegions)) {

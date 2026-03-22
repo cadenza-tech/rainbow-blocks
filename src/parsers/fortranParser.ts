@@ -387,7 +387,10 @@ export class FortranBlockParser extends BaseBlockParser {
             // Same line: else if / else where
             const isSameLine = /^[ \t]+$/.test(textBetween);
             // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if/where
-            const isContinuation = /^[ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*![^\r\n]*(?:\r\n|\r|\n))*[ \t]*&?[ \t]*$/.test(textBetween);
+            const isContinuation =
+              /^[ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)(?:\r\n|\r|\n))*[ \t]*&?[ \t]*$/.test(
+                textBetween
+              );
             if (isSameLine || isContinuation) {
               mergedTokens.push({
                 type: 'block_middle',
@@ -491,6 +494,17 @@ export class FortranBlockParser extends BaseBlockParser {
             const isElseWhereVariant = /^else(?:where$|\b[\s\S]*\bwhere$)/i.test(middleValue);
             // elsewhere / else where -> only for where blocks
             if (isElseWhereVariant && openerValue !== 'where') {
+              // If opener is 'if', accept just the 'else' part as intermediate
+              if (openerValue === 'if') {
+                topBlock.intermediates.push({
+                  type: 'block_middle',
+                  value: token.value.slice(0, 4),
+                  startOffset: token.startOffset,
+                  endOffset: token.startOffset + 4,
+                  line: token.line,
+                  column: token.column
+                });
+              }
               break;
             }
             // else / elseif / else if (but not elsewhere/else where) -> only for if blocks

@@ -91,16 +91,35 @@ function isInsideParentheses(source: string, position: number): boolean {
     if (char === "'" || char === '"') {
       const quote = char;
       i--;
+      let foundOpenQuote = false;
       while (i >= lineStart) {
         if (source[i] === quote) {
-          // Check for doubled quote escape
           if (i > lineStart && source[i - 1] === quote) {
             i -= 2;
             continue;
           }
+          foundOpenQuote = true;
           break;
         }
         i--;
+      }
+      // If opening quote not found, extend search across continuation lines
+      while (!foundOpenQuote && lineStart > 0) {
+        const prevLineStart = findContinuationLineStart(source, lineStart);
+        if (prevLineStart < 0) break;
+        depthBeforeLine = depth;
+        lineStart = prevLineStart;
+        while (i >= lineStart) {
+          if (source[i] === quote) {
+            if (i > lineStart && source[i - 1] === quote) {
+              i -= 2;
+              continue;
+            }
+            foundOpenQuote = true;
+            break;
+          }
+          i--;
+        }
       }
       i--;
       continue;
@@ -183,9 +202,12 @@ function findContinuationLineStart(source: string, currentLineStart: number): nu
   // Loop to skip comment-only lines (Fortran allows comment lines between continuation lines)
   while (true) {
     let prevEnd = searchStart - 1;
-    // Skip line terminator
-    if (prevEnd >= 0 && source[prevEnd] === '\n') prevEnd--;
-    if (prevEnd >= 0 && source[prevEnd] === '\r') prevEnd--;
+    // Skip line terminator (\r\n as a unit, then standalone \n or \r)
+    if (prevEnd >= 1 && source[prevEnd] === '\n' && source[prevEnd - 1] === '\r') {
+      prevEnd -= 2;
+    } else if (prevEnd >= 0 && (source[prevEnd] === '\n' || source[prevEnd] === '\r')) {
+      prevEnd--;
+    }
     if (prevEnd < 0) return -1;
 
     // Find start of previous line
