@@ -3031,5 +3031,19 @@ end`;
     });
   });
 
+  suite('Regression: end inside double brackets a[[end]]', () => {
+    test('should reject end inside a[[end]] as indexing', () => {
+      const pairs = parser.parse('for i in 1:10\n  x = a[[end]]\nend');
+      assertSingleBlock(pairs, 'for', 'end');
+      // The close keyword should be the final end, not the one inside [[end]]
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 29);
+    });
+
+    test('should reject end inside nested double brackets', () => {
+      const pairs = parser.parse('function foo()\n  x = A[i, [end]]\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

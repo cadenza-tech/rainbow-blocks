@@ -3449,5 +3449,15 @@ end`;
     });
   });
 
+  suite('Regression: Unicode adjacency in isDoColonOneLiner', () => {
+    test('should not treat Unicode-adjacent end as block close in do: one-liner scan', () => {
+      // αend is a variable name, not the end keyword
+      const pairs = parser.parse('if fn -> \u03B1end, do: :ok end do\n  :ok\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'fn');
+      findBlock(pairs, 'if');
+    });
+  });
+
   generateCommonTests(config);
 });

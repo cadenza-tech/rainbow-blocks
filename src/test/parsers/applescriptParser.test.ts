@@ -2021,5 +2021,28 @@ end try`;
     });
   });
 
+  suite('Regression: block keywords in if condition', () => {
+    test('should not treat repeat as block opener in if condition', () => {
+      // With end repeat present, the false repeat would pair with it creating 2 blocks
+      const pairs = parser.parse('if repeat then\n  beep\nend if\nend repeat');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat try as block opener in if condition', () => {
+      const pairs = parser.parse('if try then\n  beep\nend if\nend try');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat considering as block opener in if condition', () => {
+      const pairs = parser.parse('if considering then\n  beep\nend if\nend considering');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat ignoring as block opener in if condition', () => {
+      const pairs = parser.parse('if ignoring then\n  beep\nend if\nend ignoring');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   generateCommonTests(config);
 });

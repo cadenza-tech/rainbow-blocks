@@ -873,8 +873,8 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
 
-    test('should handle unterminated pseudo-text', () => {
-      const source = '==IF ELSE END-IF';
+    test('should handle unterminated pseudo-text in REPLACING context', () => {
+      const source = 'REPLACING ==IF ELSE END-IF';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
@@ -1421,6 +1421,30 @@ END-PERFORM`;
       const source = 'MOVE END-IF-FLAG TO X\nIF CONDITION\nEND-IF';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Regression: == as equality operator', () => {
+    test('should not treat == as pseudo-text in IF condition', () => {
+      const pairs = parser.parse('IF A == B\n  DISPLAY OK\nEND-IF');
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat == as pseudo-text in EVALUATE WHEN', () => {
+      const pairs = parser.parse('EVALUATE TRUE\n  WHEN A == 1\n    DISPLAY OK\nEND-EVALUATE');
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+    });
+
+    test('should still detect pseudo-text in COPY REPLACING context', () => {
+      const regions = parser.getExcludedRegions('COPY X REPLACING ==OLD== BY ==NEW==.');
+      const pseudoRegions = regions.filter((r) => r.end - r.start >= 7);
+      assert.ok(pseudoRegions.length >= 2);
+    });
+
+    test('should still detect pseudo-text in REPLACE context', () => {
+      const regions = parser.getExcludedRegions('REPLACE ==OLD== BY ==NEW==.');
+      const pseudoRegions = regions.filter((r) => r.end - r.start >= 7);
+      assert.ok(pseudoRegions.length >= 2);
     });
   });
 

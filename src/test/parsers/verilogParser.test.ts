@@ -1939,5 +1939,22 @@ endmodule`;
     });
   });
 
+  suite('Regression: single-line comment in define directive', () => {
+    test('should not treat backslash in // comment as line continuation', () => {
+      const pairs = parser.parse('`define MACRO value // comment \\\nmodule test;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should handle // comment in define with CRLF', () => {
+      const pairs = parser.parse('`define MACRO value // comment \\\r\nmodule test;\r\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still support line continuation without // comment', () => {
+      const pairs = parser.parse('`define MACRO value \\\nmodule test;\nendmodule');
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

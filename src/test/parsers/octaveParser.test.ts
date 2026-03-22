@@ -1273,5 +1273,31 @@ end`;
     });
   });
 
+  suite('Regression: middle keywords used as variable names', () => {
+    test('should not treat else followed by assignment as intermediate', () => {
+      const pairs = parser.parse('if true\n  else = 5;\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat case followed by compound assignment as intermediate', () => {
+      const pairs = parser.parse('switch x\n  case += 1;\nend');
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat elseif followed by assignment as intermediate', () => {
+      const pairs = parser.parse('if true\n  elseif = 5;\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still detect normal middle keywords', () => {
+      const pairs = parser.parse('if true\n  x = 1;\nelse\n  x = 2;\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   generateCommonTests(config);
 });
