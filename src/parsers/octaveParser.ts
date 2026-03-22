@@ -101,9 +101,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
       return true;
     }
-    // Compound assignment: +=, -=, *=, /=, ^=
+    // Compound assignment: +=, -=, *=, /=, ^=, |=, &=
     if (
-      (source[i] === '+' || source[i] === '-' || source[i] === '*' || source[i] === '/' || source[i] === '^') &&
+      (source[i] === '+' ||
+        source[i] === '-' ||
+        source[i] === '*' ||
+        source[i] === '/' ||
+        source[i] === '^' ||
+        source[i] === '|' ||
+        source[i] === '&') &&
       i + 1 < source.length &&
       source[i + 1] === '='
     ) {
@@ -155,9 +161,13 @@ export class OctaveBlockParser extends MatlabBlockParser {
           let matchIndex = -1;
 
           // Check if it's an Octave-specific end keyword
+          // Only match if the opener is at the top of the stack (don't skip intervening unclosed blocks)
           const validOpener = OCTAVE_CLOSE_TO_OPEN[closeValue];
           if (validOpener) {
-            matchIndex = findLastOpenerByType(stack, validOpener, true);
+            const foundIndex = findLastOpenerByType(stack, validOpener, true);
+            if (foundIndex === stack.length - 1) {
+              matchIndex = foundIndex;
+            }
           }
 
           // If no specific match found, only fallback for generic 'end'
@@ -300,7 +310,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Check if single quote is a transpose operator (after identifier, number, ], }, or .)
     if (quote === "'" && pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || /\p{L}/u.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar)) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         if (/[0-9]/.test(prevChar)) {
           const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
@@ -334,8 +344,9 @@ export class OctaveBlockParser extends MatlabBlockParser {
         }
       }
       if (source[i] === quote) {
-        // Check for doubled quote escape
-        if (i + 1 < source.length && source[i + 1] === quote) {
+        // Doubled quote escape: only for single-quoted strings
+        // In double-quoted strings, backslash escapes handle quote embedding
+        if (quote === "'" && i + 1 < source.length && source[i + 1] === quote) {
           i += 2;
           continue;
         }

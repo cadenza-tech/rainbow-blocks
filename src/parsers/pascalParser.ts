@@ -17,21 +17,8 @@ export class PascalBlockParser extends BaseBlockParser {
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
-      const afterCase = source.slice(position + keyword.length);
-      // Tagged variant: case Tag: Type of (only inside record)
-      if (/^[ \t]+[a-zA-Z_]\w*[ \t]*:/i.test(afterCase)) {
-        if (this.isInsideRecord(source, position, excludedRegions)) {
-          return false;
-        }
-      }
-      // Tagless variant: case TypeName of (identifier followed by 'of', no colon)
-      // TypeName can be qualified (e.g., Types.MyEnum)
-      // 'of' may appear on a separate line
-      if (/^[ \t]+[a-zA-Z_][\w.]*\s+of\b/i.test(afterCase)) {
-        // Check if we're inside a record block by scanning backward
-        if (this.isInsideRecord(source, position, excludedRegions)) {
-          return false;
-        }
+      if (this.isVariantRecordCase(source, position, excludedRegions)) {
+        return false;
       }
     }
 
@@ -299,6 +286,65 @@ export class PascalBlockParser extends BaseBlockParser {
     return { start: pos, end: source.length };
   }
 
+  // Checks if 'case' at position is a variant record case (tagged or tagless)
+  // Skips excluded regions (comments) between 'case' and the identifier
+  private isVariantRecordCase(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (!this.isInsideRecord(source, position, excludedRegions)) {
+      return false;
+    }
+    // Scan forward from after 'case', skipping whitespace and excluded regions, looking for identifier
+    let j = position + 4; // skip 'case'
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+        j++;
+        continue;
+      }
+      if (source[j] === ' ' || source[j] === '\t') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    // Expect an identifier
+    if (j < source.length && /[a-zA-Z_]/i.test(source[j])) {
+      // Tagged variant: identifier followed by ':'
+      // Tagless variant: identifier followed by 'of'
+      let k = j;
+      while (k < source.length && /[\w.]/i.test(source[k])) {
+        k++;
+      }
+      // Skip whitespace and excluded regions after identifier
+      while (k < source.length) {
+        if (this.isInExcludedRegion(k, excludedRegions)) {
+          const region = this.findExcludedRegionAt(k, excludedRegions);
+          if (region) {
+            k = region.end;
+            continue;
+          }
+          k++;
+          continue;
+        }
+        if (source[k] === ' ' || source[k] === '\t') {
+          k++;
+          continue;
+        }
+        break;
+      }
+      if (k < source.length && source[k] === ':') {
+        return true; // Tagged variant
+      }
+      if (k + 2 <= source.length && /^of\b/i.test(source.slice(k, k + 3))) {
+        return true; // Tagless variant
+      }
+    }
+    return false;
+  }
+
   // Checks if a position is inside a record block (for variant case detection)
   private isInsideRecord(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerSource = source.toLowerCase();
@@ -350,6 +396,13 @@ export class PascalBlockParser extends BaseBlockParser {
         (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
+        // Skip 'object' in method pointer syntax: procedure of object, function of object
+        let oi = i - 6;
+        while (oi >= 0 && (source[oi] === ' ' || source[oi] === '\t')) oi--;
+        if (oi >= 1 && lowerSource.slice(oi - 1, oi + 1) === 'of' && (oi - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[oi - 2]))) {
+          i -= 6;
+          continue;
+        }
         if (depth === 0) return true;
         depth--;
         i -= 6;
@@ -391,8 +444,19 @@ export class PascalBlockParser extends BaseBlockParser {
         i -= 3;
         continue;
       }
-      // Note: 'case' is NOT tracked here because variant case (inside record/object) has no matching 'end'
-      // Tracking case would cause variant case to consume the record's 'end', breaking depth accounting
+      // Track standalone case...end pairs (depth >= 1) only when the case is NOT a variant case
+      // Variant cases have parenthesized field lists after 'of' labels, e.g. 0: (Field: Type)
+      // Standalone cases have statements after labels, e.g. 1: WriteLn
+      if (
+        i >= 3 &&
+        lowerSource.slice(i - 3, i + 1) === 'case' &&
+        (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        if (depth >= 1 && !this.isVariantCase(source, i - 3, excludedRegions)) depth--;
+        i -= 4;
+        continue;
+      }
       // 'asm' closes an 'end'
       if (
         i >= 2 &&
@@ -406,6 +470,67 @@ export class PascalBlockParser extends BaseBlockParser {
         continue;
       }
       i--;
+    }
+    return false;
+  }
+
+  // Checks if a case at the given position is a variant case (record variant part)
+  // Variant cases have parenthesized field lists after labels: case Tag of 0: (Field: Type)
+  // Standalone cases have statements after labels: case X of 1: WriteLn
+  private isVariantCase(source: string, caseStart: number, excludedRegions: ExcludedRegion[]): boolean {
+    const lowerSource = source.toLowerCase();
+    // Find 'of' after 'case', skipping excluded regions
+    let j = caseStart + 4;
+    while (j + 1 < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+        j++;
+        continue;
+      }
+      if (
+        lowerSource[j] === 'o' &&
+        lowerSource[j + 1] === 'f' &&
+        (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) &&
+        (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))
+      ) {
+        j += 2;
+        break;
+      }
+      if (source[j] === '\n' || source[j] === '\r') return false;
+      j++;
+    }
+    if (j >= source.length) return false;
+    // After 'of', find the first label pattern: digits/identifier followed by ':'
+    // Then check if after ':' there's '(' (variant) or something else (standalone)
+    while (j < source.length) {
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      // Skip excluded regions (comments, strings)
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.end;
+        continue;
+      }
+      // Look for label: digits or identifier followed by ':'
+      if (/[a-zA-Z0-9_]/.test(source[j])) {
+        while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
+        // Skip whitespace between label and ':'
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+        if (j < source.length && source[j] === ':') {
+          j++;
+          // Skip whitespace after ':'
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+          // '(' indicates variant case field list
+          return j < source.length && source[j] === '(';
+        }
+      }
+      break;
     }
     return false;
   }
