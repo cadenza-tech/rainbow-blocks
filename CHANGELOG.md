@@ -5,6 +5,87 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.20] - 2026-03-22
+
+### Fixed
+
+- Ada: Add `entry` to compound end types (`end entry`)
+- Ada: Fix multi-line discriminant list paren tracking in backward type declaration scan
+- Ada: Fix backward type scan to stop at non-type, non-continuation lines
+- Ada: Fix type-to-`is` separation check to recognize declaration keywords as separators
+- Ada: Fix `or else` detection to recognize `select` keyword before `or` (not just `;`)
+- Ada: Fix subprogram open validation to stop backward scan at newline
+- AppleScript: Fix keyword-as-variable detection to strip excluded regions (block comments) before matching
+- AppleScript: Fix continuation character regex to consume rest of line after `\u00AC`
+- AppleScript: Fix `of <keyword>` pattern to detect keyword as object in property access
+- AppleScript: Fix `<keyword> of` pattern to only match on same physical line
+- AppleScript: Fix multi-line `if...then` detection to extend effective line end past block comments
+- Bash: Add `$"..."` locale-specific double-quoted string as excluded region
+- Bash: Fix `{` brace context to check for preceding block keywords (`then`, `do`, `else`, etc.)
+- Bash: Fix keywords used as variable assignment (`done=`, `fi+=`, `done[0]=`) rejected as block keywords
+- Bash: Fix gap excluded region clipping to not include newline before heredoc body
+- Bash: Fix parameter expansion `${var:+{value}}` bare brace tracking
+- Bash: Fix `${...}` inside double quotes to treat single quotes as literal characters
+- COBOL: Add block close validation in tokenize
+- COBOL: Fix pseudo-text `==...==` handling inside EXEC blocks
+- Crystal: Add question mark char literal (`?x`, `?\n`, `?\u{XXXX}`) as excluded region
+- Crystal: Filter out keywords preceded by `$` (global variables like `$end`)
+- Crystal: Skip `do` preceded by `.`, `::`, `@`, or `$` in loop detection
+- Crystal: Fix unbalanced `{` in macro templates to treat `}}` as template closer
+- Crystal: Fix `#{}` interpolation inside nested double-quoted strings in macro templates
+- Elixir: Fix escape handling in uppercase sigils to only escape closing delimiter
+- Elixir: Fix Unicode atom support with surrogate pairs (codepoints outside BMP)
+- Elixir: Fix sigil `~` detection to skip sigil modifier letters after closing delimiter
+- Elixir: Fix character literal `?\x` and `?\u` escape validation to require hex digits
+- Elixir: Reject function call form `keyword(...)` as block opener
+- Elixir: Fix `do` detection to allow after `)`, `]`, `}`
+- Elixir: Fix `fn`/`end` tracking to check `?!` suffixes and Unicode adjacency
+- Erlang: Add OTP 27+ tilde-sigil support (`~"..."`, `~'...'`, `~s"..."`, `~S"..."`)
+- Erlang: Add OTP 27+ triple-quoted string (`"""..."""`) and atom (`'''...'''`) support
+- Erlang: Fix map key detection to allow multiple comment-only lines before `=>`/`:=`
+- Erlang: Fix `-spec`/`-type` position offset calculation for indented declarations
+- Fortran: Fix continuation line processing to skip comment-only and bare continuation lines
+- Fortran: Fix `else where` continuation regex to allow `&`-only intermediate lines
+- Fortran: Fix `else where` to extract `else` as intermediate for `if` blocks
+- Fortran: Fix `isInsideParentheses` to search across continuation lines for opening quote
+- Fortran: Fix `findContinuationLineStart` to treat CRLF as a unit
+- Julia: Fix prefixed string escapes so all prefixed strings handle `\"` and `\\`
+- Julia: Fix Unicode surrogate pair handling in tokenize word boundary check
+- Julia: Fix `end` inside matched parentheses to be rejected as block close (`f(end + 1)`)
+- Julia: Fix `hasBlockOpenerBetween` and `hasForInComprehension` to use `isAdjacentToUnicodeLetter`
+- Julia: Fix symbol literal boundary check at end of source
+- Lua: Skip keywords preceded by `.` or `:` (table field/method access like `t.end`, `obj:repeat`)
+- Lua: Filter middle keywords preceded by `.` or `:` in tokenize
+- Lua: Fix `isDoPartOfLoop` to break on `end`/`until` at depth 0 without pending closers
+- MATLAB: Reject block openers inside parentheses or brackets
+- MATLAB: Fix transpose detection after double-quote string closer
+- Octave: Add `|=` and `&=` compound assignment operators
+- Octave: Fix end keyword matching to require opener at top of stack
+- Octave: Fix doubled quote escape to only apply for single-quoted strings
+- Pascal: Fix variant record case detection to skip excluded regions between `case` and identifier
+- Pascal: Fix `isInsideRecord` to skip `object` in method pointer syntax (`procedure of object`)
+- Pascal: Fix `isInsideRecord` to track standalone `case...end` pairs in depth accounting
+- Ruby: Skip `do` preceded by `.`, `::`, `@`, or `$` in loop detection
+- Ruby: Fix hash key colon detection to allow `::` scope resolution after keywords
+- Ruby: Fix global variables (`$!`, `$?`, etc.) recognized as complete expressions
+- Ruby: Fix backslash continuation handling in postfix keyword detection
+- Ruby: Fix heredoc handling inside regex interpolation
+- Ruby: Fix character literal `?` detection after string/backtick closers
+- Ruby: Fix `%}` inside interpolation incorrectly parsed as percent literal
+- Verilog: Skip backtick-prefixed preprocessor directives in `isFollowedByBegin`
+- Verilog: Handle `@identifier` single signal sensitivity (e.g., `always @clk begin`)
+- Verilog: Handle backtick-prefixed macro identifiers in expression scanning
+- Verilog: Fix `\`undef` directive prefix check
+- Verilog: Skip preprocessor directive tokens in `matchBlocks` control keyword and else-next scanning
+- Verilog: Fix block comments and single-line comments inside attributes
+- Verilog: Fix unterminated block comments at `\`define` directive boundary
+- VHDL: Reject block openers inside parenthesized expressions (port maps, generic maps)
+- VHDL: Reject `wait while` as block opener
+- VHDL: Support `end postponed process` compound end pattern
+- VHDL: Fix compound end multi-word matching to use last word for type detection
+- VHDL: Add semicolon check between `for`/`while` prefix and `loop` keyword
+- VHDL: Reject newline inside character literals
+
 ## [1.1.19] - 2026-03-16
 
 ### Fixed
@@ -877,6 +958,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.20]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.19...v1.1.20
 [1.1.19]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.18...v1.1.19
 [1.1.18]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.17...v1.1.18
 [1.1.17]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.16...v1.1.17
