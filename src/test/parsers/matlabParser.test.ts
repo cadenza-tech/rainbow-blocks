@@ -1298,5 +1298,42 @@ end`;
     });
   });
 
+  suite('Bug: block openers inside parentheses or brackets', () => {
+    test('should not detect if inside parentheses as block opener', () => {
+      const source = 'function f\n  x = foo(if);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect for inside brackets as block opener', () => {
+      const source = 'function f\n  x = [for];\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect while inside braces as block opener', () => {
+      const source = 'function f\n  x = {while};\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still detect if at top level as block opener', () => {
+      const source = 'if true\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: transpose after double-quoted string', () => {
+    test('should treat single quote after closing double quote as transpose', () => {
+      const regions = parser.getExcludedRegions('"x"\'');
+      assert.strictEqual(regions.length, 2);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 3);
+      assert.strictEqual(regions[1].start, 3);
+      assert.strictEqual(regions[1].end, 4);
+    });
+  });
+
   generateCommonTests(config);
 });

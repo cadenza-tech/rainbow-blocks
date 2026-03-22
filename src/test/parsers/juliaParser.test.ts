@@ -1386,6 +1386,25 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should not match keywords adjacent to BMP-outside Unicode letters', () => {
+      const source = '\uD835\uDC00if true\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match keywords followed by BMP-outside Unicode letters', () => {
+      const source = 'if\uD835\uDC00 true\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat backslash-quote as escape in non-b prefixed triple-quoted string', () => {
+      // r"""\""" - backslash is literal, """ closes the string
+      const source = 'r' + '"""' + '\\' + '"""' + '\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('End inside brackets/parentheses', () => {
@@ -2889,6 +2908,126 @@ end`;
       const source = '(x for x in 1:10 if x > 5)';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: prefixed string backslash-quote escaping', () => {
+    test('should treat r"test\\"more" as a single excluded region', () => {
+      // Bug: only b"..." handled backslash-quote escaping; r"...", s"...", etc. did not
+      const regions = parser.getExcludedRegions('r"test\\"more"');
+      const strRegion = regions.find((r) => r.start === 0);
+      assert.ok(strRegion, 'prefixed string should create an excluded region');
+      assert.strictEqual(strRegion.end, 13, 'r"test\\"more" should be a single region');
+    });
+
+    test('should not produce block pairs from keywords inside r"..." with escaped quote', () => {
+      // Bug: r"end\"end" was split into r"end\" and end" leaving "end" visible
+      const pairs = parser.parse('r"end\\"end"');
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle s"..." prefixed string with backslash-quote', () => {
+      const pairs = parser.parse('s"if\\"end"\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle v"..." prefixed string with backslash-quote', () => {
+      const pairs = parser.parse('v"begin\\"end"\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  // Regression: prefixed string with even backslashes before closing quote
+  suite('Regression: prefixed string backslash handling', () => {
+    test('should close raw string after even backslashes', () => {
+      const source = 'r"test\\\\" \nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should keep escaped quote open', () => {
+      const source = 'r"test\\"still open" \nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close triple-quoted prefixed string after even backslashes', () => {
+      const source = 'r"""\ntest\\\\\n"""\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle four backslashes before closing quote', () => {
+      const source = 'r"\\\\\\\\" \nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: end inside function call parentheses', () => {
+    test('should not let end inside f(end) steal enclosing block close', () => {
+      const source = 'function foo()\n  f(end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not let end inside f(end) steal for block close', () => {
+      const source = 'for i in 1:10\n  x = f(end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should still allow end as block close after unmatched paren', () => {
+      const source = 'function foo(\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still allow end inside block expression in parens', () => {
+      const source = 'f(begin\n  1\nend)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject end inside f(end) when close paren is on next line', () => {
+      const source = 'function foo()\n  f(end\n)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should reject end inside f(end) when close paren follows CRLF', () => {
+      const source = 'function foo()\n  f(end\r\n)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should reject end inside f(end) when close paren follows CR-only', () => {
+      const source = 'function foo()\n  f(end\r)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
+  suite('Regression: end inside function call not followed by close paren', () => {
+    test('should reject end followed by operator inside parens', () => {
+      const source = 'function foo()\n  x = f(end + 1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject end followed by comma inside parens', () => {
+      const source = 'function foo()\n  f(end, end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject end as middle argument inside parens', () => {
+      const source = 'function foo()\n  f(x, end, y)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 

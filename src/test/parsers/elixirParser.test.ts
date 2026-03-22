@@ -1113,6 +1113,18 @@ end`;
       const pairs = parser.parse('if true do\n  x = ?end\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle Unicode identifier containing block keyword in hasDoKeyword lookahead', () => {
+      const source = 'if \u03B1if do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle Unicode identifier containing block keyword in isDoColonOneLiner', () => {
+      const source = 'if \u03B1if, do: :ok';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Branch coverage', () => {
@@ -3246,6 +3258,194 @@ end`;
       // Covers elixirParser.ts line 428: afterEnd === '!'
       const pairs = parser.parse('if end!(x) do\n  :ok\nend');
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: sigil modifier letters followed by another sigil', () => {
+    test('should detect sigil with modifier letters immediately followed by another sigil', () => {
+      // Bug: sigil following modifier letters was not detected as excluded region
+      // e.g., ~r/pattern/i~s(end) - the ~s(end) sigil was not excluded
+      const source = '~r/pattern/i~s(end)\nif true do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: hasDoKeyword with do preceded by closing brackets', () => {
+    test('should detect do preceded by closing paren', () => {
+      // Bug: hasDoKeyword did not recognize do preceded by ')'
+      const source = 'if foo() do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect do preceded by closing bracket', () => {
+      // Bug: hasDoKeyword did not recognize do preceded by ']'
+      const source = 'if list[:key] do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect do preceded by closing brace', () => {
+      // Bug: hasDoKeyword did not recognize do preceded by '}'
+      const source = 'if %{a: 1} do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: matchAtomLiteral with @ for Erlang-style node atoms', () => {
+    test('should treat :node@hostname as a single atom literal', () => {
+      // Bug: matchAtomLiteral was missing @ in the character set for atom continuation
+      const regions = parser.getExcludedRegions(':node@hostname');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 14);
+    });
+
+    test('should exclude end keyword inside Erlang-style node atom', () => {
+      // :end@node should be a single atom, not exposing "end" as a keyword
+      const pairs = parser.parse(':end@node\nif true do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: isAtomStart with Unicode letter atom starts', () => {
+    test('should recognize atom starting with Unicode letter', () => {
+      // Bug: isAtomStart did not recognize Unicode letter atom starts like :日本語
+      const regions = parser.getExcludedRegions(':\u65E5\u672C\u8A9E');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+    });
+
+    test('should exclude keywords inside Unicode atom context', () => {
+      const pairs = parser.parse('x = :\u65E5\u672C\u8A9E\nif true do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Regression: Unicode atom should be fully excluded
+  suite('Regression: Unicode atom excluded region', () => {
+    test('should exclude full Unicode atom', () => {
+      const regions = parser.getExcludedRegions(':\u4E2D');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 2);
+    });
+
+    test('should exclude multi-char Unicode atom', () => {
+      const regions = parser.getExcludedRegions(':\u03B1\u03B2\u03B3');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 4);
+    });
+
+    test('should exclude CJK atom', () => {
+      const regions = parser.getExcludedRegions(':\u65E5\u672C\u8A9E');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 4);
+    });
+  });
+
+  suite('Regression: surrogate pair in atoms', () => {
+    test('should handle surrogate pair Unicode letter in atom context', () => {
+      // U+10400 DESERET CAPITAL LETTER LONG I encoded as surrogate pair \uD801\uDC00
+      const source = ':\uD801\uDC00\nif true do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: isDoColonOneLiner fn? check', () => {
+    test('should detect do: one-liner when fn? is in condition', () => {
+      const source = 'if fn?(x), do: :ok';
+      const pairs = parser.parse(source);
+      // fn? should not increment innerBlockDepth, so this is a one-liner
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: block keyword function call inside hasDoKeyword', () => {
+    test('should detect outer if block when inner if() function call has do: argument', () => {
+      const source = 'if if(cond, do: val) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect for block when if() function call appears in comprehension', () => {
+      const source = 'for x <- list, if(cond, do: val) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should detect outer if block when fn() function call has do: argument', () => {
+      const source = 'if fn(x, do: y) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug: Unicode letter boundary in hasDoKeyword fn/end tracking', () => {
+    test('should detect if block when fn is preceded by BMP Unicode letter', () => {
+      const source = 'if \u03B1fn do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect if block when end is preceded by BMP Unicode letter', () => {
+      const source = 'if \u03B1end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect if block when fn is preceded by surrogate pair character', () => {
+      const source = 'if \uD801\uDC00fn do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: isDoColonOneLiner should not treat end?/end!/.end/@end as end', () => {
+    test('should not treat end? as end keyword in do: one-liner check', () => {
+      const source = 'if fn -> end?() do: :val end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat end! as end keyword in do: one-liner check', () => {
+      const source = 'if fn -> end! do: :val end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat .end as end keyword in do: one-liner check', () => {
+      const source = 'if fn -> data.end do: :val end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat @end as end keyword in do: one-liner check', () => {
+      const source = 'if fn -> @end do: :val end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: uppercase sigil escaped delimiter', () => {
+    test('should handle escaped delimiter in uppercase sigil ~S', () => {
+      const pairs = parser.parse('~S(pat\\) if true do :ok end)\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escaped delimiter in uppercase sigil ~R with slash', () => {
+      const pairs = parser.parse('~R/pat\\/ if true do :ok end/\ndef foo do\n  :ok\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle escaped delimiter in uppercase sigil ~S with brackets', () => {
+      const pairs = parser.parse('~S[pat\\] do end]\nfn -> :ok end');
+      assertSingleBlock(pairs, 'fn', 'end');
     });
   });
 

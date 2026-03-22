@@ -1490,6 +1490,19 @@ esac`;
       const pairs = parser.parse('echo \\\\\nif true; then\necho ok\nfi');
       assertSingleBlock(pairs, 'if', 'fi');
     });
+
+    test('should detect blocks after heredoc with unterminated string in gap', () => {
+      const source = 'cat <<EOF "\nunterminated\nheredoc\nEOF\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not tokenize middle keyword followed by equals as block middle', () => {
+      const tokens = parser.getTokens('then=5\nif true; then\n  echo ok\nfi');
+      const thenTokens = tokens.filter((t) => t.value === 'then');
+      assert.strictEqual(thenTokens.length, 1, 'only one then token should exist');
+      assert.strictEqual(thenTokens[0].type, 'block_middle');
+    });
   });
 
   suite('Block middle keyword validation', () => {
@@ -1678,6 +1691,36 @@ esac`;
     test('should not treat $$$$$# as comment inside command substitution', () => {
       const source = '$($$$$$#)\nif true; then\n  echo test\nfi';
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: single quote in double-quoted parameter expansion inside subshell', () => {
+    test('should detect if/fi after subshell with single quote in parameter expansion', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = 'x=$(echo "${v:-\'}") \nif true; then\necho hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if/fi after process substitution with single quote in parameter expansion', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = 'cat <(echo "${v:-\'}") \nif true; then\necho hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: $"..." locale strings handled as single excluded region', () => {
+    test('should handle $"..." locale string as single excluded region starting at $', () => {
+      const regions = parser.getExcludedRegions('$"test"');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 7);
+    });
+
+    test('should detect blocks after $"..." on same line', () => {
+      const pairs = parser.parse('$"text"; if true; then\n  echo ok\nfi');
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
@@ -4487,6 +4530,174 @@ fi`;
       const source = 'diff <(cat <<MARKER) file\ncontent\nMARKER\nif true; then\n  echo ok\nfi';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  // Regression: keyword=value variable assignment should not be block keyword
+  suite('Regression: bare brace in parameter expansion', () => {
+    test('should end excluded region correctly when parameter expansion contains bare brace', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = 'echo "${var:-{}" done';
+      const regions = parser.getExcludedRegions(source);
+      // The excluded region for the double-quoted string should not consume the entire source
+      const lastRegion = regions[regions.length - 1];
+      assert.ok(lastRegion.end < source.length, 'excluded region should not extend to end of source');
+    });
+
+    test('should detect if...fi after parameter expansion with bare brace default', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = 'x=${var:-{}}\nif true; then\necho hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: single quote in double-quoted parameter expansion', () => {
+    test('should treat single quote as literal inside double-quoted parameter expansion', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = 'echo "${var:-\'}" done';
+      const regions = parser.getExcludedRegions(source);
+      // The single quote inside parameter expansion is literal, should not start a new string
+      const lastRegion = regions[regions.length - 1];
+      assert.ok(lastRegion.end < source.length, 'excluded region should end properly');
+    });
+
+    test('should detect if...fi after double-quoted parameter expansion with single quote', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = '"${var:-\'}"\nif true; then\necho hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: keyword=value variable assignment', () => {
+    test('should not treat done=value as block close', () => {
+      const source = 'for i in 1; do\n  done=complete\n  echo ok\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat fi=value as block close', () => {
+      const source = 'if true; then\n  fi=1\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still detect keyword followed by == as block keyword', () => {
+      const source = 'if true; then\n  [ "$fi" == "x" ]\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat done+=value as block close', () => {
+      const source = 'for i in 1; do\n  done+=1\n  echo ok\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
+
+    test('should not treat fi[0]=value as block close', () => {
+      const source = 'if true; then\n  fi[0]=1\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+
+    test('should not treat done[idx]+=value as block close', () => {
+      const source = 'for i in 1; do\n  done[idx]+=1\n  echo ok\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
+
+    test('should not treat then+=value as block middle', () => {
+      const source = 'if true; then\n  then+=1\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should not treat esac+=value as block close', () => {
+      const source = 'case x in\n  *) esac+=1;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('esac'));
+    });
+  });
+
+  suite('Bug: parameter expansion with bare braces does not track depth', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion syntax in test name
+    test('should not close parameter expansion prematurely at bare } inside ${...{...}}', () => {
+      // matchParameterExpansion does not increment depth for bare { (only for ${),
+      // so the first } inside {a} closes the expansion prematurely.
+      // The trailing } is exposed and picked up as a block_close token.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion syntax
+      const source = '{\n  x=${v:+{a\n}}\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+      // Expected: { at pos 0 pairs with } at end (pos 17)
+      // Actual bug: { at pos 0 pairs with the exposed } at pos 15
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('}'));
+    });
+
+    test('should handle parameter expansion with bare braces in replacement', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion syntax
+      const source = 'x=${var/old/{new}}\nif true; then\n  echo ok\nfi';
+      const regions = parser.getExcludedRegions(source);
+      const paramExpStart = source.indexOf('$' + '{');
+      const paramExpRegion = regions.find((r) => r.start === paramExpStart);
+      assert.ok(paramExpRegion, 'parameter expansion region should exist');
+      // The region should cover the entire ${var/old/{new}} (16 chars from $ to final })
+      // Without the fix, it closes prematurely at the } of {new} (only covering ${var/old/{new})
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion syntax
+      assert.strictEqual(paramExpRegion.end, paramExpStart + 16, 'region should cover the full ${var/old/{new}} expansion');
+    });
+  });
+
+  suite('Bug: keywords inside { } not detected when { follows command starter on same line', () => {
+    test('should detect if block inside { } when { follows do on same line', () => {
+      // isAtCommandPosition for keywords inside { } fails when { is preceded
+      // by a command starter (do, then, else, etc.) on the same line.
+      // The { reserved word check does not recognize command starters as valid precursors.
+      const source = 'for i in 1; do { if true; then echo hi; fi; }; done';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'if');
+      findBlock(pairs, '{');
+      findBlock(pairs, 'for');
+    });
+
+    test('should detect for block inside { } when { follows then on same line', () => {
+      const source = 'if true; then { for i in 1 2; do\n  echo $i\ndone; }; fi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'for');
+      findBlock(pairs, '{');
+      findBlock(pairs, 'if');
+    });
+
+    test('should detect while block inside { } when { follows coproc on same line', () => {
+      const source = 'coproc { while true; do\n  break\ndone; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'while');
+      findBlock(pairs, '{');
+    });
+
+    test('should detect while block inside { } when { follows time on same line', () => {
+      const source = 'time { while true; do\n  break\ndone; }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'while');
+      findBlock(pairs, '{');
+    });
+
+    test('should detect if block inside { } when { follows else on same line', () => {
+      const source = 'if false; then\n  echo no\nelse { if true; then echo yes; fi; }; fi';
+      const pairs = parser.parse(source);
+      const ifBlocks = pairs.filter((p) => p.openKeyword.value === 'if');
+      assert.strictEqual(ifBlocks.length, 2);
+      findBlock(pairs, '{');
     });
   });
 });

@@ -427,6 +427,18 @@ endif`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'do', 'end do');
     });
+
+    test('should handle continuation lines with CRLF line endings', () => {
+      const source = 'if (.true.) &\r\n  then\r\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should reject end inside parentheses with continuation line string', () => {
+      const source = "program test\n  x = func('hello &\n  &world', end)\nend program";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
   });
 
   suite('Type-bound procedure declarations', () => {
@@ -3975,6 +3987,61 @@ end program`;
       const source = 'program test\r\n  integer :: enddo\r\n  enddo &\r\n  &\r\n  = 5\r\nend program';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  // Regression: else where in if block should preserve else as intermediate
+  suite('Regression: else where in if block', () => {
+    test('should preserve else when followed by where in if block', () => {
+      const source = 'if (x > 0) then\n  y = 1\nelse where (a > 0) a = 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const ifBlock = findBlock(pairs, 'if');
+      const hasElse = ifBlock.intermediates.some((t) => t.value.toLowerCase().startsWith('else'));
+      assert.strictEqual(hasElse, true, 'else should be intermediate of if block');
+    });
+
+    test('should still merge else where for where blocks', () => {
+      const source = 'where (a > 0)\n  b = 1\nelse where (a < 0)\n  b = -1\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+      assertIntermediates(findBlock(pairs, 'where'), ['else where']);
+    });
+  });
+
+  suite('Regression: isBlockWhereOrForall bare & continuation', () => {
+    test('should detect where...end where with bare & and comment-only continuation line', () => {
+      const source = 'where &\n  & ! comment\n  &(mask > 0)\n  a = 1\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('should detect forall...end forall with bare & continuation lines', () => {
+      const source = 'forall &\n  &\n  &(i = 1:n)\n  a(i) = i\nend forall';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'forall', 'end forall');
+    });
+  });
+
+  suite('Regression: bare & continuation in else if/where merge', () => {
+    test('should merge else if across bare & continuation line', () => {
+      const source = 'if (x > 0) then\n  y = 1\nelse &\n  &\n  if (x < 0) then\n  y = -1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // Merged token value includes raw continuation characters from source
+      assert.strictEqual(pairs[0].intermediates.length, 3);
+      assert.ok(/^else\b/i.test(pairs[0].intermediates[1].value), 'second intermediate should start with else');
+      assert.ok(/\bif$/i.test(pairs[0].intermediates[1].value), 'second intermediate should end with if');
+    });
+
+    test('should merge else where across bare & continuation line', () => {
+      const source = 'where (a > 0)\n  b = 1\nelse &\n  &\n  where\n  b = 0\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+      // Merged token value includes raw continuation characters from source
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.ok(/^else\b/i.test(pairs[0].intermediates[0].value), 'intermediate should start with else');
+      assert.ok(/\bwhere$/i.test(pairs[0].intermediates[0].value), 'intermediate should end with where');
     });
   });
 

@@ -1412,6 +1412,16 @@ end`;
       const pairs = parser.parse('"#{?{}" + do_something\nif true\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should treat if after $! as postfix conditional', () => {
+      const pairs = parser.parse('def foo\n  puts $! if true\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat if after $? as postfix conditional', () => {
+      const pairs = parser.parse('def foo\n  puts $? if true\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Rescue modifier', () => {
@@ -3031,6 +3041,53 @@ end`;
       const source = '"#{?\'}" if true\nend';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: isLoopDo should filter dot-prefixed do in inner scan', () => {
+    test('should treat while x.do do as while loop with do separator', () => {
+      // Bug: isLoopDo inner do scanning did not filter dot-prefixed do,
+      // so x.do was mistakenly treated as the loop's do keyword
+      const source = 'while x.do do\nputs x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  // Regression: scope resolution :: should not be filtered as hash key syntax
+  suite('Regression: scope resolution operator ::', () => {
+    test('should not filter end:: as hash key', () => {
+      const source = 'result = if true\n  1\nend::to_s';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still filter end: as hash key', () => {
+      const source = '{ end: 1 }';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Bug: heredoc inside regex interpolation', () => {
+    test('should exclude heredoc body keywords inside regex interpolation', () => {
+      const source = '/#{<<~EOF}/\n  if true\n  end\nEOF\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: postfix conditional across backslash continuation', () => {
+    test('should detect postfix if after regex across line continuation', () => {
+      const source = 'def foo\n  x = /pattern/ \\\nif condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should detect postfix unless after regex across line continuation', () => {
+      const source = 'def foo\n  x = /pattern/ \\\nunless condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
     });
   });
 

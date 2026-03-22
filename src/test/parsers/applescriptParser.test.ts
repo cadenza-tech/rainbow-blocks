@@ -479,6 +479,11 @@ end tell`;
       const pairs = parser.parse('-- comment \u00AC\nset repeat to 5');
       assertNoBlocks(pairs);
     });
+
+    test('should not suppress block keyword when continuation character precedes of on next line', () => {
+      const pairs = parser.parse('try \u00AC\nof something\n  riskyOp()\nend try');
+      assertSingleBlock(pairs, 'try', 'end try');
+    });
   });
 
   suite('Branch coverage: set/copy before middle keyword', () => {
@@ -875,17 +880,13 @@ end run`;
       assertSingleBlock(pairs, 'on', 'end');
     });
 
-    // Covers lines 420-421: '<keyword> of' pattern (property access)
+    // Covers: '<keyword> of' pattern (property access)
     test('should not treat repeat in property access as block opener', () => {
       const source = `on run
   set x to name of repeat
 end run`;
       const pairs = parser.parse(source);
-      // Currently, 'repeat' after 'of' is still detected as a block keyword
-      // because the 'of' pattern check excludes 'repeat' from the check
-      // So we expect repeat-end to be paired
-      const repeatPair = findBlock(pairs, 'repeat');
-      assert.ok(repeatPair, 'Expected repeat block to be found');
+      assertSingleBlock(pairs, 'on', 'end');
     });
 
     test('should not treat end in property access as block keyword', () => {
@@ -901,6 +902,30 @@ end run`;
 end repeat`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat tell after of as block opener', () => {
+      const source = `on run
+  set x to name of tell
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat if after of as block opener', () => {
+      const source = `on run
+  set x to value of if
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat script after of as block opener', () => {
+      const source = `on run
+  set x to name of script
+end run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
     });
   });
 
@@ -1825,6 +1850,174 @@ end try`;
       const source = 'tell application "Finder"\n  get name\nend \u00AC(* comment *) \ntell';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
+  suite('Regression: Unicode toLowerCase length change should not break parsing', () => {
+    test('should parse blocks after U+0130 character', () => {
+      // Before fix: source.toLowerCase() was pre-computed, but U+0130 (İ)
+      // lowercases to 'i' + U+0307 (2 code units), causing position mismatch
+      // and complete parsing failure
+      const source = '\u0130 tell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should parse blocks after multiple U+0130 characters', () => {
+      const source = '\u0130\u0130\u0130 if true then\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should parse compound keywords after U+0130 character', () => {
+      const source = '\u0130 using terms from application "Finder"\n  activate\nend using terms from';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+    });
+  });
+
+  suite('Regression: isInsideIfCondition with U+0130 and tell keyword', () => {
+    test('should suppress tell as condition value in if...then when U+0130 precedes the line', () => {
+      // Bug: isInsideIfCondition used pre-computed source.toLowerCase() causing
+      // index mismatch with U+0130 (lowercases to 2 code units: 'i' + U+0307)
+      // Without the fix, tell was NOT detected as inside if condition and produced
+      // 2 pairs (tell...end tell and if...end if). With the fix, tell is correctly
+      // suppressed as a condition value, leaving only if...end if.
+      const source = '\u0130 if tell then\n  beep\nend tell\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  // Regression: isKeywordAsVariableName should strip block comments from lineBefore
+  suite('Regression: block comment in set/copy pattern', () => {
+    test('should detect set pattern with block comment before keyword', () => {
+      // set (* comment *) repeat to 5 should treat repeat as variable name
+      const source = 'set (* comment *) repeat to 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect of pattern with block comment before keyword', () => {
+      // name of (* comment *) repeat should treat repeat as property target
+      const source = 'on run\n  set x to name of (* comment *) repeat\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
+  suite('Regression: compound block_open of-keyword check', () => {
+    test('should detect on...end when with timeout is property access target', () => {
+      const source = 'on run\n  set x to name of with timeout\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
+  suite('Bug: X of pattern should span line continuations', () => {
+    test('should not treat repeat as block opener when followed by of on continuation line', () => {
+      // 'repeat ¬\nof myList' is the same logical line as 'repeat of myList'
+      // The 'X of' pattern in isKeywordAsVariableName should detect this
+      const source = 'set x to repeat \u00AC\nof myList';
+      const tokens = parser.getTokens(source);
+      // Bug: 'repeat' should not appear as a token since it's a property access (repeat of)
+      assert.ok(!tokens.some((t) => t.value === 'repeat'), 'repeat should not be tokenized when followed by of on continuation line');
+    });
+
+    test('should not treat tell as block opener when followed by of on continuation line', () => {
+      // 'tell ¬\nof myApp' is property access, not a block opener
+      const source = 'log tell \u00AC\nof myApp\ntell application "Finder"\n  activate\nend tell';
+      const tokens = parser.getTokens(source);
+      // Bug: there should be only ONE tell token (the real block opener), not two
+      const tellTokens = tokens.filter((t) => t.value === 'tell');
+      assert.strictEqual(tellTokens.length, 1, 'should have exactly 1 tell token');
+    });
+
+    test('should not treat end as block closer when followed by of on continuation line', () => {
+      // 'end ¬\nof myList' is property access (end of myList), not a block closer
+      const source = 'tell application "Finder"\n  get end \u00AC\nof myList\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      // Verify the close keyword is on the correct line (last line, not the spurious end)
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should treat compound end tell at line start as block closer even with of on continuation line', () => {
+      // 'end tell' at line start is a block closer, not property access
+      const source = 'tell application "Finder"\n  end tell \u00AC\nof myList\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      // The first end tell closes the tell block (line 1)
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+
+    test('should still detect X of pattern on same physical line (no continuation)', () => {
+      // Sanity check: the same-line case should still work
+      const source = 'set x to repeat of myList';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'repeat'), 'repeat should not be tokenized when followed by of on same line');
+    });
+  });
+
+  suite('Block comment with newline between then and content', () => {
+    test('should treat if as single-line when block comment with newline appears after then', () => {
+      const source = 'if x then (* has\nnewline *) content\nend if';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat if as multi-line when only comment after then', () => {
+      const source = 'if x then (* has\nnewline *)\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Regression: continuation-with-comment in set-to and compound keywords', () => {
+    test('should suppress keyword in set...to with continuation and comment', () => {
+      const source = 'set repeat \u00AC -- comment\nto 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should suppress compound keyword after set with continuation and comment', () => {
+      const source = 'set \u00AC -- comment\nwith timeout of 30 seconds\n  beep\nend timeout';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: U+0130 toLowerCase position mismatch in set/copy pattern', () => {
+    test('should suppress repeat in set pattern when block comment contains U+0130', () => {
+      const source = 'set repeat (* \u0130 *) to 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should parse all blocks when U+0130 appears in block comment within if condition', () => {
+      const source = 'tell application "X"\n  if (* \u0130 *) tell then\n    beep\n  end if\n  tell window 1\n    beep\n  end tell\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+  });
+
+  suite('Regression: excluded region between keyword and of/to', () => {
+    test('should suppress keyword when comment appears between keyword and of', () => {
+      const source = 'on run\n  set x to repeat (* comment *) of myList\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should suppress keyword when comment appears between keyword and to in set', () => {
+      const source = 'set repeat (* comment *) to 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should suppress keyword when string appears between keyword and of', () => {
+      const source = 'on run\n  set x to repeat "label" of myList\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
     });
   });
 

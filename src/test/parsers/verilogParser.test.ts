@@ -423,6 +423,24 @@ endmodule`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
     });
+
+    test('should calculate correct nest levels when control and begin share close keyword', () => {
+      const pairs = parser.parse('module test;\n  always @(posedge clk) begin\n    q <= d;\n  end\nendmodule');
+      assertBlockCount(pairs, 3);
+      const modulePair = findBlock(pairs, 'module');
+      const alwaysPair = findBlock(pairs, 'always');
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(modulePair.nestLevel, 0);
+      assert.strictEqual(alwaysPair.nestLevel, 1);
+      assert.strictEqual(beginPair.nestLevel, 2);
+    });
+
+    test('should recognize always with @identifier sensitivity list', () => {
+      const pairs = parser.parse('always @clk begin\n  q <= d;\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'begin');
+    });
   });
 
   suite('SystemVerilog constructs', () => {
@@ -1788,6 +1806,24 @@ endmodule`;
     });
   });
 
+  suite('Regression: skipDelayExpression with backtick-prefixed macro', () => {
+    test('should handle delay expression with backtick-prefixed macro identifier', () => {
+      // Bug: skipDelayExpression did not handle backtick-prefixed macro identifiers
+      // like `CLK_PERIOD, causing "begin" after the delay to not be detected
+      const pairs = parser.parse('always #`CLK_PERIOD begin\n  q <= d;\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'always');
+    });
+
+    test('should handle delay expression with backtick-prefixed macro in parentheses', () => {
+      const pairs = parser.parse('always #`(CLK_PERIOD/2) begin\n  q <= d;\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'always');
+    });
+  });
+
   suite('Coverage: default intermediate skipping non-case blocks', () => {
     test('should not attach default to begin block when no case block exists', () => {
       // Covers verilogParser.ts lines 489-490: default found as middle keyword
@@ -1805,6 +1841,101 @@ endmodule`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'default should not attach to module block');
+    });
+  });
+
+  suite('Regression: matchAttribute comment skip', () => {
+    test('should not close attribute prematurely when block comment appears inside', () => {
+      const source = '(* /* *) */ attr = 1 *)\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Bug: preprocessor directives between end and else break control keyword chaining', () => {
+    test('should not consume always when ifdef/endif appears between end and else', () => {
+      const source = 'always @(posedge clk) if (a) begin\n  x <= 1;\nend\n`ifdef DEBUG\n`endif\nelse begin\n  y <= 2;\nend';
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired');
+      // always should be paired with the LAST end (after else begin...end), not the first
+      assert.strictEqual(alwaysPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not consume always when ifdef with content appears between end and else', () => {
+      const source = [
+        'always @(posedge clk)',
+        '  if (a) begin',
+        '    x <= 1;',
+        '  end',
+        '  `ifdef DEBUG',
+        '    // debug code',
+        '  `endif',
+        '  else begin',
+        '    y <= 2;',
+        '  end'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired');
+      assert.strictEqual(alwaysPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not consume always when multiple ifdefs appear between end and else', () => {
+      const source = 'always @(posedge clk) if (a) begin\n  x <= 1;\nend `ifdef A wire a; `endif `ifdef B wire b; `endif else begin\n  y <= 2;\nend';
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired');
+      assert.strictEqual(alwaysPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
+  suite('Preprocessor directives between control keyword and begin', () => {
+    test('should pair always with end when ifdef/endif appear before begin', () => {
+      const source = 'always @(posedge clk) `ifdef DEBUG `endif begin\n  q <= d;\nend';
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired');
+    });
+
+    test('should pair initial with end when macro appears before begin', () => {
+      const source = 'initial `MY_MACRO begin\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      const initialPair = pairs.find((p) => p.openKeyword.value === 'initial');
+      assert.ok(initialPair, 'initial should be paired');
+    });
+
+    test('should pair if with end when ifndef/endif appear before begin', () => {
+      const source = 'if (cond) `ifndef X `endif begin\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if should be paired');
+    });
+  });
+
+  suite('Regression: unterminated block comment in define', () => {
+    test('should not extend excluded region past define boundary for unterminated block comment', () => {
+      const source = '`define MACRO /* unterminated\nmodule test;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: control keyword with ifdef wrapping begin', () => {
+    test('should pair always with end when ifdef wraps begin-end', () => {
+      const source = 'always @(posedge clk)\n`ifdef DEBUG\nbegin\n  q <= d;\nend\n`endif';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const alwaysPair = findBlock(pairs, 'always');
+      assert.strictEqual(alwaysPair.closeKeyword.value, 'end');
+    });
+
+    test('should pair initial with end when ifndef wraps begin-end', () => {
+      const source = 'initial\n`ifndef SYNTH\nbegin\n  q <= 0;\nend\n`endif';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const initialPair = findBlock(pairs, 'initial');
+      assert.strictEqual(initialPair.closeKeyword.value, 'end');
     });
   });
 

@@ -521,6 +521,11 @@ end`;
       const pairs = parser.parse('\u03B1for = 1\ndo\n  x = 1\nend');
       assertSingleBlock(pairs, 'do', 'end');
     });
+
+    test('should treat standalone do as block opener after for without do followed by end', () => {
+      const pairs = parser.parse('for i = 1, 10\nend\ndo\n  x = 1\nend');
+      assertBlockCount(pairs, 2);
+    });
   });
 
   suite('Regression: findLastNonRepeatIndex backward scan', () => {
@@ -968,6 +973,104 @@ end`;
     test('should handle \\z escape with mixed \\v \\f \\t \\n whitespace', () => {
       const pairs = parser.parse('x = "hello\\z\v\f\t\n  world"\nfunction f()\nend');
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: keywords preceded by dot or colon should not be block keywords', () => {
+    test('should not treat t.end as block close', () => {
+      // Bug: keywords preceded by '.' or ':' were incorrectly detected as block keywords
+      const source = 'function f() print(t.end) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat t.if as block open', () => {
+      const source = 'function f() x = t.if end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat t.while as block open', () => {
+      const source = 'function f() x = t.while end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat t.repeat as block open', () => {
+      const source = 'function f() x = t.repeat end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat obj:do as block open', () => {
+      const source = 'function f() obj:do() end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat t.then as intermediate keyword', () => {
+      const source = 'if true then\n  x = t.then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat t.else as intermediate keyword', () => {
+      const source = 'if true then\n  x = t.else\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // Regression: goto label :: should not trigger dot/colon check
+  suite('Regression: goto label closing ::', () => {
+    test('should detect if block after goto label', () => {
+      const source = '::label::if true then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect end after goto label', () => {
+      const source = 'if true then\n::lbl::end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect function after goto label', () => {
+      const source = '::lbl::function f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still reject method call colon', () => {
+      const source = 'obj:do\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: isDoPartOfLoop dot/colon filter', () => {
+    test('should detect for...end when t.do appears between for and real do', () => {
+      const source = 'for i = 1, t.do do print(i) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should detect for...end when t.end appears between for and real do', () => {
+      const source = 'for i = 1, t.end do print(i) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should detect while...end when obj:end() appears in condition', () => {
+      const source = 'while obj:end() do print(1) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should detect standalone do...end when t.while precedes it', () => {
+      const source = 't.while\ndo print(1) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
     });
   });
 

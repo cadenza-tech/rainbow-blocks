@@ -590,6 +590,13 @@ end architecture;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'architecture', 'end architecture');
     });
+
+    test('should recognize end postponed process as compound end keyword', () => {
+      const pairs = parser.parse('postponed process\nbegin\n  null;\nend postponed process;');
+      const processPair = findBlock(pairs, 'process');
+      assert.ok(processPair, 'process should be paired');
+      assert.strictEqual(processPair.closeKeyword.value.toLowerCase(), 'end postponed process');
+    });
   });
 
   suite('Wait for timing statement', () => {
@@ -2078,6 +2085,132 @@ end loop;`;
       const casePair = findBlock(pairs, 'case');
       assert.ok(casePair);
       assertIntermediates(casePair, ['is', 'when', 'when']);
+    });
+  });
+
+  suite('Regression: character literal with newline should not span lines', () => {
+    test('should not treat tick-LF-tick as character literal', () => {
+      // Before fix: '\n' between ticks was treated as a 3-char character literal
+      // After fix: newline is rejected, each tick handled separately
+      const regions = parser.getExcludedRegions("'\n'");
+      const charLitRegion = regions.find((r) => r.start === 0 && r.end === 3);
+      assert.strictEqual(charLitRegion, undefined, 'tick-LF-tick should not be a character literal');
+    });
+
+    test('should not treat tick-CR-tick as character literal', () => {
+      const regions = parser.getExcludedRegions("'\r'");
+      const charLitRegion = regions.find((r) => r.start === 0 && r.end === 3);
+      assert.strictEqual(charLitRegion, undefined, 'tick-CR-tick should not be a character literal');
+    });
+
+    test('should preserve attribute tick after newline-terminated tick', () => {
+      // Before fix: '\n' consumed both ticks as character literal,
+      // exposing 'loop' keyword that should be excluded by attribute tick
+      const source = "x <= '\n'loop;\nfor i in 0 to 7 loop\n  null;\nend loop;";
+      const regions = parser.getExcludedRegions(source);
+      const loopExcluded = regions.some((r) => source.slice(r.start, r.end).includes('loop'));
+      assert.ok(loopExcluded, "'loop should be excluded as attribute tick");
+    });
+  });
+
+  suite('Regression: end postponed process pairing', () => {
+    test('should pair process with end postponed process, not if with end postponed process', () => {
+      const source =
+        'architecture rtl of test is\nbegin\n  postponed process\n  begin\n    if cond then\n      null;\n    end postponed process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const processPair = findBlock(pairs, 'process');
+      assert.ok(processPair, 'process block should exist');
+      assert.strictEqual(processPair.closeKeyword.value.toLowerCase(), 'end postponed process');
+      // if should NOT pair with end postponed process
+      const ifBlocks = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'if');
+      for (const ifBlock of ifBlocks) {
+        assert.notStrictEqual(ifBlock.closeKeyword.value.toLowerCase(), 'end postponed process');
+      }
+    });
+  });
+
+  suite('Bug: isValidLoopOpen ignores semicolons between for/while prefix and loop', () => {
+    test('should treat loop as standalone when for is terminated by semicolon on same line', () => {
+      const source = 'for i in range; loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop should be standalone when for is terminated by semicolon');
+    });
+
+    test('should treat loop as standalone when for is terminated by semicolon on previous line', () => {
+      const source = 'for i in range;\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop should be standalone when for is terminated by semicolon on previous line');
+    });
+
+    test('should treat loop as standalone when while is terminated by semicolon on same line', () => {
+      const source = 'while cond; loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop should be standalone when while is terminated by semicolon');
+    });
+
+    test('should still pair for with loop when no semicolon separates them', () => {
+      const source = 'for i in 0 to 7 loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+
+    test('should not treat semicolon in comment as terminator between for and loop', () => {
+      const source = 'for i in 0 to 7 -- ;\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
+  });
+
+  suite('Wait while rejection', () => {
+    test('should not treat while as block open when preceded by wait', () => {
+      const source = 'process\nbegin\n  wait while running;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+
+    test('should still treat standalone while as block open', () => {
+      const source = 'while running loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end loop');
+    });
+  });
+
+  suite('Regression: isValidWhileOpen scans across newlines', () => {
+    test('should reject while as block opener when wait is on previous line', () => {
+      const source = 'process\nbegin\n  wait\n  while running;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+
+    test('should reject while when wait is on previous line with comment between', () => {
+      const source = 'process\nbegin\n  wait -- comment\n  while running;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+  });
+
+  suite('Regression: keywords inside parenthesized expressions', () => {
+    test('should reject if inside port map', () => {
+      const source = 'process\nbegin\n  inst: entity work.my_entity\n    port map (if => a);\n  null;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should reject case inside generic map', () => {
+      const source =
+        'architecture rtl of test is\nbegin\n  inst: entity work.comp\n    generic map (case => 1)\n    port map (a => b);\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should reject if inside function call', () => {
+      const source = 'process\nbegin\n  x := func(if);\n  null;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
     });
   });
 

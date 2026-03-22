@@ -452,6 +452,15 @@ end`;
       const pairs = parser.parse('begin\n  1..begin ok end\nend');
       assertBlockCount(pairs, 2);
     });
+
+    test('should handle tilde-sigil verbatim string without escape processing', () => {
+      // In tilde-sigil strings, backslash is literal (not an escape character)
+      // ~"abc\" - the \" does NOT escape the quote, " closes the string
+      // Without the fix, \" is treated as escaped quote and string extends to EOF
+      const source = '~"abc\\" begin end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
   });
 
   suite('Fun references', () => {
@@ -1809,6 +1818,111 @@ bar() -> fun() -> ok end.`;
       const source = 'X = #{catch := handler}.\nbegin\n  ok\nend.';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: tilde-sigil verbatim string phantom region', () => {
+    test('should not create phantom string from unterminated tilde-sigil double quote', () => {
+      const source = '~"str\n" begin end';
+      const regions = parser.getExcludedRegions(source);
+      // Unterminated verbatim string extends to source.length
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should not create phantom atom from unterminated tilde-sigil single quote', () => {
+      const source = "~'str\n' begin end";
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should handle properly terminated tilde-sigil string', () => {
+      const source = '~"str" begin end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Bug: Sigil triple-quoted string (~""") misparse', () => {
+    test('should treat ~""" followed by newline as sigil triple-quoted string', () => {
+      // ~""" is a sigil applied to a triple-quoted string (OTP 27+)
+      // The parser incorrectly breaks it into ~"" (verbatim empty) + "...\n" (regular string)
+      // Keywords inside the sigil triple-quoted string leak out as block keywords
+      const source = '~"""\nfoo " bar\nbegin end\n"""';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~S""" followed by newline as sigil triple-quoted string with modifier', () => {
+      const source = '~S"""\nfoo " bar\nbegin end\n"""';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle ~""" with multiple interior quotes', () => {
+      const source = '~"""\nShe said "begin end" here\n"""';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite("Bug: Sigil triple-quoted atom (~''') misparse", () => {
+    test("should treat ~''' followed by newline as sigil triple-quoted atom", () => {
+      // ~''' is a sigil applied to a triple-quoted atom (OTP 27+)
+      // Same issue as triple-quoted string: parser breaks it into ~'' + '...'
+      const source = "~'''\nfoo ' bar\nbegin end\n'''";
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test("should treat ~S''' followed by newline as sigil triple-quoted atom with modifier", () => {
+      const source = "~S'''\nfoo ' bar\nbegin end\n'''";
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite("Bug: Missing triple-quoted atom (''') support", () => {
+    test("should treat ''' followed by newline as triple-quoted atom", () => {
+      // OTP 27+ supports triple-quoted atoms (''') similar to triple-quoted strings (""")
+      // The parser currently has no handling for this, causing keywords to leak
+      const source = "'''\nbegin end\n'''";
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle triple-quoted atom with interior single quote', () => {
+      const source = "'''\nfoo ' bar\nbegin end\n'''";
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: multi-line comment between map key and =>', () => {
+    test('should reject block keyword followed by => with multi-line comments between', () => {
+      const source = '#{begin\n  % comment1\n  % comment2\n  => value},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: tokenize filter regex for map keys with comment-only lines', () => {
+    test('should reject map key end with single comment line before =>', () => {
+      const source = 'begin\n#{end\n  % comment\n  => val}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The close end must be the final one (offset 33), not the map-key end (offset 8)
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should reject map key end with multiple comment lines before =>', () => {
+      const source = 'begin\n#{end\n  % c1\n  % c2\n  => val}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
     });
   });
 

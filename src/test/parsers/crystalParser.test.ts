@@ -1387,6 +1387,11 @@ end`;
       const pairs = parser.parse('x = 1 \\\\\nif true\n  puts 1\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not scan past newline in \\u{ char literal', () => {
+      const pairs = parser.parse('?\\u{\ndef foo\n  1\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Loop separator do', () => {
@@ -3307,6 +3312,116 @@ end`;
     test('should handle ?{ at start of interpolation without incrementing depth', () => {
       // ? followed by { at interpolation start: should not affect brace depth
       const source = '"#{?{}" + if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: isLoopDo should filter dot-prefixed do in inner scan', () => {
+    test('should treat while x.do do as while loop with do separator', () => {
+      // Bug: isLoopDo inner do scanning did not filter dot/scope/variable-prefixed do,
+      // so x.do was mistakenly treated as the loop's do keyword
+      const source = 'while x.do do\nputs x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  // Regression: ?<keyword> char literal should be excluded
+  suite('Regression: question mark char literal', () => {
+    test('should not treat ?end as block close', () => {
+      const source = 'if true\n  x = ?end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat ?do as block open', () => {
+      const source = 'x = ?do';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not affect method? calls', () => {
+      const source = 'if x.nil?\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle escape char literal', () => {
+      const source = 'x = ?\\n\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: skipMacroString interpolation with nested string', () => {
+    test('should properly exclude macro template with interpolated string containing inner string', () => {
+      const source = '{% "test #{"hello"}" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug: $-prefixed global variables should not be treated as keywords', () => {
+    test('should not match $end as block close', () => {
+      const source = 'if true\n  $end = 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // The real 'end' is on line 2, not line 1 ($end)
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not match $do as block open', () => {
+      const source = 'def foo\n  $do = true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match $begin as block open', () => {
+      const source = 'def foo\n  $begin = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match $class as block open', () => {
+      const source = 'def foo\n  $class = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not match $for as block open', () => {
+      const source = 'def foo\n  $for = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle mixed $ variables and real blocks', () => {
+      const source = 'class Foo\n  def initialize\n    $end = false\n    $do = true\n    if $end\n      puts $do\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assertNestLevel(pairs, 'if', 2);
+      assertNestLevel(pairs, 'def', 1);
+      assertNestLevel(pairs, 'class', 0);
+    });
+  });
+
+  suite('Regression: percent literal in interpolation with closing brace', () => {
+    test('should handle %} inside interpolation as percent literal', () => {
+      const source = '"#{%}"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle expression with %} inside interpolation', () => {
+      const source = '"#{ x = %}"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: macro template {{ { }} closing', () => {
+    test('should handle {{ { }} as excluded region', () => {
+      const source = '{{ { }}\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });

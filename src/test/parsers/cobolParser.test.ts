@@ -1391,5 +1391,38 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: matchExecBlock should skip pseudo-text delimiters ==...==', () => {
+    test('should not terminate EXEC block early when ==END-EXEC== appears in pseudo-text', () => {
+      // Bug: matchExecBlock did not skip pseudo-text delimiters ==...==, so
+      // END-EXEC inside ==...== terminated the excluded region prematurely
+      const source = 'EXEC SQL\n  COPY SOMETHING REPLACING ==END-EXEC== BY ==NEW-TEXT==\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should handle pseudo-text with PERFORM keyword inside EXEC block', () => {
+      // Pseudo-text containing block keywords should not affect parsing
+      const source = 'EXEC SQL\n  COPY FILE REPLACING ==PERFORM== BY ==CALL==\nEND-EXEC\nPERFORM\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: isValidBlockClose check in tokenize override', () => {
+    test('should reject block close keyword preceded by hyphen', () => {
+      // Bug: missing isValidBlockClose check in tokenize override allowed
+      // hyphenated identifiers like MY-END-IF to be parsed as END-IF
+      const source = 'MOVE MY-END-IF TO X\nIF CONDITION\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should reject block close keyword followed by hyphen', () => {
+      const source = 'MOVE END-IF-FLAG TO X\nIF CONDITION\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });

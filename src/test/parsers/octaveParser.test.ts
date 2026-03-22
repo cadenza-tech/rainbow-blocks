@@ -499,6 +499,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
     });
+
+    test('should not apply doubled quote escape in double-quoted strings', () => {
+      // "a""b" should be string "a" + string "b", not "a\"b"
+      const pairs = parser.parse('"a""b"; if true; end');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still apply doubled quote escape in single-quoted strings', () => {
+      // 'a''b' should be a single string containing a'b
+      const pairs = parser.parse("'a''b'; if true; end");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Typed end keyword', () => {
@@ -1167,6 +1179,97 @@ end`;
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'classdef', 'end');
+    });
+  });
+
+  suite('Bug: typed close keywords skip past intervening unclosed blocks', () => {
+    test('should not let endfor skip past unclosed if', () => {
+      // In Octave, 'endfor' should only close 'for' if 'for' is the most recent
+      // unclosed block. It should NOT skip past an unclosed 'if'.
+      const pairs = parser.parse('for i = 1:10\n  if true\n    x = 1;\nendfor');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not let endif skip past unclosed for', () => {
+      const pairs = parser.parse('if true\n  for i = 1:10\n    x = 1;\nendif');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not let endwhile skip past unclosed for', () => {
+      const pairs = parser.parse('while true\n  for i = 1:10\n    x = 1;\nendwhile');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not let endfunction skip past unclosed if', () => {
+      const pairs = parser.parse('function f()\n  if true\n    x = 1;\nendfunction');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not let end_try_catch skip past unclosed for', () => {
+      const pairs = parser.parse('try\n  for i = 1:10\n    x = 1;\nend_try_catch');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not let until skip past unclosed if', () => {
+      const pairs = parser.parse('do\n  if true\n    x = 1;\nuntil (cond)');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still match endfor when for is on top of stack', () => {
+      // When for is the most recent unclosed block, endfor should close it
+      const source = 'if true\n  for i = 1:10\n    x = 1;\n  endfor\nendif';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'if');
+    });
+  });
+
+  suite('Bug: missing |= and &= compound assignment recognition', () => {
+    test('should not treat end |= 1 as block close', () => {
+      // |= is bitwise OR assignment in Octave; end used as variable
+      // The 'end' on the second line is 'end |= 1' (variable assignment),
+      // so it should not close the function block.
+      // Only the 'end' on the third line should close the function.
+      const source = 'function f()\n  end |= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // Verify the correct 'end' was matched (the one at line 2, not line 1)
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should be closed by the last end, not the one followed by |=');
+    });
+
+    test('should not treat end &= 1 as block close', () => {
+      // &= is bitwise AND assignment in Octave; end used as variable
+      const source = 'function f()\n  end &= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should be closed by the last end, not the one followed by &=');
+    });
+
+    test('should not treat if |= 1 as block open', () => {
+      // |= is bitwise OR assignment in Octave; if used as variable
+      // The 'if' token should not appear when followed by |=
+      const tokens = parser.getTokens('if |= 1;\nfor i = 1:10\nend');
+      const ifToken = tokens.find((t) => t.value === 'if');
+      assert.strictEqual(ifToken, undefined, 'if followed by |= should not be tokenized as block_open');
+    });
+
+    test('should not treat if &= 1 as block open', () => {
+      // &= is bitwise AND assignment in Octave; if used as variable
+      const tokens = parser.getTokens('if &= 1;\nfor i = 1:10\nend');
+      const ifToken = tokens.find((t) => t.value === 'if');
+      assert.strictEqual(ifToken, undefined, 'if followed by &= should not be tokenized as block_open');
+    });
+  });
+
+  suite('Regression: transpose after double-quoted string', () => {
+    test('should treat single quote after closing double quote as transpose', () => {
+      const regions = parser.getExcludedRegions('"x"\'');
+      assert.strictEqual(regions.length, 2);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, 3);
+      assert.strictEqual(regions[1].start, 3);
+      assert.strictEqual(regions[1].end, 4);
     });
   });
 

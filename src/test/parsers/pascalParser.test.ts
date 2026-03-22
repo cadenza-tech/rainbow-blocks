@@ -479,6 +479,13 @@ end;`;
       // Unterminated string ends at newline; if/then are not block keywords
       assertBlockCount(pairs, 2);
     });
+
+    test('should detect variant case inside record with case statement in method body', () => {
+      const source = 'TRec = record\n  begin\n    case X of\n      1: DoOne;\n    end;\n  end;\n  case Integer of\n    0: (IntVal: Integer);\nend';
+      const pairs = parser.parse(source);
+      const recordPair = findBlock(pairs, 'record');
+      assert.ok(recordPair, 'record should be paired');
+    });
   });
 
   suite('Class modifier', () => {
@@ -1631,6 +1638,24 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'class', 'end');
     });
+
+    test('should suppress variant case when brace comment appears before tag', () => {
+      const source = 'TRec = record\n  case {c} Tag: Integer of\n    0: (X: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should suppress variant case when paren-star comment appears before tag', () => {
+      const source = 'TRec = record\n  case (* c *) Tag: Integer of\n    0: (X: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should suppress tagless variant case when comment appears before type name', () => {
+      const source = 'TRec = record\n  case {c} Integer of\n    0: (X: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
   });
 
   suite('Branch coverage', () => {
@@ -1745,6 +1770,19 @@ end.`;
     });
   });
 
+  suite('Regression: tagless variant case with of on separate line', () => {
+    test('should detect case as block when of is on the next line after identifier', () => {
+      // Bug: tagless variant regex used \s+ between identifier and "of", which
+      // allowed cross-line matching. With [ \t]+, newline no longer matches.
+      // "case Integer\n  of" should NOT be suppressed as tagless variant.
+      const source = 'type\n  TRec = record\n    case Integer\n      of\n    0: (IntVal: Integer);\n  end;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+  });
+
   suite('Regression: Unicode adjacency check in tokenize', () => {
     test('should not detect keywords adjacent to Unicode letters', () => {
       const pairs = parser.parse('\u03B1begin\n  x := 1;\n\u03B1end');
@@ -1781,6 +1819,49 @@ end.`;
     test('should still treat object with body as block opener', () => {
       const pairs = parser.parse('type\n  TObj = object(TBase)\n    X: Integer;\n  end;');
       assertSingleBlock(pairs, 'object', 'end');
+    });
+  });
+
+  suite('Regression: isVariantRecordCase skips comments between identifier and of/:', () => {
+    test('should detect variant case with comment between identifier and of', () => {
+      const source = 'type TRec = record\n  case Integer {comment} of\n    0: (IntVal: Integer);\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should handle comment containing of in variant case scan', () => {
+      const source = 'type TRec = record\n  case X {of} of\n    0: (A: Integer);\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Regression: isVariantCase missing left word boundary for of', () => {
+    test('should detect variant case when tag name ends with of-like substring', () => {
+      const source = 'TRec = record\n  case eof: Byte of\n    0: (A: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Regression: isVariantCase skips comments after of', () => {
+    test('should handle brace comment between of and label', () => {
+      const source =
+        'TBig = record\n  TInner = class\n    TVariant = record\n      case Integer of\n        { comment } 0: (Field: Integer);\n    end;\n  end;\n  case Byte of\n    0: (B: Byte);\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should handle paren-star comment between of and label', () => {
+      const source = 'x = record\n  case Integer of\n    (* comment *) 0: (Field: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should handle line comment between of and label on next line', () => {
+      const source = 'x = record\n  case Integer of\n    // comment\n    0: (Field: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
     });
   });
 

@@ -434,6 +434,12 @@ end Hello;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
+
+    test('should keep or and else as intermediates when or follows select directly', () => {
+      const pairs = parser.parse('select\nor\nelse\n  null;\nend select;');
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or', 'else']);
+    });
   });
 
   suite('Entry declarations', () => {
@@ -2148,6 +2154,32 @@ end if;`;
     });
   });
 
+  suite('Regression: or else with identifiers ending in select', () => {
+    test('should filter or else when preceded by identifier ending with select', () => {
+      const source = 'if Aselect or else B then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should filter or else when preceded by identifier with underscore select', () => {
+      const source = 'if my_select or else flag then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should still recognize or else in real select block', () => {
+      const source = 'select\n  accept A;\nor\n  delay 1.0;\nelse\n  null;\nend select;';
+      const pairs = parser.parse(source);
+      const selectPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(selectPair);
+      const intermediates = selectPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('or'));
+      assert.ok(intermediates.includes('else'));
+    });
+  });
+
   suite('Coverage: and then backward scan findExcludedRegionAt null branch', () => {
     test('should handle backward scan where isInExcludedRegion is true but findExcludedRegionAt returns null', () => {
       // Lines 304-305: the else branch when findExcludedRegionAt returns null
@@ -2277,6 +2309,120 @@ end if;`;
       const source = 'or   else';
       const result = isOrElseShortCircuit(source, 2, 5, () => false);
       assert.strictEqual(result, true);
+    });
+  });
+
+  // Regression: backward type scan should not skip is when declaration keyword intervenes
+  suite('Regression: type scan with intervening declarations', () => {
+    test('should not skip is when procedure follows unterminated type', () => {
+      const source = 'type T\nprocedure P(X : Integer) is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      const procBlock = findBlock(pairs, 'procedure');
+      const isIntermediate = procBlock.intermediates.some((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediate, true, 'is should be intermediate of procedure');
+    });
+
+    test('should not skip is when function follows unterminated type', () => {
+      const source = 'type T\nfunction F return Integer is\nbegin\n  return 1;\nend F;';
+      const pairs = parser.parse(source);
+      const funcBlock = findBlock(pairs, 'function');
+      const isIntermediate = funcBlock.intermediates.some((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediate, true, 'is should be intermediate of function');
+    });
+
+    test('should still skip is for actual type declaration', () => {
+      const source = 'type T is new Integer;\nprocedure P is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      const procBlock = findBlock(pairs, 'procedure');
+      const isIntermediate = procBlock.intermediates.some((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediate, true, 'is should be intermediate of procedure');
+    });
+  });
+
+  suite('Regression: entry in COMPOUND_END_TYPES', () => {
+    test('should detect entry...end entry pair with compound close keyword', () => {
+      const source = 'entry Read(V : out Integer) when Count > 0 is\nbegin\n  V := Value;\nend entry;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entry', 'end entry');
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    // BUG 1: Backward scan for type declaration crosses unrelated non-type lines
+    // The backward scan in the 'is' filtering logic continues past non-type, non-comment
+    // lines and can find a 'type' keyword many lines back, incorrectly filtering 'is'.
+    // The 'case' keyword is not in the separator keyword list, so when there's a
+    // type declaration above without a semicolon, and a multi-line case statement below,
+    // the 'is' after 'case' gets incorrectly filtered.
+    test('BUG1: should not filter is in multi-line case when type without semicolon exists above', () => {
+      const source = 'type T\ncase X\n  is\n  when 1 => null;\n  when others => null;\nend case;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('is'), 'is should be an intermediate of case (not filtered as type is)');
+    });
+
+    // BUG 1 variant: backward scan crosses non-type line to find type declaration
+    test('BUG1: should not filter is when non-type line exists between type and is', () => {
+      const source = 'type T\nX_Value\n  is';
+      const tokens = parser.getTokens(source);
+      const isToken = tokens.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isToken, 'is should be present as a token (not filtered as type is)');
+    });
+
+    // BUG 2: lineBefore ending with ')' triggers backward scan that finds distant type
+    // When 'is' is on the same line as an expression ending with ')', and there's a
+    // type declaration on a previous line without a semicolon, the 'is' gets incorrectly
+    // filtered because the backward scan finds the type and no separator keyword is found.
+    test('BUG2: should not filter is when preceded by non-type paren expression and type exists above', () => {
+      const source = 'type T\nMy_Func(X) is';
+      const tokens = parser.getTokens(source);
+      const isToken = tokens.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isToken, 'is should be present as a token (not filtered by distant type)');
+    });
+  });
+
+  suite('Regression: access on previous line should not suppress procedure/function', () => {
+    test('should detect procedure after access type on previous line', () => {
+      const source = 'type Handler is access\nprocedure P is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should detect function after access type on previous line', () => {
+      const source = 'type Handler is access\nfunction F return Integer is\nbegin\n  return 1;\nend F;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: is in type with multi-line discriminant filtered correctly', () => {
+    test('should filter is in type with multi-line discriminant list', () => {
+      const source = 'procedure P is\n  type T\n    (D1 : Integer;\n     D2 : Integer)\n    is range 1 .. 100;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const isCount = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, 'should have exactly one is intermediate (the procedure is)');
+    });
+  });
+
+  suite('Regression: paren tracking in excluded regions for is type-declaration filter', () => {
+    test('should skip comment containing open paren inside discriminant list', () => {
+      const source = 'procedure P is\n  type T(\n    D : Integer -- (\n    )\n    is range 1 .. 100;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should skip string containing open paren inside discriminant list', () => {
+      const source = 'procedure P is\n  type T(\n    D : String := "("\n    )\n    is range 1 .. 100;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
     });
   });
 
