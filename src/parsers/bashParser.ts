@@ -68,10 +68,15 @@ export class BashBlockParser extends BaseBlockParser {
             }
             const gapResult = this.tryMatchExcludedRegion(source, j);
             if (gapResult) {
-              regions.push({
-                start: gapResult.start,
-                end: Math.min(gapResult.end, result.start)
-              });
+              // Clip gap region to not include the newline before heredoc body,
+              // preventing adjacent regions that cause isAtCommandPosition to fail
+              let gapEnd = Math.min(gapResult.end, result.start);
+              while (gapEnd > gapResult.start && (source[gapEnd - 1] === '\n' || source[gapEnd - 1] === '\r')) {
+                gapEnd--;
+              }
+              if (gapEnd > gapResult.start) {
+                regions.push({ start: gapResult.start, end: gapEnd });
+              }
               j = gapResult.end;
             } else {
               j++;
@@ -110,6 +115,12 @@ export class BashBlockParser extends BaseBlockParser {
     // $'...' ANSI-C quoting (must check before single quote)
     if (char === '$' && pos + 1 < source.length && source[pos + 1] === "'") {
       return matchDollarSingleQuote(source, pos);
+    }
+
+    // $"..." locale-specific double-quoted string (must check before double quote)
+    if (char === '$' && pos + 1 < source.length && source[pos + 1] === '"') {
+      const region = matchBashDoubleQuote(source, pos + 1);
+      return { start: pos, end: region.end };
     }
 
     // Parameter expansion ${...}
@@ -279,6 +290,20 @@ export class BashBlockParser extends BaseBlockParser {
       }
       if (k < 0 || source[k] === '\n' || source[k] === '\r' || ';|&(){}`'.includes(source[k])) {
         return true;
+      }
+      // Check if { is preceded by a command starter keyword or block close keyword
+      const braceContextKws = ['then', 'do', 'else', 'elif', 'time', 'coproc', 'fi', 'done', 'esac'];
+      for (const kw of braceContextKws) {
+        const kwStart = k - kw.length + 1;
+        if (kwStart >= 0 && source.slice(kwStart, k + 1) === kw) {
+          if (kwStart === 0 || !/[a-zA-Z0-9_]/.test(source[kwStart - 1])) {
+            let p = kwStart - 1;
+            while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
+            if (p < 0 || ';|&\n\r()'.includes(source[p]) || source[p] === '`' || source[p] === '{' || source[p] === '}') {
+              return true;
+            }
+          }
+        }
       }
       return false;
     }
@@ -450,6 +475,9 @@ export class BashBlockParser extends BaseBlockParser {
     if (this.isCasePattern(source, position, keyword, excludedRegions)) {
       return false;
     }
+    if (this.isFollowedByEquals(source, position, keyword)) {
+      return false;
+    }
     return true;
   }
 
@@ -460,7 +488,43 @@ export class BashBlockParser extends BaseBlockParser {
     if (this.isCasePattern(source, position, keyword, excludedRegions)) {
       return false;
     }
+    if (this.isFollowedByEquals(source, position, keyword)) {
+      return false;
+    }
     return true;
+  }
+
+  // Checks if keyword is used as variable assignment (done=value, fi+=1, done[0]=value)
+  private isFollowedByEquals(source: string, position: number, keyword: string): boolean {
+    const afterPos = position + keyword.length;
+    if (afterPos >= source.length) return false;
+    // Direct assignment: keyword=value (but not keyword==)
+    if (source[afterPos] === '=' && (afterPos + 1 >= source.length || source[afterPos + 1] !== '=')) {
+      return true;
+    }
+    // Append assignment: keyword+=value
+    if (source[afterPos] === '+' && afterPos + 1 < source.length && source[afterPos + 1] === '=') {
+      return true;
+    }
+    // Array element assignment: keyword[idx]=value or keyword[idx]+=value
+    if (source[afterPos] === '[') {
+      let depth = 1;
+      let j = afterPos + 1;
+      while (j < source.length && depth > 0) {
+        if (source[j] === '[') depth++;
+        else if (source[j] === ']') depth--;
+        j++;
+      }
+      if (depth === 0 && j < source.length) {
+        if (source[j] === '=' && (j + 1 >= source.length || source[j + 1] !== '=')) {
+          return true;
+        }
+        if (source[j] === '+' && j + 1 < source.length && source[j + 1] === '=') {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
@@ -471,6 +535,7 @@ export class BashBlockParser extends BaseBlockParser {
       if (token.type !== 'block_middle') return true;
       if (!this.isAtCommandPosition(source, token.startOffset, excludedRegions)) return false;
       if (this.isCasePattern(source, token.startOffset, token.value, excludedRegions)) return false;
+      if (this.isFollowedByEquals(source, token.startOffset, token.value)) return false;
       return true;
     });
 
