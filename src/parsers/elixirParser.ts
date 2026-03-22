@@ -601,7 +601,8 @@ export class ElixirBlockParser extends BaseBlockParser {
             word === 'end' &&
             innerBlockDepth > 0 &&
             !/[?!]/.test(source[i + word.length] || '') &&
-            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@'))
+            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@')) &&
+            !this.isAdjacentToUnicodeLetter(source, i, 3)
           ) {
             innerBlockDepth--;
             i += word.length;

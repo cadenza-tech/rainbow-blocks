@@ -204,7 +204,10 @@ export class JuliaBlockParser extends BaseBlockParser {
     const prevChar = source[i];
     // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing
     if (/[a-zA-Z0-9_)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
-    // Everything else (operators, (, [, =, comma, newline, etc.) -> array construction
+    // '[' before '[' means the outer bracket is indexing (e.g., a[[end]])
+    // In this context, end still means lastindex, so treat as indexing
+    if (prevChar === '[') return this.isIndexingBracket(source, i);
+    // Everything else (operators, (, =, comma, newline, etc.) -> array construction
     return false;
   }
 
