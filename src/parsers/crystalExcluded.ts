@@ -62,9 +62,14 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
           continue;
         }
         if (singleBraceDepth === 1) {
-          // First } closes the single {, advance past it and continue
+          // Unbalanced single {: treat }} as template closer
+          // (unmatched { is a Crystal syntax error, but the template boundary is still valid)
           singleBraceDepth = 0;
-          i++;
+          depth--;
+          if (depth === 0) {
+            return { start: pos, end: i + 2 };
+          }
+          i += 2;
           continue;
         }
         depth--;
@@ -114,6 +119,22 @@ function skipMacroString(source: string, pos: number, quote: string): number {
           while (i < source.length && source[i] !== nestedQuote) {
             if (source[i] === '\\' && i + 1 < source.length) {
               i += 2;
+              continue;
+            }
+            // Handle #{} inside nested double-quoted strings
+            if (nestedQuote === '"' && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+              i += 2;
+              let innerDepth = 1;
+              while (i < source.length && innerDepth > 0) {
+                if (source[i] === '\\' && i + 1 < source.length) {
+                  i += 2;
+                  continue;
+                }
+                if (source[i] === '{') innerDepth++;
+                else if (source[i] === '}') innerDepth--;
+                if (innerDepth > 0) i++;
+              }
+              if (i < source.length) i++;
               continue;
             }
             i++;
@@ -507,6 +528,19 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
       const doAbsolutePos = afterLoopStart + doMatch.index;
       if (isInExcludedRegion(doAbsolutePos, excludedRegions)) {
         continue;
+      }
+      // Skip 'do' preceded by dot (method call), :: (scope resolution), @ or $ (variable prefix)
+      if (doAbsolutePos > 0) {
+        const prevChar = source[doAbsolutePos - 1];
+        if (prevChar === '$' || prevChar === '@') {
+          continue;
+        }
+        if (prevChar === ':' && doAbsolutePos > 1 && source[doAbsolutePos - 2] === ':') {
+          continue;
+        }
+        if (prevChar === '.' && !(doAbsolutePos > 1 && source[doAbsolutePos - 2] === '.')) {
+          continue;
+        }
       }
       if (doAbsolutePos === position) {
         return true;

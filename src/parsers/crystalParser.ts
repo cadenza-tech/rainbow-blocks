@@ -146,6 +146,26 @@ export class CrystalBlockParser extends BaseBlockParser {
       return this.matchInterpolatedString(source, pos);
     }
 
+    // Question mark char literal (?x, ?\n, ?\uXXXX, etc.)
+    if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_]/.test(source[pos - 1]))) {
+      const nextChar = source[pos + 1];
+      if (nextChar === '\\' && pos + 2 < source.length) {
+        // Escape sequences: ?\n, \\, \u{XXXX}, etc.
+        if (source[pos + 2] === 'u' && pos + 3 < source.length && source[pos + 3] === '{') {
+          let j = pos + 4;
+          while (j < source.length && source[j] !== '}' && source[j] !== '\n' && source[j] !== '\r') {
+            j++;
+          }
+          if (j < source.length && source[j] === '}') return { start: pos, end: j + 1 };
+          return { start: pos, end: j };
+        }
+        return { start: pos, end: pos + 3 };
+      }
+      if (nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r') {
+        return { start: pos, end: pos + 2 };
+      }
+    }
+
     // Single-quoted char literal (Crystal: only single characters)
     if (char === "'") {
       const charLiteral = matchCharLiteral(source, pos);
@@ -320,6 +340,10 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
       // Filter out keywords preceded by @ (instance/class variable names like @end, @@end, @do)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '@') {
+        return false;
+      }
+      // Filter out keywords preceded by $ (global variable names like $end, $do, $begin)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '$') {
         return false;
       }
       // Filter out tokens immediately followed by colon (named tuple key)

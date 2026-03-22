@@ -13,8 +13,7 @@ import {
   skipInterpolationShared,
   skipNestedBacktickString,
   skipNestedRegex,
-  skipNestedString,
-  skipRegexInterpolationShared
+  skipNestedString
 } from './rubyFamilyHelpers';
 
 // Valid Ruby regex flags
@@ -93,7 +92,7 @@ export class RubyBlockParser extends BaseBlockParser {
       if (token.startOffset >= 2) {
         const prefixStart = Math.max(0, token.startOffset - 4);
         const prefix = source.slice(prefixStart, token.startOffset);
-        if (/<<[~-]?\\?['"`]?$/.test(prefix)) {
+        if (/<<[~-]?['"`]?$/.test(prefix)) {
           // Find the position after the opener line's newline
           let lineEnd = token.endOffset;
           // Skip past optional closing quote of the heredoc identifier
@@ -133,7 +132,8 @@ export class RubyBlockParser extends BaseBlockParser {
         return false;
       }
       // Filter out tokens immediately followed by colon (hash key syntax)
-      if (source[token.endOffset] === ':') {
+      // But not :: (scope resolution operator)
+      if (source[token.endOffset] === ':' && source[token.endOffset + 1] !== ':') {
         return false;
       }
       // Filter out keywords followed by ? (method names like end?, begin?)
@@ -275,14 +275,44 @@ export class RubyBlockParser extends BaseBlockParser {
       return true;
     }
 
+    // Global variables with special chars ($!, $?, $~, etc.) are complete expressions
+    if (/\$[!?~&/.<>*+,;:=\\@$^`|%-]$/.test(beforeKeyword)) {
+      return true;
+    }
+
     // Operator expecting expression means not postfix
     // Includes: assignment, logical, comparison, arithmetic, range, and other operators
     if (/[=&|,([{:?+\-*/%<>^~!.]$/.test(beforeKeyword)) {
       // If the last character before keyword is inside an excluded region
       // (e.g., closing / of a regex literal), it's a complete expression, not an operator
       let checkPos = position - 1;
-      while (checkPos >= lineStart && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
-        checkPos--;
+      while (checkPos >= lineStart) {
+        const ch = source[checkPos];
+        if (ch === ' ' || ch === '\t') {
+          checkPos--;
+          continue;
+        }
+        // Skip backslash continuation: \<newline> or \<CR><LF>
+        if (ch === '\n') {
+          checkPos--;
+          if (checkPos >= lineStart && source[checkPos] === '\r') {
+            checkPos--;
+          }
+          if (checkPos >= lineStart && source[checkPos] === '\\') {
+            checkPos--;
+            continue;
+          }
+          break;
+        }
+        if (ch === '\r') {
+          checkPos--;
+          if (checkPos >= lineStart && source[checkPos] === '\\') {
+            checkPos--;
+            continue;
+          }
+          break;
+        }
+        break;
       }
       if (checkPos >= lineStart && this.isInExcludedRegion(checkPos, excludedRegions)) {
         return true;
@@ -353,6 +383,19 @@ export class RubyBlockParser extends BaseBlockParser {
         if (this.isInExcludedRegion(doAbsolutePos, excludedRegions)) {
           continue;
         }
+        // Skip 'do' preceded by dot (method call), :: (scope resolution), @ or $ (variable prefix)
+        if (doAbsolutePos > 0) {
+          const prevChar = source[doAbsolutePos - 1];
+          if (prevChar === '$' || prevChar === '@') {
+            continue;
+          }
+          if (prevChar === ':' && doAbsolutePos > 1 && source[doAbsolutePos - 2] === ':') {
+            continue;
+          }
+          if (prevChar === '.' && !(doAbsolutePos > 1 && source[doAbsolutePos - 2] === '.')) {
+            continue;
+          }
+        }
         // This is the first valid 'do' after the loop keyword
         if (doAbsolutePos === position) {
           return true;
@@ -421,7 +464,7 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // Ruby character literal: ?x (must check before #, ", ' to prevent false matches)
     if (char === '?' && pos + 1 < source.length) {
-      if (pos === 0 || !/[a-zA-Z0-9_)\]}]/.test(source[pos - 1])) {
+      if (pos === 0 || !/[a-zA-Z0-9_)\]}"'`]/.test(source[pos - 1])) {
         const nextChar = source[pos + 1];
         if (nextChar === '\\' && pos + 2 < source.length) {
           const escChar = source[pos + 2];
@@ -635,14 +678,22 @@ export class RubyBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Matches regex literal with flags and #{} interpolation
+  // Matches regex literal with flags and #{} interpolation (including heredoc support)
   private matchRegexLiteral(source: string, pos: number): ExcludedRegion {
-    return matchRegexLiteral(source, pos, REGEX_FLAGS_PATTERN, (s, p) => this.skipRegexInterpolation(s, p), true);
-  }
-
-  // Skips #{} interpolation inside regex, tracking brace depth
-  private skipRegexInterpolation(source: string, pos: number): number {
-    return skipRegexInterpolationShared(source, pos, this.interpolationHandlers);
+    const heredocState: HeredocState = { pendingEnd: -1 };
+    const result = matchRegexLiteral(
+      source,
+      pos,
+      REGEX_FLAGS_PATTERN,
+      (s, p) => {
+        return skipInterpolationShared(s, p, this.interpolationHandlers, heredocState);
+      },
+      true
+    );
+    if (heredocState.pendingEnd > result.end) {
+      return { start: result.start, end: heredocState.pendingEnd };
+    }
+    return result;
   }
 
   // Checks if slash is regex start (not division)

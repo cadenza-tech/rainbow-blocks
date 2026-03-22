@@ -360,7 +360,7 @@ export function skipInterpolationShared(source: string, pos: number, handlers: I
     } else if (source[i] === '/' && isRegexInInterpolation(source, i, pos)) {
       i = handlers.skipNestedRegex(source, i);
       continue;
-    } else if (source[i] === '%' && i + 1 < source.length && !handlers.isModuloOperator(source, i)) {
+    } else if (source[i] === '%' && i + 1 < source.length && source[i + 1] !== '}' && !handlers.isModuloOperator(source, i)) {
       const result = handlers.matchPercentLiteral(source, i);
       if (result) {
         i = result.end;
@@ -431,7 +431,7 @@ export function skipRegexInterpolationShared(source: string, pos: number, handle
     } else if (source[i] === '/' && isRegexInInterpolation(source, i, pos)) {
       i = handlers.skipNestedRegex(source, i);
       continue;
-    } else if (source[i] === '%' && i + 1 < source.length && !handlers.isModuloOperator(source, i)) {
+    } else if (source[i] === '%' && i + 1 < source.length && source[i + 1] !== '}' && !handlers.isModuloOperator(source, i)) {
       const result = handlers.matchPercentLiteral(source, i);
       if (result) {
         i = result.end;
