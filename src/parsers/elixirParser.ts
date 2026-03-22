@@ -81,9 +81,12 @@ export class ElixirBlockParser extends BaseBlockParser {
     }
 
     // Sigil (~r, ~s, ~w, etc) - must not be preceded by identifier characters
-    if (char === '~' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_]/.test(source[pos - 1]))) {
-      const result = matchSigil(source, pos, skipInterpolationBound);
-      if (result) return result;
+    // Exception: sigil modifiers (letters immediately after a sigil closing delimiter) are not identifiers
+    if (char === '~' && pos + 1 < source.length && /[a-zA-Z]/.test(source[pos + 1])) {
+      if (pos === 0 || !this.isPrecededByIdentifier(source, pos)) {
+        const result = matchSigil(source, pos, skipInterpolationBound);
+        if (result) return result;
+      }
     }
 
     // Atom literal
@@ -137,7 +140,12 @@ export class ElixirBlockParser extends BaseBlockParser {
           i++;
         }
         continue;
-      } else if (source[i] === '~' && i + 1 < source.length && /[a-zA-Z]/.test(source[i + 1]) && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
+      } else if (
+        source[i] === '~' &&
+        i + 1 < source.length &&
+        /[a-zA-Z]/.test(source[i + 1]) &&
+        (i === 0 || !this.isPrecededByIdentifier(source, i))
+      ) {
         // Skip sigil inside interpolation (e.g. ~s(}))
         const sigilEnd = skipNestedSigil(source, i, skipInterpolationBound);
         if (sigilEnd > i) {
@@ -169,33 +177,37 @@ export class ElixirBlockParser extends BaseBlockParser {
       const escChar = source[pos + 2];
       // ?\<newline> is not a valid character literal
       if (escChar === '\n' || escChar === '\r') return pos;
-      // ?\xNN - hex escape
+      // ?\xNN - hex escape (requires at least one hex digit)
       if (escChar === 'x') {
         let i = pos + 3;
+        const startI = i;
         const limit = Math.min(i + 2, source.length);
         while (i < limit && /[0-9a-fA-F]/.test(source[i])) {
           i++;
         }
-        return i;
+        return i === startI ? pos : i;
       }
-      // ?\u{NNNN} or ?\uNNNN - unicode escape
+      // ?\u{NNNN} or ?\uNNNN - unicode escape (requires at least one hex digit)
       if (escChar === 'u') {
         if (pos + 3 < source.length && source[pos + 3] === '{') {
           let i = pos + 4;
+          const startI = i;
           while (i < source.length && /[0-9a-fA-F]/.test(source[i])) {
             i++;
           }
+          if (i === startI) return pos;
           if (i < source.length && source[i] === '}') {
             i++;
           }
           return i;
         }
         let i = pos + 3;
+        const startI = i;
         const limit = Math.min(i + 4, source.length);
         while (i < limit && /[0-9a-fA-F]/.test(source[i])) {
           i++;
         }
-        return i;
+        return i === startI ? pos : i;
       }
       // Basic escape: ?\n, ?\t, ?\\, ?\s, etc
       return pos + 3;
@@ -213,6 +225,11 @@ export class ElixirBlockParser extends BaseBlockParser {
     // Reject identifiers ending with ? or ! (e.g., fn?, if!, end?)
     const afterKeyword = source[position + keyword.length];
     if (afterKeyword === '?' || afterKeyword === '!') {
+      return false;
+    }
+
+    // Reject function call form: keyword followed by '(' (e.g., if(cond, do: val))
+    if (afterKeyword === '(') {
       return false;
     }
 
@@ -372,7 +389,11 @@ export class ElixirBlockParser extends BaseBlockParser {
       // Only look for "do" outside all brackets
       if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
         // Check for "do" with word boundary
-        if (i > 0 && (/\s/.test(source[i - 1]) || source[i - 1] === ',') && source.slice(i, i + 2) === 'do') {
+        if (
+          i > 0 &&
+          (/\s/.test(source[i - 1]) || source[i - 1] === ',' || source[i - 1] === ')' || source[i - 1] === ']' || source[i - 1] === '}') &&
+          source.slice(i, i + 2) === 'do'
+        ) {
           const afterDo = source[i + 2];
           // do: is keyword syntax (one-liner) - decrements inner block depth
           if (afterDo === ':') {
@@ -408,16 +429,19 @@ export class ElixirBlockParser extends BaseBlockParser {
         }
 
         // Track inner block keywords (their do/do: will be handled above)
-        if (this.isBlockKeywordAt(source, i)) {
+        // Skip function call pattern: keyword followed by '(' (e.g., if(cond, do: val))
+        // because do: inside parens won't be seen at depth 0 to decrement innerBlockDepth
+        if (this.isBlockKeywordAt(source, i) && !this.isBlockKeywordFunctionCall(source, i)) {
           innerBlockDepth++;
         }
 
         // Track fn...end nesting at depth 0
-        // Exclude fn: (keyword argument syntax), .fn (method call), @fn (module attribute)
+        // Exclude fn: (keyword argument syntax), .fn (method call), @fn (module attribute), fn() (function call)
         if (
           source.slice(i, i + 2) === 'fn' &&
           (i === 0 || (!/[a-zA-Z0-9_]/.test(source[i - 1]) && source[i - 1] !== '.' && source[i - 1] !== '@')) &&
-          (i + 2 >= source.length || !/[a-zA-Z0-9_:?!]/.test(source[i + 2]))
+          (i + 2 >= source.length || (!/[a-zA-Z0-9_:?!]/.test(source[i + 2]) && source[i + 2] !== '(')) &&
+          !this.isAdjacentToUnicodeLetter(source, i, 2)
         ) {
           fnDepth++;
         }
@@ -431,7 +455,8 @@ export class ElixirBlockParser extends BaseBlockParser {
             !/[a-zA-Z0-9_]/.test(beforeEnd) &&
             beforeEnd !== '.' &&
             beforeEnd !== '@' &&
-            (afterEnd === undefined || !/[a-zA-Z0-9_:?!]/.test(afterEnd))
+            (afterEnd === undefined || !/[a-zA-Z0-9_:?!]/.test(afterEnd)) &&
+            !this.isAdjacentToUnicodeLetter(source, i, 3)
           ) {
             if (fnDepth > 0) {
               fnDepth--;
@@ -452,20 +477,50 @@ export class ElixirBlockParser extends BaseBlockParser {
   // Checks if a block keyword that takes "do" starts at position
   private isBlockKeywordAt(source: string, pos: number): boolean {
     // Must have word boundary before (also reject . and @ prefixes)
-    if (pos > 0 && (/[a-zA-Z0-9_]/.test(source[pos - 1]) || source[pos - 1] === '.' || source[pos - 1] === '@')) {
-      return false;
+    if (pos > 0) {
+      const before = source[pos - 1];
+      if (/[a-zA-Z0-9_]/.test(before) || before === '.' || before === '@') {
+        return false;
+      }
+      // Handle surrogate pairs: low surrogate preceded by high surrogate
+      if (pos >= 2 && before >= '\uDC00' && before <= '\uDFFF') {
+        const cp = source.codePointAt(pos - 2);
+        if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) return false;
+      } else if (/\p{L}/u.test(before)) {
+        return false;
+      }
     }
 
     for (const kw of ElixirBlockParser.DO_BLOCK_KEYWORDS) {
       if (source.startsWith(kw, pos)) {
-        const afterKw = source[pos + kw.length];
+        const afterPos = pos + kw.length;
+        const afterKw = source[afterPos];
         // Must have word boundary after, and not be a keyword argument (e.g. for:)
         if (afterKw === undefined || (!/[a-zA-Z0-9_]/.test(afterKw) && afterKw !== ':' && afterKw !== '?' && afterKw !== '!')) {
+          // Check Unicode letter after keyword (handle surrogate pairs)
+          if (afterKw !== undefined && !/[a-zA-Z0-9_:?!]/.test(afterKw)) {
+            if (afterKw >= '\uD800' && afterKw <= '\uDBFF' && afterPos + 1 < source.length) {
+              const cp = source.codePointAt(afterPos);
+              if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) return false;
+            } else if (/\p{L}/u.test(afterKw)) {
+              return false;
+            }
+          }
           return true;
         }
       }
     }
 
+    return false;
+  }
+
+  // Checks if a block keyword at pos is a function call (immediately followed by '(')
+  private isBlockKeywordFunctionCall(source: string, pos: number): boolean {
+    for (const kw of ElixirBlockParser.DO_BLOCK_KEYWORDS) {
+      if (source.startsWith(kw, pos) && pos + kw.length < source.length && source[pos + kw.length] === '(') {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -532,12 +587,22 @@ export class ElixirBlockParser extends BaseBlockParser {
         const wordMatch = source.slice(i).match(/^[a-zA-Z_]\w*/);
         if (wordMatch) {
           const word = wordMatch[0];
-          if (word === 'fn') {
+          if (
+            word === 'fn' &&
+            !/[?!]/.test(source[i + word.length] || '') &&
+            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@')) &&
+            !this.isAdjacentToUnicodeLetter(source, i, 2)
+          ) {
             innerBlockDepth++;
             i += word.length;
             continue;
           }
-          if (word === 'end' && innerBlockDepth > 0) {
+          if (
+            word === 'end' &&
+            innerBlockDepth > 0 &&
+            !/[?!]/.test(source[i + word.length] || '') &&
+            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@'))
+          ) {
             innerBlockDepth--;
             i += word.length;
             continue;
@@ -547,6 +612,8 @@ export class ElixirBlockParser extends BaseBlockParser {
             i += word.length;
             continue;
           }
+          i += word.length;
+          continue;
         }
       }
 
@@ -604,5 +671,22 @@ export class ElixirBlockParser extends BaseBlockParser {
     }
 
     return false;
+  }
+
+  // Checks if ~ at pos is preceded by an identifier (not sigil modifiers)
+  // Sigil modifiers are letter characters immediately after a sigil closing delimiter
+  private isPrecededByIdentifier(source: string, pos: number): boolean {
+    if (pos === 0) return false;
+    const prev = source[pos - 1];
+    if (!/[a-zA-Z0-9_]/.test(prev)) return false;
+    // Scan back past letter characters to check if they are sigil modifiers
+    let j = pos - 1;
+    while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
+      j--;
+    }
+    // If preceded by a sigil closing delimiter, the letters are modifiers (not an identifier)
+    if (j >= 0 && /[/|)\]}>"']/.test(source[j])) return false;
+    // Digit or underscore before the letter sequence means it's an identifier
+    return true;
   }
 }

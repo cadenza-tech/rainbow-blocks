@@ -34,8 +34,11 @@ export function isAtomStart(source: string, pos: number): boolean {
     return false;
   }
 
-  // Atom must start with letter, underscore, or quote
-  if (!/[a-zA-Z_"']/.test(nextChar)) {
+  // Atom must start with letter (including Unicode), underscore, or quote
+  // Use codePointAt to handle surrogate pairs (characters outside BMP)
+  const nextCodePoint = source.codePointAt(pos + 1);
+  if (nextCodePoint === undefined) return false;
+  if (!/[a-zA-Z_"']/.test(nextChar) && !(nextCodePoint > 127 && /\p{L}/u.test(String.fromCodePoint(nextCodePoint)))) {
     return false;
   }
 
@@ -82,9 +85,12 @@ export function matchAtomLiteral(source: string, pos: number, skipInterpolation:
   // Simple atom
   let i = pos + 1;
   while (i < source.length) {
-    const char = source[i];
-    if (/[a-zA-Z0-9_!?]/.test(char)) {
-      i++;
+    // Use codePointAt to handle surrogate pairs (characters outside BMP)
+    const cp = source.codePointAt(i);
+    if (cp === undefined) break;
+    const ch = cp > 0xffff ? String.fromCodePoint(cp) : source[i];
+    if (/[\p{L}0-9_@!?]/u.test(ch)) {
+      i += cp > 0xffff ? 2 : 1;
       continue;
     }
     break;
@@ -256,9 +262,11 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
       if (source[j] === '\n' || source[j] === '\r') {
         isHeredoc = true;
       }
-      if (isLowercase && source[j] === '\\' && j + 1 < source.length) {
-        j += 2;
-        continue;
+      if (source[j] === '\\' && j + 1 < source.length) {
+        if (isLowercase || source[j + 1] === tripleDelim[0]) {
+          j += 2;
+          continue;
+        }
       }
       if (isLowercase && source[j] === '#' && j + 1 < source.length && source[j + 1] === '{') {
         j = skipInterpolation(source, j + 2);
@@ -282,9 +290,11 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
   const isPaired = openDelimiter !== closeDelimiter;
 
   while (i < source.length && depth > 0) {
-    if (isLowercase && source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
+    if (source[i] === '\\' && i + 1 < source.length) {
+      if (isLowercase || source[i + 1] === closeDelimiter) {
+        i += 2;
+        continue;
+      }
     }
     // Handle #{} interpolation inside lowercase sigils
     if (isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
@@ -346,10 +356,12 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
       if (source[i] === '\n' || source[i] === '\r') {
         isSigilHeredoc = true;
       }
-      // Handle escape sequences for lowercase sigils
-      if (isLowercase && source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
+      // Handle escape sequences (lowercase: all escapes; uppercase: only escaped closing delimiter)
+      if (source[i] === '\\' && i + 1 < source.length) {
+        if (isLowercase || source[i + 1] === tripleDelim[0]) {
+          i += 2;
+          continue;
+        }
       }
       // Handle #{} interpolation for lowercase sigils
       if (isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
@@ -375,10 +387,12 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
   const isLowercase = /[a-z]/.test(nextChar);
 
   while (i < source.length && depth > 0) {
-    // Handle escape sequences for lowercase sigils
-    if (isLowercase && source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
+    // Handle escape sequences (lowercase: all escapes; uppercase: only escaped closing delimiter)
+    if (source[i] === '\\' && i + 1 < source.length) {
+      if (isLowercase || source[i + 1] === closeDelimiter) {
+        i += 2;
+        continue;
+      }
     }
     // Handle #{} interpolation for lowercase sigils
     if (isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {

@@ -13,10 +13,10 @@ export class ErlangBlockParser extends BaseBlockParser {
   // Validates block open: 'fun' references and spec context are not blocks
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords followed by => or := (map key/update: #{begin => 1, end := 2})
-    // Allow at most one line break to handle multi-line map expressions
-    // Also skip trailing comments (% ...) before line break
+    // Allow one line break (possibly with trailing comment) plus zero or more comment-only lines
+    // Blank lines without comments do NOT continue the map key detection
     const afterKeyword = source.slice(position + keyword.length);
-    if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterKeyword)) {
+    if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:%[^\n\r]*(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(afterKeyword)) {
       return false;
     }
 
@@ -27,12 +27,14 @@ export class ErlangBlockParser extends BaseBlockParser {
     // 'fun' in -spec/-type/-callback/-opaque declarations is a type, not a block
     // Note: -record is excluded because fun() inside records defines real anonymous functions
     const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
-    const lineBefore = source.slice(lineStart, position).trimStart();
+    const rawLineBefore = source.slice(lineStart, position);
+    const trimmedLength = rawLineBefore.length - rawLineBefore.trimStart().length;
+    const lineBefore = rawLineBefore.trimStart();
     if (/^-[ \t]*(spec|type|callback|opaque)\b/.test(lineBefore)) {
       // Check if there is a period (declaration separator) between the attribute and this fun
       // If so, this fun is in a separate declaration, not part of the type
       const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/) as RegExpMatchArray;
-      const afterAttr = lineStart + lineBefore.indexOf(attrMatch[0]) + attrMatch[0].length;
+      const afterAttr = lineStart + trimmedLength + lineBefore.indexOf(attrMatch[0]) + attrMatch[0].length;
       let foundPeriod = false;
       for (let j = afterAttr; j < position; j++) {
         if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
@@ -166,7 +168,7 @@ export class ErlangBlockParser extends BaseBlockParser {
       // Filter keywords used as map keys (followed by => or :=)
       // For block_close (end), only filter when it's a bare map key (directly after #{)
       if (token.type === 'block_close') {
-        if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
+        if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:%[^\n\r]*(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(afterToken)) {
           // Check if 'end' is a map key (preceded by #{ or by comma/whitespace inside a map)
           // Skip whitespace, newlines, and excluded regions (comments) backward
           let k = token.startOffset - 1;
@@ -190,7 +192,7 @@ export class ErlangBlockParser extends BaseBlockParser {
             return false;
           }
         }
-      } else if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)?(?:=>|:=)/.test(afterToken)) {
+      } else if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:%[^\n\r]*(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(afterToken)) {
         return false;
       }
       // Reject keywords preceded by '.' (record field access like Rec#state.end)
@@ -250,9 +252,58 @@ export class ErlangBlockParser extends BaseBlockParser {
       return { start: pos, end: pos + 2 };
     }
 
+    // OTP 27+ tilde-sigil: ~"...", ~'...' (verbatim, no backslash escapes)
+    // Also handles triple-quoted sigils: ~""", ~'''
+    if (char === '~' && pos + 1 < source.length) {
+      let offset = pos + 1;
+      // Skip optional sigil modifier letter (e.g., ~S, ~B)
+      if (/[a-zA-Z]/.test(source[offset]) && offset + 1 < source.length) {
+        offset++;
+      }
+      if (source[offset] === '"') {
+        // Check for triple-quoted sigil string: ~""" or ~s"""
+        if (source.slice(offset, offset + 3) === '"""') {
+          let k = offset + 3;
+          while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
+            k++;
+          }
+          if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+            return this.matchTripleQuotedString(source, pos);
+          }
+        }
+        return this.matchVerbatimString(source, pos, offset, '"');
+      }
+      if (source[offset] === "'") {
+        // Check for triple-quoted sigil atom: ~''' or ~s'''
+        if (source.slice(offset, offset + 3) === "'''") {
+          let k = offset + 3;
+          while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
+            k++;
+          }
+          if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+            return this.matchTripleQuotedAtom(source, pos);
+          }
+        }
+        return this.matchVerbatimString(source, pos, offset, "'");
+      }
+    }
+
     // Double-quoted string
     if (char === '"') {
       return this.matchQuotedString(source, pos, '"');
+    }
+
+    // Triple-quoted atom (OTP 27+): ''' must be followed by a newline
+    if (char === "'" && source.slice(pos, pos + 3) === "'''") {
+      let k = pos + 3;
+      while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
+        k++;
+      }
+      if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+        return this.matchTripleQuotedAtom(source, pos);
+      }
+      // Not a valid triple-quoted atom: treat as '' (empty atom) + ' (regular atom start)
+      return { start: pos, end: pos + 2 };
     }
 
     // Single-quoted atom
@@ -261,6 +312,22 @@ export class ErlangBlockParser extends BaseBlockParser {
     }
 
     return null;
+  }
+
+  // Matches OTP 27+ verbatim string/atom (no backslash escapes)
+  // Unterminated at newline extends to source.length to prevent phantom string/atom from orphaned quote
+  private matchVerbatimString(source: string, regionStart: number, quoteStart: number, quoteChar: string): ExcludedRegion {
+    let i = quoteStart + 1;
+    while (i < source.length) {
+      if (source[i] === quoteChar) {
+        return { start: regionStart, end: i + 1 };
+      }
+      if (source[i] === '\n' || source[i] === '\r') {
+        return { start: regionStart, end: source.length };
+      }
+      i++;
+    }
+    return { start: regionStart, end: source.length };
   }
 
   // Matches Erlang character literal: $x, $\n, $\\, etc
@@ -326,6 +393,26 @@ export class ErlangBlockParser extends BaseBlockParser {
     while (i < source.length) {
       if (source[i] === '"' && source.slice(i, i + 3) === '"""') {
         // Closing """ must be preceded only by whitespace on its line
+        let lineStart = i;
+        while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+          lineStart--;
+        }
+        if (/^[ \t]*$/.test(source.slice(lineStart, i))) {
+          return { start: pos, end: i + 3 };
+        }
+      }
+      i++;
+    }
+    return { start: pos, end: source.length };
+  }
+
+  // Matches triple-quoted atom (OTP 27+): '''...'''
+  // No escape processing; closing ''' must be at start of line
+  private matchTripleQuotedAtom(source: string, pos: number): ExcludedRegion {
+    let i = pos + 3;
+    while (i < source.length) {
+      if (source[i] === "'" && source.slice(i, i + 3) === "'''") {
+        // Closing ''' must be preceded only by whitespace on its line
         let lineStart = i;
         while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
           lineStart--;
