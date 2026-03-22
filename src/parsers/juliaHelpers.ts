@@ -56,6 +56,7 @@ export function skipPrefixedStringInInterpolation(source: string, pos: number, h
   if (source.slice(pos, pos + 3) === '"""') {
     let i = pos + 3;
     while (i < source.length) {
+      // Only b"..." strings support escape sequences; non-b prefixed strings treat \ as literal
       if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
         i += 2;
         continue;
@@ -72,7 +73,8 @@ export function skipPrefixedStringInInterpolation(source: string, pos: number, h
   // Regular prefixed string
   let i = pos + 1;
   while (i < source.length) {
-    if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
+    // All prefixed strings treat \" and \\ as escape sequences
+    if (source[i] === '\\' && i + 1 < source.length && (hasEscapes || source[i + 1] === '"' || source[i + 1] === '\\')) {
       i += 2;
       continue;
     }

@@ -38,12 +38,29 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
       // Skip keywords adjacent to Unicode identifier characters (e.g., αend, endβ)
       // JavaScript \b only handles ASCII word boundaries, so Unicode letters need explicit check
-      if (token.startOffset > 0 && /\p{L}/u.test(source[token.startOffset - 1])) {
-        return false;
+      // Handle surrogate pairs for characters outside the BMP (codepoints > U+FFFF)
+      if (token.startOffset > 0) {
+        const before = source[token.startOffset - 1];
+        if (before >= '\uDC00' && before <= '\uDFFF' && token.startOffset >= 2) {
+          const cp = source.codePointAt(token.startOffset - 2);
+          if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) {
+            return false;
+          }
+        } else if (/\p{L}/u.test(before)) {
+          return false;
+        }
       }
       const afterPos = token.endOffset;
-      if (afterPos < source.length && /\p{L}/u.test(source[afterPos])) {
-        return false;
+      if (afterPos < source.length) {
+        const after = source[afterPos];
+        if (after >= '\uD800' && after <= '\uDBFF' && afterPos + 1 < source.length) {
+          const cp = source.codePointAt(afterPos);
+          if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) {
+            return false;
+          }
+        } else if (/\p{L}/u.test(after)) {
+          return false;
+        }
       }
       return true;
     });
@@ -143,10 +160,35 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
             return false;
           }
+          // No block opener between ( and end: check if this paren group closes after end
+          // f(end + 1) → reject end (paren closes after end)
+          // function foo(\nend → accept end (unmatched paren)
+          if (
+            !this.hasAnyBlockOpenerBetween(source, i + 1, position, excludedRegions) &&
+            this.hasMatchingCloseParen(source, position + 3, excludedRegions)
+          ) {
+            return true;
+          }
           parenDepth--;
         } else {
           parenDepth--;
         }
+      }
+    }
+    return false;
+  }
+
+  // Checks if there is a matching ')' that closes the current paren group after 'from'
+  private hasMatchingCloseParen(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 1;
+    for (let i = from; i < source.length; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        depth--;
+        if (depth === 0) return true;
       }
     }
     return false;
@@ -178,12 +220,30 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
       for (const keyword of blockOpeners) {
         if (i + keyword.length <= end && source.slice(i, i + keyword.length) === keyword) {
-          // Check word boundaries
+          // Check word boundaries (ASCII + Unicode with surrogate pair support)
           const before = i > 0 ? source[i - 1] : ' ';
           const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
-          if (!/[a-zA-Z0-9_]/.test(before) && !/\p{L}/u.test(before) && !/[a-zA-Z0-9_]/.test(after) && !/\p{L}/u.test(after)) {
-            return true;
-          }
+          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+          if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Checks if there's ANY block-opening keyword (including if/for) between two positions
+  // Used to distinguish f(end) from f(if...end)
+  private hasAnyBlockOpenerBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      for (const keyword of this.keywords.blockOpen) {
+        if (i + keyword.length <= end && source.slice(i, i + keyword.length) === keyword) {
+          const before = i > 0 ? source[i - 1] : ' ';
+          const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
+          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+          if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+          return true;
         }
       }
     }
@@ -221,7 +281,7 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (depth === 0 && i + 3 <= end && source.slice(i, i + 3) === 'for') {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + 3 < source.length ? source[i + 3] : ' ';
-        if (!/[a-zA-Z0-9_]/.test(before) && !/\p{L}/u.test(before) && !/[a-zA-Z0-9_]/.test(after) && !/\p{L}/u.test(after)) {
+        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && !this.isAdjacentToUnicodeLetter(source, i, 3)) {
           return true;
         }
       }
@@ -435,6 +495,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     let i = pos + prefixLength + 3;
 
     while (i < source.length) {
+      // Only b"..." strings support escape sequences; non-b prefixed strings treat \ as literal
       if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
         i += 2;
         continue;
@@ -457,7 +518,8 @@ export class JuliaBlockParser extends BaseBlockParser {
   private findPrefixedStringEnd(source: string, start: number, quote: string, hasEscapes = false): number {
     let i = start;
     while (i < source.length) {
-      if (hasEscapes && source[i] === '\\' && i + 1 < source.length) {
+      // All prefixed strings treat \" and \\ as escape sequences
+      if (source[i] === '\\' && i + 1 < source.length && (hasEscapes || source[i + 1] === quote || source[i + 1] === '\\')) {
         i += 2;
         continue;
       }
@@ -477,6 +539,9 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Matches symbol literal including operator symbols and Unicode
   private matchSymbolLiteral(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
+    if (i >= source.length) {
+      return { start: pos, end: i };
+    }
     const firstChar = source[i];
 
     // Determine if this is an identifier symbol or operator symbol
