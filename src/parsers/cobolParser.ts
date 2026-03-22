@@ -250,6 +250,11 @@ export class CobolBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Validate block close keywords
+      if (type === 'block_close' && !this.isValidBlockClose(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
       tokens.push({
@@ -456,6 +461,18 @@ export class CobolBlockParser extends BaseBlockParser {
         }
         continue;
       }
+      // Skip pseudo-text delimiters ==...== inside EXEC block
+      if (ch === '=' && i + 1 < source.length && source[i + 1] === '=') {
+        i += 2;
+        while (i + 1 < source.length) {
+          if (source[i] === '=' && source[i + 1] === '=') {
+            i += 2;
+            break;
+          }
+          i++;
+        }
+        continue;
+      }
       // Skip single/double-quoted strings inside EXEC block
       if (ch === "'" || ch === '"') {
         i++;
@@ -505,7 +522,7 @@ export class CobolBlockParser extends BaseBlockParser {
   }
 
   // Match pseudo-text delimiters ==...==
-  private matchPseudoText(source: string, pos: number): ExcludedRegion | null {
+  private matchPseudoText(source: string, pos: number): ExcludedRegion {
     // Look for closing ==
     let i = pos + 2;
     while (i + 1 < source.length) {

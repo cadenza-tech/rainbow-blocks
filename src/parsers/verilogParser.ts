@@ -308,6 +308,31 @@ export class VerilogBlockParser extends BaseBlockParser {
         }
       }
 
+      // Skip backtick-prefixed preprocessor directives and macro invocations
+      // (`ifdef, `endif, `include, `MY_MACRO, etc.)
+      // Note: `define and `undef are excluded regions and handled above
+      if (source[i] === '`') {
+        let j = i + 1;
+        while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) {
+          j++;
+        }
+        if (j > i + 1) {
+          const directive = source.slice(i + 1, j);
+          // Directives with arguments (`ifdef, `ifndef, `elsif):
+          // skip whitespace + one identifier argument
+          if (/^(ifdef|ifndef|elsif)$/i.test(directive)) {
+            while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+              j++;
+            }
+            while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) {
+              j++;
+            }
+          }
+          i = j;
+          continue;
+        }
+      }
+
       // Any other non-whitespace, non-begin token means no begin follows
       return false;
     }
@@ -325,6 +350,11 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     if (i < source.length && source[i] === '*') {
       return i + 1;
+    }
+    // @identifier: single signal sensitivity (e.g., always @clk begin)
+    if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
+      while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+      return i;
     }
     return i;
   }
@@ -367,6 +397,15 @@ export class VerilogBlockParser extends BaseBlockParser {
       return i;
     }
     if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
+      while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+      return i;
+    }
+    // Backtick-prefixed macro identifier: `MACRO_NAME or `(expr)
+    if (i < source.length && source[i] === '`') {
+      i++;
+      if (i < source.length && source[i] === '(') {
+        return this.skipParenGroup(source, i, excludedRegions);
+      }
       while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
       return i;
     }
@@ -438,7 +477,7 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // `undef directive: exclude to end of line (may contain keyword names)
     // Word boundary check prevents matching `undefine, `undef_FOO, etc.
-    if (char === '`' && source.slice(pos + 1, pos + 6) === 'undef' && (pos + 6 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 6]))) {
+    if (char === '`' && source.slice(pos, pos + 6) === '`undef' && (pos + 6 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 6]))) {
       return matchUndefDirective(source, pos);
     }
 
@@ -506,7 +545,11 @@ export class VerilogBlockParser extends BaseBlockParser {
 
             if (beginIndex >= 0) {
               // Check for control keyword immediately before begin
-              const controlIndex = beginIndex - 1;
+              // Scan backward through stack, skipping preprocessor directives, to find control keyword
+              let controlIndex = beginIndex - 1;
+              while (controlIndex >= 0 && stack[controlIndex].token.value.startsWith('`')) {
+                controlIndex--;
+              }
               let controlBlock: OpenBlock | null = null;
 
               if (controlIndex >= 0 && CONTROL_KEYWORDS.includes(stack[controlIndex].token.value)) {
@@ -550,8 +593,17 @@ export class VerilogBlockParser extends BaseBlockParser {
                 // e.g., always -> if -> begin: after closing if, also close always
                 // BUT: if the next token is 'else', don't chain-consume because the
                 // if-else construct is not complete yet
-                const nextToken = ti + 1 < tokens.length ? tokens[ti + 1] : null;
-                const hasElseNext = nextToken !== null && nextToken.type === 'block_open' && nextToken.value === 'else';
+                let hasElseNext = false;
+                for (let ni = ti + 1; ni < tokens.length; ni++) {
+                  const candidateToken = tokens[ni];
+                  // Skip preprocessor directive tokens
+                  if (candidateToken.value.startsWith('`')) {
+                    continue;
+                  }
+                  // Check if the first non-preprocessor token is 'else'
+                  hasElseNext = candidateToken.type === 'block_open' && candidateToken.value === 'else';
+                  break;
+                }
                 if (!hasElseNext) {
                   let nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
                   while (nextCheckIndex >= 0 && CONTROL_KEYWORDS.includes(stack[nextCheckIndex].token.value)) {

@@ -82,6 +82,26 @@ export function matchAttribute(source: string, pos: number): ExcludedRegion {
       }
       continue;
     }
+    // Skip block comments /* ... */ inside attributes
+    if (source[i] === '/' && i + 1 < source.length && source[i + 1] === '*') {
+      i += 2;
+      while (i < source.length) {
+        if (source[i] === '*' && i + 1 < source.length && source[i + 1] === '/') {
+          i += 2;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    // Skip single-line comments // ... inside attributes
+    if (source[i] === '/' && i + 1 < source.length && source[i + 1] === '/') {
+      i += 2;
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        i++;
+      }
+      continue;
+    }
     if (source[i] === '*' && i + 1 < source.length && source[i + 1] === ')') {
       return { start: pos, end: i + 2 };
     }
@@ -115,6 +135,23 @@ export function matchDefineDirective(source: string, pos: number): ExcludedRegio
         if (source[i] === '*' && i + 1 < source.length && source[i + 1] === '/') {
           i += 2;
           break;
+        }
+        // Unterminated block comment: stop at define boundary (newline without continuation)
+        if (source[i] === '\n' || (source[i] === '\r' && (i + 1 >= source.length || source[i + 1] !== '\n'))) {
+          let j = i - 1;
+          if (source[i] === '\n' && j >= 0 && source[j] === '\r') {
+            j--;
+          }
+          let backslashCount = 0;
+          while (j >= 0 && source[j] === '\\') {
+            backslashCount++;
+            j--;
+          }
+          if (backslashCount % 2 === 1) {
+            i++;
+            continue;
+          }
+          return { start: pos, end: i };
         }
         i++;
       }
