@@ -5,6 +5,18 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.21] - 2026-03-22
+
+### Fixed
+
+- AppleScript: Reject block keywords (`repeat`, `try`, `considering`, `ignoring`) used as condition values in `if ... then` pattern
+- AppleScript: Reject compound block openers (`with timeout`, `with transaction`, `using terms from`) in `if ... then` condition
+- COBOL: Restrict `==` pseudo-text detection to COPY REPLACING / REPLACE statement context (allow `==` as equality operator)
+- Elixir: Add Unicode adjacency check for `end` keyword in `isDoColonOneLiner` scan
+- Julia: Reject `end` inside double brackets `a[[end]]` as array indexing (recursive `isIndexingBracket` check)
+- Octave: Filter out middle keywords (`else`, `elseif`, `case`, `otherwise`, `catch`) followed by assignment operators
+- Verilog: Skip `//` single-line comments inside `` `define `` directive body (IEEE 1800-2017 section 22.5.1)
+
 ## [1.1.20] - 2026-03-22
 
 ### Fixed
@@ -958,6 +970,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.21]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.20...v1.1.21
 [1.1.20]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.19...v1.1.20
 [1.1.19]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.18...v1.1.19
 [1.1.18]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.17...v1.1.18
