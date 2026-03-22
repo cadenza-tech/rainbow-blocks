@@ -317,9 +317,11 @@ export class CobolBlockParser extends BaseBlockParser {
       }
     }
 
-    // Pseudo-text delimiter ==...==
+    // Pseudo-text delimiter ==...== (only in COPY REPLACING / REPLACE context)
     if (char === '=' && pos + 1 < source.length && source[pos + 1] === '=') {
-      return this.matchPseudoText(source, pos);
+      if (this.isInPseudoTextContext(source, pos)) {
+        return this.matchPseudoText(source, pos);
+      }
     }
 
     // Single-quoted string
@@ -519,6 +521,31 @@ export class CobolBlockParser extends BaseBlockParser {
     }
 
     return { start: pos, end: source.length };
+  }
+
+  // Checks if == at pos is in a COPY REPLACING or REPLACE statement context
+  // Scans backward for REPLACING, REPLACE, or BY keywords (preceded by another ==...==)
+  private isInPseudoTextContext(source: string, pos: number): boolean {
+    // Scan backward from pos, skipping whitespace and newlines, looking for context keywords
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+      i--;
+    }
+    // Check if preceded by closing == of another pseudo-text (e.g., ==text== BY ==replacement==)
+    if (i >= 1 && source[i] === '=' && source[i - 1] === '=') {
+      return true;
+    }
+    // Extract the word ending at position i
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z]/.test(source[i])) {
+      i--;
+    }
+    const word = source.slice(i + 1, wordEnd).toUpperCase();
+    // REPLACING (in COPY ... REPLACING ==old== BY ==new==)
+    // REPLACE (in REPLACE ==old== BY ==new==)
+    // ALSO (in REPLACE ALSO ==old== BY ==new==)
+    // BY (in ==old== BY ==new==)
+    return word === 'REPLACING' || word === 'REPLACE' || word === 'ALSO' || word === 'BY';
   }
 
   // Match pseudo-text delimiters ==...==

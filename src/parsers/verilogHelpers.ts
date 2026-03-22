@@ -157,6 +157,18 @@ export function matchDefineDirective(source: string, pos: number): ExcludedRegio
       }
       continue;
     }
+    // Skip single-line comments inside define body (terminates the define line)
+    if (source[i] === '/' && i + 1 < source.length && source[i + 1] === '/') {
+      // Per IEEE 1800-2017 section 22.5.1, single-line comments inside `define
+      // are not part of the substituted text. The comment runs to end of line,
+      // and any backslash before the newline is inside the comment, NOT a continuation.
+      i += 2;
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        i++;
+      }
+      // End the define at this newline (the comment consumed any trailing backslash)
+      return { start: pos, end: i };
+    }
     // Skip string literals inside define body (backslash escapes apply)
     if (source[i] === '"') {
       i++;
