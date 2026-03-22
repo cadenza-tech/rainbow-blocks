@@ -87,9 +87,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return super.isValidBlockClose(keyword, source, position, excludedRegions);
   }
 
+  // Filter out middle keywords used as variable names (else = 5, case += 1, etc.)
+  protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    const tokens = super.tokenize(source, excludedRegions);
+    return tokens.filter((t) => t.type !== 'block_middle' || !this.isFollowedByAssignment(source, t.startOffset + t.value.length));
+  }
+
   // Checks if position is followed by = or compound assignment (+=, -=, *=, /=, ^=, .+=, .-=, .*=, ./=, .^=)
   // but not == (comparison)
-  private isFollowedByAssignment(source: string, afterPos: number): boolean {
+  protected isFollowedByAssignment(source: string, afterPos: number): boolean {
     let i = afterPos;
     while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
       i++;

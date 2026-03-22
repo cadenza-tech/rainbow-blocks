@@ -90,6 +90,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return true;
     }
 
+    // Reject block keywords used as condition values in 'if ... then' pattern
+    // (repeat, try, considering, ignoring are affected; script/on/to are already protected by isAtLogicalLineStart)
+    if (keyword === 'repeat' || keyword === 'try' || keyword === 'considering' || keyword === 'ignoring') {
+      if (this.isInsideIfCondition(source, position, excludedRegions)) {
+        return false;
+      }
+      return true;
+    }
+
     if (keyword !== 'if') {
       return true;
     }
@@ -329,6 +338,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
         if (/^(set|copy)[ \t]+$/.test(lineBefore) || /'s[ \t]+$/.test(lineBefore)) {
+          return { nextPos: flexMatch };
+        }
+      }
+
+      // Reject compound block openers used as condition values in 'if ... then' pattern
+      if (type === 'block_open') {
+        if (this.isInsideIfCondition(source, i, excludedRegions)) {
           return { nextPos: flexMatch };
         }
       }
