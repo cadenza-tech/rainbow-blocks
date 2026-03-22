@@ -63,6 +63,10 @@ export class MatlabBlockParser extends BaseBlockParser {
         return false;
       }
     }
+    // Reject any block opener inside parentheses or brackets
+    if (this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+      return false;
+    }
     return true;
   }
 
@@ -363,7 +367,7 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Check if this is a transpose operator (after identifier, number, ], }, or .)
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.']/.test(prevChar) || /\p{L}/u.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar)) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         // If immediately followed by a letter, it's more likely a string
         if (/[0-9]/.test(prevChar)) {

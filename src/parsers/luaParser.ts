@@ -12,12 +12,34 @@ export class LuaBlockParser extends BaseBlockParser {
   };
 
   // Validates block open keywords, excluding do that's part of while/for loop
+  // Also rejects keywords preceded by '.' or ':' (table field/method access like t.end, obj:repeat)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.isPrecededByDotOrColon(source, position)) {
+      return false;
+    }
+
     if (keyword !== 'do') {
       return true;
     }
 
     return !this.isDoPartOfLoop(source, position, excludedRegions);
+  }
+
+  // Validates block close: rejects keywords preceded by '.' or ':'
+  protected isValidBlockClose(_keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    return !this.isPrecededByDotOrColon(source, position);
+  }
+
+  // Checks if keyword is preceded by '.' or ':' (table field/method access)
+  // But not '::' which is goto label syntax (::label::keyword)
+  private isPrecededByDotOrColon(source: string, position: number): boolean {
+    if (position <= 0) return false;
+    if (source[position - 1] === '.') return true;
+    if (source[position - 1] === ':') {
+      // :: is goto label closing, not method call
+      return !(position >= 2 && source[position - 2] === ':');
+    }
+    return false;
   }
 
   // Checks if do at position is part of a while/for loop (not standalone)
@@ -36,6 +58,9 @@ export class LuaBlockParser extends BaseBlockParser {
         continue;
       }
       if (this.isAdjacentToUnicodeLetter(source, loopAbsolutePos, loopMatch[0].length)) {
+        continue;
+      }
+      if (this.isPrecededByDotOrColon(source, loopAbsolutePos)) {
         continue;
       }
 
@@ -63,6 +88,9 @@ export class LuaBlockParser extends BaseBlockParser {
         if (this.isAdjacentToUnicodeLetter(source, absolutePos, innerMatch[0].length)) {
           continue;
         }
+        if (this.isPrecededByDotOrColon(source, absolutePos)) {
+          continue;
+        }
         const word = innerMatch[1];
         // Track non-loop block openers (function, if, repeat) that can contain standalone do
         if (word === 'function' || word === 'if' || word === 'repeat') {
@@ -88,6 +116,9 @@ export class LuaBlockParser extends BaseBlockParser {
         } else if ((word === 'end' || word === 'until') && nestedLoopEndDepth > 0) {
           // Consume end that closes a nested loop's do...end block
           nestedLoopEndDepth--;
+        } else if (word === 'end' || word === 'until') {
+          // end/until at depth 0 with no pending closers means the loop scope ended
+          break;
         } else if (word === 'for' || word === 'while') {
           // Nested loop found; its do will be consumed by this nested loop
           nestedLoopDepth++;
@@ -113,6 +144,17 @@ export class LuaBlockParser extends BaseBlockParser {
     }
 
     return false;
+  }
+
+  // Filters out middle keywords preceded by '.' or ':' (table field/method access)
+  protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    const tokens = super.tokenize(source, excludedRegions);
+    return tokens.filter((token) => {
+      if (token.type === 'block_middle' && this.isPrecededByDotOrColon(source, token.startOffset)) {
+        return false;
+      }
+      return true;
+    });
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
