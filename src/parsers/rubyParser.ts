@@ -118,13 +118,19 @@ export class RubyBlockParser extends BaseBlockParser {
           }
         }
       }
-      // Filter out dot-preceded tokens (method calls like obj.end, obj.class)
+      // Filter out dot-preceded tokens (method calls like obj.end, obj. class)
       // But allow range operator (..) — x..end is valid
-      if (token.startOffset > 0 && source[token.startOffset - 1] === '.' && !(token.startOffset > 1 && source[token.startOffset - 2] === '.')) {
+      if (this.isDotPreceded(source, token.startOffset, excludedRegions)) {
         return false;
       }
       // Filter out :: scope resolution (e.g., Module::Class::Begin)
       if (token.startOffset > 1 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
+        return false;
+      }
+      // Filter out keyword followed by :: (e.g., class::Method, module::Nested)
+      // But allow end:: because end::to_s means "close the block, then call method on result"
+      const afterEnd = token.endOffset;
+      if (token.type !== 'block_close' && afterEnd + 1 < source.length && source[afterEnd] === ':' && source[afterEnd + 1] === ':') {
         return false;
       }
       // Filter out keywords preceded by $ or @ (variable names like $end, @end, @@end)

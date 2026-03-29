@@ -12,7 +12,7 @@ import {
   matchElseWhere,
   matchFortranString
 } from './fortranHelpers';
-import { isAtLineStartAllowingWhitespace, isValidFortranBlockClose, isValidProcedureOpen } from './fortranValidation';
+import { isAtLineStartAllowingWhitespace, isInsideParentheses, isValidFortranBlockClose, isValidProcedureOpen } from './fortranValidation';
 import { findLastOpenerByType, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
@@ -393,6 +393,11 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Validate block close keywords (e.g., skip end used as variable)
       if (type === 'block_close' && !this.isValidBlockClose(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Skip block_middle keywords inside parenthesized expressions (conditions, function arguments)
+      if (type === 'block_middle' && isInsideParentheses(source, startOffset)) {
         continue;
       }
 

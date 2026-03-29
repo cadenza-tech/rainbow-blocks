@@ -295,6 +295,10 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {
         return false;
       }
+      // Capture operator prefix: &end, &fn, &else, etc. are function references, not keywords
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '&') {
+        return false;
+      }
       if (token.type === 'block_middle' && token.endOffset < source.length && source[token.endOffset] === ':') {
         return false;
       }
@@ -304,6 +308,10 @@ export class ElixirBlockParser extends BaseBlockParser {
         if (afterChar === '?' || afterChar === '!') {
           return false;
         }
+      }
+      // Reject middle keywords preceded by '..' range operator (e.g., 1..else)
+      if (token.type === 'block_middle' && token.startOffset >= 2 && source[token.startOffset - 1] === '.' && source[token.startOffset - 2] === '.') {
+        return false;
       }
       return true;
     });

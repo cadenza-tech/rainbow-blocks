@@ -91,9 +91,21 @@ export class OctaveBlockParser extends MatlabBlockParser {
   }
 
   // Filter out middle keywords used as variable names (else = 5, case += 1, etc.)
+  // and middle keywords inside parentheses/brackets/braces
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
-    return tokens.filter((t) => t.type !== 'block_middle' || !this.isFollowedByAssignment(source, t.startOffset + t.value.length));
+    return tokens.filter((t) => {
+      if (t.type !== 'block_middle') {
+        return true;
+      }
+      if (this.isFollowedByAssignment(source, t.startOffset + t.value.length)) {
+        return false;
+      }
+      if (this.isInsideParensOrBrackets(source, t.startOffset, excludedRegions)) {
+        return false;
+      }
+      return true;
+    });
   }
 
   // Checks if position is followed by = or compound assignment (+=, -=, *=, /=, ^=, .+=, .-=, .*=, ./=, .^=)

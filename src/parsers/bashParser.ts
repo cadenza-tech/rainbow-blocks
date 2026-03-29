@@ -668,6 +668,9 @@ export class BashBlockParser extends BaseBlockParser {
     // Validate block_middle keywords at command position (echo then, echo else, etc.)
     tokens = tokens.filter((token) => {
       if (token.type !== 'block_middle') return true;
+      if (this.isFollowedByHyphen(source, token.startOffset, token.value)) return false;
+      if (this.isInsideExtglob(source, token.startOffset, excludedRegions)) return false;
+      if (this.isInsideDoubleBracket(source, token.startOffset, excludedRegions)) return false;
       if (!this.isAtCommandPosition(source, token.startOffset, excludedRegions)) return false;
       if (this.isCasePattern(source, token.startOffset, token.value, excludedRegions)) return false;
       if (this.isFollowedByEquals(source, token.startOffset, token.value)) return false;
@@ -732,7 +735,7 @@ export class BashBlockParser extends BaseBlockParser {
         while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
           j--;
         }
-        if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&') {
+        if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && source[j] !== ')' && source[j] !== ']') {
           // Check if preceded by block close keywords (fi, done, esac)
           const blockCloseKeywords = ['fi', 'done', 'esac', '}'];
           let isAfterBlockClose = false;

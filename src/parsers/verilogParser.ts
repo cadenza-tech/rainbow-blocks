@@ -15,10 +15,10 @@ import {
 
 // Mapping of close keywords to their valid openers
 const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
-  endmodule: ['module'],
+  endmodule: ['module', 'macromodule'],
   endfunction: ['function'],
   endtask: ['task'],
-  endcase: ['case', 'casez', 'casex'],
+  endcase: ['case', 'casez', 'casex', 'randcase'],
   endgenerate: ['generate'],
   join: ['fork'],
   join_any: ['fork'],
@@ -32,6 +32,11 @@ const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
   endsequence: ['sequence'],
   endchecker: ['checker'],
   endclocking: ['clocking'],
+  endgroup: ['covergroup'],
+  endspecify: ['specify'],
+  endprimitive: ['primitive'],
+  endtable: ['table'],
+  endconfig: ['config'],
   // 'end' closes begin directly; control keywords are handled specially
   end: ['begin'],
   // Preprocessor directives
@@ -39,7 +44,20 @@ const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
 };
 
 // Control keywords that can precede begin and are closed together with it
-const CONTROL_KEYWORDS = ['always', 'always_comb', 'always_ff', 'always_latch', 'initial', 'if', 'else', 'for', 'while', 'repeat', 'forever'];
+const CONTROL_KEYWORDS = [
+  'always',
+  'always_comb',
+  'always_ff',
+  'always_latch',
+  'initial',
+  'final',
+  'if',
+  'else',
+  'for',
+  'while',
+  'repeat',
+  'forever'
+];
 
 export class VerilogBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -56,6 +74,7 @@ export class VerilogBlockParser extends BaseBlockParser {
       'always_ff',
       'always_latch',
       'initial',
+      'final',
       'generate',
       'fork',
       'if',
@@ -72,7 +91,14 @@ export class VerilogBlockParser extends BaseBlockParser {
       'property',
       'sequence',
       'checker',
-      'clocking'
+      'clocking',
+      'covergroup',
+      'specify',
+      'primitive',
+      'table',
+      'macromodule',
+      'config',
+      'randcase'
     ],
     blockClose: [
       'endmodule',
@@ -91,14 +117,36 @@ export class VerilogBlockParser extends BaseBlockParser {
       'endproperty',
       'endsequence',
       'endchecker',
-      'endclocking'
+      'endclocking',
+      'endgroup',
+      'endspecify',
+      'endprimitive',
+      'endtable',
+      'endconfig'
     ],
     blockMiddle: ['default']
   };
 
   // Override tokenize to also scan for preprocessor directives
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
-    const tokens = super.tokenize(source, excludedRegions);
+    let tokens = super.tokenize(source, excludedRegions);
+
+    // Filter out tokens that are ifdef/ifndef/elsif directive macro name arguments
+    const directiveArgRanges: { start: number; end: number }[] = [];
+    const directiveArgPattern = /`(?:ifdef|ifndef|elsif)\b/g;
+    for (const argMatch of source.matchAll(directiveArgPattern)) {
+      if (this.isInExcludedRegion(argMatch.index, excludedRegions)) continue;
+      let argStart = argMatch.index + argMatch[0].length;
+      while (argStart < source.length && (source[argStart] === ' ' || source[argStart] === '\t')) argStart++;
+      let argEnd = argStart;
+      while (argEnd < source.length && /[a-zA-Z0-9_]/.test(source[argEnd])) argEnd++;
+      if (argEnd > argStart) {
+        directiveArgRanges.push({ start: argStart, end: argEnd });
+      }
+    }
+    if (directiveArgRanges.length > 0) {
+      tokens = tokens.filter((token) => !directiveArgRanges.some((range) => token.startOffset >= range.start && token.startOffset < range.end));
+    }
 
     // Add preprocessor directive tokens (`ifdef, `ifndef, `elsif, `else, `endif)
     const ppPattern = /`(ifdef|ifndef|elsif|else|endif)\b/g;

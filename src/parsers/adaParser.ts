@@ -191,7 +191,39 @@ export class AdaBlockParser extends BaseBlockParser {
       if (type === 'block_middle' && keyword.toLowerCase() === 'is') {
         const lineStart = findLineStart(source, startOffset);
         const lineBefore = source.slice(lineStart, startOffset).toLowerCase().trimStart();
-        if (/^(type|subtype)\b/.test(lineBefore)) {
+        let isTypeDeclLine = /^(type|subtype)\b/.test(lineBefore);
+        // Check for type/subtype keyword before this 'is' on the same line,
+        // not separated by a semicolon
+        // (e.g., "procedure Test is type T is range 1..10;")
+        if (!isTypeDeclLine) {
+          const lineSlice = source.slice(lineStart, startOffset);
+          let lastTypeDeclPos = -1;
+          for (const m of lineSlice.matchAll(/\b(type|subtype)\b/gi)) {
+            const absPos = lineStart + m.index;
+            if (this.isInExcludedRegion(absPos, excludedRegions)) continue;
+            // Skip 'type' when preceded by 'protected' or 'task' (these are block, not type decl)
+            if (m[1].toLowerCase() === 'type') {
+              const beforeType = source.slice(lineStart, absPos).toLowerCase().trimEnd();
+              if (/\b(?:protected|task)$/.test(beforeType)) continue;
+            }
+            lastTypeDeclPos = absPos;
+          }
+          if (lastTypeDeclPos >= 0) {
+            // Ensure no semicolon between type/subtype keyword and this 'is'
+            let hasSemiBetween = false;
+            for (let si = lastTypeDeclPos; si < startOffset; si++) {
+              if (this.isInExcludedRegion(si, excludedRegions)) continue;
+              if (source[si] === ';') {
+                hasSemiBetween = true;
+                break;
+              }
+            }
+            if (!hasSemiBetween) {
+              isTypeDeclLine = true;
+            }
+          }
+        }
+        if (isTypeDeclLine) {
           // Find the last top-level semicolon before this 'is' on the same line
           // to handle multiple type declarations on one line
           let lastSemiPos = -1;
@@ -220,10 +252,12 @@ export class AdaBlockParser extends BaseBlockParser {
         // Check previous lines if current line has only whitespace before 'is',
         // or if 'is' follows a closing paren from a discriminant list,
         // or if lineBefore has unmatched closing parens (multi-line discriminant)
+        // Count paren depth using absolute positions to skip excluded regions
         let lineParenDepth = 0;
-        for (const ch of lineBefore) {
-          if (ch === '(') lineParenDepth++;
-          if (ch === ')') lineParenDepth--;
+        for (let ci = lineStart; ci < startOffset; ci++) {
+          if (this.isInExcludedRegion(ci, excludedRegions)) continue;
+          if (source[ci] === '(') lineParenDepth++;
+          if (source[ci] === ')') lineParenDepth--;
         }
         const hasUnmatchedCloseParen = lineParenDepth < 0;
         if (lineBefore.length === 0 || /^\(.*\)\s*$/.test(lineBefore) || hasUnmatchedCloseParen) {
@@ -252,10 +286,27 @@ export class AdaBlockParser extends BaseBlockParser {
               }
               // Track paren depth for multi-line discriminant lists
               // Use absolute positions to skip excluded regions (comments, strings)
+              const depthBeforeLine = scanParenDepth;
+              let lineHasNonExcludedParen = false;
               for (let ci = prevStart; ci <= scanPos && ci < source.length; ci++) {
                 if (this.isInExcludedRegion(ci, excludedRegions)) continue;
-                if (source[ci] === ')') scanParenDepth++;
-                if (source[ci] === '(') scanParenDepth--;
+                if (source[ci] === ')') {
+                  scanParenDepth++;
+                  lineHasNonExcludedParen = true;
+                }
+                if (source[ci] === '(') {
+                  scanParenDepth--;
+                  lineHasNonExcludedParen = true;
+                }
+              }
+              // If this line has balanced parens (net zero change) but scanParenDepth
+              // is still elevated from lines below, and the line doesn't start with '(',
+              // it's an independent statement (e.g. a function call) that shouldn't
+              // bridge the backward scan to a type declaration above.
+              // Only apply when the line actually has non-excluded parens; lines with
+              // parens only inside comments/strings are part of the discriminant content
+              if (scanParenDepth === depthBeforeLine && depthBeforeLine > 0 && lineHasNonExcludedParen && !/^\(/.test(prevLine)) {
+                break;
               }
               if (/^(type|subtype)\b/.test(prevLine)) {
                 isTypeDecl = true;
