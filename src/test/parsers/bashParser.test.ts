@@ -291,6 +291,26 @@ fi`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, '{', '}');
     });
+
+    test('should detect comment after closing double quote', () => {
+      const pairs = parser.parse('echo "x"# if true; then echo ok; fi');
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect comment after closing single quote', () => {
+      const pairs = parser.parse("echo 'x'# if true; then echo ok; fi");
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect comment after closing backtick', () => {
+      const pairs = parser.parse('x=`cmd`# if true; then echo ok; fi');
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect comment after closing bracket', () => {
+      const pairs = parser.parse('[[ true ]]# if true; then echo ok; fi');
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Excluded regions - Strings', () => {
@@ -586,6 +606,16 @@ fi`;
       const braceBlock = pairs.find((p) => p.openKeyword.value === '{');
       assert.ok(braceBlock);
       assert.strictEqual(braceBlock?.closeKeyword?.value, '}');
+    });
+
+    test('should detect } after subshell )', () => {
+      const pairs = parser.parse('{ (echo hi) }');
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should detect } after [[ ]]', () => {
+      const pairs = parser.parse('{ [[ $x -gt 0 ]] }');
+      assertSingleBlock(pairs, '{', '}');
     });
   });
 
@@ -1503,6 +1533,59 @@ esac`;
       assert.strictEqual(thenTokens.length, 1, 'only one then token should exist');
       assert.strictEqual(thenTokens[0].type, 'block_middle');
     });
+
+    suite('Extglob patterns in case statements', () => {
+      test('should skip keywords inside negation extglob in case pattern', () => {
+        const pairs = parser.parse('for i in 1; do\n  case $i in\n    !(done)) echo match;;\n  esac\ndone');
+        assertBlockCount(pairs, 2);
+        findBlock(pairs, 'for');
+        findBlock(pairs, 'case');
+      });
+
+      test('should skip keywords inside question extglob in case pattern', () => {
+        const pairs = parser.parse('for i in 1; do\n  case $i in\n    ?(done)) echo match;;\n  esac\ndone');
+        assertBlockCount(pairs, 2);
+      });
+
+      test('should skip keywords inside star extglob in case pattern', () => {
+        const pairs = parser.parse('for i in 1; do\n  case $i in\n    *(done)) echo match;;\n  esac\ndone');
+        assertBlockCount(pairs, 2);
+      });
+
+      test('should skip keywords inside plus extglob in case pattern', () => {
+        const pairs = parser.parse('for i in 1; do\n  case $i in\n    +(done)) echo match;;\n  esac\ndone');
+        assertBlockCount(pairs, 2);
+      });
+
+      test('should skip keywords inside at extglob in case pattern', () => {
+        const pairs = parser.parse('for i in 1; do\n  case $i in\n    @(done)) echo match;;\n  esac\ndone');
+        assertBlockCount(pairs, 2);
+      });
+    });
+
+    suite('Hyphenated command names', () => {
+      test('should not treat done in done-handler as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done-handler arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+      });
+
+      test('should not treat fi in fi-nalize as block close', () => {
+        const pairs = parser.parse('if true; then\n  fi-nalize\nfi');
+        assertSingleBlock(pairs, 'if', 'fi');
+      });
+
+      test('should not treat if in if-exists as block open', () => {
+        const pairs = parser.parse('if true; then\n  if-exists file\nfi');
+        assertSingleBlock(pairs, 'if', 'fi');
+      });
+
+      test('should not treat then in then-handler as block middle', () => {
+        const pairs = parser.parse('if true; then\n  then-handler arg\nfi');
+        const pair = findBlock(pairs, 'if');
+        assert.strictEqual(pair.intermediates.length, 1);
+        assert.strictEqual(pair.intermediates[0].value, 'then');
+      });
+    });
   });
 
   suite('Block middle keyword validation', () => {
@@ -1549,6 +1632,16 @@ esac`;
     test('should parse blocks inside subshell with for loop', () => {
       const pairs = parser.parse('(for i in 1 2 3; do echo "$i"; done)');
       assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should detect case-esac inside subshell with esac)', () => {
+      const pairs = parser.parse('(case $x in\n  a) echo ok;;\nesac)');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should detect case-esac inside subshell on one line', () => {
+      const pairs = parser.parse('(case $x in a) echo ok;; esac)');
+      assertSingleBlock(pairs, 'case', 'esac');
     });
   });
 
@@ -2952,6 +3045,23 @@ fi`;
       assertBlockCount(pairs, 2);
       findBlock(pairs, 'if');
       findBlock(pairs, '{');
+    });
+  });
+
+  suite('Environment variable prefix', () => {
+    test('should detect keyword after single env var prefix', () => {
+      const pairs = parser.parse('FOO=bar if true; then echo ok; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect keyword after multiple env var prefixes', () => {
+      const pairs = parser.parse('A=1 B=2 if true; then echo ok; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect for after env var prefix', () => {
+      const pairs = parser.parse('IFS=: for i in a b c; do echo $i; done');
+      assertSingleBlock(pairs, 'for', 'done');
     });
   });
 
@@ -4698,6 +4808,178 @@ fi`;
       const ifBlocks = pairs.filter((p) => p.openKeyword.value === 'if');
       assert.strictEqual(ifBlocks.length, 2);
       findBlock(pairs, '{');
+    });
+  });
+
+  suite('Bug: keywords inside [[ ]] falsely detected as block openers', () => {
+    test('should not detect if inside multiline [[ ]]', () => {
+      const source = 'if [[\nif == "true"\n]]; then\n  echo ok\nfi';
+      const tokens = parser.getTokens(source);
+      const ifTokens = tokens.filter((t) => t.value === 'if');
+      assert.strictEqual(ifTokens.length, 1, 'only the outer if should be detected');
+      assert.strictEqual(ifTokens[0].startOffset, 0);
+    });
+
+    test('should not detect for inside multiline [[ ]]', () => {
+      const source = 'if [[\nfor == "true"\n]]; then\n  echo ok\nfi';
+      const tokens = parser.getTokens(source);
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0);
+    });
+
+    test('should not detect case inside multiline [[ ]]', () => {
+      const source = 'if [[\ncase == "true"\n]]; then\n  echo ok\nfi';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0);
+    });
+
+    test('should correctly pair outer if with fi when if appears inside [[ ]]', () => {
+      const source = 'if [[\nif == "true"\n]]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer if should pair with fi');
+    });
+
+    test('should correctly pair when [[ ]] is followed by real blocks', () => {
+      const source = 'if [[ if == "true" ]]; then\n  for i in 1 2; do\n    echo "$i"\n  done\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'if', 0);
+      assertNestLevel(pairs, 'for', 1);
+    });
+
+    test('should not detect keywords after closed ]] and before new [[', () => {
+      const source = 'if [[ a == "b" ]] && [[\ncase == "true"\n]]; then\n  echo ok\nfi';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0);
+    });
+
+    test('should not detect middle keywords inside [[ ]]', () => {
+      const source = 'if [[\nthen == "true"\n]]; then\n  echo ok\nfi';
+      const tokens = parser.getTokens(source);
+      const thenTokens = tokens.filter((t) => t.value === 'then');
+      assert.strictEqual(thenTokens.length, 1, 'only the real then should be detected');
+    });
+
+    test('should not detect close keywords inside [[ ]]', () => {
+      const source = 'if [[\nfi == "true"\n]]; then\n  echo ok\nfi';
+      const tokens = parser.getTokens(source);
+      const fiTokens = tokens.filter((t) => t.value === 'fi');
+      assert.strictEqual(fiTokens.length, 1, 'only the real fi should be detected');
+    });
+
+    test('should not let echo [[ poison subsequent keyword detection', () => {
+      const pairs = parser.parse('echo [[\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Bug: keyword==value falsely detected as keyword instead of assignment', () => {
+    // In bash, keyword==value is a variable assignment: variable "keyword" gets value "=value"
+    // The isFollowedByEquals method explicitly skips == thinking it is a comparison operator,
+    // but actually keyword== is name=value where value starts with "="
+
+    test('should not detect if in if==value assignment', () => {
+      const tokens = parser.getTokens('if==value');
+      const ifTokens = tokens.filter((t) => t.value === 'if');
+      assert.strictEqual(ifTokens.length, 0);
+    });
+
+    test('should not detect for in for==value assignment', () => {
+      const tokens = parser.getTokens('for==value');
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0);
+    });
+
+    test('should not detect done in done==value assignment', () => {
+      const tokens = parser.getTokens('done==value');
+      const doneTokens = tokens.filter((t) => t.value === 'done');
+      assert.strictEqual(doneTokens.length, 0);
+    });
+
+    test('should not detect then in then==value assignment', () => {
+      const tokens = parser.getTokens('then==value');
+      const thenTokens = tokens.filter((t) => t.value === 'then');
+      assert.strictEqual(thenTokens.length, 0);
+    });
+
+    test('should not detect fi in fi==value assignment', () => {
+      const tokens = parser.getTokens('fi==value');
+      const fiTokens = tokens.filter((t) => t.value === 'fi');
+      assert.strictEqual(fiTokens.length, 0);
+    });
+
+    test('should still correctly handle single = assignment', () => {
+      // if=value should still be filtered (existing behavior works)
+      const tokens = parser.getTokens('if=value');
+      const ifTokens = tokens.filter((t) => t.value === 'if');
+      assert.strictEqual(ifTokens.length, 0);
+    });
+
+    test('should still correctly handle += assignment', () => {
+      const tokens = parser.getTokens('if+=value');
+      const ifTokens = tokens.filter((t) => t.value === 'if');
+      assert.strictEqual(ifTokens.length, 0);
+    });
+  });
+
+  suite('Bug: # inside [[ ]] treated as comment', () => {
+    // In bash, # is NOT a comment character inside [[ ]] conditional expressions.
+    // The parser's findExcludedRegions treats # as a comment start based on the preceding
+    // character (space, etc.) without knowing about [[ ]] context. This causes the rest
+    // of the line (including ]]; then) to be excluded, breaking block detection.
+
+    test('should detect if-fi block when [[ ]] contains # in pattern matching', () => {
+      const source = 'if [[ $x == #* ]]; then\n  echo starts with hash\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if-fi block when [[ ]] contains # after != operator', () => {
+      const source = 'if [[ $x != #comment ]]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if-fi block when [[ ]] contains # as a value with -n test', () => {
+      const source = 'if [[ -n #text ]]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if-fi block when [[ ]] contains # after = operator', () => {
+      const source = 'if [[ $x = # ]]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect intermediates when [[ ]] contains # in pattern', () => {
+      const source = 'if [[ $x == #* ]]; then\n  echo ok\nelse\n  echo no\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should detect nested blocks when [[ ]] contains # in pattern', () => {
+      const source = 'if [[ $x == #* ]]; then\n  for i in 1 2; do\n    echo $i\n  done\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'if', 0);
+      assertNestLevel(pairs, 'for', 1);
+    });
+  });
+
+  suite('Regression: [[ after for-in/select-in not treated as conditional command', () => {
+    test('should not treat [[ after for-in as conditional command', () => {
+      const pairs = parser.parse('for i in [[; do\n  echo $i\ndone');
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not treat [[ after select-in as conditional command', () => {
+      const pairs = parser.parse('select opt in [[; do\n  echo $opt\ndone');
+      assertSingleBlock(pairs, 'select', 'done');
     });
   });
 });

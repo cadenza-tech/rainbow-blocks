@@ -1019,6 +1019,11 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not treat .. concatenation as field access', () => {
+      const pairs = parser.parse('x = "hi"..function()\n  return "lo"\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   // Regression: goto label :: should not trigger dot/colon check

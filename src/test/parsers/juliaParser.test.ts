@@ -1405,6 +1405,13 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should detect for loop inside if expression inside parentheses', () => {
+      const pairs = parser.parse('(if true\n  for i in 1:10\n    println(i)\n  end\nend)');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'for');
+    });
   });
 
   suite('End inside brackets/parentheses', () => {
@@ -1436,6 +1443,12 @@ end`;
       // f(a[end]) - end is indexing inside brackets
       const pairs = parser.parse('function foo()\n  x = f(a[end])\nend');
       assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should detect for loop inside begin block within array brackets', () => {
+      const source = '[begin\n  for i in 1:3\n    println(i)\n  end\nend]';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
     });
   });
 
@@ -1742,6 +1755,16 @@ end`;
     test('should not treat block keyword followed by quote as string macro', () => {
       const source = 'if"true"\n  x = 1\nend';
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not consume end as string macro suffix', () => {
+      const pairs = parser.parse('begin\nr"pattern"end');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not consume else as string macro suffix', () => {
+      const pairs = parser.parse('if true\nr"p"else\n  x\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
@@ -2333,12 +2356,11 @@ end`;
       assertNoBlocks(pairs);
     });
 
-    test('[if true 1 else 2 end] should reject if (comprehension context) but accept end', () => {
-      // if is always rejected inside brackets (comprehension syntax takes precedence)
-      // end is accepted in array construction brackets but has no matching opener
+    test('[if true 1 else 2 end] should accept if as block expression in array construction', () => {
+      // if without preceding for is a block expression in array construction, not a comprehension filter
       const source = '[if true 1 else 2 end]';
       const pairs = parser.parse(source);
-      assertNoBlocks(pairs);
+      assertSingleBlock(pairs, 'if', 'end');
     });
 
     test('[begin x = 1 end] should treat as array construction (accept block)', () => {
@@ -2642,6 +2664,12 @@ end`;
     });
 
     test('should still reject if in array comprehension', () => {
+      const source = '[x for x in 1:10 if x > 5]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject for and if in array comprehension with filter', () => {
       const source = '[x for x in 1:10 if x > 5]';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
@@ -3041,6 +3069,109 @@ end`;
 
     test('should reject end inside nested double brackets', () => {
       const pairs = parser.parse('function foo()\n  x = A[i, [end]]\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: hasAssignmentBetween operator detection', () => {
+    test('should not treat == as assignment in generator expression', () => {
+      // (x == target for x in xs) - == is equality, not assignment, so for is a generator
+      const source = 'function foo()\n  result = (x == target for x in xs)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat === as assignment in generator expression', () => {
+      // (x === nothing for x in xs) - === is strict equality, not assignment
+      const source = 'function foo()\n  result = (x === nothing for x in xs)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat !== as assignment in generator expression', () => {
+      // (x !== 0 for x in xs) - !== is strict not-equal, not assignment
+      const source = 'function foo()\n  result = (x !== 0 for x in xs)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat >>>= as compound assignment (not comparison)', () => {
+      // (x >>>= for i in 1:n ... end) - >>>= is compound assignment, for is not a generator
+      const source = 'function foo()\n  (x >>>= for i in 1:n\n    i\n  end)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'for');
+    });
+
+    test('should still treat = as assignment in named tuple context', () => {
+      // (name = for x in 1:10 ... end) - plain = is assignment
+      const source = 'function foo()\n  t = (name = for x in 1:10\n    x\n  end)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'for');
+    });
+
+    test('should still treat += as compound assignment', () => {
+      // (x += for i in 1:n ... end) - += is compound assignment, for is not a generator
+      const source = 'function foo()\n  (x += for i in 1:n\n    i\n  end)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'for');
+    });
+
+    test('should still skip != as not-equal operator', () => {
+      // (x != 0 for x in xs) - != is not-equal, not assignment
+      const source = 'function foo()\n  result = (x != 0 for x in xs)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still skip <= as comparison operator', () => {
+      // (x <= 10 for x in xs) - <= is comparison, not assignment
+      const source = 'function foo()\n  result = (x <= 10 for x in xs)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still skip >= as comparison operator', () => {
+      // (x >= 0 for x in xs) - >= is comparison, not assignment
+      const source = 'function foo()\n  result = (x >= 0 for x in xs)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still skip => as pair operator', () => {
+      // (k => v for (k, v) in dict) - => is pair, not assignment
+      const source = 'function foo()\n  result = (k => v for (k, v) in dict)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat >>= as compound assignment', () => {
+      // (x >>= for i in 1:n ... end) - >>= is compound assignment, for is not a generator
+      const source = 'function foo()\n  (x >>= for i in 1:n\n    i\n  end)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Regression: <<= compound assignment operator', () => {
+    test('should treat <<= as compound assignment, not comparison', () => {
+      const source = 'function foo()\n  (x <<= for i in 1:n\n    i\n  end)\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'for');
+    });
+
+    test('should still treat <= as comparison in generator context', () => {
+      const source = 'function foo()\n  result = (x <= 10 for x in 1:10)\nend';
+      const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
   });

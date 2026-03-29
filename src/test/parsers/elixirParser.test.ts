@@ -984,6 +984,11 @@ end`;
         const pairs = parser.parse(source);
         assert.ok(pairs.length >= 0);
       });
+
+      test('should not treat colon after Unicode letter as atom start', () => {
+        const pairs = parser.parse('caf\u00e9:if true do\n  :ok\nend');
+        assertSingleBlock(pairs, 'if', 'end');
+      });
     });
 
     suite('hasDoKeyword patterns', () => {
@@ -1124,6 +1129,38 @@ end`;
       const source = 'if \u03B1if, do: :ok';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+
+    test('should not decrement block depth for end: keyword argument in isDoColonOneLiner', () => {
+      const pairs = parser.parse('if if(c) end: v, do: :ok do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect sigil preceded by Unicode identifier as not a sigil', () => {
+      const regions = parser.getExcludedRegions('\u03B1~s(end)');
+      // Should NOT have excluded region at position 2 (alpha is identifier char)
+      const hasSigilRegion = regions.some((r) => r.start <= 2 && r.end > 2);
+      assert.strictEqual(hasSigilRegion, false);
+    });
+
+    test('should not detect atom after :: type spec operator', () => {
+      const regions = parser.getExcludedRegions('x::end');
+      const hasAtomRegion = regions.some((r) => r.start === 2);
+      assert.strictEqual(hasAtomRegion, false);
+    });
+
+    test('should not over-consume characters after atom with ! suffix', () => {
+      const regions = parser.getExcludedRegions(':end!foo');
+      const atomRegion = regions.find((r) => r.start === 0);
+      assert.ok(atomRegion, 'atom region should exist');
+      assert.strictEqual(atomRegion.end, 5); // :end! is 5 chars
+    });
+
+    test('should not over-consume characters after atom with ? suffix', () => {
+      const regions = parser.getExcludedRegions(':valid?end');
+      const atomRegion = regions.find((r) => r.start === 0);
+      assert.ok(atomRegion, 'atom region should exist');
+      assert.strictEqual(atomRegion.end, 7); // :valid? is 7 chars
     });
   });
 
@@ -3456,6 +3493,94 @@ end`;
       assertBlockCount(pairs, 2);
       findBlock(pairs, 'fn');
       findBlock(pairs, 'if');
+    });
+  });
+
+  suite('Bug: isDoColonOneLiner treats block keyword names in conditions as inner blocks', () => {
+    // isDoColonOneLiner increments innerBlockDepth when it encounters a block keyword name
+    // (cond, case, for, etc.) at word boundary in the condition expression.
+    // Since there is no matching end to decrement, innerBlockDepth stays elevated,
+    // causing do: detection to be skipped.
+    // For valid Elixir (do: only, no bare do), this is masked by hasDoKeyword also returning false.
+    // The bug manifests when both do: and bare do appear on the same line (invalid Elixir).
+
+    test('should reject if with cond keyword in condition and do: one-liner followed by bare do', () => {
+      // 'cond' is a block keyword name. isDoColonOneLiner should still detect do: as one-liner.
+      const pairs = parser.parse('if cond, do: v do\nend');
+      // Expected: 0 pairs (do: one-liner should be detected, bare do is invalid Elixir)
+      // Actual: 1 pair (if-end) because isDoColonOneLiner fails to find do:
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject if with case keyword in condition and do: one-liner followed by bare do', () => {
+      const pairs = parser.parse('if case, do: v do\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject if with for keyword in condition and do: one-liner followed by bare do', () => {
+      const pairs = parser.parse('if for, do: v do\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject if with defmodule keyword in condition and do: one-liner followed by bare do', () => {
+      const pairs = parser.parse('if defmodule, do: v do\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still correctly handle non-keyword conditions with do: one-liner', () => {
+      // Control test: non-keyword conditions work correctly
+      const pairs = parser.parse('if abc, do: v do\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still correctly handle keyword in parens with do: one-liner', () => {
+      // Parenthesized keywords are not affected (parenDepth > 0 skips word scan)
+      const pairs = parser.parse('if (cond), do: v do\nend');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Bug: block_open and block_middle keywords after .. range operator not filtered', () => {
+    // isValidBlockClose filters 'end' after '..' (e.g., 1..end) to avoid false block_close.
+    // But isValidBlockOpen does NOT filter block_open keywords after '..' (e.g., 1..def).
+    // The tokenize filter allows '..' prefix for all token types except block_close.
+    // Similarly, block_middle keywords after '..' are not filtered.
+
+    test('should not detect def after .. range as block open', () => {
+      // In Elixir, 1..def is a range expression, not a function definition
+      const source = 'if true do\n  1..def foo do\n  end\nend';
+      const pairs = parser.parse(source);
+      // Expected: 1 pair (if-end). The '..def' should not start a new block.
+      // Actual: 2 pairs (def-end and if-end) because def after .. is treated as block_open.
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not detect else after .. range as block middle', () => {
+      // In Elixir, 1..else is a range expression, not an if-else boundary
+      const source = 'if true do\n  1..else\nelse\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // Expected: 1 intermediate (the real else on line 2)
+      // Actual: 2 intermediates (the ..else on line 1 is also counted)
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
+  suite('Regression: &-prefixed keywords', () => {
+    test('should not treat &end as block close', () => {
+      const pairs = parser.parse('if true do\n  f = &end/1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat &fn as block open', () => {
+      const pairs = parser.parse('&fn');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat &else as block middle', () => {
+      const pairs = parser.parse('if true do\n  f = &else/1\nelse\n  :error\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
     });
   });
 

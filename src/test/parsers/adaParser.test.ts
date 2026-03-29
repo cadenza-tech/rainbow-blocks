@@ -440,6 +440,28 @@ end Hello;`;
       assertSingleBlock(pairs, 'select', 'end select');
       assertIntermediates(pairs[0], ['or', 'else']);
     });
+
+    suite('Standalone loop after for representation clause', () => {
+      test('should detect standalone loop after for-use representation clause on previous line', () => {
+        const pairs = parser.parse('for T use 32;\nloop\n  null;\nend loop;');
+        assertSingleBlock(pairs, 'loop', 'end loop');
+      });
+
+      test('should detect standalone loop after for-use on same line separated by semicolon', () => {
+        const pairs = parser.parse('for T use 32; loop\n  null;\nend loop;');
+        assertSingleBlock(pairs, 'loop', 'end loop');
+      });
+
+      test('should detect standalone loop after for-attribute representation clause', () => {
+        const pairs = parser.parse("for T'Size use 32;\nloop\n  null;\nend loop;");
+        assertSingleBlock(pairs, 'loop', 'end loop');
+      });
+
+      test('should still detect for-loop pair when no semicolon separates them', () => {
+        const pairs = parser.parse('for I in 1 .. 10 loop\n  null;\nend loop;');
+        assertSingleBlock(pairs, 'for', 'end loop');
+      });
+    });
   });
 
   suite('Entry declarations', () => {
@@ -450,6 +472,15 @@ end Hello;`;
 end Worker;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'task', 'end');
+    });
+
+    test('should have is as intermediate in task type declaration', () => {
+      const source = `task type Worker is
+  entry Start;
+end Worker;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'task', 'end');
+      assertIntermediates(pairs[0], ['is']);
     });
 
     test('should not treat entry with parameters as block open', () => {
@@ -2380,6 +2411,26 @@ end if;`;
       const isToken = tokens.find((t) => t.value.toLowerCase() === 'is');
       assert.ok(isToken, 'is should be present as a token (not filtered by distant type)');
     });
+
+    // BUG 3: Backward scan crosses balanced-paren line via scanParenDepth tracking
+    // When 'is' is on a line with unmatched ')', the backward scan tracks paren depth.
+    // A line with balanced parens like 'func(x)' temporarily increases scanParenDepth,
+    // preventing the break condition from triggering. This allows the scan to reach
+    // a distant 'type' keyword that is completely unrelated to the 'is'.
+    test('BUG3: should not filter is when balanced-paren line exists between type and unmatched-paren is', () => {
+      const source = 'type T\nfunc(x)\nresult) is';
+      const tokens = parser.getTokens(source);
+      const isToken = tokens.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isToken, 'is should be present (balanced-paren line should not bridge to distant type)');
+    });
+
+    // BUG 3 variant: multiple balanced-paren lines between type and is
+    test('BUG3: should not filter is when multiple balanced-paren lines exist between type and is', () => {
+      const source = 'type T\nfunc1(x)\nfunc2(y)\nresult) is';
+      const tokens = parser.getTokens(source);
+      const isToken = tokens.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isToken, 'is should be present (multiple balanced-paren lines should not bridge)');
+    });
   });
 
   suite('Regression: access on previous line should not suppress procedure/function', () => {
@@ -2395,6 +2446,15 @@ end if;`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: is in mid-line type declaration', () => {
+    test('should filter is in mid-line type declaration', () => {
+      const source = 'procedure Test is type T is range 1..10;\nbegin\n  null;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
     });
   });
 
@@ -2419,6 +2479,16 @@ end if;`;
 
     test('should skip string containing open paren inside discriminant list', () => {
       const source = 'procedure P is\n  type T(\n    D : String := "("\n    )\n    is range 1 .. 100;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+  });
+
+  suite('Regression: lineParenDepth skips excluded regions in is type-declaration filter', () => {
+    test('should filter is when string containing paren is on same line as closing paren', () => {
+      const source = 'procedure P is\n  type T(\n    D : Integer\n    ) "(" is range 1..100;\nbegin\n  null;\nend P;';
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
       assertSingleBlock(pairs, 'procedure', 'end');

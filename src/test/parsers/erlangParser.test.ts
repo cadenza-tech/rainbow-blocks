@@ -390,6 +390,12 @@ end`;
       assert.strictEqual(pairs[0].intermediates.length, 1);
       assert.strictEqual(pairs[0].intermediates[0].value, 'catch');
     });
+
+    test('should not treat catch expression prefix as intermediate in try block', () => {
+      const pairs = parser.parse('try\n  X = catch throw(hello)\ncatch\n  _:_ -> ok\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
   });
 
   suite('Edge cases', () => {
@@ -495,6 +501,11 @@ end`;
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should not create block pair for fun reference across newlines', () => {
+      const pairs = parser.parse('fun\n  my_func/1');
+      assertNoBlocks(pairs);
     });
   });
 
@@ -1923,6 +1934,157 @@ bar() -> fun() -> ok end.`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
+  suite('Regression: keywords inside module attribute arguments', () => {
+    test('should not detect keywords inside -define macro arguments', () => {
+      const source = '-define(begin, start).\n-define(end, stop).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, source.indexOf('begin\n  ok'));
+    });
+
+    test('should not detect keywords inside -module/-export arguments', () => {
+      const source = '-module(begin).\n-export([end/0]).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, source.indexOf('begin\n  ok'));
+    });
+
+    test('should not detect keywords inside -record name position', () => {
+      const source = '-record(begin, {field}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not detect keywords inside -ifdef/-undef arguments', () => {
+      const source = '-ifdef(begin).\n-endif.\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not detect keywords inside multi-line -define', () => {
+      const source = '-define(MY_MACRO,\n  begin).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not detect keywords inside -export list', () => {
+      const source = '-export([end/0, begin/1]).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still detect fun/end inside -record default value as real block', () => {
+      const source = '-record(state, {handler = fun() -> ok end}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funPair = findBlock(pairs, 'fun');
+      assert.strictEqual(funPair.closeKeyword.value, 'end');
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword.value, 'end');
+    });
+
+    test('should still detect blocks in normal code after module attributes', () => {
+      const source = '-export([foo/0]).\nfoo() ->\n  begin\n    ok\n  end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not detect keywords inside -define tuple body', () => {
+      const source = '-define(MY_MACRO, {begin, end}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, source.indexOf('begin\n  ok'));
+    });
+
+    test('should not detect keywords inside -define nested tuple body', () => {
+      const source = '-define(NESTED, {outer, {begin, end}}).\ncase X of\n  _ -> ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not detect keywords inside multi-line -define tuple body', () => {
+      const source = '-define(MY_MACRO,\n  {begin, end}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, source.indexOf('begin\n  ok'));
+    });
+
+    test('should still detect fun/end inside -record brace body as real block', () => {
+      const source = '-record(state, {handler = fun() -> ok end}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funPair = findBlock(pairs, 'fun');
+      assert.strictEqual(funPair.closeKeyword.value, 'end');
+    });
+
+    test('should still detect begin/end inside -record brace body as real block', () => {
+      const source = '-record(state, {init = begin ok end}).\ncase X of\n  _ -> ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword.value, 'end');
+    });
+
+    test('should detect fun/end inside record literal in -define body', () => {
+      const pairs = parser.parse('-define(MY_REC, #state{handler = fun() -> ok end}).');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should detect begin/end inside map literal in -define body', () => {
+      const pairs = parser.parse('-define(X, #{key => begin ok end}).');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should filter keywords inside nested function calls in module attributes', () => {
+      const tokens = parser.getTokens('-define(MACRO, nested(begin)).');
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0);
+    });
+
+    test('should filter keywords in double-nested calls in module attributes', () => {
+      const tokens = parser.getTokens('-define(M, a(b(begin))).');
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0);
+    });
+  });
+
+  suite('Regression: fun() in -record union type not treated as block opener', () => {
+    test('should not treat fun in record union type as block opener', () => {
+      const pairs = parser.parse('begin\n  -record(s, {h :: a | fun(() -> ok)}),\n  ok\nend.');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat fun in record tuple type as block opener', () => {
+      const pairs = parser.parse('begin\n  -record(s, {h :: {ok, fun(() -> ok)}}),\n  ok\nend.');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat fun() in map type annotation inside -record as block opener', () => {
+      const pairs = parser.parse('begin\n  -record(st, {cb :: #{atom() => fun(() -> ok)}}).\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should treat catch after > as expression prefix', () => {
+      const pairs = parser.parse('try\n  X > catch throw(hello),\n  ok\ncatch\n  _:_ -> error\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after | as expression prefix', () => {
+      const pairs = parser.parse('try\n  X = A | catch throw(hello),\n  ok\ncatch\n  _:_ -> error\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after || as expression prefix', () => {
+      const pairs = parser.parse('try\n  X = A || catch throw(hello),\n  ok\ncatch\n  _:_ -> error\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
     });
   });
 

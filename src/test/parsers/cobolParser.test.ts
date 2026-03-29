@@ -740,6 +740,12 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should treat PERFORM TIMES as paragraph call', () => {
+      const source = 'PERFORM TIMES';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Performance', () => {
@@ -858,6 +864,12 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
+
+    test('should exclude keywords inside EXEC HTML block', () => {
+      const source = 'EXEC HTML\n  <div>IF X > 0 END-IF</div>\nEND-EXEC\nPERFORM\n  DISPLAY Y\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
   });
 
   suite('Excluded regions - Pseudo-text delimiters', () => {
@@ -873,10 +885,46 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
 
-    test('should handle unterminated pseudo-text in REPLACING context', () => {
+    test('should not treat REPLACING without COPY as pseudo-text context', () => {
       const source = 'REPLACING ==IF ELSE END-IF';
       const pairs = parser.parse(source);
-      assertNoBlocks(pairs);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not trigger pseudo-text detection for REPLACING outside COPY context', () => {
+      const source = 'DISPLAY REPLACING == X\nIF A > 0\n  DISPLAY OK\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    suite('Regression: multi-pair COPY REPLACING / REPLACE', () => {
+      test('should exclude all pseudo-text in 2-pair COPY REPLACING', () => {
+        const source = 'COPY X REPLACING ==a== BY ==b== ==c== BY ==IF x END-IF==.\nPERFORM UNTIL DONE\n  DISPLAY X\nEND-PERFORM';
+        const regions = parser.getExcludedRegions(source);
+        const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+        assert.strictEqual(pseudoRegions.length, 4);
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+      });
+
+      test('should exclude all pseudo-text in 3-pair COPY REPLACING', () => {
+        const source = 'COPY X REPLACING ==a== BY ==b== ==c== BY ==d== ==IF== BY ==PERFORM==.\nIF COND\nEND-IF';
+        const regions = parser.getExcludedRegions(source);
+        const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+        assert.strictEqual(pseudoRegions.length, 6);
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'IF', 'END-IF');
+      });
+
+      test('should exclude all pseudo-text in multi-pair REPLACE', () => {
+        const source =
+          'REPLACE ==old1== BY ==new1== ==old2== BY ==new2== ==IF x END-IF== BY ==DISPLAY y==.\nPERFORM UNTIL DONE\n  DISPLAY X\nEND-PERFORM';
+        const regions = parser.getExcludedRegions(source);
+        const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+        assert.strictEqual(pseudoRegions.length, 6);
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+      });
     });
   });
 
@@ -1445,6 +1493,65 @@ END-PERFORM`;
       const regions = parser.getExcludedRegions('REPLACE ==OLD== BY ==NEW==.');
       const pseudoRegions = regions.filter((r) => r.end - r.start >= 7);
       assert.ok(pseudoRegions.length >= 2);
+    });
+  });
+
+  suite('Bug: BY triggers false pseudo-text detection after ==', () => {
+    test('should not treat == as pseudo-text when preceded by BY in arithmetic context', () => {
+      // isInPseudoTextContext returns true for any BY before ==, even in SORT/MULTIPLY/DIVIDE
+      // This causes == and everything after it to become a false excluded region
+      const source = 'SORT FILE-A ASCENDING BY == KEY-FIELD\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat == as pseudo-text when BY is separated by newline', () => {
+      const source = 'MULTIPLY A BY\n== something\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Bug: ALSO triggers false pseudo-text detection after ==', () => {
+    test('should not treat == as pseudo-text when preceded by ALSO in EVALUATE context', () => {
+      // ALSO is valid in EVALUATE ALSO and REPLACE ALSO, but isInPseudoTextContext
+      // does not distinguish the two contexts
+      const source = 'EVALUATE TRUE ALSO == TRUE\n  WHEN 1\n    DISPLAY OK\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+    });
+  });
+
+  suite('Bug: Standalone EXEC triggers false excluded region', () => {
+    test('should not treat standalone EXEC as EXEC block start when used as data name', () => {
+      // matchExecBlock treats any standalone EXEC as an EXEC block start, even when
+      // it appears in non-SQL/CICS contexts like MOVE EXEC TO X
+      const source = 'MOVE EXEC TO X\nIF A > 0\n  DISPLAY OK\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Regression: unclosed == in EXEC block swallows END-EXEC', () => {
+    test('should not swallow END-EXEC when == appears in SQL expression', () => {
+      // Bug: == in SQL WHERE clause triggered pseudo-text scanning that consumed
+      // everything to end of source, making END-EXEC invisible to the parser
+      const source = 'EXEC SQL\n  SELECT * FROM T WHERE A == 1\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should handle == as equality operator in SQL WHERE clause', () => {
+      const source = 'EXEC SQL\n  SELECT COL1 FROM TABLE1 WHERE COL2 == :HOST-VAR\nEND-EXEC\nPERFORM\n  DISPLAY "X"\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should handle multiple unclosed == fragments in EXEC block', () => {
+      // Three == operators: first two pair up as pseudo-text, third is unclosed
+      const source = 'EXEC SQL\n  WHERE A == 1 OR B == 2 OR C ==\n  3\nEND-EXEC\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
     });
   });
 

@@ -1299,5 +1299,123 @@ end`;
     });
   });
 
+  suite('Bug: middle keywords inside parentheses treated as intermediates', () => {
+    test('should not treat else inside parentheses as intermediate', () => {
+      // else is a reserved keyword in Octave, but if it appears inside parens
+      // (e.g., as a struct field or in malformed code), it should not be
+      // treated as an intermediate keyword
+      const pairs = parser.parse('if true\n  x = foo(else, 1);\nelse\n  y = 1;\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should not treat case inside brackets as intermediate', () => {
+      const pairs = parser.parse('switch x\n  y = [case];\n  case 1\n    z = 1;\nend');
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should not treat catch inside curly braces as intermediate', () => {
+      const pairs = parser.parse('try\n  x = {catch};\ncatch e\n  y = 1;\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
+  suite('Bug: isFollowedByAssignment does not skip line continuation', () => {
+    test('should treat end followed by ... then = as variable assignment', () => {
+      // "end ...\n= 5" is semantically "end = 5" due to line continuation
+      const pairs = parser.parse('function f()\n  end ...\n    = 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should be closed by the last end');
+    });
+
+    test('should treat if followed by ... then = as variable assignment', () => {
+      // "if ...\n= 5" is semantically "if = 5" due to line continuation
+      const tokens = parser.getTokens('if ...\n  = 5;');
+      const ifToken = tokens.find((t) => t.value === 'if');
+      assert.strictEqual(ifToken, undefined, 'if followed by ... then = should not be tokenized as block_open');
+    });
+
+    test('should treat end followed by ... then += as variable assignment', () => {
+      // "end ...\n+= 5" is semantically "end += 5" due to line continuation
+      const pairs = parser.parse('function f()\n  end ...\n    += 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should be closed by the last end');
+    });
+
+    test('should treat else followed by ... then = as variable assignment', () => {
+      // "else ...\n= 5" is semantically "else = 5" due to line continuation
+      const tokens = parser.getTokens('else ...\n  = 5;');
+      const elseToken = tokens.find((t) => t.value === 'else');
+      assert.strictEqual(elseToken, undefined, 'else followed by ... then = should be filtered');
+    });
+  });
+
+  suite('Regression: line continuation with trailing text', () => {
+    test('should treat end followed by ...+comment+newline then = as assignment', () => {
+      const pairs = parser.parse('function f()\n  end ... some comment\n    = 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should treat end followed by ...+spaces+newline then = as assignment', () => {
+      const pairs = parser.parse('function f()\n  end ...   \n    = 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should treat if followed by ...+comment+newline then = as variable', () => {
+      const tokens = parser.getTokens('if ... comment\n  = 5;');
+      assert.strictEqual(tokens.length, 0);
+    });
+  });
+
+  suite('Regression: backslash line continuation with dot detects struct field access', () => {
+    test('should treat end after backslash dot continuation as struct field access', () => {
+      // "obj.\<newline>end;" is semantically "obj.end;" due to backslash line continuation
+      const source = 'function f()\n  x = obj.\\\n  end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Bug: backslash line continuation in isFollowedByAssignment', () => {
+    test('should treat end followed by backslash continuation then = as variable assignment', () => {
+      // "end \<newline>= 5" is semantically "end = 5" due to backslash line continuation
+      const pairs = parser.parse('function f()\n  end \\\n    = 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should be closed by the last end');
+    });
+
+    test('should treat if followed by backslash continuation then = as variable assignment', () => {
+      // "if \<newline>= 5" is semantically "if = 5" due to backslash line continuation
+      const tokens = parser.getTokens('if \\\n  = 5;');
+      const ifToken = tokens.find((t) => t.value === 'if');
+      assert.strictEqual(ifToken, undefined, 'if followed by \\ then = should not be tokenized as block_open');
+    });
+
+    test('should treat end followed by backslash continuation then += as variable assignment', () => {
+      // "end \<newline>+= 5" is semantically "end += 5" due to backslash line continuation
+      const pairs = parser.parse('function f()\n  end \\\n    += 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should be closed by the last end');
+    });
+
+    test('should treat else followed by backslash continuation then = as variable assignment', () => {
+      // "else \<newline>= 5" is semantically "else = 5" due to backslash line continuation
+      const tokens = parser.getTokens('else \\\n  = 5;');
+      const elseToken = tokens.find((t) => t.value === 'else');
+      assert.strictEqual(elseToken, undefined, 'else followed by \\ then = should be filtered');
+    });
+
+    test('should handle backslash with trailing whitespace before newline', () => {
+      // "end \<spaces><newline>= 5" should also be recognized as line continuation
+      const pairs = parser.parse('function f()\n  end \\   \n    = 5;\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should be closed by the last end');
+    });
+  });
+
   generateCommonTests(config);
 });

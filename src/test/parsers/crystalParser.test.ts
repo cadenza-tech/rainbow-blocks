@@ -303,6 +303,11 @@ end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
     });
+
+    test('should handle regex character class containing slash', () => {
+      const pairs = parser.parse('if true\n  x = /[/]end/\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Excluded regions - Macro templates', () => {
@@ -329,6 +334,11 @@ end`;
 if real
 end`;
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat {{% as {{ macro expression template', () => {
+      const pairs = parser.parse('{{% end %}\nif true\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
   });
@@ -1392,6 +1402,18 @@ end`;
       const pairs = parser.parse('?\\u{\ndef foo\n  1\nend');
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should fully exclude ?\\uXXXX char literal escape', () => {
+      const regions = parser.getExcludedRegions('?\\u0041');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, 7); // ?\u0041 is 7 chars
+    });
+
+    test('should fully exclude ?\\xNN char literal escape', () => {
+      const regions = parser.getExcludedRegions('?\\x41');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, 5); // ?\x41 is 5 chars
+    });
   });
 
   suite('Loop separator do', () => {
@@ -1530,6 +1552,48 @@ def foo
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: empty heredoc delimiter', () => {
+    test('should not let empty heredoc delimiter <<-"" consume subsequent code', () => {
+      const pairs = parser.parse('x = <<-""\nif real\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: unmatched quote in invalid heredoc opener', () => {
+    test('should not treat unmatched double quote in <<-" as string start', () => {
+      // <<-"end (no closing quote) is an invalid heredoc opener.
+      // The orphaned " must not be misinterpreted as a regular string start,
+      // which would consume all subsequent code into an excluded region.
+      const source = '<<-"end\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat unmatched double quote in <<-"IDENTIFIER as string start', () => {
+      const source = '<<-"FOO\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat unmatched double quote in <<-" without identifier as string start', () => {
+      const source = '<<-"\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat unmatched double quote in <<-" within expression as string start', () => {
+      const source = 'x = <<-"WORD\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still handle valid <<-"END" heredoc correctly', () => {
+      const source = '<<-"END"\nheredoc body\nEND\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
@@ -2880,6 +2944,11 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should not treat / after $? as regex start', () => {
+      const pairs = parser.parse('x = $? / 100\nif condition\n  action\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Bug 28: skipMacroString interpolation handling', () => {
@@ -3424,6 +3493,89 @@ end`;
       const source = '{{ { }}\nif true\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: ternary ? before string delimiters', () => {
+    test('should not treat ?" as char literal in ternary with double-quoted string', () => {
+      const source = 'nil ?"yes" : "no"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test("should not treat ?' as char literal in ternary with single-quoted string", () => {
+      const source = "nil ?'yes' : 'no'\ndef foo\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not swallow subsequent code when ?" consumes opening quote', () => {
+      const source = 'x = cond ?"yes" : "no"\ndef foo\nend\ndef bar\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle ternary ?" after closing paren', () => {
+      const source = '(x) ?"a" : "b"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle ternary ?" after closing bracket', () => {
+      const source = 'arr[0] ?"a" : "b"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Bug: {{ }} macro template off-by-one when inner brace closes at }}', () => {
+    test('should include all three braces in }}} excluded region', () => {
+      // {{ {x}}} has }}} at the end: first } closes inner {, then }} closes template.
+      // The excluded region should span the entire template including all 3 closing braces.
+      const source = '{{ {x}}}';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should include all braces in {{ a{b}}} excluded region', () => {
+      const source = '{{ a{b}}}';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should fully exclude }}} when inner brace closes at template boundary', () => {
+      // Without fix, the excluded region ends 1 char too early, leaving an orphaned }
+      const source = '{{ {x}}}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      const regions = parser.getExcludedRegions('{{ {x}}}');
+      assert.strictEqual(regions[0].end, 8);
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should not treat if after while as postfix conditional', () => {
+      const pairs = parser.parse('while if cond\n  true\nend\n  body\nend');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat unless after until as postfix conditional', () => {
+      const pairs = parser.parse('until unless cond\n  false\nend\n  body\nend');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat while after case as postfix conditional', () => {
+      const pairs = parser.parse('case if cond\n  :a\nend\nend');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat if after for as postfix conditional', () => {
+      const pairs = parser.parse('for x in arr\n  if cond\n    x\n  end\nend');
+      assertBlockCount(pairs, 2);
     });
   });
 

@@ -319,6 +319,12 @@ end`;
       assertSingleBlock(pairs, 'program', 'end');
     });
 
+    test('should not treat end followed by // as block close', () => {
+      const source = 'program test\n  character(len=20) :: end\n  end = "hello"\n  end // " world"\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
     test('should handle named end', () => {
       const source = `program hello
   print *, "Hello"
@@ -438,6 +444,16 @@ endif`;
       const source = "program test\n  x = func('hello &\n  &world', end)\nend program";
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not detect type(name)(args) constructor as block open', () => {
+      const pairs = parser.parse('subroutine init(p)\n  type(point) :: p\n  p = type(point)(1.0, 2.0)\nend subroutine');
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should still detect type block with body', () => {
+      const pairs = parser.parse('type :: point\n  real :: x, y\nend type');
+      assertSingleBlock(pairs, 'type', 'end type');
     });
   });
 
@@ -669,6 +685,29 @@ program test
 end program`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should treat Cend as free-form code (C followed by alphanumeric)', () => {
+      // C/c at column 1 followed by alphanumeric is treated as free-form code
+      // to support identifiers like count, compute, current, etc.
+      const tokens = parser.getTokens('Cend program foo');
+      assert.strictEqual(tokens.length, 1);
+      assert.strictEqual(tokens[0].value.toLowerCase(), 'program');
+    });
+
+    test('should not treat call at column 1 as comment', () => {
+      const pairs = parser.parse('program main\ncall sub1\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat count at column 1 as comment', () => {
+      const pairs = parser.parse('count = 0\ndo i = 1, 10\nend do');
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should not treat labeled do with c-identifier as comment', () => {
+      const pairs = parser.parse('compute: do i = 1, 10\nend do');
+      assertSingleBlock(pairs, 'do', 'end do');
     });
   });
 
@@ -2132,6 +2171,18 @@ end function`;
       const source = 'program test\n  y = x% end + 1\nend program';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat compound end keyword preceded by % as block close', () => {
+      const source = 'do i = 1, 5\n  x = obj%enddo\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should not treat plain end preceded by % as block close', () => {
+      const source = 'do i = 1, 5\n  x = obj%end\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
     });
   });
 
@@ -4042,6 +4093,236 @@ end program`;
       assert.strictEqual(pairs[0].intermediates.length, 1);
       assert.ok(/^else\b/i.test(pairs[0].intermediates[0].value), 'intermediate should start with else');
       assert.ok(/\bwhere$/i.test(pairs[0].intermediates[0].value), 'intermediate should end with where');
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('BUG1: end as variable in arithmetic expression should not close block', () => {
+      // 'end' used as variable name in expression (RHS of assignment)
+      // isValidBlockClose sees 'end' followed by ' + 1' (not = or %) and accepts it
+      // Expected: program -> end program (1 pair)
+      // Actual: program -> end at the expression 'end' (wrong close)
+      const source = 'program test\n  integer :: end\n  end = 10\n  x = end + 1\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG1: end as variable with multiplication should not close block', () => {
+      const source = 'program test\n  integer :: end\n  end = 10\n  x = end * 2\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG1: end as variable with unary minus should not close block', () => {
+      const source = 'program test\n  integer :: end\n  end = 10\n  x = -end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG1: end in print statement should not close block', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\n  print *, end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG1: end in write statement should not close block', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\n  write(*,*) end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG1: end + end in expression should not close block', () => {
+      const source = 'program test\n  integer :: end\n  end = 10\n  x = end + end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG1: end in COMMON statement should not close block', () => {
+      const source = 'program test\n  common /blk/ end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('BUG2: enddo as variable in expression inside do loop should not close loop', () => {
+      // enddo used as variable inside a do loop falsely closes the loop
+      // Expected: do -> end do, program -> end program (2 pairs)
+      // Actual: do -> enddo (wrong), program -> end program
+      const source = 'program test\n  integer :: enddo\n  enddo = 5\n  do i = 1, 5\n    x = enddo + i\n  end do\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'program');
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(doBlock.closeKeyword.value.toLowerCase(), 'end do');
+    });
+
+    test('BUG2: endif as variable in expression inside if block should not close block', () => {
+      const source = 'program test\n  integer :: endif\n  endif = 0\n  if (.true.) then\n    x = endif\n  end if\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'program');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value.toLowerCase(), 'end if');
+    });
+
+    test('BUG2: endprogram as variable should not close program block', () => {
+      const source = 'program test\n  integer :: endprogram\n  endprogram = 5\n  do i = 1, 5\n    x = endprogram + i\n  end do\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const progBlock = findBlock(pairs, 'program');
+      assert.strictEqual(progBlock.closeKeyword.value.toLowerCase(), 'end program');
+    });
+
+    test('BUG3: endif used as function call should not close if block', () => {
+      // endif(5) is a function call, not a block closer
+      // isValidBlockClose sees ( after endif, skips parens, no = follows -> accepts as block close
+      // Expected: if -> end if, program -> end program
+      // Actual: if -> endif (wrong)
+      const source = 'program test\n  if (.true.) then\n    x = endif(5)\n  end if\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'program');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value.toLowerCase(), 'end if');
+    });
+  });
+
+  suite('Regression: comparison operators before end keyword', () => {
+    test('should reject end after > as variable', () => {
+      const pairs = parser.parse('program test\n  print *, x > end\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end after < as variable', () => {
+      const pairs = parser.parse('program test\n  print *, x < end\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end after >= as variable', () => {
+      const pairs = parser.parse('program test\n  result = x >= end\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end after <= as variable', () => {
+      const pairs = parser.parse('program test\n  result = x <= end\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Regression: statement keywords before end/compound-end', () => {
+    test('should reject end after call as entity name', () => {
+      const source = 'program test\n  call end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject enddo after save as entity name inside do loop', () => {
+      const source = 'program test\n  integer :: enddo\n  do i = 1, 5\n    save enddo\n    x = i\n  end do\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'program');
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(doBlock.closeKeyword.value.toLowerCase(), 'end do');
+    });
+
+    test('should reject end after dimension as entity name', () => {
+      const source = 'program test\n  dimension end(10)\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end after data as entity name', () => {
+      const source = 'program test\n  integer :: end\n  data end /5/\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end after CALL with mixed case', () => {
+      const source = 'program test\n  CALL end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not reject legitimate end program after call statement', () => {
+      const source = 'program test\n  call mysub()\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Regression: isPrecededByOperator across continuation lines', () => {
+    test('should reject end on continuation after = operator', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\n  x = &\n  end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end on continuation after + operator', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\n  x = y + &\n  end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject end on continuation after .and. operator', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\n  x = y .and. &\n  end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not reject enddo on continuation inside do loop', () => {
+      const source = 'program test\n  integer :: enddo\n  enddo = 5\n  do i = 1, 5\n    x = &\n    enddo\n  end do\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'program');
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(doBlock.closeKeyword.value.toLowerCase(), 'end do');
+    });
+  });
+
+  suite('Regression: end followed by continuation and string concatenation', () => {
+    test('should not treat end followed by continuation and string concatenation as block close', () => {
+      const source = 'program test\n  character(len=20) :: end\n  end = "hello"\n  end &\n  // " world"\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should not treat variable named then as block keyword', () => {
+      const pairs = parser.parse('if (outer > 0) then\n  if (then > 5) print *, then\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat then in print statement as block keyword', () => {
+      const pairs = parser.parse('if (x > 0) print *, then');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect block if with then at end of line', () => {
+      const pairs = parser.parse('if (x > 0) then\n  y = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect block if with then followed by comment', () => {
+      const pairs = parser.parse('if (x > 0) then ! comment\n  y = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should filter then variable inside parenthesized condition', () => {
+      const pairs = parser.parse('if (x > then) then\n  y = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should filter else variable inside parenthesized expression', () => {
+      const pairs = parser.parse('if (else > 0) then\n  y = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should filter case inside function call in select case', () => {
+      const pairs = parser.parse('select case (func(case))\n  case (1)\n    y = 1\nend select');
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['case']);
     });
   });
 

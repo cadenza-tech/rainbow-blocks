@@ -597,6 +597,11 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should handle regex character class containing slash', () => {
+      const pairs = parser.parse('if true\n  x = /[/]end/\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Excluded regions - Percent literals', () => {
@@ -852,6 +857,25 @@ HEREDOC
 def foo
 end`;
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat :/ as regex start', () => {
+      const pairs = parser.parse('ops = [:+, :-, :*, :/]\ndef calculate(op)\n  case op\n  when :+\n    1\n  end\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'def');
+      findBlock(pairs, 'case');
+    });
+
+    test('should not treat :` as backtick string start', () => {
+      const pairs = parser.parse('CMDS = {exec: :`}\ndef run\n  if valid?\n    execute\n  end\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'def');
+      findBlock(pairs, 'if');
+    });
+
+    test('should not treat :% in array as percent literal start', () => {
+      const pairs = parser.parse('ops = [:%]\ndef foo\n  1\nend');
       assertSingleBlock(pairs, 'def', 'end');
     });
   });
@@ -1422,6 +1446,16 @@ end`;
       const pairs = parser.parse('def foo\n  puts $? if true\nend');
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should not treat / after $? as regex start', () => {
+      const pairs = parser.parse('x = $? / 100\nif condition\n  action\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat / after $! as regex start', () => {
+      const pairs = parser.parse('x = $! / 2\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Rescue modifier', () => {
@@ -1670,6 +1704,41 @@ end`;
       assertBlockCount(pairs, 2);
       assertNestLevel(pairs, 'class', 0);
       assertNestLevel(pairs, 'def', 1);
+    });
+
+    test('should skip class after dot on previous line', () => {
+      const pairs = parser.parse('def foo\n  obj.\n  class\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should skip end after dot on previous line', () => {
+      const pairs = parser.parse('def foo\n  x = obj.\n  end\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should skip keyword after dot with CRLF line ending', () => {
+      const pairs = parser.parse('def foo\r\n  obj.\r\n  class\r\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should skip class after dot with comment in between', () => {
+      const pairs = parser.parse('def foo\n  obj. # comment\n  class\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should skip module after dot with comment in between', () => {
+      const pairs = parser.parse('def foo\n  obj. # get module\n  module\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should skip keyword after safe navigation with comment', () => {
+      const pairs = parser.parse('def foo\n  obj&. # safe nav\n  class\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should skip keyword after dot with multiple comment lines', () => {
+      const pairs = parser.parse('def foo\n  obj. # first\n  # second\n  class\nend');
+      assertSingleBlock(pairs, 'def', 'end');
     });
   });
 
@@ -3087,6 +3156,82 @@ end`;
     test('should detect postfix unless after regex across line continuation', () => {
       const source = 'def foo\n  x = /pattern/ \\\nunless condition\nend';
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: $`, $\', $" global variables', () => {
+    test('should not treat $` as backtick string start', () => {
+      const pairs = parser.parse('def foo\n  puts $`\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test("should not treat $' as single-quoted string start", () => {
+      const pairs = parser.parse("$'\ndef foo\nend");
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat $" as double-quoted string start', () => {
+      const pairs = parser.parse('x = $"\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: $; global variable semicolon', () => {
+    test('should not treat $; semicolon as statement separator for postfix if', () => {
+      const pairs = parser.parse('def foo\n  puts $; if true\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat $; semicolon as statement separator for postfix rescue', () => {
+      const pairs = parser.parse('begin\n  $; rescue nil\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should not treat $; semicolon as statement separator for loop do', () => {
+      const pairs = parser.parse('x = $; while true do\n  body\nend');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Bug: dot-space-keyword not filtered as method call', () => {
+    test('should not treat obj. end (dot space end) as block close', () => {
+      // Ruby allows whitespace between dot and method name: obj. end means obj.end()
+      // The incorrect end at line 1 should not close the def block
+      const pairs = parser.parse('def foo\n  obj. end\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat obj. if as block opener inside def', () => {
+      // obj. if(cond) is a method call, not a block if
+      // Without fix: produces 2 pairs (if/end:1, def/end:0) instead of 1 pair (def/end)
+      const pairs = parser.parse('def bar\n  obj. if true\n    body\n  end\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat obj.  end with multiple spaces as block close', () => {
+      const pairs = parser.parse('def foo\n  obj.  end\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat obj.\\tend with tab as block close', () => {
+      const pairs = parser.parse('def foo\n  obj.\tend\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should treat / after division operator as regex start', () => {
+      const pairs = parser.parse('def foo\n  n = 10 / /if end/\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should exclude regex after division with block keywords inside', () => {
+      const pairs = parser.parse('def foo\n  n = 10 / /begin/\nend');
       assertSingleBlock(pairs, 'def', 'end');
     });
   });

@@ -486,6 +486,11 @@ end;`;
       const recordPair = findBlock(pairs, 'record');
       assert.ok(recordPair, 'record should be paired');
     });
+
+    test('should not treat := class as block open', () => {
+      const pairs = parser.parse('begin\n  x := class\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
   });
 
   suite('Class modifier', () => {
@@ -534,6 +539,27 @@ end;`;
   suite('Variant record case', () => {
     test('should not treat case in variant record as block', () => {
       const pairs = parser.parse('TVariant = record\n  case Tag: Integer of\n    0: (IntVal: Integer);\n    1: (FloatVal: Double);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect variant case with class field type on separate line from colon', () => {
+      const pairs = parser.parse('TRec = record\n  field:\n    class;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect variant case with interface field type on separate line from colon', () => {
+      const pairs = parser.parse('TRec = record\n  intf:\n    interface;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should handle procedure of object with of on separate line', () => {
+      const pairs = parser.parse('type\n  TProc = procedure of\n    object;\ncase X of\n  1: DoOne;\nend');
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should handle variant record with multi-line labels', () => {
+      const source = 'TRec = record\n  case Integer of\n    1,\n    2: (Field: Byte);\nend';
+      const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'record', 'end');
     });
   });
@@ -1574,16 +1600,11 @@ end`;
     // Tagless variant regex changed from /^\s+identifier\s+of\b/ to /^[ \t]+identifier[ \t]+of\b/
     // so a newline between 'case' and 'Integer of' no longer suppresses the case block
 
-    test('should detect case as block when identifier-of is on the next line inside record', () => {
-      // With the old /^\s+/ regex, the newline would match \s and suppress case as tagless variant.
-      // With the fixed /^[ \t]+/ regex, the newline does NOT match, so case is a block opener.
-      const source = 'type\n  TRec = record\n    case\n      Integer of\n    0: (IntVal: Integer);\n  end;\nend';
+    test('should suppress variant case when identifier-of is on the next line inside record', () => {
+      // Variant case with identifier on the next line should still be recognized and suppressed
+      const source = 'type\n  TRec = record\n    case\n      Integer of\n    0: (IntVal: Integer);\n  end;';
       const pairs = parser.parse(source);
-      // case is now treated as a block opener (not suppressed as tagless variant)
-      // record-end and case-end are two separate blocks
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'record');
-      findBlock(pairs, 'case');
+      assertSingleBlock(pairs, 'record', 'end');
     });
 
     test('should still suppress tagless variant case with identifier and of on same line inside record', () => {
@@ -1862,6 +1883,244 @@ end.`;
       const source = 'x = record\n  case Integer of\n    // comment\n    0: (Field: Integer);\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Bug: isVariantCase fails on non-simple case labels', () => {
+    test('should correctly track depth when inner case has range labels', () => {
+      // isVariantCase scans for label after 'of': finds '0', stops at '.' in '0..3'
+      // '.' is not ':' or 'of', so returns false (not variant case)
+      // This incorrectly decrements depth in isInsideRecord backward scan:
+      //   end -> depth=1, case(range, wrongly non-variant) -> depth=0, begin -> returns false
+      // Correct: end -> depth=1, case(range, IS variant) -> depth=1, begin -> depth=0, record -> returns true
+      const source = 'TRec = record\n  begin\n    case Integer of\n      0..3: (Field: Byte);\n  end;\n  case Byte of\n    0: (B: Byte);\nend';
+      const pairs = parser.parse(source);
+      // Expected: outer 'case Byte of' suppressed as variant case -> 2 blocks (case...end, begin...end)
+      // But record is unmatched because only 2 ends exist (the test structure intentionally has 2 ends
+      // to expose the bug: with correct behavior, begin gets 1st end, outer case is suppressed,
+      // record gets 2nd end)
+      // Correct: begin...end (1st end), record...end (2nd end), inner case NOT a block (inside begin)
+      // Wait: inner case IS a block (isInsideRecord returns false for begin), but it consumes an end
+      // With correct isVariantCase: inner case...end (1st end), begin unmatched, outer case suppressed,
+      // ... this doesn't work either. Let me use 3 ends instead.
+      // With 3 ends: inner case...end (1st), begin...end (2nd), outer case suppressed, record...end (3rd)
+      assertBlockCount(pairs, 2);
+      // Bug: both blocks are case->end (outer case not suppressed, steals record's end)
+      // Expected: case->end and begin->end (outer case suppressed, record gets last end)
+      findBlock(pairs, 'begin');
+    });
+
+    test('should correctly track depth when inner case has negative labels', () => {
+      // isVariantCase scans after 'of': finds '-' which is not /[a-zA-Z0-9_]/
+      // Falls through without finding label -> returns false (should be true for variant)
+      const source = 'TRec = record\n  begin\n    case Integer of\n      -1: (Field: Byte);\n  end;\n  case Byte of\n    0: (B: Byte);\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+
+    test('should correctly track depth when inner case has comma-separated labels', () => {
+      // isVariantCase scans: finds '1', stops at ',', ',' is not ':' -> returns false
+      const source = 'TRec = record\n  begin\n    case Integer of\n      1, 2, 3: (Field: Byte);\n  end;\n  case Byte of\n    0: (B: Byte);\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+  });
+
+  suite('Regression: isVariantCase with multi-line of and complex labels', () => {
+    test('should detect variant case when of is on separate line', () => {
+      const source = 'TRec = record\n  begin\n    case Integer\n    of\n      0: (Field: Byte);\n  end;\n  case Byte of\n    0: (B: Byte);\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+
+    test('should detect variant case with character constant labels', () => {
+      const source = "TRec = record\n  begin\n    case Char of\n      'a': (Field: Byte);\n  end;\n  case Byte of\n    0: (B: Byte);\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+
+    test('should detect variant case with qualified name labels', () => {
+      const source = 'TRec = record\n  begin\n    case Color of\n      Types.Red: (Field: Byte);\n  end;\n  case Byte of\n    0: (B: Byte);\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+    });
+  });
+
+  suite('Bug: isInsideRecord treats non-type-definition keywords as block keywords', () => {
+    test('should not treat object field type as block keyword in backward scan', () => {
+      // isInsideRecord backward scan: finds 'object' at depth > 0 -> depth--
+      // But 'object' here is a field type (obj: object;), not a type definition
+      const source = 'TRec = record\n  obj: object;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      // Expected: 2 blocks (record...end, case...end)
+      // The case is standalone (after record's end), not a variant case
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should not treat class modifier as block keyword in backward scan', () => {
+      // 'class function' is a method modifier, not a type definition
+      const source = 'TRec = record\n  class function Create: TRec;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should not treat interface field type as block keyword in backward scan', () => {
+      // 'intf: interface;' is a field type reference, not a type definition
+      const source = 'TRec = record\n  intf: interface;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+  });
+
+  suite('Bug: multi-line comment bypasses newline check in class-of detection', () => {
+    test('should not treat class-of as reference type when newline is inside comment', () => {
+      // Forward scan from 'class': excluded region skips the comment (including newline)
+      // After comment, finds 'of' -> falsely treated as 'class of' reference type
+      // But the newline between class and of should prevent this detection
+      const source = 'type\n  TRef = class { comment\n  } of TBase;\nend';
+      const pairs = parser.parse(source);
+      // Expected: 1 block (class...end), 'class of' should NOT be detected as reference type
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat class-of as reference type with paren-star multi-line comment', () => {
+      const source = 'type\n  TRef = class (* comment\n  *) of TBase;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('Regression: sealed and abstract class modifiers', () => {
+    test('should recognize sealed class as block opener', () => {
+      const source = 'type\n  TFoo = sealed class\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should recognize abstract class as block opener', () => {
+      const source = 'type\n  TBar = abstract class\n    procedure DoSomething; virtual; abstract;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should recognize sealed class with parent as block opener', () => {
+      const source = 'type\n  TFoo = sealed class(TBase)\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should recognize abstract class with parent as block opener', () => {
+      const source = 'type\n  TBar = abstract class(TBase)\n    procedure DoSomething; virtual; abstract;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat sealed class forward declaration as block', () => {
+      const source = 'type\n  TFoo = sealed class;\nbegin\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: interface with GUID bracket syntax as forward declaration', () => {
+    test('should treat interface with GUID bracket followed by semicolon as forward declaration', () => {
+      const source = "begin\n  IMyIntf = interface['{00000000-0000-0000-C000-000000000046}']\n  ;\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat interface with simple bracket followed by semicolon as forward declaration', () => {
+      const pairs = parser.parse("IMyIntf = interface['guid'];\nbegin\nend");
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still treat interface without bracket as block opener', () => {
+      const source = 'IMyIntf = interface\n  procedure DoSomething;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+
+    test('should treat interface with bracket and parent body as block opener', () => {
+      const source = "IMyIntf = interface['{GUID}']\n  procedure DoSomething;\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+  });
+
+  suite('Regression: class operator as method modifier in isInsideRecord', () => {
+    test('should not treat class operator inside record as block opener', () => {
+      const source = 'TRec = record\n  class operator Implicit(const AValue: Integer): TRec;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should handle class operator with different operator names', () => {
+      const source = 'TRec = record\n  class operator Explicit(const AValue: String): TRec;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: isInsideRecord skips excluded regions after class modifier', () => {
+    test('should skip brace comment between class and method keyword', () => {
+      const source = 'TRec = record\n  class {comment} function Create: TRec;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should skip paren-star comment between class and method keyword', () => {
+      const source = 'TRec = record\n  class (* comment *) procedure Destroy;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'record');
+      findBlock(pairs, 'case');
+    });
+
+    test('should skip line comment between class and method keyword on next line', () => {
+      const source = 'TRec = record\n  class // comment\n  function Create: TRec;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: isInsideRecord with comment before class/interface/object', () => {
+    test('should suppress case in record when class field type has comment before colon', () => {
+      const source = 'TRec = record\n  field: { type } class;\n  case Integer of\n    0: (IntVal: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should exclude keywords inside double-quoted strings', () => {
+      const pairs = parser.parse('begin\n  x := "begin";\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not close begin with end inside double-quoted string', () => {
+      const pairs = parser.parse('begin\n  x := "end";\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should handle doubled double-quote escape in strings', () => {
+      const pairs = parser.parse('begin\n  x := "He said ""end"" here";\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 

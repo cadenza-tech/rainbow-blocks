@@ -1428,6 +1428,15 @@ endmodule`;
     });
   });
 
+  suite('Regression: isValidForkOpen line boundaries', () => {
+    test('should not let disable on previous line suppress fork', () => {
+      const pairs = parser.parse('module m;\n  disable\n  fork\n    #10 a = 1;\n  join\nendmodule');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'module');
+      findBlock(pairs, 'fork');
+    });
+  });
+
   suite('Bug 6: backtick-prefixed `default not rejected as block_middle', () => {
     test('should not treat `default as block_middle in case block', () => {
       const source = 'case (sel)\n  1: a = 1;\n  `default: a = 0;\nendcase';
@@ -1806,6 +1815,21 @@ endmodule`;
     });
   });
 
+  suite('Regression: skipDelayExpression with base specifiers', () => {
+    test('should pair always with end when delay uses sized base-specifier literal', () => {
+      const pairs = parser.parse("always #32'd0 begin\n  x = 1;\nend");
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should pair always with end when delay uses unsized base-specifier literal', () => {
+      const pairs = parser.parse("always #'hFF begin\n  x = 1;\nend");
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+    });
+  });
+
   suite('Regression: skipDelayExpression with backtick-prefixed macro', () => {
     test('should handle delay expression with backtick-prefixed macro identifier', () => {
       // Bug: skipDelayExpression did not handle backtick-prefixed macro identifiers
@@ -1953,6 +1977,249 @@ endmodule`;
     test('should still support line continuation without // comment', () => {
       const pairs = parser.parse('`define MACRO value \\\nmodule test;\nendmodule');
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Preprocessor directive argument filtering', () => {
+    test('should not tokenize keyword used as ifdef macro name', () => {
+      const pairs = parser.parse('module top;\n  `ifdef end\n    wire x;\n  `endif\nendmodule');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'module');
+      findBlock(pairs, '`ifdef');
+    });
+
+    test('should not tokenize keyword used as ifndef macro name', () => {
+      const pairs = parser.parse('module top;\n  `ifndef module\n    wire x;\n  `endif\nendmodule');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'module');
+      findBlock(pairs, '`ifndef');
+    });
+
+    test('should not tokenize keyword used as elsif macro name', () => {
+      const pairs = parser.parse('`ifdef FOO\n  wire a;\n`elsif begin\n  wire b;\n`endif');
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, '`ifdef');
+    });
+  });
+
+  suite('Additional Verilog/SystemVerilog keyword pairs', () => {
+    test('should detect covergroup/endgroup pair', () => {
+      const pairs = parser.parse('covergroup cg;\n  coverpoint a;\nendgroup');
+      assertSingleBlock(pairs, 'covergroup', 'endgroup');
+    });
+
+    test('should detect specify/endspecify pair', () => {
+      const pairs = parser.parse('specify\n  (A => Z) = 1;\nendspecify');
+      assertSingleBlock(pairs, 'specify', 'endspecify');
+    });
+
+    test('should detect primitive/endprimitive pair', () => {
+      const pairs = parser.parse('primitive mux(out, a, b, sel);\n  output out;\nendprimitive');
+      assertSingleBlock(pairs, 'primitive', 'endprimitive');
+    });
+
+    test('should detect table/endtable pair', () => {
+      const pairs = parser.parse('table\n  0 0 : 0;\nendtable');
+      assertSingleBlock(pairs, 'table', 'endtable');
+    });
+
+    test('should detect macromodule/endmodule pair', () => {
+      const pairs = parser.parse('macromodule test;\n  wire a;\nendmodule');
+      assertSingleBlock(pairs, 'macromodule', 'endmodule');
+    });
+
+    test('should detect config/endconfig pair', () => {
+      const pairs = parser.parse('config cfg;\n  design top;\nendconfig');
+      assertSingleBlock(pairs, 'config', 'endconfig');
+    });
+
+    test('should detect randcase/endcase pair', () => {
+      const pairs = parser.parse('randcase\n  50: x = 1;\nendcase');
+      assertSingleBlock(pairs, 'randcase', 'endcase');
+    });
+  });
+
+  suite('Bug: chain consumption does not skip preprocessor directives on stack', () => {
+    test('should pair always when `ifdef appears between always and if on stack', () => {
+      // Bug: after closing if (control keyword), the chain consumption loop at matchBlocks
+      // checks stack.top for CONTROL_KEYWORDS but encounters `ifdef, which blocks the chain
+      // from reaching the always keyword below it on the stack.
+      const source = 'always @(posedge clk)\n`ifdef A\nif (x) begin\n  y <= 1;\nend\n`endif';
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should be paired with end');
+    });
+
+    test('should pair initial when `ifdef appears between initial and if on stack', () => {
+      const source = 'initial\n`ifdef A\nif (x) begin\n  y <= 1;\nend\n`endif';
+      const pairs = parser.parse(source);
+      const initialPair = pairs.find((p) => p.openKeyword.value === 'initial');
+      assert.ok(initialPair, 'initial should be paired with end');
+    });
+
+    test('should pair always_ff when `ifdef appears between always_ff and if on stack', () => {
+      const source = 'always_ff @(posedge clk)\n`ifdef A\nif (rst) begin\n  y <= 0;\nend\n`endif';
+      const pairs = parser.parse(source);
+      const alwaysFFPair = pairs.find((p) => p.openKeyword.value === 'always_ff');
+      assert.ok(alwaysFFPair, 'always_ff should be paired with end');
+    });
+  });
+
+  suite('Bug: elseIndex check does not skip preprocessor directives on stack', () => {
+    test('should find else past `ifdef when closing if+begin', () => {
+      // Bug: after closing if (control keyword), elseIndex = controlIndex - 1 points
+      // to `ifdef instead of else. The else keyword below `ifdef is not found.
+      const source = 'if (a) begin\n  x = 1;\nend else\n`ifdef X\nif (b) begin\n  y = 2;\nend\n`endif';
+      const pairs = parser.parse(source);
+      const elsePair = pairs.find((p) => p.openKeyword.value === 'else');
+      assert.ok(elsePair, 'else should be paired with end');
+    });
+  });
+
+  suite('Bug: default with :: scope resolution falsely treated as case label', () => {
+    test('should not treat default:: as case label intermediate', () => {
+      // Bug: the default filter checks if ":" follows but does not distinguish
+      // single ":" (case label) from "::" (scope resolution operator).
+      const source = 'case (sel)\n  1: x = default::method();\n  default: y = 0;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      // Only the real "default:" at case level should be an intermediate,
+      // not the "default::" scope resolution in the expression
+      assertIntermediates(pairs[0], ['default']);
+    });
+  });
+
+  suite('Bug: final keyword missing from control keywords', () => {
+    test('should parse final begin...end as two block pairs', () => {
+      const source = 'final begin\n  $display("done");\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const finalPair = findBlock(pairs, 'final');
+      assert.strictEqual(finalPair.closeKeyword.value, 'end');
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword.value, 'end');
+    });
+
+    test('should parse final block nested in module', () => {
+      const source = 'module test;\n  final begin\n    $display("done");\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assertNestLevel(pairs, 'final', 1);
+      assertNestLevel(pairs, 'begin', 2);
+    });
+  });
+
+  suite('Bug: randcase does not support default as intermediate', () => {
+    test('should attach default as intermediate to randcase', () => {
+      const source = 'randcase\n  50: x = 1;\n  default: x = 0;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'randcase', 'endcase');
+      assertIntermediates(pairs[0], ['default']);
+    });
+
+    test('should not misattribute default to outer case when inside randcase', () => {
+      const source = 'case (sel)\n  1: begin\n    randcase\n      50: x = 1;\n      default: x = 0;\n    endcase\n  end\n  default: y = 0;\nendcase';
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(casePair, 'case block should exist');
+      assertIntermediates(casePair, ['default']);
+      const randcasePair = findBlock(pairs, 'randcase');
+      assertIntermediates(randcasePair, ['default']);
+    });
+  });
+
+  suite('Regression: assert property false positive', () => {
+    test('should not detect property in assert property as block open', () => {
+      const tokens = parser.getTokens('assert property (@(posedge clk) a |-> b);');
+      assert.strictEqual(tokens.length, 0);
+    });
+
+    test('should not detect property in assume/cover/expect property', () => {
+      const tokens = parser.getTokens('assume property (p1);\ncover property (p2);');
+      assert.strictEqual(tokens.length, 0);
+    });
+  });
+
+  suite('Regression: assertion verbs restrict and cover sequence', () => {
+    test('should not treat restrict property as block open', () => {
+      const pairs = parser.parse('restrict property (@(posedge clk) a |-> b);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat cover sequence as block open', () => {
+      const pairs = parser.parse('cover sequence (s1);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle assertion verb on separate line from property', () => {
+      const pairs = parser.parse('assert\nproperty (p1);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle assertion verb with comment before property', () => {
+      const pairs = parser.parse('assert /* check */ property (p1);');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: block labels should not open nested blocks', () => {
+    test('should not treat keyword after label colon as block open', () => {
+      const pairs = parser.parse('begin : module\n  x = 1;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat keyword after label colon in fork as block open', () => {
+      const pairs = parser.parse('fork : begin\n  x = 1;\njoin');
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+
+    test('should allow scope resolution :: (not label colon)', () => {
+      const pairs = parser.parse('module m;\n  pkg::begin x = 1;\nendmodule');
+      // begin after :: should still be detected (it's scope resolution, not a label)
+      // The module-endmodule pair should exist
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'module');
+    });
+  });
+
+  suite('Regression: virtual interface false block_open', () => {
+    test('should not pair virtual interface with endinterface meant for real interface', () => {
+      const pairs = parser.parse('module m;\n  virtual interface my_if vif;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: bare tick fill literals in delay', () => {
+    test('should pair always with end when delay uses bare tick 1 literal', () => {
+      const pairs = parser.parse("always #'1 begin\n  x = 1;\nend");
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should pair always with end when delay uses bare tick 0 literal', () => {
+      const pairs = parser.parse("always #'0 begin\n  x = 1;\nend");
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should skip end after scope resolution operator', () => {
+      const pairs = parser.parse('begin\n  x = pkg::end;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should skip begin after scope resolution operator', () => {
+      const pairs = parser.parse('module m;\n  always @(*) begin\n    x = pkg::begin;\n  end\nendmodule');
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should skip endmodule after scope resolution operator', () => {
+      const pairs = parser.parse('module m;\n  x = pkg::endmodule;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should skip endcase after scope resolution operator', () => {
+      const pairs = parser.parse('case (sel)\n  1: x = pkg::endcase;\n  default: y = 0;\nendcase');
+      assertSingleBlock(pairs, 'case', 'endcase');
     });
   });
 

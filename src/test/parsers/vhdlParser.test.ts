@@ -900,6 +900,50 @@ end process;`;
     });
   });
 
+  suite('Regression: exit when and next when in case blocks', () => {
+    test('should not treat when in exit when as case intermediate', () => {
+      const source = `case state is
+  when idle =>
+    null;
+  when active =>
+    exit when done;
+  when others =>
+    null;
+end case;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      const casePair = findBlock(pairs, 'case');
+      const whenCount = casePair.intermediates.filter((i) => i.value.toLowerCase() === 'when').length;
+      assert.strictEqual(whenCount, 3);
+    });
+
+    test('should not treat when in next when as case intermediate', () => {
+      const source = `case mode is
+  when running =>
+    next when flag;
+  when stopped =>
+    null;
+end case;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      const casePair = findBlock(pairs, 'case');
+      const whenCount = casePair.intermediates.filter((i) => i.value.toLowerCase() === 'when').length;
+      assert.strictEqual(whenCount, 2);
+    });
+
+    test('should still treat normal when as case intermediate', () => {
+      const source = `case sel is
+  when "00" => a <= '0';
+  when "01" => a <= '1';
+  when others => a <= 'X';
+end case;`;
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      const whenCount = casePair.intermediates.filter((i) => i.value.toLowerCase() === 'when').length;
+      assert.strictEqual(whenCount, 3);
+    });
+  });
+
   suite('CRLF handling for wait for', () => {
     test('should detect wait for with CRLF line endings', () => {
       const pairs = parser.parse('process\r\nbegin\r\n  wait for 10 ns;\r\nend process;');
@@ -2211,6 +2255,342 @@ end loop;`;
       const source = 'process\nbegin\n  x := func(if);\n  null;\nend process;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('BUG1: for in use-clause binding should not be detected as block opener', () => {
+      // In VHDL configurations, 'use entity work.impl for all;' contains 'for'
+      // that is part of the binding syntax, not a loop or generate prefix.
+      // The false 'for' steals 'end for' from the real for-block opener.
+      const source = `configuration cfg of test is
+  for all : counter
+    use entity work.impl for all;
+  end for;
+end configuration;`;
+      const pairs = parser.parse(source);
+      // Real for block (for all : counter) should be paired with end for
+      const forBlock = findBlock(pairs, 'for');
+      assert.ok(forBlock, 'real for block should exist');
+      assert.strictEqual(forBlock.openKeyword.startOffset, source.indexOf('for all : counter'));
+      assert.strictEqual(forBlock.closeKeyword.value.toLowerCase(), 'end for');
+    });
+
+    test('BUG1: for in use configuration binding should not be detected as block opener', () => {
+      const source = `configuration cfg of test is
+  for all : counter
+    use configuration work.counter_cfg for all;
+  end for;
+end configuration;`;
+      const pairs = parser.parse(source);
+      const forBlock = findBlock(pairs, 'for');
+      assert.ok(forBlock, 'real for block should exist');
+      assert.strictEqual(forBlock.openKeyword.startOffset, source.indexOf('for all : counter'));
+    });
+
+    test('should filter is in multi-line type declaration', () => {
+      const source = 'package my_pkg is\n  type state_t\n    is (idle, active);\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('BUG2: is in subtype declaration should not be false intermediate of package', () => {
+      // 'subtype byte is integer' contains 'is' that is not the package's own 'is'
+      const source = `package my_pkg is
+  subtype byte is integer range 0 to 255;
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have only 1 is intermediate, not 2');
+    });
+
+    test('BUG2: is in alias declaration should not be false intermediate of package', () => {
+      const source = `package my_pkg is
+  alias byte is integer range 0 to 255;
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have only 1 is intermediate from alias');
+    });
+
+    test('BUG2: is in type declaration should not be false intermediate of package', () => {
+      const source = `package my_pkg is
+  constant C : integer := 10;
+  subtype byte is integer range 0 to 255;
+  type state_t is (idle, active);
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have only 1 is intermediate, not 3');
+    });
+
+    test('BUG2: is in attribute specification should not be false intermediate of package', () => {
+      const source = `package my_pkg is
+  attribute keep of sig : signal is true;
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have only 1 is intermediate, not 2');
+    });
+
+    test('BUG2: is in file declaration should not be false intermediate of package', () => {
+      const source = `package my_pkg is
+  file f : text is "data.txt";
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have only 1 is intermediate, not 2');
+    });
+
+    test('BUG2: is in group template declaration should not be false intermediate of package', () => {
+      const source = `package my_pkg is
+  group my_group is (signal, signal);
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have only 1 is intermediate, not 2');
+    });
+
+    test('BUG3: then inside parenthesized expression should not be false intermediate', () => {
+      // Reserved words cannot be identifiers in VHDL, but the parser should
+      // still handle this gracefully to avoid false intermediates
+      const source = 'if cond then\n  x := func(a, then, b);\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const thenCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'then').length;
+      assert.strictEqual(thenCount, 1, 'if block should have only 1 then intermediate, not 2');
+    });
+  });
+
+  suite('Regression: multi-line use entity/configuration for binding', () => {
+    test('should reject for in multi-line use entity ... for binding', () => {
+      const source = 'configuration cfg of test is\n  for all : comp\n    use entity\n      work.impl for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.line, 1, 'for block should start at line 1 (for all : comp)');
+      assert.strictEqual(forBlock.closeKeyword.value.toLowerCase(), 'end for');
+    });
+
+    test('should reject for in multi-line use configuration ... for binding', () => {
+      const source = 'configuration cfg of test is\n  for all : comp\n    use configuration\n      work.cfg for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.line, 1, 'for block should start at line 1 (for all : comp)');
+      assert.strictEqual(forBlock.closeKeyword.value.toLowerCase(), 'end for');
+    });
+
+    test('should not treat for in use-entity binding clause with port map as block opener', () => {
+      const source =
+        'configuration cfg of test is\n  for all : comp\n    use entity work.impl\n      port map (a => b)\n      for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'configuration');
+    });
+  });
+
+  suite('Regression: is filtering with type declaration after semicolon mid-line', () => {
+    test('should filter is in type declaration after semicolon on same line', () => {
+      const source = 'package my_pkg is\n  signal x : integer; type state_t is (idle, active);\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should not filter is when type declaration is terminated by semicolon before block opener is', () => {
+      const source = 'type byte is integer range 0 to 255; entity test is\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
+  suite('Regression: multi-line type/subtype is filtering', () => {
+    test('should filter is in multi-line type declaration', () => {
+      const source = 'package my_pkg is\n  type state_t\n    is (idle, active);\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should filter is in multi-line subtype declaration', () => {
+      const source = 'package my_pkg is\n  subtype my_int\n    is integer range 0 to 255;\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should filter is in type declaration with block comment between type and is', () => {
+      const pairs = parser.parse('architecture rtl of test is\nbegin\n  type state_t\n  /* comment */\n  is (idle, active);\nend architecture;');
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+      // Intermediates should be ['is', 'begin'], not ['is', 'begin', 'is']
+      const pair = pairs[0];
+      assert.strictEqual(pair.intermediates.length, 2);
+    });
+  });
+
+  suite('Regression: component instantiation vs declaration', () => {
+    test('should not treat component instantiation with label as block opener', () => {
+      // Bug: 'inst: component ...' with simple 'end' causes component/end pairing,
+      // leaving architecture unpaired
+      const source =
+        'architecture rtl of test is\nbegin\n  inst: component my_comp port map (a => b);\n  proc: process\n  begin\n    null;\n  end;\nend;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'process');
+      findBlock(pairs, 'architecture');
+    });
+
+    test('should not emit component token for component instantiation', () => {
+      const source = 'inst: component my_comp;';
+      const tokens = parser.getTokens(source);
+      const compToken = tokens.find((t) => t.value.toLowerCase() === 'component');
+      assert.strictEqual(compToken, undefined, 'component after colon should not be a token');
+    });
+
+    test('should parse component declaration without label as block', () => {
+      const source = 'component counter is\n  port (clk : in std_logic);\nend component;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'component', 'end component');
+    });
+
+    test('should not emit component token for instantiation with port map', () => {
+      const source = 'u1: component adder\n  port map (a => x, b => y, sum => z);';
+      const tokens = parser.getTokens(source);
+      const compToken = tokens.find((t) => t.value.toLowerCase() === 'component');
+      assert.strictEqual(compToken, undefined, 'component after colon should not be a token');
+    });
+
+    test('should not emit component token for instantiation with generic map', () => {
+      const source = 'u1: component fifo\n  generic map (DEPTH => 16)\n  port map (clk => clk, data => data);';
+      const tokens = parser.getTokens(source);
+      const compToken = tokens.find((t) => t.value.toLowerCase() === 'component');
+      assert.strictEqual(compToken, undefined, 'component after colon should not be a token');
+    });
+
+    test('should not emit component token for instantiation with whitespace before colon', () => {
+      const source = 'inst : component my_comp port map (a => b);';
+      const tokens = parser.getTokens(source);
+      const compToken = tokens.find((t) => t.value.toLowerCase() === 'component');
+      assert.strictEqual(compToken, undefined, 'component after colon (with space) should not be a token');
+    });
+
+    test('should not emit COMPONENT token for instantiation (case insensitive)', () => {
+      const source = 'inst: COMPONENT my_comp port map (a => b);';
+      const tokens = parser.getTokens(source);
+      const compToken = tokens.find((t) => t.value.toLowerCase() === 'component');
+      assert.strictEqual(compToken, undefined, 'COMPONENT after colon should not be a token');
+    });
+  });
+
+  suite('Regression: for loop after terminated use entity', () => {
+    test('should allow for loop after terminated use entity on same line', () => {
+      const pairs = parser.parse('use entity work.impl; for i in 0 to 3 loop\n  null;\nend loop;');
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'for');
+    });
+
+    test('should allow for loop after terminated use entity on previous line', () => {
+      const pairs = parser.parse('use entity work.impl;\nfor i in 0 to 3 loop\n  null;\nend loop;');
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'for');
+    });
+
+    test('should allow for loop when use entity is inside string', () => {
+      const pairs = parser.parse('report "use entity";\nfor i in 0 to 3 loop\n  null;\nend loop;');
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'for');
+    });
+
+    test('should allow for loop when use entity is inside block comment', () => {
+      const pairs = parser.parse('/* use entity work.comp */ for i in 0 to 3 loop\n  null;\nend loop;');
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Regression: is filter multi-line scan', () => {
+    test('should filter is from type declaration split across three lines', () => {
+      const source = 'package pkg is\n  type\n    state_t\n    is (idle, active);\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1);
+    });
+  });
+
+  suite('Regression: isValidForOpen backward scan skips comment-only lines', () => {
+    test('should reject for in use entity binding with comment between', () => {
+      const source =
+        'configuration cfg of test is\n  for all : counter\n    use entity work.impl\n      -- binding comment\n      for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'for');
+      assert.ok(forBlock);
+      assert.strictEqual(forBlock.openKeyword.line, 1);
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should filter exit when with newline between exit and when', () => {
+      const source = 'case x is\n  when 0 =>\n    exit\n      when done;\n  when others =>\n    null;\nend case;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      assertIntermediates(pairs[0], ['is', 'when', 'when']);
+    });
+
+    test('should filter next when with newline between next and when', () => {
+      const source = 'case x is\n  when 0 =>\n    next\n      when ready;\n  when others =>\n    null;\nend case;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      assertIntermediates(pairs[0], ['is', 'when', 'when']);
+    });
+
+    test('should not filter when after exit in comment', () => {
+      const source = 'case x is\n-- exit\nwhen val => null;\nend case;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      assertIntermediates(pairs[0], ['is', 'when']);
+    });
+
+    test('should not filter when after next in comment', () => {
+      const source = 'case x is\n-- next\nwhen val => null;\nend case;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+      assertIntermediates(pairs[0], ['is', 'when']);
+    });
+
+    test('should have flat nest levels for elsif generate siblings', () => {
+      const source = 'gen1: if cond1 generate\n  null;\nelsif cond2 generate\n  null;\nend generate gen1;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const gen1 = pairs.find((p) => p.openKeyword.value === 'generate' && p.intermediates.length > 0);
+      const gen2 = pairs.find((p) => p.openKeyword.value === 'generate' && p.intermediates.length === 0);
+      assert.ok(gen1 && gen2);
+      assert.strictEqual(gen1.nestLevel, 1);
+      assert.strictEqual(gen2.nestLevel, 1);
+      assertNestLevel(pairs, 'if', 0);
+    });
+
+    test('should have flat nest levels for if-elsif-else generate', () => {
+      const source = 'g: if c1 generate\n  null;\nelsif c2 generate\n  null;\nelse generate\n  null;\nend generate g;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 4);
+      const generates = pairs.filter((p) => p.openKeyword.value === 'generate');
+      assert.strictEqual(generates.length, 3);
+      for (const gen of generates) {
+        assert.strictEqual(gen.nestLevel, 1);
+      }
+      assertNestLevel(pairs, 'if', 0);
     });
   });
 

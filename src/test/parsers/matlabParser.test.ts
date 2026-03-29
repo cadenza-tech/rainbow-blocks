@@ -485,6 +485,11 @@ end`;
       const pairs = parser.parse("A.'\nif true\nend");
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not treat numeric decimal point with continuation as struct access', () => {
+      const pairs = parser.parse('x = 1. ...\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('end as array index', () => {
@@ -639,6 +644,62 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not filter end after scientific notation dot', () => {
+      const pairs = parser.parse('if true\n  x = 1e5.end\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: isPrecededByDot with digit-ending variable names', () => {
+    test('should not treat data1.end as block close', () => {
+      const source = `function process(data1)
+  n = data1.end;
+  for i = 1:n
+    disp(i);
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcPair = findBlock(pairs, 'function');
+      assert.strictEqual(funcPair.closeKeyword.line, 5, 'function should pair with standalone end on line 5');
+      findBlock(pairs, 'for');
+    });
+
+    test('should not treat x2.end as block close', () => {
+      const source = `function f
+  x = x2.end;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with standalone end on line 2');
+    });
+
+    test('should not treat _0.end as block close', () => {
+      const source = `function f
+  x = _0.end;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with standalone end on line 2');
+    });
+
+    test('should still treat numeric decimal 10.end correctly', () => {
+      const source = `function f
+  x = 10.end;
+end`;
+      const pairs = parser.parse(source);
+      // 10.end: 10. is numeric decimal, end is block close matching function
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat digit-ending variable with dot keyword as block open', () => {
+      const source = `function f
+  x = x2.for;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   suite('Bug 1: isPrecededByDot with line continuation', () => {
@@ -677,6 +738,21 @@ end`;
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: block opener keywords used as variable names', () => {
+    test('should not treat for = as block open', () => {
+      const source = 'for = 10;\nif true\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat end = as block close when another end follows', () => {
+      const source = 'if true\n  end = 5;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'close keyword should be the last end');
     });
   });
 
@@ -1332,6 +1408,58 @@ end`;
       assert.strictEqual(regions[0].end, 3);
       assert.strictEqual(regions[1].start, 3);
       assert.strictEqual(regions[1].end, 4);
+    });
+  });
+
+  suite('Bug: classdef section keyword followed by string literal', () => {
+    test('should not treat properties followed by single-quoted string as block open', () => {
+      const source = "function f\nproperties 'test'\n  x = 1;\nend\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat properties followed by double-quoted string as block open', () => {
+      const source = 'function f\nproperties "test"\n  x = 1;\nend\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat methods followed by empty single-quoted string as block open', () => {
+      const source = "function f\nmethods ''\n  x = 1;\nend\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat events followed by single-quoted string as block open in classdef', () => {
+      const source = "classdef Foo\nevents 'trigger'\nend\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+
+    test('should not treat enumeration followed by double-quoted string as block open', () => {
+      const source = 'classdef Foo\nenumeration "Red"\nend\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+
+    test('should not treat arguments followed by single-quoted string as block open', () => {
+      const source = "function f(x)\narguments 'test'\n  x double\nend\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still accept properties followed by comment as block open', () => {
+      const source = 'classdef MyClass\n  properties % comment\n    Value\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'properties');
+    });
+
+    test('should still accept methods followed by line continuation as block open', () => {
+      const source = 'classdef MyClass\n  methods ...\n    (Access = public)\n    function f()\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'methods');
     });
   });
 

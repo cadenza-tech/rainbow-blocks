@@ -344,6 +344,11 @@ end tell`;
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
 
+    test('should handle doubled-quote escaping in strings', () => {
+      const pairs = parser.parse('tell application "Finder"\n  display dialog ""end tell""\nend tell');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
     test('should handle comment at end of line', () => {
       const source = `tell application "Finder"
   activate -- this is not end tell
@@ -1914,6 +1919,35 @@ end try`;
     });
   });
 
+  suite('Regression: compound open keywords after return/log/get/in', () => {
+    test('should not treat with timeout after return as block open', () => {
+      const source = 'on run\n  return with timeout\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat using terms from after log as block open', () => {
+      const source = 'using terms from application "Mail"\n  log using terms from\nend using terms from';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'opener should be on line 0, not line 1');
+    });
+
+    test('should not treat with transaction after get as block open', () => {
+      const source = 'on run\n  get with transaction\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat using terms from after in as block open', () => {
+      const source = 'repeat with i in using terms from\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'using terms from'), 'using terms from should not be tokenized');
+    });
+  });
+
   suite('Bug: X of pattern should span line continuations', () => {
     test('should not treat repeat as block opener when followed by of on continuation line', () => {
       // 'repeat ¬\nof myList' is the same logical line as 'repeat of myList'
@@ -2041,6 +2075,268 @@ end try`;
     test('should not treat ignoring as block opener in if condition', () => {
       const pairs = parser.parse('if ignoring then\n  beep\nend if\nend ignoring');
       assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Bug: keyword + continuation + of at line start not suppressed', () => {
+    test('should suppress repeat when followed by of on continuation line at line start', () => {
+      // 'repeat ¬\nof myList' is logically 'repeat of myList' (property access)
+      // but the continuation-of check requires lineBefore.length > 0,
+      // which fails at line start
+      const tokens = parser.getTokens('repeat \u00AC\nof myList');
+      assert.ok(!tokens.some((t) => t.value === 'repeat'), 'repeat should not be tokenized when followed by of on continuation line at line start');
+    });
+
+    test('should not create false block when repeat + continuation + of appears before real repeat block', () => {
+      const pairs = parser.parse('repeat \u00AC\nof myList\nend repeat\nrepeat 3 times\n  beep\nend repeat');
+      // The first 'repeat' is a property access (repeat of myList), NOT a block opener
+      // Only the second 'repeat 3 times' should pair with 'end repeat'
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assert.strictEqual(pairs[0].openKeyword.line, 3, 'opener should be on line 3 (repeat 3 times)');
+    });
+
+    test('should suppress tell when followed by of on continuation line at line start', () => {
+      const tokens = parser.getTokens('tell \u00AC\nof myApp');
+      assert.ok(!tokens.some((t) => t.value === 'tell'), 'tell should not be tokenized when followed by of on continuation line at line start');
+    });
+
+    test('should suppress end when followed by of on continuation line at line start', () => {
+      const source = 'tell application "Finder"\nend \u00AC\nof myList\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'end tell should be on line 3');
+    });
+
+    test('should suppress try when followed by of on continuation line at line start', () => {
+      const tokens = parser.getTokens('try \u00AC\nof myList');
+      assert.ok(!tokens.some((t) => t.value === 'try'), 'try should not be tokenized when followed by of on continuation line at line start');
+    });
+
+    test('should still suppress keyword of on same physical line at line start', () => {
+      // Sanity check: same-line case should still work
+      const tokens = parser.getTokens('repeat of myList');
+      assert.ok(!tokens.some((t) => t.value === 'repeat'), 'repeat should not be tokenized for same-line of');
+    });
+
+    test('should still suppress keyword of on continuation line with preceding context', () => {
+      // Sanity check: with-context case should still work
+      const tokens = parser.getTokens('set x to repeat \u00AC\nof myList');
+      assert.ok(!tokens.some((t) => t.value === 'repeat'), 'repeat should not be tokenized with preceding context');
+    });
+  });
+
+  suite('Bug: bare end in expression context falsely closes block', () => {
+    test('should not treat end after return as block closer', () => {
+      // 'return end' returns the value of 'end' (last element reference)
+      // The 'end' should NOT close the enclosing handler
+      const pairs = parser.parse('on run\n  return end\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'end should close on line 2 (real end), not line 1 (return end)');
+    });
+
+    test('should not treat end after log as block closer', () => {
+      const pairs = parser.parse('on run\n  log end\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'end should close on line 2');
+    });
+
+    test('should not treat end in if-condition as block closer', () => {
+      // 'if end then' uses 'end' as a condition value
+      const source = 'tell application "Finder"\n  if end then\n    beep\n  end if\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'tell');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value, 'end if', 'if block should be closed by end if');
+    });
+
+    test('should still treat end at line start as block closer', () => {
+      // 'end' at line start alone IS a block closer
+      const pairs = parser.parse('on run\n  beep\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should still treat end of as property access (already handled)', () => {
+      // Sanity: 'end of myList' is handled by existing 'X of Y' pattern
+      const pairs = parser.parse('on run\n  log end of myList\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
+  suite('Regression: exit repeat and expression-context keywords', () => {
+    test('should not treat repeat in exit repeat as block opener', () => {
+      const pairs = parser.parse('repeat\n  exit repeat\nend repeat');
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'should pair with repeat on line 0');
+    });
+
+    test('should not treat repeat after log as block opener', () => {
+      const pairs = parser.parse('repeat\n  log repeat\nend repeat');
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'should pair with repeat on line 0');
+    });
+
+    test('should not treat tell after return as block opener', () => {
+      const pairs = parser.parse('on run\n  return tell\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat tell after get as block opener', () => {
+      const pairs = parser.parse('on run\n  get tell\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat if after return as block opener', () => {
+      const pairs = parser.parse('on run\n  return if\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
+  suite('Regression: keywords inside complex if conditions', () => {
+    test('should not treat end after not as block closer in if condition', () => {
+      const source = 'tell application "X"\n  if not end then\n    beep\n  end if\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value, 'end if');
+      findBlock(pairs, 'tell');
+    });
+
+    test('should not treat end after and as block closer in if condition', () => {
+      const source = 'tell application "X"\n  if true and end then\n    beep\n  end if\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value, 'end if');
+      findBlock(pairs, 'tell');
+    });
+
+    test('should not treat end inside parentheses as block closer in if condition', () => {
+      const source = 'tell application "X"\n  if (end > 0) then\n    beep\n  end if\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value, 'end if');
+      findBlock(pairs, 'tell');
+    });
+
+    test('should not treat tell after not as block opener in if condition', () => {
+      const source = 'if not tell then\n  beep\nend if';
+      const tokens = parser.getTokens(source);
+      const tellTokens = tokens.filter((t) => t.value === 'tell');
+      assert.strictEqual(tellTokens.length, 0, 'tell should not appear as a token inside if condition');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat repeat after not as block opener in if condition', () => {
+      const source = 'if not repeat then\n  beep\nend if';
+      const tokens = parser.getTokens(source);
+      const repeatTokens = tokens.filter((t) => t.value === 'repeat');
+      assert.strictEqual(repeatTokens.length, 0, 'repeat should not appear as a token inside if condition');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat tell after and as block opener in if condition', () => {
+      const source = 'if true and tell then\n  beep\nend if';
+      const tokens = parser.getTokens(source);
+      const tellTokens = tokens.filter((t) => t.value === 'tell');
+      assert.strictEqual(tellTokens.length, 0, 'tell should not appear as a token inside if condition');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Regression: block keywords after in in repeat with X in', () => {
+    test('should not treat tell after in as block opener', () => {
+      const source = 'repeat with i in tell\n  log i\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat repeat after in as block opener', () => {
+      const source = 'repeat with i in repeat\n  log i\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Regression: end after prepositions in expression context', () => {
+    test('should not treat end after to as block closer', () => {
+      const source = 'repeat with i from 1 to end\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat end after thru as block closer', () => {
+      const source = 'repeat with i from 1 to 5\n  set x to items 1 thru end of myList\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat end after through as block closer', () => {
+      const source = 'repeat with i from 1 to 5\n  set x to items 1 through end of myList\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat end after from as block closer', () => {
+      const source = 'repeat with i from 1 to 5\n  set x to items from end of myList\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Regression: repeat while/until suppresses keywords in condition', () => {
+    test('should not treat end in repeat while condition as block closer', () => {
+      const source = 'repeat while end\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat end in repeat until condition as block closer', () => {
+      const source = 'repeat until end\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Regression: multi-line block comment disrupting line boundary scanning', () => {
+    test('should treat if as single-line when multi-line block comment precedes then', () => {
+      const source = 'if x (* comment\nspanning *) then doSomething()\ntell application "Finder"\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should suppress condition keyword inside multi-line block comment context', () => {
+      const source = 'if (* multi\nline *) true then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should not detect with timeout inside tell...to one-liner as block opener', () => {
+      const source = 'with timeout of 60 seconds\n  tell application "X" to open with timeout of 30 seconds\nend timeout';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with timeout', 'end timeout');
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+    });
+
+    test('should not detect considering inside tell...to one-liner as block opener', () => {
+      const source = 'considering case\n  tell application "X" to do something considering the rules\nend considering';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'considering', 'end considering');
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+    });
+
+    test('should not detect ignoring inside expression as block opener', () => {
+      const source = 'ignoring case\n  tell application "X" to do something ignoring case\nend ignoring';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'ignoring', 'end ignoring');
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
     });
   });
 
