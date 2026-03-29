@@ -5,6 +5,100 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.22] - 2026-03-29
+
+### Fixed
+
+- Base: Fix nest level calculation to skip sibling blocks sharing the same close offset
+- Ada: Fix type/subtype detection when multiple type declarations appear mid-line
+- Ada: Fix paren depth tracking to skip excluded regions in backward scan
+- Ada: Fix discriminant list handling to detect balanced parens that don't bridge type declarations
+- Ada: Fix standalone `loop` validation after `for` representation clause separated by semicolon
+- AppleScript: Fix string literal parsing to handle doubled-quote escaping
+- AppleScript: Add `tell...to` one-liner detection to reject block keywords in expression context
+- AppleScript: Fix logical line boundary detection to skip excluded regions
+- AppleScript: Fix `of <keyword>` property access detection across continuation lines
+- AppleScript: Expand postfix conditional detection for `repeat while/until` conditions
+- AppleScript: Fix `isInsideIfCondition` to accept keyword length for accurate boundary detection
+- AppleScript: Fix keyword-as-variable detection with continuation character and excluded region handling
+- Bash: Add `[[ ]]` double-bracket depth tracking to prevent `#` misdetection as comment
+- Bash: Add environment variable assignment detection (`VAR=value` before keywords)
+- Bash: Add extglob pattern detection to reject keywords inside `?(...)`, `*(...)`, `+(...)`, `@(...)`, `!(...)`
+- Bash: Add hyphenated command name detection to reject keywords like `done-handler`
+- Bash: Fix case pattern detection to reject block close keywords (`esac`, `fi`, `done`)
+- Bash: Fix comment detection to handle additional metacharacters before `#`
+- Bash: Fix double-bracket `[[` command position validation
+- Bash: Fix pipe detection for block separator validation
+- COBOL: Remove spurious `times` keyword from PERFORM validation
+- COBOL: Add sub-language keyword verification after EXEC/EXECUTE
+- COBOL: Fix pseudo-text delimiter `==...==` handling with fallback for unclosed delimiters
+- COBOL: Improve REPLACING/REPLACE/ALSO/BY keyword detection with context-aware backward scan
+- Crystal: Fix template delimiter parsing to reject `{%` control tag
+- Crystal: Fix brace depth tracking in templates for `}}}` edge case
+- Crystal: Fix character literal detection to skip when followed by quote (ternary before string)
+- Crystal: Expand character escape sequence handling for `\uXXXX`, `\xNN`, `\oNNN`
+- Crystal: Improve postfix conditional detection with expanded preceding block keywords
+- Elixir: Add range operator `..` detection to reject definition keywords after `..`
+- Elixir: Add capture operator detection (`&end`, `&fn` as function references, not keywords)
+- Elixir: Add keyword-as-value detection for bare values in `do:` one-liners
+- Elixir: Fix `end` boundary detection to include `:` in non-word character check
+- Elixir: Fix block keyword tracking in nested `do:` one-liner contexts
+- Elixir: Improve Unicode identifier detection for surrogate pairs
+- Erlang: Add module attribute argument detection to filter keywords inside `-define(...)`, `-module(...)`, etc.
+- Erlang: Add `catch` expression prefix detection to distinguish from try-catch separator
+- Erlang: Fix triple-quoted string/atom matching for prefixed forms
+- Erlang: Fix whitespace pattern in function reference matching
+- Erlang: Add extended backward scan for `::` in type contexts
+- Erlang: Improve record detection inside `-record(...)` brace bodies
+- Fortran: Add constructor call detection for `type(name)(args)` pattern to reject as block opener
+- Fortran: Fix `then` validation to ensure end-of-line position (not a variable name)
+- Fortran: Fix continuation line handling across `&` boundaries
+- Fortran: Add operator/assignment/statement keyword precedence detection for `end`
+- Fortran: Fix column 1 comment detection for modern Fortran identifiers
+- Fortran: Add string concatenation `//` detection to reject `end` in concatenation context
+- Fortran: Filter block_middle keywords inside parenthesized expressions
+- Julia: Add curly brace type parameter detection to reject keywords in `Dict{begin, end}`
+- Julia: Fix block expression detection in array construction (`[if true 1 else 2 end]`)
+- Julia: Improve comprehension filter detection with `for...if` pattern checking
+- Julia: Enhance generator expression handling with named tuple context
+- Julia: Fix string macro suffix to stop before block keywords
+- Julia: Add assignment detection in parenthesized contexts for named tuples
+- Lua: Fix concatenation operator `..` detection to distinguish from field access `.`
+- MATLAB: Add variable assignment detection (`end = 5`) to reject keywords used as variables
+- MATLAB: Fix section keyword validation for string literals and line continuations
+- MATLAB: Fix decimal point detection to distinguish from struct field access
+- MATLAB: Add Octave backslash line continuation support in dot-precedence checking
+- Octave: Add line continuation handling for `...` and `\` forms
+- Octave: Improve middle keyword filtering for parenthesized/bracketed contexts
+- Octave: Enhance assignment detection across continuation lines
+- Pascal: Add type modifier keywords (`abstract`, `sealed`, `packed`) detection for type alias checking
+- Pascal: Fix forward declaration detection for Delphi GUID bracket syntax `interface['{GUID}']`
+- Pascal: Add `class`/`object`/`interface` as field type reference detection (preceded by `:`)
+- Pascal: Add method modifier detection for `class` keyword
+- Pascal: Enhance variant case detection with char constants, ranges, and complex labels
+- Pascal: Add double-quoted string support (FreePascal)
+- Pascal: Improve `class of` pattern detection with newline awareness
+- Ruby: Fix division operator detection for special global variables (`$?`, `$!`, `$~`, etc.)
+- Ruby: Fix regex termination with character class tracking to prevent `[/]` false positives
+- Ruby: Add method scope resolution detection (`class::Method`) to reject keywords after `::`
+- Ruby: Fix postfix rescue/conditional to skip `$;` global variable semicolons
+- Ruby: Enhance dot precedence checking with whitespace skipping and excluded region handling
+- Ruby: Add operator symbol detection (`:+`, `:*`, `:-@`, etc.) for symbol literal parsing
+- Ruby: Fix special global variables (`` $` ``, `$'`, `$"`) in string context
+- Verilog: Expand `endmodule` to match `macromodule` openers
+- Verilog: Expand `endcase` to match `randcase` openers
+- Verilog: Add new block types: `covergroup/endgroup`, `specify/endspecify`, `primitive/endprimitive`, `table/endtable`, `config/endconfig`
+- Verilog: Add `final` control keyword alongside `always` variants
+- Verilog: Add macro name argument filtering for `` `ifdef ``/`` `ifndef ``/`` `elsif `` directives
+- Verilog: Fix label detection to distinguish from scope resolution operator (`::`)
+- VHDL: Fix `exit when`/`next when` in case blocks not treated as intermediates
+- VHDL: Fix `for` in use-entity/configuration binding not rejected
+- VHDL: Fix `is` in type/subtype/alias/attribute/file/group declarations not filtered
+- VHDL: Fix `then` inside parenthesized expressions not rejected
+- VHDL: Fix component instantiation vs declaration detection
+- VHDL: Fix `isValidForOpen` backward scan to skip comment-only lines
+- VHDL: Fix `elsif` generate treated as nested rather than sibling
+
 ## [1.1.21] - 2026-03-22
 
 ### Fixed
@@ -970,6 +1064,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.22]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.21...v1.1.22
 [1.1.21]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.20...v1.1.21
 [1.1.20]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.19...v1.1.20
 [1.1.19]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.18...v1.1.19
