@@ -2,12 +2,13 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType, findLastOpenerForLoop, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
+import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
 import type { VhdlValidationCallbacks } from './vhdlValidation';
 import {
   isInSignalAssignment,
   isInsideParens,
+  isValidComponentOpen,
   isValidEntityOrConfigOpen,
   isValidForOpen,
   isValidFuncProcOpen,
@@ -118,6 +119,11 @@ export class VhdlBlockParser extends BaseBlockParser {
     // Reject 'while' preceded by 'wait' (wait while is not a block construct)
     if (lowerKeyword === 'while') {
       return isValidWhileOpen(source, position, excludedRegions, cb);
+    }
+
+    // Reject 'component' preceded by ':' (label: component instantiation, not declaration)
+    if (lowerKeyword === 'component') {
+      return isValidComponentOpen(source, position, excludedRegions, cb);
     }
 
     return true;
@@ -239,6 +245,89 @@ export class VhdlBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip 'is' in type/subtype/alias declarations (not block-level 'is')
+      // Uses statement-based detection: finds the last unquoted semicolon on the line
+      // and checks if the text after it starts with a declaration keyword
+      if (type === 'block_middle' && keyword.toLowerCase() === 'is') {
+        const lineStart = findLineStart(source, startOffset);
+        const lineSlice = source.slice(lineStart, startOffset);
+        // Find last unquoted semicolon on the line to get the current statement start
+        let stmtStart = 0;
+        for (let si = 0; si < lineSlice.length; si++) {
+          if (this.isInExcludedRegion(lineStart + si, excludedRegions)) continue;
+          if (lineSlice[si] === ';') {
+            stmtStart = si + 1;
+          }
+        }
+        const stmtBefore = lineSlice.slice(stmtStart).toLowerCase().trimStart();
+        if (/^(type|subtype|alias|attribute|file|group)\b/.test(stmtBefore)) {
+          continue;
+        }
+        // Check previous lines for type/subtype declaration (multi-line case)
+        // e.g., "type state_t\n  is (idle, active);"
+        if (stmtBefore.length === 0 || /^\(/.test(stmtBefore)) {
+          let skipThisIs = false;
+          let scanPos = lineStart - 1;
+          if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+          if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+          let linesChecked = 0;
+          while (scanPos >= 0 && linesChecked < 2) {
+            const prevLineStart = findLineStart(source, scanPos);
+            const prevLine = source
+              .slice(prevLineStart, scanPos + 1)
+              .toLowerCase()
+              .trimStart();
+            if (prevLine.length > 0) {
+              // Skip comment-only lines (single-line -- or block comment /* ... */)
+              const isCommentOnlyLine =
+                /^--/.test(prevLine) ||
+                (() => {
+                  // Check if all non-whitespace characters on this line are inside excluded regions
+                  for (let ci = prevLineStart; ci <= scanPos; ci++) {
+                    if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\r' || source[ci] === '\n') continue;
+                    if (!this.isInExcludedRegion(ci, excludedRegions)) return false;
+                  }
+                  return true;
+                })();
+              if (isCommentOnlyLine) {
+                scanPos = prevLineStart - 1;
+                if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+                if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                continue;
+              }
+              if (/^(type|subtype|alias|attribute|file|group)\b/.test(prevLine)) {
+                // Check no semicolon between declaration and this 'is'
+                let hasSemicolon = false;
+                for (let si = prevLineStart; si < startOffset; si++) {
+                  if (this.isInExcludedRegion(si, excludedRegions)) continue;
+                  if (source[si] === ';') {
+                    hasSemicolon = true;
+                    break;
+                  }
+                }
+                if (!hasSemicolon) {
+                  skipThisIs = true;
+                }
+                break;
+              }
+              // Content line that doesn't match declaration → continue scanning upward
+              scanPos = prevLineStart - 1;
+              if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+              if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+              linesChecked++;
+              continue;
+            }
+            scanPos = prevLineStart - 1;
+            if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+            if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+            linesChecked++;
+          }
+          if (skipThisIs) {
+            continue;
+          }
+        }
+      }
+
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
       tokens.push({
@@ -253,11 +342,38 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     const { tokens: result } = mergeCompoundEndTokens(tokens, compoundEndPositions);
 
-    // Filter out when/else in conditional signal assignments (sig <= val when cond else val)
+    // Filter out block_middle tokens inside parenthesized expressions and
+    // when/else in conditional signal assignments (sig <= val when cond else val)
     const cb = this.validationCallbacks;
     return result.filter((token) => {
       if (token.type !== 'block_middle') return true;
+      // Reject block_middle keywords inside parenthesized expressions (port maps, generic maps, function calls)
+      if (isInsideParens(source, token.startOffset, excludedRegions, cb)) {
+        return false;
+      }
       const kw = token.value.toLowerCase();
+      // Filter 'when' in 'exit when' and 'next when' statements (may span lines)
+      if (kw === 'when') {
+        let p = token.startOffset - 1;
+        while (p >= 0) {
+          const region = this.findExcludedRegionAt(p, excludedRegions);
+          if (region) {
+            p = region.start - 1;
+            continue;
+          }
+          if (source[p] === ' ' || source[p] === '\t' || source[p] === '\n' || source[p] === '\r') {
+            p--;
+            continue;
+          }
+          break;
+        }
+        if (p >= 3) {
+          const prevWord = source.slice(p - 3, p + 1).toLowerCase();
+          if ((prevWord === 'exit' || prevWord === 'next') && (p - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[p - 4]))) {
+            return false;
+          }
+        }
+      }
       if (kw !== 'when' && kw !== 'else') return true;
       return !isInSignalAssignment(source, token.startOffset, excludedRegions, kw, cb);
     });

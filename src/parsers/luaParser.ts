@@ -34,7 +34,10 @@ export class LuaBlockParser extends BaseBlockParser {
   // But not '::' which is goto label syntax (::label::keyword)
   private isPrecededByDotOrColon(source: string, position: number): boolean {
     if (position <= 0) return false;
-    if (source[position - 1] === '.') return true;
+    if (source[position - 1] === '.') {
+      // .. is string concatenation operator, not field access
+      return !(position >= 2 && source[position - 2] === '.');
+    }
     if (source[position - 1] === ':') {
       // :: is goto label closing, not method call
       return !(position >= 2 && source[position - 2] === ':');

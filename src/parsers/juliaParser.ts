@@ -74,6 +74,11 @@ export class JuliaBlockParser extends BaseBlockParser {
       return /^[ \t]+type\b/.test(afterKeyword);
     }
 
+    // Keywords inside curly brace type parameters are not blocks (e.g., Dict{begin, end})
+    if (this.isInsideCurlyBraces(source, position, excludedRegions)) {
+      return false;
+    }
+
     // for inside brackets or parentheses are array comprehensions/generators
     if (keyword === 'for') {
       if (this.isInsideBrackets(source, position, excludedRegions) || this.isInsideParentheses(source, position, excludedRegions)) {
@@ -81,9 +86,11 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
     }
 
-    // if inside brackets are comprehension filters; inside parentheses only if generator filter (for...if)
+    // if inside brackets is a comprehension filter only when preceded by 'for'
+    // [x for x in 1:10 if x > 5] -> comprehension filter (reject)
+    // [if true 1 else 2 end] -> block expression in array construction (accept)
     if (keyword === 'if') {
-      if (this.isInsideBrackets(source, position, excludedRegions)) {
+      if (this.isComprehensionFilterInBrackets(source, position, excludedRegions)) {
         return false;
       }
       if (this.isGeneratorFilterIf(source, position, excludedRegions)) {
@@ -104,12 +111,16 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Validates block close: 'end' inside indexing brackets is array indexing, not block close
   // 'end' inside array construction brackets IS a valid block close (e.g., [begin...end])
+  // 'end' inside curly brace type parameters is not a block close (e.g., Dict{begin, end})
   protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.isInsideCurlyBraces(source, position, excludedRegions)) {
+      return false;
+    }
     return !this.isInsideIndexingBrackets(source, position, excludedRegions);
   }
 
   // Checks if position is inside any brackets (for for/if comprehension check)
-  // Returns true only when the keyword is directly inside [] without intervening ()
+  // Returns true only when the keyword is directly inside [] without intervening () or block expressions
   private isInsideBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
@@ -121,7 +132,14 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (char === ']') {
         bracketDepth++;
       } else if (char === '[') {
-        if (bracketDepth === 0) return true;
+        if (bracketDepth === 0) {
+          // Check if there's a block opener between [ and position
+          // [begin for i in 1:n ... end end] → for is inside a block expression
+          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+            return false;
+          }
+          return true;
+        }
         bracketDepth--;
       } else if (char === ')') {
         parenDepth++;
@@ -214,9 +232,9 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if there's a block-opening keyword between two positions (not in excluded regions)
   // Used to distinguish a[f(end)] (lastindex) from [f(begin...end)] (block close)
   private hasBlockOpenerBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Exclude 'for' and 'if' since they are themselves subject to parenthesis rejection
-    // Only count block openers like 'begin', 'function', 'struct', etc.
-    const blockOpeners = this.keywords.blockOpen.filter((kw) => kw !== 'for' && kw !== 'if');
+    // Exclude 'for' since it is itself subject to parenthesis rejection (generator expressions)
+    // Only count block openers like 'begin', 'function', 'struct', 'if', etc.
+    const blockOpeners = this.keywords.blockOpen.filter((kw) => kw !== 'for');
     for (let i = start; i < end; i++) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
@@ -248,6 +266,31 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
           return true;
         }
+      }
+    }
+    return false;
+  }
+
+  // Checks if 'if' is a comprehension filter inside brackets (for...if pattern)
+  // Returns true only when there's a 'for' keyword between the unmatched '[' and position
+  private isComprehensionFilterInBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let bracketDepth = 0;
+    let parenDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const char = source[i];
+      if (char === ']') {
+        bracketDepth++;
+      } else if (char === '[') {
+        if (bracketDepth === 0) {
+          return this.hasForBetween(source, i + 1, position, excludedRegions);
+        }
+        bracketDepth--;
+      } else if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) return false;
+        parenDepth--;
       }
     }
     return false;
@@ -295,6 +338,8 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if a position is inside unmatched parentheses (for generator expressions)
   // Returns false if there's a block opener between the unmatched '(' and position
   // (which indicates a block expression like f(if x > 0 x else -x end))
+  // Also returns false for named tuple context: (a = for ...) where '=' before 'for'
+  // indicates assignment, not a generator expression
   private isInsideParentheses(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -306,7 +351,15 @@ export class JuliaBlockParser extends BaseBlockParser {
         parenDepth++;
       } else if (char === '(') {
         if (parenDepth === 0) {
-          return !this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions);
+          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+            return false;
+          }
+          // Check for named tuple context: (name = for ...)
+          // If there's a '=' (not '==') between '(' and the keyword, it's assignment
+          if (this.hasAssignmentBetween(source, i + 1, position, excludedRegions)) {
+            return false;
+          }
+          return true;
         }
         parenDepth--;
       }
@@ -314,8 +367,40 @@ export class JuliaBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Checks if there's an assignment '=' (not '==') between two positions at depth 0
+  private hasAssignmentBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+      } else if (depth === 0 && ch === '=') {
+        // Skip '==' (equality) and '=>' (pair): forward check
+        if (i + 1 < end && (source[i + 1] === '=' || source[i + 1] === '>')) continue;
+        // Skip second '=' of '==', '===', '!==': preceded by '='
+        if (i > start && source[i - 1] === '=') continue;
+        // Skip '!=' (not-equal): preceded by '!'
+        if (i > start && source[i - 1] === '!') continue;
+        // Skip '<=' and '>=': preceded by '<' or '>' but not compound assignments like '<<=', '>>=', '>>>='
+        if (i > start && (source[i - 1] === '<' || source[i - 1] === '>')) {
+          if (i - 2 >= start && (source[i - 2] === '>' || source[i - 2] === '<')) {
+            // Could be <<=, >>=, or >>>=, which are compound assignments
+            return true;
+          }
+          continue;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Checks if position is inside square brackets only (for other block keywords)
   // Julia allows block expressions inside parentheses, so only [] excludes them
+  // Keywords inside parentheses within brackets are valid (e.g., a[map(1:3) do x ... end])
   private isInsideSquareBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
@@ -328,6 +413,8 @@ export class JuliaBlockParser extends BaseBlockParser {
         bracketDepth++;
       } else if (char === '[') {
         if (bracketDepth === 0) {
+          // If inside parentheses within brackets, the keyword is valid
+          if (parenDepth > 0) return false;
           // Only indexing brackets exclude block keywords, not array construction
           return this.isIndexingBracket(source, i);
         }
@@ -337,6 +424,34 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === '(') {
         if (parenDepth === 0) return false;
         parenDepth--;
+      }
+    }
+    return false;
+  }
+
+  // Checks if position is inside curly braces (type parameters like Dict{begin, end})
+  private isInsideCurlyBraces(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let braceDepth = 0;
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const char = source[i];
+      if (char === '}') {
+        braceDepth++;
+      } else if (char === '{') {
+        if (braceDepth === 0) return true;
+        braceDepth--;
+      } else if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) return false;
+        parenDepth--;
+      } else if (char === ']') {
+        bracketDepth++;
+      } else if (char === '[') {
+        if (bracketDepth === 0) return false;
+        bracketDepth--;
       }
     }
     return false;
@@ -497,8 +612,11 @@ export class JuliaBlockParser extends BaseBlockParser {
   private startsWithBlockKeyword(source: string, pos: number): boolean {
     const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
     for (const kw of allKeywords) {
-      if (source.startsWith(kw, pos) && (pos + kw.length >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + kw.length]))) {
-        return true;
+      if (source.startsWith(kw, pos)) {
+        const afterPos = pos + kw.length;
+        if (afterPos >= source.length || !/[a-zA-Z0-9_]/.test(source[afterPos])) {
+          return true;
+        }
       }
     }
     return false;
@@ -519,7 +637,9 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (source.slice(i, i + 3) === '"""') {
         let end = i + 3;
         // Consume string macro suffix characters
+        // Stop before block keywords to avoid swallowing them
         while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) {
+          if (this.startsWithBlockKeyword(source, end)) break;
           end++;
         }
         return { start: pos, end };

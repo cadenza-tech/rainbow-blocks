@@ -5,9 +5,13 @@ import { BaseBlockParser } from './baseParser';
 
 export class MatlabBlockParser extends BaseBlockParser {
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
-  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject end preceded by dot (struct field access like s.end or s . end)
     if (this.isPrecededByDot(source, position, excludedRegions)) {
+      return false;
+    }
+    // Reject end used as variable name (end = 5)
+    if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
       return false;
     }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
@@ -45,21 +49,32 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (/\S/.test(textBefore)) {
         return false;
       }
-      // Reject if followed by operator or punctuation (used as variable, not section keyword)
-      // Valid section keywords are followed by newline, EOF, '(' (attribute list), or comment (% or #)
+      // Reject if followed by operator, punctuation, or string literal (used as variable, not section keyword)
+      // Valid section keywords are followed by newline, EOF, '(' (attribute list), comment (% or #), or line continuation (...)
       let nextPos = position + keyword.length;
       while (nextPos < source.length && (source[nextPos] === ' ' || source[nextPos] === '\t')) {
         nextPos++;
       }
-      if (
-        nextPos < source.length &&
-        !this.isInExcludedRegion(nextPos, excludedRegions) &&
-        source[nextPos] !== '\n' &&
-        source[nextPos] !== '\r' &&
-        source[nextPos] !== '(' &&
-        source[nextPos] !== '%' &&
-        !this.isCommentChar(source[nextPos])
-      ) {
+      if (nextPos < source.length) {
+        const excludedRegion = this.findExcludedRegionAt(nextPos, excludedRegions);
+        if (excludedRegion) {
+          // Reject if inside a string literal (starts with ' or ")
+          const regionStart = source[excludedRegion.start];
+          if (regionStart === "'" || regionStart === '"') {
+            return false;
+          }
+          // Accept if inside a comment (%), line continuation (...), or shell escape (!)
+        } else {
+          const nextChar = source[nextPos];
+          if (nextChar !== '\n' && nextChar !== '\r' && nextChar !== '(' && nextChar !== '%' && !this.isCommentChar(nextChar)) {
+            return false;
+          }
+        }
+      }
+    }
+    // Reject block opener keywords used as variable names (for = 10, if = 5)
+    if (!MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(keyword)) {
+      if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
         return false;
       }
     }
@@ -166,10 +181,10 @@ export class MatlabBlockParser extends BaseBlockParser {
   protected isPrecededByDot(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
-      // Skip excluded regions backward only for ... line continuations
+      // Skip excluded regions backward for line continuations (... and \ in Octave)
       if (excludedRegions) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region && source[region.start] === '.') {
+        if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
           i = region.start - 1;
           continue;
         }
@@ -189,8 +204,8 @@ export class MatlabBlockParser extends BaseBlockParser {
         const regionBeforeNl = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
         const regionBeforeLf = this.findExcludedRegionAt(i > 0 ? i - 1 : 0, excludedRegions);
         if (
-          (regionBeforeNl?.end === nlStart && source[regionBeforeNl.start] === '.') ||
-          (regionBeforeLf?.end === i && source[regionBeforeLf.start] === '.')
+          (regionBeforeNl?.end === nlStart && (source[regionBeforeNl.start] === '.' || source[regionBeforeNl.start] === '\\')) ||
+          (regionBeforeLf?.end === i && (source[regionBeforeLf.start] === '.' || source[regionBeforeLf.start] === '\\'))
         ) {
           i = nlStart - 1;
           continue;
@@ -198,7 +213,25 @@ export class MatlabBlockParser extends BaseBlockParser {
       }
       break;
     }
-    return i >= 0 && source[i] === '.';
+    // Distinguish struct field access dot (obj.end, data1.end) from numeric decimal point (10.)
+    if (i >= 0 && source[i] === '.') {
+      // Scan backward past digits and letters that form numeric literals
+      let j = i - 1;
+      while (j >= 0 && /[0-9a-fA-F_]/.test(source[j])) {
+        j--;
+      }
+      // Check for numeric literal patterns: digits only, exponent (1e5), imaginary (1i/5j),
+      // hex prefix (0xFF), binary prefix (0b1010)
+      if (j < i - 1) {
+        const numPart = source.slice(j + 1, i);
+        // Pure digits, or digits with trailing exponent/imaginary/hex suffixes
+        if (/^[0-9][0-9a-fA-F_]*$/.test(numPart) && (j < 0 || !(/[a-zA-Z_]/.test(source[j]) || /\p{L}/u.test(source[j])))) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
   }
 
   // Checks if position is inside parentheses, square brackets, or curly braces
@@ -248,6 +281,15 @@ export class MatlabBlockParser extends BaseBlockParser {
     blockClose: ['end'],
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch']
   };
+
+  // Checks if keyword is followed by = (but not ==) indicating variable assignment
+  protected isFollowedBySimpleAssignment(source: string, afterPos: number): boolean {
+    let i = afterPos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    return i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=');
+  }
 
   // Checks if a character is a comment prefix (overridden in Octave to include #)
   protected isCommentChar(_char: string): boolean {

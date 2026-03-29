@@ -5,6 +5,9 @@ import { MatlabBlockParser } from './matlabParser';
 import { findLastOpenerByType } from './parserUtils';
 
 // Mapping of Octave-specific close keywords to their valid openers
+const LINE_CONTINUATION_PATTERN = /^\.\.\.(?:[^\r\n]*)(?:\r\n|\r|\n)/;
+const BACKSLASH_CONTINUATION_PATTERN = /^\\[ \t]*(?:\r\n|\r|\n)/;
+
 const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   endfunction: 'function',
   endif: 'if',
@@ -97,8 +100,24 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // but not == (comparison)
   protected isFollowedByAssignment(source: string, afterPos: number): boolean {
     let i = afterPos;
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
+    while (i < source.length) {
+      if (source[i] === ' ' || source[i] === '\t') {
+        i++;
+        continue;
+      }
+      // Skip ... line continuation followed by a newline
+      const continuation = source.slice(i).match(LINE_CONTINUATION_PATTERN);
+      if (continuation) {
+        i += continuation[0].length;
+        continue;
+      }
+      // Skip \ line continuation followed by a newline
+      const backslashContinuation = source.slice(i).match(BACKSLASH_CONTINUATION_PATTERN);
+      if (backslashContinuation) {
+        i += backslashContinuation[0].length;
+        continue;
+      }
+      break;
     }
     if (i >= source.length) {
       return false;
@@ -243,6 +262,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Line continuation: ... to end of line (treated as comment)
     if (char === '.' && pos + 2 < source.length && source[pos + 1] === '.' && source[pos + 2] === '.') {
       return this.matchSingleLineComment(source, pos);
+    }
+
+    // Line continuation: \ followed by optional whitespace and newline
+    if (char === '\\') {
+      const match = source.slice(pos).match(BACKSLASH_CONTINUATION_PATTERN);
+      if (match) {
+        return { start: pos, end: pos + match[0].length };
+      }
     }
 
     // Shell escape command: ! to end of line (only at line start)

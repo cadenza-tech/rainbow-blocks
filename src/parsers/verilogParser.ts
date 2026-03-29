@@ -154,7 +154,7 @@ export class VerilogBlockParser extends BaseBlockParser {
           }
           break;
         }
-        return j < source.length && source[j] === ':';
+        return j < source.length && source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== ':');
       }
       return true;
     });
@@ -176,6 +176,11 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject keywords preceded by :: (scope resolution operator like pkg::begin)
+    if (position >= 2 && source[position - 1] === ':' && source[position - 2] === ':') {
+      return false;
+    }
+
     // Reject keywords adjacent to $ (system tasks like $end, identifiers like fork$sig)
     if (hasDollarAdjacent(source, position, keyword)) {
       return false;
@@ -183,6 +188,23 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     if (keyword === 'fork') {
       return this.isValidForkOpen(source, position, excludedRegions);
+    }
+
+    // Reject 'property' or 'sequence' when preceded by assertion verbs
+    if (keyword === 'property' || keyword === 'sequence') {
+      if (this.isPrecededByAssertionVerb(source, position, excludedRegions)) {
+        return false;
+      }
+    }
+
+    // Reject keywords used as block labels (e.g., begin : module, fork : begin)
+    if (this.isPrecededByLabelColon(source, position, excludedRegions)) {
+      return false;
+    }
+
+    // Reject modifier-prefixed keywords (virtual interface, extern module/function/task, typedef class)
+    if (this.isPrecededByModifierKeyword(source, position, keyword)) {
+      return false;
     }
 
     if (!CONTROL_KEYWORDS.includes(keyword)) {
@@ -196,9 +218,13 @@ export class VerilogBlockParser extends BaseBlockParser {
   private isValidForkOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let j = position - 1;
     while (j >= 0) {
-      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+      if (source[j] === ' ' || source[j] === '\t') {
         j--;
         continue;
+      }
+      // Stop at line boundaries so we don't cross lines
+      if (source[j] === '\n' || source[j] === '\r') {
+        break;
       }
       // Skip over excluded regions (comments)
       let inExcluded = false;
@@ -227,6 +253,105 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
     }
     return true;
+  }
+
+  // Returns true if 'property' or 'sequence' at the given position is preceded by an assertion verb
+  // (assert, assume, cover, expect, restrict) with whitespace or comments between them
+  private isPrecededByAssertionVerb(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const ASSERTION_VERBS = ['assert', 'assume', 'cover', 'expect', 'restrict'];
+    let j = position - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.start - 1;
+        while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+          j--;
+        }
+      } else {
+        j--;
+      }
+    }
+    for (const verb of ASSERTION_VERBS) {
+      const verbStart = j - verb.length + 1;
+      if (verbStart >= 0 && source.slice(verbStart, j + 1) === verb) {
+        if (verbStart === 0 || !/[a-zA-Z0-9_$]/.test(source[verbStart - 1])) {
+          if (!this.isInExcludedRegion(verbStart, excludedRegions)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // Returns true if keyword at position is preceded by a label colon (e.g., begin : module, end : end)
+  private isPrecededByLabelColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
+      j--;
+    }
+    if (j < 0 || source[j] !== ':') return false;
+    if (j > 0 && source[j - 1] === ':') return false;
+    if (this.isInExcludedRegion(j, excludedRegions)) return false;
+    let k = j - 1;
+    while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+      k--;
+    }
+    while (k >= 0 && this.isInExcludedRegion(k, excludedRegions)) {
+      const region = this.findExcludedRegionAt(k, excludedRegions);
+      if (region) {
+        k = region.start - 1;
+      } else {
+        k--;
+      }
+    }
+    if (k < 0) return false;
+    const wordEnd = k;
+    while (k >= 0 && /[a-zA-Z0-9_]/.test(source[k])) {
+      k--;
+    }
+    if (wordEnd > k) {
+      const word = source.slice(k + 1, wordEnd + 1);
+      const allKeywords = new Set([...this.keywords.blockOpen, ...this.keywords.blockClose]);
+      return allKeywords.has(word);
+    }
+    return false;
+  }
+
+  // Returns true if keyword is preceded by a modifier keyword that indicates a non-block usage
+  // (e.g., virtual interface, extern module, typedef class)
+  private isPrecededByModifierKeyword(source: string, position: number, keyword: string): boolean {
+    const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
+      interface: ['virtual'],
+      class: ['virtual', 'typedef'],
+      function: ['virtual', 'extern'],
+      task: ['virtual', 'extern'],
+      module: ['extern'],
+      program: ['extern']
+    };
+    const validModifiers = MODIFIER_MAP[keyword];
+    if (!validModifiers) return false;
+
+    let j = position - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    if (j < 0) return false;
+    const wordEnd = j;
+    while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) {
+      j--;
+    }
+    if (wordEnd === j) return false;
+    const word = source.slice(j + 1, wordEnd + 1);
+    if (validModifiers.includes(word)) {
+      if (j < 0 || !/[a-zA-Z0-9_$]/.test(source[j])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Scans forward from a control keyword to find 'begin' before any statement terminator
@@ -384,6 +509,11 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     if (i < source.length && /[0-9]/.test(source[i])) {
       while (i < source.length && /[0-9_.]/.test(source[i])) i++;
+      // Handle base-specifier format: [size]'[s/S][base]digits (e.g., 32'd0, 8'hFF, 4'sb1010)
+      if (i < source.length && source[i] === "'") {
+        i = this.skipBaseSpecifierSuffix(source, i);
+        return i;
+      }
       // Handle exponent notation (e.g., 1.5e-3, 2.0E+6)
       if (i < source.length && (source[i] === 'e' || source[i] === 'E')) {
         i++;
@@ -395,6 +525,18 @@ export class VerilogBlockParser extends BaseBlockParser {
       // Skip time unit (e.g., ns, ps)
       while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
       return i;
+    }
+    // Handle unsized base-specifier literals: '[s/S][base]digits (e.g., 'd5, 'hFF)
+    // and bare tick fill literals: '0, '1, 'x, 'X, 'z, 'Z
+    if (i < source.length && source[i] === "'") {
+      const next = i + 1 < source.length ? source[i + 1] : '';
+      if (/[sS]/.test(next) || /[bBoOdDhH]/.test(next)) {
+        i = this.skipBaseSpecifierSuffix(source, i);
+        return i;
+      }
+      if (/[01xXzZ]/.test(next)) {
+        return i + 2;
+      }
     }
     if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
       while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
@@ -412,8 +554,28 @@ export class VerilogBlockParser extends BaseBlockParser {
     return i;
   }
 
+  // Skips the tick and base-specifier portion of a Verilog number literal
+  // Handles '[s/S][base]digits where base is b/B/o/O/d/D/h/H
+  // Digits include hex digits (a-f, A-F), x, X, z, Z, ?, and _
+  private skipBaseSpecifierSuffix(source: string, pos: number): number {
+    let i = pos;
+    // Skip the tick
+    i++;
+    // Skip optional signed indicator
+    if (i < source.length && (source[i] === 's' || source[i] === 'S')) {
+      i++;
+    }
+    // Skip base specifier
+    if (i < source.length && /[bBoOdDhH]/.test(source[i])) {
+      i++;
+    }
+    // Skip base digits (hex digits, x, z, ?, _)
+    while (i < source.length && /[0-9a-fA-F_xXzZ?]/.test(source[i])) i++;
+    return i;
+  }
+
   // Validates block close: reject keywords preceded by backtick, dot, or adjacent to $
-  protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject close keywords preceded by dot (hierarchical reference like inst.end)
     if (position > 0 && source[position - 1] === '.') {
       return false;
@@ -424,8 +586,18 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject keywords preceded by :: (scope resolution operator like pkg::end)
+    if (position >= 2 && source[position - 1] === ':' && source[position - 2] === ':') {
+      return false;
+    }
+
     // Reject keywords adjacent to $ (system tasks like $end, identifiers like end$suffix)
     if (hasDollarAdjacent(source, position, keyword)) {
+      return false;
+    }
+
+    // Reject keywords used as block labels (e.g., end : end, endmodule : module_name)
+    if (this.isPrecededByLabelColon(source, position, excludedRegions)) {
       return false;
     }
 

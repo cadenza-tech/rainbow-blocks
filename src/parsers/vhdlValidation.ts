@@ -11,7 +11,7 @@ export interface VhdlValidationCallbacks {
 // Keywords that can be followed by 'loop'
 const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
 
-// Validates 'for' keyword: rejects 'wait for' timing statements
+// Validates 'for' keyword: rejects 'wait for' timing statements and 'use entity/configuration ... for' binding clauses
 export function isValidForOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
   const textBefore = source.slice(0, position).toLowerCase();
   const lastNewline = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
@@ -21,11 +21,28 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   const trimOffset = rawLineBefore.length - lineBefore.length;
   // Strip trailing comments (-- ...) before checking for wait
   const lineBeforeNoComment = stripTrailingComment(lineBefore, lineStart + trimOffset, excludedRegions, callbacks);
+  // Reject 'for' in 'use entity ... for ...' or 'use configuration ... for ...' binding clauses
+  const useEntityMatch = lineBeforeNoComment.match(/\buse[ \t]+(entity|configuration)\b/);
+  if (useEntityMatch && useEntityMatch.index !== undefined) {
+    const useAbsOffset = lineStart + trimOffset + useEntityMatch.index;
+    if (!callbacks.isInExcludedRegion(useAbsOffset, excludedRegions)) {
+      let hasSemicolon = false;
+      for (let ci = useAbsOffset + useEntityMatch[0].length; ci < position; ci++) {
+        if (source[ci] === ';' && !callbacks.isInExcludedRegion(ci, excludedRegions)) {
+          hasSemicolon = true;
+          break;
+        }
+      }
+      if (!hasSemicolon) {
+        return false;
+      }
+    }
+  }
   if (isWaitBeforeFor(lineBeforeNoComment, lineStart, rawLineBefore, excludedRegions, callbacks)) {
     return false;
   }
-  // Check previous lines for 'wait' (multi-line wait for, skip blank lines)
-  if (/^[ \t]*$/.test(lineBefore) && lastNewline > 0) {
+  // Check previous lines for 'wait' or 'use entity/configuration' (multi-line, skip blank lines)
+  if (lastNewline > 0) {
     let scanEnd = lastNewline;
     // Skip the \r in \r\n pairs
     if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
@@ -45,8 +62,42 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       }
       const prevTrimOffset = rawPrevLine.length - prevLine.length;
       const prevLineNoComment = stripTrailingComment(prevLine, prevNl + 1 + prevTrimOffset, excludedRegions, callbacks);
+      // Skip comment-only lines (line content is entirely inside a comment)
+      if (/^[ \t]*$/.test(prevLineNoComment)) {
+        if (prevNl <= 0) break;
+        scanEnd = prevNl;
+        if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
+          scanEnd--;
+        }
+        continue;
+      }
+      const prevUseMatch = prevLineNoComment.match(/\buse[ \t]+(entity|configuration)\b/);
+      if (prevUseMatch && prevUseMatch.index !== undefined) {
+        const prevUseAbsOffset = prevNl + 1 + prevTrimOffset + prevUseMatch.index;
+        if (!callbacks.isInExcludedRegion(prevUseAbsOffset, excludedRegions)) {
+          let prevHasSemicolon = false;
+          for (let ci = prevUseAbsOffset + prevUseMatch[0].length; ci < position; ci++) {
+            if (source[ci] === ';' && !callbacks.isInExcludedRegion(ci, excludedRegions)) {
+              prevHasSemicolon = true;
+              break;
+            }
+          }
+          if (!prevHasSemicolon) {
+            return false;
+          }
+        }
+      }
       if (isWaitBeforeFor(prevLineNoComment, prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
         return false;
+      }
+      // Continue scanning upward through port map / generic map lines
+      if (/\b(port|generic)[ \t]+map\b/.test(prevLineNoComment)) {
+        if (prevNl <= 0) break;
+        scanEnd = prevNl;
+        if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
+          scanEnd--;
+        }
+        continue;
       }
       break;
     }
@@ -75,6 +126,27 @@ export function isValidWhileOpen(source: string, position: number, excludedRegio
   if (i >= 3) {
     const candidate = source.slice(i - 3, i + 1).toLowerCase();
     if (candidate === 'wait' && (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Validates 'component': rejects 'label: component' instantiation (not a declaration)
+export function isValidComponentOpen(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  // Scan backward from component, skipping whitespace
+  let i = position - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  // If preceded by ':', this is a component instantiation (label: component name ...)
+  if (i >= 0 && source[i] === ':') {
+    if (!callbacks.isInExcludedRegion(i, excludedRegions)) {
       return false;
     }
   }

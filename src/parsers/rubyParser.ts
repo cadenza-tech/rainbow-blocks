@@ -63,9 +63,9 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Validates block open keywords, excluding postfix conditionals
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Reject keywords preceded by dot (method calls like obj.class, obj.begin)
+    // Reject keywords preceded by dot (method calls like obj.class, obj. begin)
     // But allow range operator (..) — x..end is valid
-    if (position > 0 && source[position - 1] === '.' && !(position > 1 && source[position - 2] === '.')) {
+    if (this.isDotPreceded(source, position, excludedRegions)) {
       return false;
     }
 
@@ -213,9 +213,10 @@ export class RubyBlockParser extends BaseBlockParser {
   private isPostfixRescue(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
     // Find last semicolon in original source (not after replace) to avoid index mapping errors
+    // Skip semicolons that are part of $; global variable
     let lastSemicolonPos = -1;
     for (let i = position - 1; i >= lineStart; i--) {
-      if (source[i] === ';' && !this.isInExcludedRegion(i, excludedRegions)) {
+      if (source[i] === ';' && !this.isInExcludedRegion(i, excludedRegions) && !(i > 0 && source[i - 1] === '$')) {
         lastSemicolonPos = i;
         break;
       }
@@ -225,7 +226,26 @@ export class RubyBlockParser extends BaseBlockParser {
     let before = source.slice(sliceStart, position).replace(/\\\r?\n|\\\r/g, ' ');
     before = before.trim();
     if (before.length === 0) return false;
-    const blockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
+    const blockKeywords = [
+      'if',
+      'unless',
+      'while',
+      'until',
+      'for',
+      'case',
+      'do',
+      'then',
+      'else',
+      'elsif',
+      'begin',
+      'rescue',
+      'ensure',
+      'when',
+      'in',
+      'not',
+      'and',
+      'or'
+    ];
     const normalizedRescueBefore = before.replace(/[ \t]+/g, ' ');
     for (const kw of blockKeywords) {
       if (normalizedRescueBefore === kw || normalizedRescueBefore.endsWith(` ${kw}`)) {
@@ -241,9 +261,10 @@ export class RubyBlockParser extends BaseBlockParser {
     const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
 
     // Find last semicolon in original source (not after replace) to avoid index mapping errors
+    // Skip semicolons that are part of $; global variable
     let lastSemicolonPos = -1;
     for (let i = position - 1; i >= lineStart; i--) {
-      if (source[i] === ';' && !this.isInExcludedRegion(i, excludedRegions)) {
+      if (source[i] === ';' && !this.isInExcludedRegion(i, excludedRegions) && !(i > 0 && source[i - 1] === '$')) {
         lastSemicolonPos = i;
         break;
       }
@@ -260,7 +281,26 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     // Block keyword before means not postfix
-    const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
+    const precedingBlockKeywords = [
+      'if',
+      'unless',
+      'while',
+      'until',
+      'for',
+      'case',
+      'do',
+      'then',
+      'else',
+      'elsif',
+      'begin',
+      'rescue',
+      'ensure',
+      'when',
+      'in',
+      'not',
+      'and',
+      'or'
+    ];
 
     const normalizedBefore = beforeKeyword.replace(/[ \t]+/g, ' ');
     for (const kw of precedingBlockKeywords) {
@@ -333,11 +373,12 @@ export class RubyBlockParser extends BaseBlockParser {
     let beforeDo = source.slice(lineStart, position);
 
     // Find last semicolon not in excluded region
+    // Skip semicolons that are part of $; global variable
     let lastValidSemicolon = -1;
     for (let i = beforeDo.length - 1; i >= 0; i--) {
       if (beforeDo[i] === ';') {
         const absolutePos = lineStart + i;
-        if (!this.isInExcludedRegion(absolutePos, excludedRegions)) {
+        if (!this.isInExcludedRegion(absolutePos, excludedRegions) && !(absolutePos > 0 && source[absolutePos - 1] === '$')) {
           lastValidSemicolon = i;
           break;
         }
@@ -406,6 +447,34 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     return false;
+  }
+
+  // Checks if a keyword at the given position is preceded by a dot (method call),
+  // skipping whitespace (spaces, tabs, and newlines) between the dot and the keyword.
+  // Returns false for range operator (..) — x..end is valid Ruby.
+  private isDotPreceded(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      // Skip excluded regions (comments between dot and keyword)
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
+      }
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0 || source[i] !== '.') {
+      return false;
+    }
+    // Check for range operator (..) — if the character before the dot is also a dot, it's a range
+    if (i > 0 && source[i - 1] === '.') {
+      return false;
+    }
+    return true;
   }
 
   // Finds excluded regions: comments, strings, regex, heredocs, percent literals, symbols
@@ -598,7 +667,7 @@ export class RubyBlockParser extends BaseBlockParser {
     // Symbol must start with letter, underscore, quote, or operator character
     // Operator symbols: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
     // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
-    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^[`]/.test(nextChar)) {
+    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^\[`]/.test(nextChar)) {
       return false;
     }
 
@@ -668,7 +737,7 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // Operator symbol: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
     // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
-    if (/[+\-*/%<>=!~&|^[`]/.test(nextChar)) {
+    if (/[+\-*/%<>=!~&|^\[`]/.test(nextChar)) {
       if (nextChar === '`') return { start: pos, end: pos + 2 };
       if (nextChar === '[') {
         let i = pos + 2;

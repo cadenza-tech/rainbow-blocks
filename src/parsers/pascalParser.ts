@@ -4,6 +4,9 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import { findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 
+// Type modifier keywords that can appear between '=' and class/object/interface
+const TYPE_MODIFIERS = ['abstract', 'sealed', 'packed'];
+
 export class PascalBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['begin', 'case', 'repeat', 'try', 'record', 'class', 'object', 'interface', 'asm'],
@@ -33,8 +36,11 @@ export class PascalBlockParser extends BaseBlockParser {
     // 'class of' is a class reference type, not a block (same line only)
     if (keyword === 'class') {
       let j = position + keyword.length;
+      let hasNewline = false;
       while (j < source.length) {
         if (this.isInExcludedRegion(j, excludedRegions)) {
+          // Track newlines inside excluded regions (multi-line comments)
+          if (source[j] === '\n' || source[j] === '\r') hasNewline = true;
           j++;
           continue;
         }
@@ -45,12 +51,13 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         break;
       }
-      if (j + 2 <= source.length && /^of\b/i.test(source.slice(j, j + 3))) {
+      if (!hasNewline && j + 2 <= source.length && /^of\b/i.test(source.slice(j, j + 3))) {
         return false;
       }
     }
 
     // Forward declarations: keyword followed by ';' (e.g. class;, interface;, object;)
+    // Also handles Delphi GUID bracket syntax: interface['{GUID}'];
     // Applies to class, interface, and object
     {
       let j = position + keyword.length;
@@ -64,6 +71,32 @@ export class PascalBlockParser extends BaseBlockParser {
           continue;
         }
         break;
+      }
+      // Skip bracket expression [...] (Delphi GUID syntax)
+      if (j < source.length && source[j] === '[') {
+        let bracketDepth = 1;
+        j++;
+        while (j < source.length && bracketDepth > 0) {
+          if (this.isInExcludedRegion(j, excludedRegions)) {
+            j++;
+            continue;
+          }
+          if (source[j] === '[') bracketDepth++;
+          else if (source[j] === ']') bracketDepth--;
+          j++;
+        }
+        // Skip whitespace and comments after ']'
+        while (j < source.length) {
+          if (this.isInExcludedRegion(j, excludedRegions)) {
+            j++;
+            continue;
+          }
+          if (source[j] === ' ' || source[j] === '\t' || source[j] === '\r' || source[j] === '\n') {
+            j++;
+            continue;
+          }
+          break;
+        }
       }
       if (j < source.length && source[j] === ';') {
         return false;
@@ -133,23 +166,28 @@ export class PascalBlockParser extends BaseBlockParser {
       break;
     }
 
-    // If we found 'packed' keyword before 'object', scan further back for '='
-    if (i >= 5 && source.slice(i - 5, i + 1).toLowerCase() === 'packed' && (i < 6 || !/[a-zA-Z0-9_]/.test(source[i - 6]))) {
-      i -= 6;
-      while (i >= 0) {
-        if (this.isInExcludedRegion(i, excludedRegions)) {
-          i--;
-          continue;
-        }
-        if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
-          i--;
-          continue;
+    // If we found a type modifier keyword (packed, sealed, abstract) before class/object/interface, scan further back for '='
+    for (const modifier of TYPE_MODIFIERS) {
+      const len = modifier.length;
+      if (i >= len - 1 && source.slice(i - len + 1, i + 1).toLowerCase() === modifier && (i < len || !/[a-zA-Z0-9_]/.test(source[i - len]))) {
+        i -= len;
+        while (i >= 0) {
+          if (this.isInExcludedRegion(i, excludedRegions)) {
+            i--;
+            continue;
+          }
+          if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+            i--;
+            continue;
+          }
+          break;
         }
         break;
       }
     }
 
-    return i >= 0 && source[i] === '=';
+    // Must be '=' but not ':=' (assignment operator)
+    return i >= 0 && source[i] === '=' && (i === 0 || source[i - 1] !== ':');
   }
 
   // Extends base to add ASM block excluded regions
@@ -182,7 +220,7 @@ export class PascalBlockParser extends BaseBlockParser {
       return this.matchPascalString(source, pos, "'");
     }
 
-    // Double-quoted string
+    // Double-quoted string (FreePascal) with Pascal escaping ("")
     if (char === '"') {
       return this.matchPascalString(source, pos, '"');
     }
@@ -309,7 +347,7 @@ export class PascalBlockParser extends BaseBlockParser {
         j++;
         continue;
       }
-      if (source[j] === ' ' || source[j] === '\t') {
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
         j++;
         continue;
       }
@@ -403,8 +441,24 @@ export class PascalBlockParser extends BaseBlockParser {
       ) {
         // Skip 'object' in method pointer syntax: procedure of object, function of object
         let oi = i - 6;
-        while (oi >= 0 && (source[oi] === ' ' || source[oi] === '\t')) oi--;
+        while (oi >= 0) {
+          if (source[oi] === ' ' || source[oi] === '\t' || source[oi] === '\n' || source[oi] === '\r') {
+            oi--;
+            continue;
+          }
+          const rgn = this.findExcludedRegionAt(oi, excludedRegions);
+          if (rgn) {
+            oi = rgn.start - 1;
+            continue;
+          }
+          break;
+        }
         if (oi >= 1 && lowerSource.slice(oi - 1, oi + 1) === 'of' && (oi - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[oi - 2]))) {
+          i -= 6;
+          continue;
+        }
+        // Skip 'object' as field type reference (preceded by ':')
+        if (oi >= 0 && source[oi] === ':') {
           i -= 6;
           continue;
         }
@@ -420,6 +474,49 @@ export class PascalBlockParser extends BaseBlockParser {
         (i - 5 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 5])) &&
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
+        // Skip 'class' as field type reference (preceded by ':')
+        let ci = i - 5;
+        while (ci >= 0) {
+          if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') {
+            ci--;
+            continue;
+          }
+          const rgn = this.findExcludedRegionAt(ci, excludedRegions);
+          if (rgn) {
+            ci = rgn.start - 1;
+            continue;
+          }
+          break;
+        }
+        if (ci >= 0 && source[ci] === ':') {
+          i -= 5;
+          continue;
+        }
+        // Skip 'class' as method modifier (followed by function, procedure, var, property, constructor, destructor, operator)
+        {
+          let cj = i + 2; // i points at last char of 'class', move past it
+          while (cj < source.length) {
+            if (this.isInExcludedRegion(cj, excludedRegions)) {
+              const region = this.findExcludedRegionAt(cj, excludedRegions);
+              if (region) {
+                cj = region.end;
+                continue;
+              }
+              cj++;
+              continue;
+            }
+            if (source[cj] === ' ' || source[cj] === '\t' || source[cj] === '\n' || source[cj] === '\r') {
+              cj++;
+              continue;
+            }
+            break;
+          }
+          const afterClass = lowerSource.slice(cj, cj + 12);
+          if (/^(function|procedure|var|property|constructor|destructor|operator)\b/.test(afterClass)) {
+            i -= 5;
+            continue;
+          }
+        }
         if (depth > 0) depth--;
         else return false;
         i -= 5;
@@ -432,6 +529,24 @@ export class PascalBlockParser extends BaseBlockParser {
         (i - 9 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 9])) &&
         (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
       ) {
+        // Skip 'interface' as field type reference (preceded by ':')
+        let ii = i - 9;
+        while (ii >= 0) {
+          if (source[ii] === ' ' || source[ii] === '\t' || source[ii] === '\n' || source[ii] === '\r') {
+            ii--;
+            continue;
+          }
+          const rgn = this.findExcludedRegionAt(ii, excludedRegions);
+          if (rgn) {
+            ii = rgn.start - 1;
+            continue;
+          }
+          break;
+        }
+        if (ii >= 0 && source[ii] === ':') {
+          i -= 9;
+          continue;
+        }
         if (depth > 0) depth--;
         else return false;
         i -= 9;
@@ -484,7 +599,7 @@ export class PascalBlockParser extends BaseBlockParser {
   // Standalone cases have statements after labels: case X of 1: WriteLn
   private isVariantCase(source: string, caseStart: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerSource = source.toLowerCase();
-    // Find 'of' after 'case', skipping excluded regions
+    // Find 'of' after 'case', skipping excluded regions and newlines
     let j = caseStart + 4;
     while (j + 1 < source.length) {
       if (this.isInExcludedRegion(j, excludedRegions)) {
@@ -493,6 +608,10 @@ export class PascalBlockParser extends BaseBlockParser {
           j = region.end;
           continue;
         }
+        j++;
+        continue;
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
         j++;
         continue;
       }
@@ -505,26 +624,50 @@ export class PascalBlockParser extends BaseBlockParser {
         j += 2;
         break;
       }
-      if (source[j] === '\n' || source[j] === '\r') return false;
+      // Stop at semicolons (statement boundary)
+      if (source[j] === ';') return false;
       j++;
     }
     if (j >= source.length) return false;
-    // After 'of', find the first label pattern: digits/identifier followed by ':'
+    // After 'of', find the first label pattern: digits/identifier/char constant followed by ':'
     // Then check if after ':' there's '(' (variant) or something else (standalone)
     while (j < source.length) {
       if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
         j++;
         continue;
       }
-      // Skip excluded regions (comments, strings)
+      // Skip excluded regions (comments, strings) and check for ':' after char constants
       const region = this.findExcludedRegionAt(j, excludedRegions);
       if (region) {
         j = region.end;
+        // After an excluded region (e.g., char constant 'a'), check if ':' follows
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+        if (j < source.length && source[j] === ':') {
+          j++;
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+          return j < source.length && source[j] === '(';
+        }
         continue;
       }
-      // Look for label: digits or identifier followed by ':'
-      if (/[a-zA-Z0-9_]/.test(source[j])) {
+      // Look for label: digits, identifier, range (..), negative (-), comma-separated, hex ($xx) followed by ':'
+      if (/[a-zA-Z0-9_$-]/.test(source[j])) {
         while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
+        // Continue scanning past range dots, negatives, commas, spaces, newlines, qualified names, parentheses
+        while (j < source.length && (/[., \t()\p{L}0-9_$-]/u.test(source[j]) || source[j] === '\n' || source[j] === '\r')) {
+          // Skip excluded regions within labels (e.g., char constants in range labels)
+          const innerRegion = this.findExcludedRegionAt(j, excludedRegions);
+          if (innerRegion) {
+            j = innerRegion.end;
+            continue;
+          }
+          if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+            // Peek ahead past whitespace/newlines to see if next non-space is ':'
+            let peek = j;
+            while (peek < source.length && (source[peek] === ' ' || source[peek] === '\t' || source[peek] === '\n' || source[peek] === '\r')) peek++;
+            if (peek < source.length && source[peek] === ':') break;
+          }
+          j++;
+        }
         // Skip whitespace between label and ':'
         while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
         if (j < source.length && source[j] === ':') {
