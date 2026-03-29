@@ -119,7 +119,24 @@ export class CrystalBlockParser extends BaseBlockParser {
         regions.push(result);
         i = result.end;
       } else {
-        i++;
+        // Skip past quote in failed heredoc opener (e.g., <<-"FOO without closing quote)
+        // to prevent the quote from being re-scanned as a string delimiter
+        if (
+          source[i] === '<' &&
+          i + 3 < source.length &&
+          source[i + 1] === '<' &&
+          source[i + 2] === '-' &&
+          (source[i + 3] === '"' || source[i + 3] === "'")
+        ) {
+          const quoteType = source[i + 3];
+          i = i + 4;
+          // Skip closing quote of empty heredoc identifier (e.g., <<-"" or <<-'')
+          if (i < source.length && source[i] === quoteType) {
+            i++;
+          }
+        } else {
+          i++;
+        }
       }
     }
 
@@ -147,16 +164,43 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
 
     // Question mark char literal (?x, ?\n, ?\uXXXX, etc.)
+    // Skip when followed by " or ' — that is a ternary operator before a string, not a char literal
     if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_]/.test(source[pos - 1]))) {
       const nextChar = source[pos + 1];
+      if (nextChar === '"' || nextChar === "'") return null;
       if (nextChar === '\\' && pos + 2 < source.length) {
-        // Escape sequences: ?\n, \\, \u{XXXX}, etc.
-        if (source[pos + 2] === 'u' && pos + 3 < source.length && source[pos + 3] === '{') {
+        const escChar = source[pos + 2];
+        // \u{XXXX} brace form
+        if (escChar === 'u' && pos + 3 < source.length && source[pos + 3] === '{') {
           let j = pos + 4;
           while (j < source.length && source[j] !== '}' && source[j] !== '\n' && source[j] !== '\r') {
             j++;
           }
           if (j < source.length && source[j] === '}') return { start: pos, end: j + 1 };
+          return { start: pos, end: j };
+        }
+        // \uXXXX: up to 4 hex digits
+        if (escChar === 'u') {
+          let j = pos + 3;
+          while (j < source.length && j < pos + 7 && /[0-9a-fA-F]/.test(source[j])) j++;
+          return { start: pos, end: j };
+        }
+        // \xNN: up to 2 hex digits
+        if (escChar === 'x') {
+          let j = pos + 3;
+          while (j < source.length && j < pos + 5 && /[0-9a-fA-F]/.test(source[j])) j++;
+          return { start: pos, end: j };
+        }
+        // \oNNN: up to 3 octal digits
+        if (escChar === 'o') {
+          let j = pos + 3;
+          while (j < source.length && j < pos + 6 && /[0-7]/.test(source[j])) j++;
+          return { start: pos, end: j };
+        }
+        // \NNN: legacy octal, up to 2 more octal digits
+        if (/[0-7]/.test(escChar)) {
+          let j = pos + 3;
+          while (j < source.length && j < pos + 5 && /[0-7]/.test(source[j])) j++;
           return { start: pos, end: j };
         }
         return { start: pos, end: pos + 3 };

@@ -30,8 +30,8 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
     return { start: pos, end: source.length };
   }
 
-  // {{ ... }}
-  if (source.slice(pos, pos + 2) === '{{') {
+  // {{ ... }} (but not {{% which is { followed by {% ... %})
+  if (source.slice(pos, pos + 2) === '{{' && (pos + 2 >= source.length || source[pos + 2] !== '%')) {
     let i = pos + 2;
     let depth = 1;
     let singleBraceDepth = 0;
@@ -62,8 +62,13 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
           continue;
         }
         if (singleBraceDepth === 1) {
+          if (i + 2 < source.length && source[i + 2] === '}') {
+            // }}} = first } closes inner brace, then }} closes template
+            singleBraceDepth = 0;
+            i++;
+            continue;
+          }
           // Unbalanced single {: treat }} as template closer
-          // (unmatched { is a Crystal syntax error, but the template boundary is still valid)
           singleBraceDepth = 0;
           depth--;
           if (depth === 0) {

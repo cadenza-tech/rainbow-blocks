@@ -178,18 +178,23 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return this.matchNestedComment(source, pos);
     }
 
-    // Double-quoted string with backslash escaping (AppleScript strings are single-line)
+    // Double-quoted string with backslash and doubled-quote escaping (AppleScript strings are single-line)
     if (char === '"') {
       let j = pos + 1;
-      while (j < source.length && source[j] !== '"' && source[j] !== '\n' && source[j] !== '\r') {
+      while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
         if (source[j] === '\\' && j + 1 < source.length && source[j + 1] !== '\n' && source[j + 1] !== '\r') {
           j += 2;
           continue;
         }
+        if (source[j] === '"') {
+          // Doubled quote ("") is an escaped quote in legacy AppleScript
+          if (j + 1 < source.length && source[j + 1] === '"') {
+            j += 2;
+            continue;
+          }
+          return { start: pos, end: j + 1 };
+        }
         j++;
-      }
-      if (j < source.length && source[j] === '"') {
-        return { start: pos, end: j + 1 };
       }
       return { start: pos, end: j };
     }

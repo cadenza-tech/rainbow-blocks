@@ -10,7 +10,7 @@ export function isCommentStart(source: string, pos: number): boolean {
   if (prev === '$') return true;
   // # after shell metacharacters or whitespace starts a comment
   // Note: < and > are excluded because >#file and <#file are redirects to files starting with #
-  return /[ \t\n\r;|&(){}]/.test(prev);
+  return /[ \t\n\r;|&(){}"'`\]]/.test(prev);
 }
 
 // Checks if '#' at position is part of $# variable (odd consecutive $ count before #)

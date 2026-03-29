@@ -94,6 +94,59 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (j > 0 && source[j] === ':' && source[j - 1] === ':' && !this.isInExcludedRegion(j - 1, excludedRegions)) {
         return false;
       }
+      // Extended scan: look for :: through type expression chars (union |, tuples {}, etc.)
+      if (j >= 0 && source[j] !== '=' && source[j] !== ';' && source[j] !== '.') {
+        let k = j;
+        let depth = 0;
+        while (k >= 0) {
+          if (this.isInExcludedRegion(k, excludedRegions)) {
+            k--;
+            continue;
+          }
+          const ch = source[k];
+          if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+            k--;
+            continue;
+          }
+          if (ch === ')' || ch === '}' || ch === ']') {
+            depth++;
+            k--;
+            continue;
+          }
+          if (ch === '(' || ch === '{' || ch === '[') {
+            depth = Math.max(0, depth - 1);
+            k--;
+            continue;
+          }
+          if (depth > 0) {
+            k--;
+            continue;
+          }
+          if (k > 0 && ch === ':' && source[k - 1] === ':' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            return false;
+          }
+          // Skip => (map arrow) and := (map update) inside type expressions
+          if (ch === '=' && k + 1 < source.length && source[k + 1] === '>') {
+            k--;
+            continue;
+          }
+          if (ch === '=' && k > 0 && source[k - 1] === ':' && (k < 2 || source[k - 2] !== ':')) {
+            k -= 2;
+            continue;
+          }
+          // Skip .. (range operator) and decimal points in float literals
+          if (ch === '.' && ((k + 1 < source.length && source[k + 1] === '.') || (k > 0 && source[k - 1] === '.'))) {
+            k--;
+            continue;
+          }
+          if (ch === '.' && k > 0 && k + 1 < source.length && /[0-9]/.test(source[k - 1]) && /[0-9]/.test(source[k + 1])) {
+            k--;
+            continue;
+          }
+          if (ch === '=' || ch === ';' || ch === '.') break;
+          k--;
+        }
+      }
     }
 
     // fun() in type context (inside parentheses of -spec/-type)
@@ -220,8 +273,52 @@ export class ErlangBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Reject 'catch' expression prefix (preceded by =, (, [, {, ,, !, operator)
+      if (token.value === 'catch' && token.type === 'block_middle') {
+        if (this.isCatchExpressionPrefix(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+      }
       return true;
     });
+  }
+
+  // Checks if 'catch' at position is an expression prefix (e.g., X = catch throw(hello))
+  // rather than a try-catch clause separator
+  private isCatchExpressionPrefix(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    while (j >= 0) {
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.start - 1;
+        while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+          j--;
+        }
+        continue;
+      }
+      break;
+    }
+    if (j < 0) return false;
+    const ch = source[j];
+    // Preceded by operator, assignment, or opening bracket → expression prefix
+    return (
+      ch === '=' ||
+      ch === '(' ||
+      ch === '[' ||
+      ch === '{' ||
+      ch === ',' ||
+      ch === '!' ||
+      ch === '+' ||
+      ch === '-' ||
+      ch === '*' ||
+      ch === '/' ||
+      ch === '<' ||
+      ch === '>' ||
+      ch === '|'
+    );
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
@@ -268,7 +365,7 @@ export class ErlangBlockParser extends BaseBlockParser {
             k++;
           }
           if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
-            return this.matchTripleQuotedString(source, pos);
+            return this.matchTripleQuotedString(source, pos, offset);
           }
         }
         return this.matchVerbatimString(source, pos, offset, '"');
@@ -281,7 +378,7 @@ export class ErlangBlockParser extends BaseBlockParser {
             k++;
           }
           if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
-            return this.matchTripleQuotedAtom(source, pos);
+            return this.matchTripleQuotedAtom(source, pos, offset);
           }
         }
         return this.matchVerbatimString(source, pos, offset, "'");
@@ -388,8 +485,9 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   // Matches triple-quoted string (OTP 27+): """..."""
   // No escape processing; closing """ must be at start of line
-  private matchTripleQuotedString(source: string, pos: number): ExcludedRegion {
-    let i = pos + 3;
+  // quoteStart: position of the first " (defaults to pos for bare """, differs for ~""" or ~S""")
+  private matchTripleQuotedString(source: string, pos: number, quoteStart = pos): ExcludedRegion {
+    let i = quoteStart + 3;
     while (i < source.length) {
       if (source[i] === '"' && source.slice(i, i + 3) === '"""') {
         // Closing """ must be preceded only by whitespace on its line
@@ -408,8 +506,9 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   // Matches triple-quoted atom (OTP 27+): '''...'''
   // No escape processing; closing ''' must be at start of line
-  private matchTripleQuotedAtom(source: string, pos: number): ExcludedRegion {
-    let i = pos + 3;
+  // quoteStart: position of the first ' (defaults to pos for bare ''', differs for ~''' or ~S''')
+  private matchTripleQuotedAtom(source: string, pos: number, quoteStart = pos): ExcludedRegion {
+    let i = quoteStart + 3;
     while (i < source.length) {
       if (source[i] === "'" && source.slice(i, i + 3) === "'''") {
         // Closing ''' must be preceded only by whitespace on its line

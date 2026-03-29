@@ -47,8 +47,22 @@ export function isAtomStart(source: string, pos: number): boolean {
   // Includes ? and ! since Elixir identifiers can end with them (e.g., ok?: true)
   if (pos > 0) {
     const prevChar = source[pos - 1];
-    if (/[a-zA-Z0-9_)\]}?!]/.test(prevChar)) {
+    if (/[a-zA-Z0-9_)\]}?!:]/.test(prevChar)) {
       return false;
+    }
+    // Check Unicode letters (BMP) not caught by ASCII regex above
+    if (prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar)) {
+      return false;
+    }
+    // Check surrogate pairs (characters outside BMP)
+    if (pos - 2 >= 0) {
+      const highSurrogate = source.charCodeAt(pos - 2);
+      if (highSurrogate >= 0xd800 && highSurrogate <= 0xdbff) {
+        const pair = source.slice(pos - 2, pos);
+        if (/\p{L}/u.test(pair)) {
+          return false;
+        }
+      }
     }
   }
 
@@ -89,9 +103,14 @@ export function matchAtomLiteral(source: string, pos: number, skipInterpolation:
     const cp = source.codePointAt(i);
     if (cp === undefined) break;
     const ch = cp > 0xffff ? String.fromCodePoint(cp) : source[i];
-    if (/[\p{L}0-9_@!?]/u.test(ch)) {
+    if (/[\p{L}0-9_@]/u.test(ch)) {
       i += cp > 0xffff ? 2 : 1;
       continue;
+    }
+    // ! and ? can only appear as the final character of an atom name
+    if (ch === '!' || ch === '?') {
+      i++;
+      break;
     }
     break;
   }

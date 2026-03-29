@@ -19,7 +19,7 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 };
 
 // Characters that indicate the preceding / is division, not regex
-const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$/]/;
+const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$]/;
 
 // Returns the matching close delimiter for an open delimiter
 function getMatchingDelimiter(open: string): string | null {
@@ -44,6 +44,10 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
 
   // Check ? and ! - could be method name suffix or operator
   if (source[i] === '?' || source[i] === '!') {
+    // If preceded by $, it's a special global variable ($? or $!), / is division
+    if (i > 0 && source[i - 1] === '$') {
+      return false;
+    }
     // If preceded by a word character, it's a method name suffix (valid? / 2 = division)
     if (i > 0 && /[a-zA-Z0-9_]/.test(source[i - 1])) {
       return false;
@@ -54,6 +58,10 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
 
   // After these characters, / is likely division
   if (!DIVISION_PRECEDERS_PATTERN.test(source[i])) {
+    // If preceded by $, it's a special global variable ($~, $&, $+, etc.), / is division
+    if (i > 0 && source[i - 1] === '$') {
+      return false;
+    }
     return true;
   }
 
@@ -123,6 +131,7 @@ export function matchRegexLiteral(
   allowMultiline: boolean
 ): ExcludedRegion {
   let i = pos + 1;
+  let inCharClass = false;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
@@ -133,7 +142,18 @@ export function matchRegexLiteral(
       i = skipInterpolation(source, i + 2);
       continue;
     }
-    if (source[i] === '/') {
+    // Track character class brackets: [/] should not terminate regex
+    if (source[i] === '[' && !inCharClass) {
+      inCharClass = true;
+      i++;
+      continue;
+    }
+    if (source[i] === ']' && inCharClass) {
+      inCharClass = false;
+      i++;
+      continue;
+    }
+    if (source[i] === '/' && !inCharClass) {
       i++;
       // Skip regex flags
       while (i < source.length && regexFlagsPattern.test(source[i])) {
@@ -181,6 +201,7 @@ export function skipNestedRegex(
   allowMultiline = false
 ): number {
   let i = pos + 1;
+  let inCharClass = false;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
@@ -191,7 +212,18 @@ export function skipNestedRegex(
       i = skipInterpolation(source, i + 2);
       continue;
     }
-    if (source[i] === '/') {
+    // Track character class brackets: [/] should not terminate regex
+    if (source[i] === '[' && !inCharClass) {
+      inCharClass = true;
+      i++;
+      continue;
+    }
+    if (source[i] === ']' && inCharClass) {
+      inCharClass = false;
+      i++;
+      continue;
+    }
+    if (source[i] === '/' && !inCharClass) {
       i++;
       // Skip regex flags
       while (i < source.length && regexFlagsPattern.test(source[i])) {

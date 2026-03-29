@@ -426,8 +426,14 @@ export class CobolBlockParser extends BaseBlockParser {
       return null;
     }
 
-    // Search for END-EXEC (case-insensitive), skipping string literals and inline comments
+    // Verify a recognized sub-language keyword follows
     const startWord = isExecute ? 'EXECUTE' : 'EXEC';
+    const afterExec = source.slice(pos + startWord.length).match(/^[ \t]+([a-zA-Z]+)/);
+    if (!afterExec || !/^(SQL|CICS|DLI|SQLIMS|HTML|XML|JAVA|ADO|ADABAS|DB2|IMS|IDMS|ORACLE|DATACOM)$/i.test(afterExec[1])) {
+      return null;
+    }
+
+    // Search for END-EXEC (case-insensitive), skipping string literals and inline comments
     let i = pos + startWord.length;
     while (i < source.length) {
       const ch = source[i];
@@ -465,13 +471,19 @@ export class CobolBlockParser extends BaseBlockParser {
       }
       // Skip pseudo-text delimiters ==...== inside EXEC block
       if (ch === '=' && i + 1 < source.length && source[i + 1] === '=') {
+        const savedPos = i;
         i += 2;
+        let foundClose = false;
         while (i + 1 < source.length) {
           if (source[i] === '=' && source[i + 1] === '=') {
             i += 2;
+            foundClose = true;
             break;
           }
           i++;
+        }
+        if (!foundClose) {
+          i = savedPos + 2;
         }
         continue;
       }
@@ -541,11 +553,92 @@ export class CobolBlockParser extends BaseBlockParser {
       i--;
     }
     const word = source.slice(i + 1, wordEnd).toUpperCase();
-    // REPLACING (in COPY ... REPLACING ==old== BY ==new==)
-    // REPLACE (in REPLACE ==old== BY ==new==)
-    // ALSO (in REPLACE ALSO ==old== BY ==new==)
-    // BY (in ==old== BY ==new==)
-    return word === 'REPLACING' || word === 'REPLACE' || word === 'ALSO' || word === 'BY';
+    // REPLACE (in REPLACE ==old== BY ==new==) - standalone statement
+    if (word === 'REPLACE') {
+      return true;
+    }
+    // REPLACING (in COPY ... REPLACING ==old== BY ==new==) - must be in a COPY statement
+    if (word === 'REPLACING') {
+      const beforeReplacing = source.slice(0, i + 1).toUpperCase();
+      const lastPeriod = beforeReplacing.lastIndexOf('.');
+      const statement = beforeReplacing.slice(lastPeriod + 1);
+      return /\bCOPY\b/.test(statement);
+    }
+    // ALSO (in REPLACE ALSO ==old== BY ==new==) - must be preceded by REPLACE, not EVALUATE
+    if (word === 'ALSO') {
+      return this.isPrecededByKeyword(source, i, 'REPLACE');
+    }
+    // BY (in ==old== BY ==new==) - must be preceded by REPLACING, REPLACE, or ALSO in a COPY REPLACING / REPLACE context
+    if (word === 'BY') {
+      return (
+        this.isPrecededByKeyword(source, i, 'REPLACING') ||
+        this.isPrecededByKeyword(source, i, 'REPLACE') ||
+        this.isPrecededByKeyword(source, i, 'ALSO')
+      );
+    }
+    return false;
+  }
+
+  // Scans backward from position i to check if the preceding word matches target keyword
+  // Skips whitespace, pseudo-text (==...==), and BY keywords between replacement pairs
+  private isPrecededByKeyword(source: string, i: number, target: string): boolean {
+    let j = i;
+    // Skip whitespace
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    if (j < 0) {
+      return false;
+    }
+    // Skip multiple consecutive pseudo-text blocks and BY keywords
+    // (e.g., ==a== BY ==b== ==c== BY ==d== ← need to traverse all to reach REPLACING)
+    while (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
+      j -= 2;
+      // Skip pseudo-text content to find opening ==
+      while (j >= 1) {
+        if (source[j] === '=' && source[j - 1] === '=') {
+          j -= 2;
+          break;
+        }
+        j--;
+      }
+      // Skip whitespace
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+        j--;
+      }
+      if (j < 0) {
+        return false;
+      }
+      // If we landed on another closing ==, let the loop handle it directly
+      if (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
+        continue;
+      }
+      // Check if the preceding word is BY; if so, skip it and continue the loop
+      const byEnd = j + 1;
+      let byStart = j;
+      while (byStart >= 0 && /[a-zA-Z]/.test(source[byStart])) {
+        byStart--;
+      }
+      const byWord = source.slice(byStart + 1, byEnd).toUpperCase();
+      if (byWord !== 'BY') {
+        break;
+      }
+      // Skip past BY and whitespace, then continue to next pseudo-text block
+      j = byStart;
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+        j--;
+      }
+      if (j < 0) {
+        return false;
+      }
+    }
+    // Extract the preceding word
+    const wordEnd = j + 1;
+    while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
+      j--;
+    }
+    const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
+    return prevWord === target;
   }
 
   // Match pseudo-text delimiters ==...==

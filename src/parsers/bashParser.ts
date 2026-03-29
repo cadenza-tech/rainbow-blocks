@@ -36,8 +36,27 @@ export class BashBlockParser extends BaseBlockParser {
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
     let i = 0;
+    // Track [[ ]] depth: # is not a comment character inside [[ ]] conditional expressions
+    let doubleBracketDepth = 0;
 
     while (i < source.length) {
+      // Track [[ and ]] to maintain doubleBracketDepth
+      // Only track [[ at command position to avoid false positives (e.g., echo [[ would poison # detection)
+      if (source[i] === '[' && i + 1 < source.length && source[i + 1] === '[' && this.isDoubleBracketCommand(source, i)) {
+        doubleBracketDepth++;
+        i += 2;
+        continue;
+      }
+      if (source[i] === ']' && i + 1 < source.length && source[i + 1] === ']' && doubleBracketDepth > 0) {
+        doubleBracketDepth--;
+        i += 2;
+        continue;
+      }
+      // Skip comment detection when inside [[ ]] (# is not a comment there)
+      if (doubleBracketDepth > 0 && source[i] === '#') {
+        i++;
+        continue;
+      }
       const result = this.tryMatchExcludedRegion(source, i);
       if (result) {
         // If region starts after current position (heredoc opener line gap),
@@ -522,6 +541,37 @@ export class BashBlockParser extends BaseBlockParser {
         if (source[j] === '+' && j + 1 < source.length && source[j + 1] === '=') {
           return true;
         }
+      }
+    }
+    return false;
+  }
+
+  // Checks if [[ at given position is at command position (not an argument like echo [[)
+  private isDoubleBracketCommand(source: string, pos: number): boolean {
+    let prev = pos - 1;
+    while (prev >= 0 && (source[prev] === ' ' || source[prev] === '\t')) prev--;
+    if (prev < 0) return true;
+    const ch = source[prev];
+    if (ch === '\n' || ch === '\r' || ch === ';' || ch === '|' || ch === '&' || ch === '(' || ch === '`' || ch === '{' || ch === '!') {
+      return true;
+    }
+    // Check if preceded by a shell keyword (then, else, elif, do, in)
+    if (/[a-zA-Z]/.test(ch)) {
+      const end = prev;
+      let start = prev;
+      while (start > 0 && /[a-zA-Z]/.test(source[start - 1])) start--;
+      const word = source.slice(start, end + 1);
+      if (
+        word === 'then' ||
+        word === 'else' ||
+        word === 'elif' ||
+        word === 'do' ||
+        word === 'if' ||
+        word === 'while' ||
+        word === 'until' ||
+        word === 'time'
+      ) {
+        return true;
       }
     }
     return false;

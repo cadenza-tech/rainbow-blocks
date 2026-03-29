@@ -543,6 +543,11 @@ export class RubyBlockParser extends BaseBlockParser {
       if (region) return region;
     }
 
+    // $', $", $` are global variables, not string/backtick starts
+    if (pos > 0 && source[pos - 1] === '$' && (char === '"' || char === "'" || char === '`')) {
+      return { start: pos, end: pos + 1 };
+    }
+
     // Double-quoted string (with #{} interpolation support)
     if (char === '"') {
       return this.matchInterpolatedString(source, pos);
@@ -590,8 +595,10 @@ export class RubyBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Symbol must start with letter, underscore, or quote
-    if (!/[a-zA-Z_"']/.test(nextChar)) {
+    // Symbol must start with letter, underscore, quote, or operator character
+    // Operator symbols: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
+    // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
+    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^[`]/.test(nextChar)) {
       return false;
     }
 
@@ -654,6 +661,25 @@ export class RubyBlockParser extends BaseBlockParser {
         if (source[i] === "'") {
           return { start: pos, end: i + 1 };
         }
+        i++;
+      }
+      return { start: pos, end: i };
+    }
+
+    // Operator symbol: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
+    // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
+    if (/[+\-*/%<>=!~&|^[`]/.test(nextChar)) {
+      if (nextChar === '`') return { start: pos, end: pos + 2 };
+      if (nextChar === '[') {
+        let i = pos + 2;
+        if (i < source.length && source[i] === ']') {
+          i++;
+          if (i < source.length && source[i] === '=') i++;
+        }
+        return { start: pos, end: i };
+      }
+      let i = pos + 2;
+      while (i < source.length && /[+\-*/%<>=!~&|^@]/.test(source[i])) {
         i++;
       }
       return { start: pos, end: i };
