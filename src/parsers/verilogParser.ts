@@ -524,7 +524,7 @@ export class VerilogBlockParser extends BaseBlockParser {
               const isPreprocessorBlock = openerValue.startsWith('`');
               if (isPreprocessorMiddle === isPreprocessorBlock) {
                 // 'default' only attaches to case/casex/casez blocks
-                if (isCaseMiddle && openerValue !== 'case' && openerValue !== 'casex' && openerValue !== 'casez') {
+                if (isCaseMiddle && openerValue !== 'case' && openerValue !== 'casex' && openerValue !== 'casez' && openerValue !== 'randcase') {
                   continue;
                 }
                 stack[si].intermediates.push(token);
@@ -569,8 +569,11 @@ export class VerilogBlockParser extends BaseBlockParser {
               if (controlBlock) {
                 stack.splice(controlIndex, 1);
 
-                // Check for else before control keyword
-                const elseIndex = controlIndex - 1;
+                // Check for else before control keyword, skipping preprocessor directives
+                let elseIndex = controlIndex - 1;
+                while (elseIndex >= 0 && stack[elseIndex].token.value.startsWith('`')) {
+                  elseIndex--;
+                }
                 if (elseIndex >= 0 && stack[elseIndex].token.value === 'else') {
                   // Merge else + control keyword into single pair
                   const elseBlock = stack.splice(elseIndex, 1)[0];
@@ -606,6 +609,10 @@ export class VerilogBlockParser extends BaseBlockParser {
                 }
                 if (!hasElseNext) {
                   let nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
+                  // Skip preprocessor directives at top of stack
+                  while (nextCheckIndex >= 0 && stack[nextCheckIndex].token.value.startsWith('`')) {
+                    nextCheckIndex--;
+                  }
                   while (nextCheckIndex >= 0 && CONTROL_KEYWORDS.includes(stack[nextCheckIndex].token.value)) {
                     const chainedBlock = stack.splice(nextCheckIndex, 1)[0];
                     pairs.push({
@@ -615,6 +622,10 @@ export class VerilogBlockParser extends BaseBlockParser {
                       nestLevel: stack.length
                     });
                     nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
+                    // Skip preprocessor directives at top of stack
+                    while (nextCheckIndex >= 0 && stack[nextCheckIndex].token.value.startsWith('`')) {
+                      nextCheckIndex--;
+                    }
                   }
                 }
               }

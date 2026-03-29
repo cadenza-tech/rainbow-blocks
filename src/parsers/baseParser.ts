@@ -25,6 +25,15 @@ export abstract class BaseBlockParser {
           other.openKeyword.startOffset < pair.openKeyword.startOffset &&
           other.closeKeyword.startOffset >= pair.closeKeyword.startOffset
         ) {
+          // When sharing the same close offset, skip if pair opens after
+          // other's last intermediate (siblings, not parent-child)
+          if (
+            other.closeKeyword.startOffset === pair.closeKeyword.startOffset &&
+            other.intermediates.length > 0 &&
+            pair.openKeyword.startOffset > other.intermediates[other.intermediates.length - 1].startOffset
+          ) {
+            continue;
+          }
           level++;
         }
       }
