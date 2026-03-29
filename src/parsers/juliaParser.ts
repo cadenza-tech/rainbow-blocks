@@ -475,8 +475,10 @@ export class JuliaBlockParser extends BaseBlockParser {
         }
         // Regular prefixed string (no interpolation, raw content except b"...")
         let stringEnd = this.findPrefixedStringEnd(source, prefixEnd + 1, '"', prefix === 'b');
-        // Consume string macro suffix characters (e.g., custom"content"end)
+        // Consume string macro suffix characters (e.g., custom"content"flags)
+        // Stop before block keywords to avoid swallowing them (e.g., r"pattern"end)
         while (stringEnd < source.length && /[a-zA-Z0-9_]/.test(source[stringEnd])) {
+          if (this.startsWithBlockKeyword(source, stringEnd)) break;
           stringEnd++;
         }
         return { start: pos, end: stringEnd };
@@ -489,6 +491,17 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if a word is a block keyword
   private isBlockKeyword(word: string): boolean {
     return this.keywords.blockOpen.includes(word) || this.keywords.blockClose.includes(word) || this.keywords.blockMiddle.includes(word);
+  }
+
+  // Checks if source at pos starts with a block keyword followed by a non-word char or end of string
+  private startsWithBlockKeyword(source: string, pos: number): boolean {
+    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
+    for (const kw of allKeywords) {
+      if (source.startsWith(kw, pos) && (pos + kw.length >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + kw.length]))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Matches prefixed triple-quoted string (no interpolation, raw content except b"...")

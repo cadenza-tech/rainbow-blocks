@@ -179,7 +179,12 @@ export class PascalBlockParser extends BaseBlockParser {
 
     // Single-quoted string with Pascal escaping ('')
     if (char === "'") {
-      return this.matchPascalString(source, pos);
+      return this.matchPascalString(source, pos, "'");
+    }
+
+    // Double-quoted string
+    if (char === '"') {
+      return this.matchPascalString(source, pos, '"');
     }
 
     return null;
@@ -591,13 +596,13 @@ export class PascalBlockParser extends BaseBlockParser {
   }
 
   // Matches Pascal string with '' escape (not backslash)
-  private matchPascalString(source: string, pos: number): ExcludedRegion {
+  private matchPascalString(source: string, pos: number, quote: string): ExcludedRegion {
     let i = pos + 1;
 
     while (i < source.length) {
-      if (source[i] === "'") {
+      if (source[i] === quote) {
         // Check for doubled quote (escape)
-        if (i + 1 < source.length && source[i + 1] === "'") {
+        if (i + 1 < source.length && source[i + 1] === quote) {
           i += 2;
           continue;
         }
