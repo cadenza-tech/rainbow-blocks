@@ -84,7 +84,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return false;
       }
       // Reject 'tell' when used as a condition value in 'if ... then' pattern
-      if (this.isInsideIfCondition(source, position, excludedRegions)) {
+      if (this.isInsideIfCondition(source, position, keyword.length, excludedRegions)) {
         return false;
       }
       return true;
@@ -93,7 +93,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // Reject block keywords used as condition values in 'if ... then' pattern
     // (repeat, try, considering, ignoring are affected; script/on/to are already protected by isAtLogicalLineStart)
     if (keyword === 'repeat' || keyword === 'try' || keyword === 'considering' || keyword === 'ignoring') {
-      if (this.isInsideIfCondition(source, position, excludedRegions)) {
+      if (this.isInsideIfCondition(source, position, keyword.length, excludedRegions)) {
         return false;
       }
       return true;
@@ -349,7 +349,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       // Reject compound block openers used as condition values in 'if ... then' pattern
       if (type === 'block_open') {
-        if (this.isInsideIfCondition(source, i, excludedRegions)) {
+        if (this.isInsideIfCondition(source, i, keyword.length, excludedRegions)) {
+          return { nextPos: flexMatch };
+        }
+      }
+
+      // Reject compound block openers inside tell...to one-liner context
+      if (type === 'block_open') {
+        if (this.isInsideTellToOneLiner(source, i, excludedRegions)) {
           return { nextPos: flexMatch };
         }
       }
@@ -373,7 +380,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           .toLowerCase()
           .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
-        if (/^(set|copy)[ \t]+$/.test(lineBefore) || /'s[ \t]+$/.test(lineBefore) || /\bof[ \t]+$/.test(lineBefore)) {
+        if (
+          /^(set|copy)[ \t]+$/.test(lineBefore) ||
+          /'s[ \t]+$/.test(lineBefore) ||
+          /\bof[ \t]+$/.test(lineBefore) ||
+          /\bin[ \t]+$/.test(lineBefore) ||
+          /\b(?:return|log|get)[ \t]+$/.test(lineBefore)
+        ) {
           return { nextPos: flexMatch };
         }
       }
@@ -414,8 +427,20 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
+      // 'considering' and 'ignoring' should not be block openers inside tell...to one-liners
+      if (type === 'block_open' && (keyword === 'considering' || keyword === 'ignoring')) {
+        if (this.isInsideTellToOneLiner(source, i, excludedRegions)) {
+          return { nextPos: endPos };
+        }
+      }
+
       // Validate block open keywords (e.g., single-line if)
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, i, excludedRegions)) {
+        return { nextPos: endPos };
+      }
+
+      // Check if block opener is used as a variable/property name or in expression context
+      if (type === 'block_open' && this.isKeywordAsVariableName(source, i, keyword, excludedRegions)) {
         return { nextPos: endPos };
       }
 
@@ -443,6 +468,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   private isAtLogicalLineStart(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     let lineStart = pos;
     while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      // Skip over excluded regions (multi-line block comments may contain newlines)
+      const region = this.findExcludedRegionAt(lineStart - 1, excludedRegions);
+      if (region) {
+        lineStart = region.start;
+        continue;
+      }
       lineStart--;
     }
     // Check if previous physical line ends with continuation character
@@ -545,6 +576,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   private findLogicalLineEnd(source: string, position: number, excludedRegions?: ExcludedRegion[]): number {
     let lineEnd = position;
     while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+      // Skip over excluded regions (multi-line block comments may contain newlines)
+      if (excludedRegions) {
+        const region = this.findExcludedRegionAt(lineEnd, excludedRegions);
+        if (region) {
+          lineEnd = region.end;
+          continue;
+        }
+      }
       lineEnd++;
     }
     // Check if line ends with ¬ continuation
@@ -580,6 +619,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
       // Continue to next line end
       while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+        if (excludedRegions) {
+          const region = this.findExcludedRegionAt(lineEnd, excludedRegions);
+          if (region) {
+            lineEnd = region.end;
+            continue;
+          }
+        }
         lineEnd++;
       }
     }
@@ -590,6 +636,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   private findLogicalLineStart(source: string, position: number, excludedRegions?: ExcludedRegion[]): number {
     let lineStart = position;
     while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      // Skip over excluded regions (multi-line block comments may contain newlines)
+      if (excludedRegions) {
+        const region = this.findExcludedRegionAt(lineStart - 1, excludedRegions);
+        if (region) {
+          lineStart = region.start;
+          continue;
+        }
+      }
       lineStart--;
     }
     // Check if previous line ends with ¬ continuation
@@ -626,6 +680,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Go to start of previous line
       let prevLineStart = contentEnd;
       while (prevLineStart > 0 && source[prevLineStart - 1] !== '\n' && source[prevLineStart - 1] !== '\r') {
+        if (excludedRegions) {
+          const region = this.findExcludedRegionAt(prevLineStart - 1, excludedRegions);
+          if (region) {
+            prevLineStart = region.start;
+            continue;
+          }
+        }
         prevLineStart--;
       }
       lineStart = prevLineStart;
@@ -655,9 +716,39 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Checks if a compound block opener is inside a tell...to one-liner
+  // e.g., 'tell application "X" to open with timeout of 30 seconds'
+  private isInsideTellToOneLiner(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
+    // Scan backward from position for 'to' keyword on the same logical line
+    for (let i = position - 1; i >= lineStart; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      if (
+        i + 2 <= position &&
+        source.slice(i, i + 2).toLowerCase() === 'to' &&
+        (i === 0 || !/\w/.test(source[i - 1])) &&
+        (i + 2 >= source.length || !/\w/.test(source[i + 2]))
+      ) {
+        // Found 'to' keyword; now check if there's a 'tell' before it on the same logical line
+        for (let j = i - 1; j >= lineStart; j--) {
+          if (this.isInExcludedRegion(j, excludedRegions)) continue;
+          if (
+            j + 4 <= i &&
+            source.slice(j, j + 4).toLowerCase() === 'tell' &&
+            (j === 0 || !/\w/.test(source[j - 1])) &&
+            (j + 4 >= source.length || !/\w/.test(source[j + 4]))
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   // Checks if a keyword is used inside an 'if ... then' condition
   // e.g., 'if tell then' uses 'tell' as a condition value, not a block opener
-  private isInsideIfCondition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  private isInsideIfCondition(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
     const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
     // Strip excluded regions first (before toLowerCase to preserve positions)
     let rawBefore = source.slice(lineStart, position);
@@ -673,14 +764,26 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     rawBefore = rawBefore.toLowerCase();
     // Normalize continuation characters for backward scan
     const beforeText = rawBefore.replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ');
-    // Check if 'if' appears before this keyword on the same logical line
-    const ifMatch = beforeText.match(/(?:^|[^a-z0-9_])if[ \t]+$/);
-    if (!ifMatch) {
+    // Check if a condition-opening keyword appears before this keyword on the same logical line
+    // Handles both simple cases (if tell then) and complex expressions (if not tell then, if true and tell then)
+    // Ensure no 'then' appears between the condition opener and our keyword
+    const condMatch = beforeText.match(/(?:^|[^a-z0-9_])(?:if|else\s+if|repeat\s+while|repeat\s+until)\b/);
+    if (!condMatch) {
       return false;
+    }
+    // Verify no 'then' between the condition opener and our keyword
+    const afterCond = beforeText.slice((condMatch.index ?? 0) + condMatch[0].length);
+    if (/\bthen\b/.test(afterCond)) {
+      return false;
+    }
+    // 'repeat while/until' conditions don't use 'then', so return true immediately
+    const condMatchStr = condMatch[0].trim();
+    if (/^repeat\s+(while|until)$/i.test(condMatchStr)) {
+      return true;
     }
     // Check if 'then' appears after this keyword on the same logical line
     const lineEnd = this.findLogicalLineEnd(source, position, excludedRegions);
-    let i = position + 4; // skip past 'tell'
+    let i = position + keywordLength;
     while (i < lineEnd) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
       if (region) {
@@ -761,17 +864,59 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // '<keyword> of' pattern (property access, same physical line)
     // Use rawAfterKwText (excluded regions stripped but NOT continuation-normalized)
     // to avoid matching 'of' across continuation lines
-    const firstPhysLine = rawAfterKwText.split(/\r\n|\r|\n/)[0];
+    const afterPhysLines = rawAfterKwText.split(/\r\n|\r|\n/);
+    const firstPhysLine = afterPhysLines[0];
     if (/^[ \t]+of\b/.test(firstPhysLine)) {
       return true;
     }
     // '<keyword> of' across continuation (only when keyword is in expression context)
-    if (lineBefore.length > 0 && /^[ \t]+of\b/.test(afterKwNorm.split(/\r\n|\r|\n/)[0])) {
+    if (lineBefore.length > 0 && !keyword.includes(' ') && /^[ \t]+of\b/.test(afterKwNorm.split(/\r\n|\r|\n/)[0])) {
       return true;
+    }
+    // '<keyword> ¬\nof' at line start: suppress only when the line after 'of <value>' is
+    // absent or not indented (not a block body). Compound keywords (e.g. 'end tell') are
+    // never property access, so skip them.
+    if (lineBefore.length === 0 && !keyword.includes(' ') && afterPhysLines.length >= 2) {
+      if (/^[ \t]*\u00AC[ \t]*$/.test(firstPhysLine) && /^[ \t]*of\b/.test(afterPhysLines[1])) {
+        const lineAfterOf = afterPhysLines.length > 2 ? afterPhysLines[2] : '';
+        if (lineAfterOf.length === 0 || !/^[ \t]/.test(lineAfterOf)) {
+          return true;
+        }
+      }
     }
 
     // 'of <keyword>' pattern (keyword as object in property access)
     if (/\bof[ \t]+$/.test(lineBefore)) {
+      return true;
+    }
+
+    // 'in <keyword>' pattern (keyword as list expression in repeat with X in <expr>)
+    if (/\bin[ \t]+$/.test(lineBefore)) {
+      return true;
+    }
+
+    // 'exit repeat' is a control flow statement, not a block opener
+    if (keyword === 'repeat' && /\bexit[ \t]+$/.test(lineBefore)) {
+      return true;
+    }
+
+    // Keywords used as values in command expression contexts
+    // e.g., 'return tell', 'log repeat', 'get tell'
+    if (lineBefore.length > 0) {
+      if (/\b(?:return|log|get)[ \t]+$/.test(lineBefore)) {
+        return true;
+      }
+    }
+
+    // Bare 'end' used as a value in control flow contexts
+    // e.g., 'if end then', 'if not end then', 'if true and end then', 'if (end > 0) then'
+    if (keyword === 'end' && excludedRegions && this.isInsideIfCondition(source, position, keyword.length, excludedRegions)) {
+      return true;
+    }
+
+    // Bare 'end' after prepositions in expression context
+    // e.g., 'repeat with i from 1 to end', 'items thru end', 'items through end', 'from end'
+    if (keyword === 'end' && /\b(?:to|thru|through|from)[ \t]+$/i.test(lineBefore)) {
       return true;
     }
 

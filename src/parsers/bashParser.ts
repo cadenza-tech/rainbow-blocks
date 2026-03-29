@@ -373,12 +373,38 @@ export class BashBlockParser extends BaseBlockParser {
       }
     }
 
+    // Environment variable prefix: VAR=value before a command keyword
+    // Handles: FOO=bar if, A=1 B=2 if, FOO="quoted" if, FOO= if
+    if (i >= 0) {
+      let eqScan = i;
+      if (source[eqScan] !== '=') {
+        while (eqScan > 0 && source[eqScan - 1] !== '=' && /[^\s;|&(){}#`]/.test(source[eqScan - 1])) {
+          eqScan--;
+        }
+        eqScan = eqScan > 0 && source[eqScan - 1] === '=' ? eqScan - 1 : -1;
+      }
+      if (eqScan >= 0 && source[eqScan] === '=' && (eqScan + 1 >= source.length || source[eqScan + 1] !== '=')) {
+        let varPos = eqScan - 1;
+        while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
+          varPos--;
+        }
+        const varStart = varPos + 1;
+        if (varStart < eqScan && /[a-zA-Z_]/.test(source[varStart])) {
+          return this.isAtCommandPosition(source, varStart, excludedRegions);
+        }
+      }
+    }
+
     return false;
   }
 
   // Check if keyword is followed by ) → case pattern (e.g., for), done))
   // But not inside subshell (...) where ) closes the subshell
   private isCasePattern(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
+    // Block close keywords (esac, fi, done) are never case patterns
+    if (keyword === 'esac' || keyword === 'fi' || keyword === 'done') {
+      return false;
+    }
     let j = position + keyword.length;
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
       j++;
@@ -488,6 +514,15 @@ export class BashBlockParser extends BaseBlockParser {
   }
 
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.isFollowedByHyphen(source, position, keyword)) {
+      return false;
+    }
+    if (this.isInsideExtglob(source, position, excludedRegions)) {
+      return false;
+    }
+    if (this.isInsideDoubleBracket(source, position, excludedRegions)) {
+      return false;
+    }
     if (!this.isAtCommandPosition(source, position, excludedRegions)) {
       return false;
     }
@@ -501,6 +536,15 @@ export class BashBlockParser extends BaseBlockParser {
   }
 
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.isFollowedByHyphen(source, position, keyword)) {
+      return false;
+    }
+    if (this.isInsideExtglob(source, position, excludedRegions)) {
+      return false;
+    }
+    if (this.isInsideDoubleBracket(source, position, excludedRegions)) {
+      return false;
+    }
     if (!this.isAtCommandPosition(source, position, excludedRegions)) {
       return false;
     }
@@ -517,8 +561,8 @@ export class BashBlockParser extends BaseBlockParser {
   private isFollowedByEquals(source: string, position: number, keyword: string): boolean {
     const afterPos = position + keyword.length;
     if (afterPos >= source.length) return false;
-    // Direct assignment: keyword=value (but not keyword==)
-    if (source[afterPos] === '=' && (afterPos + 1 >= source.length || source[afterPos + 1] !== '=')) {
+    // Direct assignment: keyword=value (including keyword==value where value starts with =)
+    if (source[afterPos] === '=') {
       return true;
     }
     // Append assignment: keyword+=value
@@ -544,6 +588,12 @@ export class BashBlockParser extends BaseBlockParser {
       }
     }
     return false;
+  }
+
+  // Checks if keyword is part of a hyphenated command name (done-handler, fi-nalize)
+  private isFollowedByHyphen(source: string, position: number, keyword: string): boolean {
+    const afterPos = position + keyword.length;
+    return afterPos < source.length && source[afterPos] === '-';
   }
 
   // Checks if [[ at given position is at command position (not an argument like echo [[)
@@ -572,6 +622,41 @@ export class BashBlockParser extends BaseBlockParser {
         word === 'time'
       ) {
         return true;
+      }
+    }
+    return false;
+  }
+
+  // Checks if position is inside [[ ... ]] conditional expression
+  // Keywords inside [[ ]] are string operands, not commands
+  private isInsideDoubleBracket(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    for (let k = position - 1; k >= 0; k--) {
+      if (this.isInExcludedRegion(k, excludedRegions)) continue;
+      const char = source[k];
+      // Found ]] before [[ -> not inside double bracket
+      if (char === ']' && k > 0 && source[k - 1] === ']') {
+        return false;
+      }
+      // Found [[ -> check if it's at command position
+      if (char === '[' && k > 0 && source[k - 1] === '[') {
+        return this.isDoubleBracketCommand(source, k - 1);
+      }
+    }
+    return false;
+  }
+
+  // Checks if position is inside a Bash extglob pattern ?(…), *(…), +(…), @(…), !(…)
+  private isInsideExtglob(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let parenDepth = 0;
+    for (let k = position - 1; k >= 0; k--) {
+      if (this.isInExcludedRegion(k, excludedRegions)) continue;
+      if (source[k] === ')') {
+        parenDepth++;
+      } else if (source[k] === '(') {
+        if (parenDepth === 0) {
+          return k > 0 && '?*+@!'.includes(source[k - 1]);
+        }
+        parenDepth--;
       }
     }
     return false;

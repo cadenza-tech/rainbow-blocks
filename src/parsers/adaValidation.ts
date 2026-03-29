@@ -271,6 +271,13 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
           }
         }
       }
+      // Check if a semicolon appears after the rightmost for/while on this line
+      // If so, the for/while is a complete statement (e.g., for T use 32;), not a loop prefix
+      for (let ci = lastPrefixEnd; ci < lineText.length; ci++) {
+        if (lineText[ci] === ';' && !callbacks.isInExcludedRegion(lineStartOffset + ci, excludedRegions)) {
+          return true;
+        }
+      }
       // Check if any non-excluded 'loop' appears AFTER the rightmost for/while
       let hasLoopAfterPrefix = false;
       for (const loopMatch of lineText.matchAll(/\bloop\b/gi)) {

@@ -142,6 +142,24 @@ export class FortranBlockParser extends BaseBlockParser {
       if (isTypeSpecifier(afterKeyword, 0)) {
         return false;
       }
+      // Check for constructor call: type(name)(args) - not a block opener
+      let depth = 0;
+      let j = 0;
+      while (j < afterKeyword.length) {
+        if (afterKeyword[j] === '(') depth++;
+        else if (afterKeyword[j] === ')') {
+          depth--;
+          if (depth === 0) break;
+        }
+        j++;
+      }
+      if (depth === 0 && j < afterKeyword.length) {
+        let k = j + 1;
+        while (k < afterKeyword.length && (afterKeyword[k] === ' ' || afterKeyword[k] === '\t')) k++;
+        if (k < afterKeyword.length && afterKeyword[k] === '(') {
+          return false;
+        }
+      }
     }
     return true;
   }
@@ -177,7 +195,25 @@ export class FortranBlockParser extends BaseBlockParser {
         (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
         (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
       ) {
-        return true;
+        // Verify 'then' is at end-of-line (only whitespace, comments, or & follow)
+        // If other content follows, 'then' is a variable name, not a block keyword
+        let k = i + 4;
+        let isBlockThen = true;
+        while (k < source.length) {
+          const thenRegion = this.findExcludedRegionAt(k, excludedRegions);
+          if (thenRegion) {
+            k = thenRegion.end;
+            continue;
+          }
+          if (source[k] === ' ' || source[k] === '\t') {
+            k++;
+            continue;
+          }
+          if (source[k] === '\n' || source[k] === '\r' || source[k] === '&') break;
+          isBlockThen = false;
+          break;
+        }
+        if (isBlockThen) return true;
       }
 
       // Handle line continuation with &
@@ -253,8 +289,10 @@ export class FortranBlockParser extends BaseBlockParser {
     if (char === '*' && this.isAtLineStart(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
-    // Fixed-form: C/c in column 1 is a comment only if followed by non-alphanumeric
-    // In free-form code, identifiers like call, character, count start with c/C
+    // Fixed-form: C/c in column 1 is a comment only when followed by non-alphanumeric
+    // (space, tab, or line end). When followed by an alphanumeric character, treat as
+    // free-form code (keyword or identifier) to support modern Fortran identifiers like
+    // count, compute, current, etc.
     if ((char === 'C' || char === 'c') && this.isAtLineStart(source, pos)) {
       const nextChar = pos + 1 < source.length ? source[pos + 1] : '';
       if (!/[a-zA-Z0-9_]/.test(nextChar)) {

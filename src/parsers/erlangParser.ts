@@ -3,6 +3,12 @@
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 
+// Matches a module attribute followed by '(' at line start: -define(, -module(, -export(, etc.
+const MODULE_ATTR_PAREN_PATTERN = /^[ \t]*-[ \t]*[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\($/;
+
+// Matches -record( specifically at line start (record brace bodies contain real expressions)
+const RECORD_ATTR_PATTERN = /^[ \t]*-[ \t]*record[ \t]*\($/;
+
 export class ErlangBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['begin', 'if', 'case', 'receive', 'try', 'fun', 'maybe'],
@@ -63,15 +69,15 @@ export class ErlangBlockParser extends BaseBlockParser {
     // Module can be a quoted atom: fun 'my.module':func/N
     // Module/Function can be a macro: fun ?MODULE:handler/N, fun ?MY_FUNC/N
     const atomOrIdent = "(?:\\??[a-zA-Z_][a-zA-Z0-9_]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
-    const funRefModPattern = new RegExp(`^[ \\t]+${atomOrIdent}[ \\t]*:[ \\t]*${atomOrIdent}[ \\t]*/[ \\t]*\\d`);
+    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*\\d`);
     if (funRefModPattern.test(afterFun)) {
       return false;
     }
-    if (/^[ \t]+\??[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\/[ \t]*\d/.test(afterFun)) {
+    if (/^\s+\??[a-zA-Z_][a-zA-Z0-9_]*\s*\/\s*\d/.test(afterFun)) {
       return false;
     }
     // fun 'quoted-atom'/Arity or fun ?'quoted-atom'/Arity (function reference without module prefix)
-    const quotedFunRef = /^[ \t]+\??'(?:[^'\\\n\r]|\\.)*'[ \t]*\/[ \t]*\d/;
+    const quotedFunRef = /^\s+\??'(?:[^'\\\n\r]|\\.)*'\s*\/\s*\d/;
     if (quotedFunRef.test(afterFun)) {
       return false;
     }
@@ -272,6 +278,10 @@ export class ErlangBlockParser extends BaseBlockParser {
         if (j < 0 || source[j] === '\n' || source[j] === '\r') {
           return false;
         }
+      }
+      // Reject keywords inside module attribute arguments: -define(...), -module(...), etc.
+      if (this.isInsideModuleAttributeArgs(source, token.startOffset, excludedRegions)) {
+        return false;
       }
       // Reject 'catch' expression prefix (preceded by =, (, [, {, ,, !, operator)
       if (token.value === 'catch' && token.type === 'block_middle') {
@@ -581,6 +591,65 @@ export class ErlangBlockParser extends BaseBlockParser {
     }
 
     return pairs;
+  }
+
+  // Checks if a position is inside parenthesized arguments of a module attribute
+  // e.g. -define(begin, start), -module(begin), -export([end/0]), -ifdef(begin)
+  // For -record, stops at unmatched '{' because record bodies contain real expressions (fun() -> ok end)
+  // For -define and other attributes, tuple bodies inside braces still filter keywords
+  private isInsideModuleAttributeArgs(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let insideUnmatchedBrace = false;
+    for (let i = pos - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ')' || ch === ']') {
+        parenDepth++;
+      } else if (ch === '(' || ch === '[') {
+        if (parenDepth > 0) {
+          parenDepth--;
+        } else if (ch === '(') {
+          if (!MODULE_ATTR_PAREN_PATTERN.test(this.getTextFromLineStart(source, i))) {
+            // This '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
+            // Continue scanning backward to find the enclosing module attribute '('.
+            continue;
+          }
+          // For -record, unmatched braces contain real expressions
+          if (insideUnmatchedBrace && RECORD_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
+            return false;
+          }
+          return true;
+        }
+      } else if (ch === '}') {
+        braceDepth++;
+      } else if (ch === '{') {
+        if (braceDepth > 0) {
+          braceDepth--;
+        } else {
+          // Unmatched '{' at depth 0: check if this is a record (#name{...}) or map (#{...}) literal
+          // Record/map brace bodies contain real expressions that should not be filtered
+          let j = i - 1;
+          while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) j--;
+          if (j >= 0 && source[j] === '#') {
+            return false;
+          }
+          // Non-record/map brace (tuple in -define): continue scanning
+          insideUnmatchedBrace = true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private getTextFromLineStart(source: string, pos: number): string {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    return source.slice(lineStart, pos + 1);
   }
 
   // Matches single-quoted atom with escape handling

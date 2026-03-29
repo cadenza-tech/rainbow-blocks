@@ -143,7 +143,7 @@ export class CobolBlockParser extends BaseBlockParser {
             const word = nextWord[1].toLowerCase();
             if (word === `end-${lowerKeyword}`) {
               // The next word is the matching END-PERFORM closer, not a paragraph name
-            } else if (word !== 'until' && word !== 'varying' && word !== 'with' && word !== 'times') {
+            } else if (word !== 'until' && word !== 'varying' && word !== 'with') {
               const afterNextWord = afterInner.slice(nextWord[0].length);
               // Check for PERFORM <variable> TIMES pattern
               const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);

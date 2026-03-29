@@ -68,7 +68,7 @@ export function isValidProcedureOpen(
 // Skips characters inside string literals (single/double quoted with doubled-quote escaping)
 // and comments (! to end of line)
 // Follows & continuation lines backward to handle multi-line expressions
-function isInsideParentheses(source: string, position: number): boolean {
+export function isInsideParentheses(source: string, position: number): boolean {
   // Find start of current physical line
   let lineStart = position;
   while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
@@ -260,6 +260,156 @@ function findContinuationLineStart(source: string, currentLineStart: number): nu
   }
 }
 
+// Fortran logical/relational operator patterns: .eq., .ne., .lt., .gt., .le., .ge.,
+// .and., .or., .not., .eqv., .neqv.
+const FORTRAN_DOT_OPERATOR_PATTERN = /\.(eq|ne|lt|gt|le|ge|and|or|not|eqv|neqv)\.$/i;
+
+// Fortran statement keywords that take identifiers as arguments
+// When `end` or a compound-end keyword appears after one of these, it is an entity name
+const FORTRAN_STATEMENT_KEYWORDS = new Set([
+  'call',
+  'save',
+  'data',
+  'dimension',
+  'goto',
+  'common',
+  'equivalence',
+  'namelist',
+  'external',
+  'intrinsic',
+  'implicit'
+]);
+
+// Skips backward across & continuation line boundaries
+// Given position i pointing at a newline character, checks if the previous line
+// ends with & (outside comments/strings). If so, returns the position of the last
+// non-whitespace character before the &. Otherwise returns i unchanged.
+function skipContinuationBackward(source: string, i: number): number {
+  // Find the start of the line after the newline (the keyword's physical line)
+  let keywordLineStart = i + 1;
+  // For \r\n pair where i points at \r, advance past \n
+  if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+    keywordLineStart = i + 2;
+  }
+
+  const prevLineStart = findContinuationLineStart(source, keywordLineStart);
+  if (prevLineStart < 0) return i;
+
+  // Previous line ends with &. Find the last non-whitespace before &.
+  let prevEnd = keywordLineStart - 1;
+  // Skip line terminator
+  if (prevEnd >= 1 && source[prevEnd] === '\n' && source[prevEnd - 1] === '\r') {
+    prevEnd -= 2;
+  } else if (prevEnd >= 0) {
+    prevEnd--;
+  }
+
+  // Scan forward to find ! comment boundary (skipping strings)
+  let codeEnd = prevEnd;
+  let inString = false;
+  let quoteChar = '';
+  for (let c = prevLineStart; c <= prevEnd; c++) {
+    if (inString) {
+      if (source[c] === quoteChar) {
+        if (c + 1 <= prevEnd && source[c + 1] === quoteChar) {
+          c++;
+        } else {
+          inString = false;
+        }
+      }
+    } else if (source[c] === "'" || source[c] === '"') {
+      inString = true;
+      quoteChar = source[c];
+    } else if (source[c] === '!') {
+      codeEnd = c - 1;
+      break;
+    }
+  }
+
+  // Find & at end of code portion
+  while (codeEnd >= prevLineStart && (source[codeEnd] === ' ' || source[codeEnd] === '\t')) {
+    codeEnd--;
+  }
+  if (codeEnd < prevLineStart || source[codeEnd] !== '&') return i;
+
+  // Return position of last non-whitespace character before &
+  let result = codeEnd - 1;
+  while (result >= prevLineStart && (source[result] === ' ' || source[result] === '\t')) {
+    result--;
+  }
+  return result;
+}
+
+// Checks if the keyword is preceded by an expression-context token
+// (operator, assignment =, or closing paren) indicating it is used
+// as a variable in an expression, not as a block closer.
+// Follows & continuation lines backward when the keyword is at a line boundary.
+function isPrecededByOperator(source: string, position: number): boolean {
+  let i = position - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  // Skip leading & on continuation line (e.g., "x = &\n  &end")
+  if (i >= 0 && source[i] === '&') {
+    i--;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+  }
+  // Follow & continuation backward when at a line boundary
+  if (i >= 0 && (source[i] === '\n' || source[i] === '\r')) {
+    i = skipContinuationBackward(source, i);
+  }
+  if (i < 0) return false;
+  const char = source[i];
+  // Arithmetic operators: +, -, *, /
+  // Component access operator: % (derived type member access like obj%enddo)
+  if (char === '+' || char === '-' || char === '/' || char === '*' || char === '%') {
+    return true;
+  }
+  // Comparison operators: >, <
+  if (char === '>' || char === '<') {
+    return true;
+  }
+  // Comma: I/O list separator (e.g., print *, end), but only when comma is
+  // not at statement start (continuation lines may start with comma inside parens)
+  if (char === ',') {
+    let c = i - 1;
+    while (c >= 0 && (source[c] === ' ' || source[c] === '\t')) {
+      c--;
+    }
+    if (c >= 0 && source[c] !== '\n' && source[c] !== '\r') {
+      return true;
+    }
+  }
+  // Closing paren: I/O format spec or function result context (e.g., write(*,*) end)
+  if (char === ')') return true;
+  // Assignment operator (x = end) or comparison operators (<=, >=, ==, /=)
+  // All indicate expression context where keyword is used as a variable
+  if (char === '=') {
+    return true;
+  }
+  // Fortran dot-operators: .eq., .ne., .lt., .gt., .le., .ge., .and., .or., .not., .eqv., .neqv.
+  if (char === '.') {
+    const textBefore = source.slice(Math.max(0, i - 7), i + 1);
+    if (FORTRAN_DOT_OPERATOR_PATTERN.test(textBefore)) {
+      return true;
+    }
+  }
+  // Fortran statement keywords that take identifiers: call end, save enddo, etc.
+  if (/[a-zA-Z]/.test(char)) {
+    let wordStart = i;
+    while (wordStart > 0 && /[a-zA-Z]/.test(source[wordStart - 1])) {
+      wordStart--;
+    }
+    const word = source.slice(wordStart, i + 1).toLowerCase();
+    if (FORTRAN_STATEMENT_KEYWORDS.has(word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Validates block close keywords
 // Rejects 'end' used as variable name (followed by = but not ==) or component access (% before end)
 export function isValidFortranBlockClose(keyword: string, source: string, position: number): boolean {
@@ -267,10 +417,15 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
   if (isInsideParentheses(source, position)) {
     return false;
   }
+  // Reject end/compound-end preceded by operator or comma (used as variable in expression)
+  if (isPrecededByOperator(source, position)) {
+    return false;
+  }
   // For compound end keywords (enddo, endif, etc.), check after the full keyword
   const lowerKw = keyword.toLowerCase();
   if (lowerKw !== 'end' && lowerKw.startsWith('end')) {
     let i = position + keyword.length;
+    const firstCharAfterKw = i < source.length ? source[i] : '';
     while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
       i++;
     }
@@ -305,8 +460,16 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
       if (k < source.length && source[k] === '=' && (k + 1 >= source.length || source[k + 1] !== '=')) {
         return false;
       }
+      // Keyword directly followed by ( with no = or % after parens: function call pattern
+      if (firstCharAfterKw === '(') {
+        return false;
+      }
     }
     if (i < source.length && source[i] === '%') {
+      return false;
+    }
+    // Compound-end keyword followed by // is string concatenation, not block close
+    if (i + 1 < source.length && source[i] === '/' && source[i + 1] === '/') {
       return false;
     }
     return true;
@@ -328,6 +491,10 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
   }
   // end%component is derived type component access, not block close
   if (i < source.length && source[i] === '%') {
+    return false;
+  }
+  // end // "world" is string concatenation, not block close
+  if (i + 1 < source.length && source[i] === '/' && source[i + 1] === '/') {
     return false;
   }
   // Handle & continuation: end &\n  = ... (assignment across lines)
@@ -352,6 +519,10 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
         i++;
       }
     }
+  }
+  // end &\n// "text" (string concatenation across continuation)
+  if (i + 1 < source.length && source[i] === '/' && source[i + 1] === '/') {
+    return false;
   }
   // end &\n%component (derived type component access across continuation)
   if (i < source.length && source[i] === '%') {

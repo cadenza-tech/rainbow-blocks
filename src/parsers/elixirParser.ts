@@ -14,6 +14,21 @@ import {
   skipNestedTripleQuotedString
 } from './elixirHelpers';
 
+// Definition keywords that should not be treated as block opens after '..' range operator
+const DEFINITION_KEYWORDS = new Set([
+  'def',
+  'defp',
+  'defmodule',
+  'defmacro',
+  'defmacrop',
+  'defguard',
+  'defguardp',
+  'defprotocol',
+  'defimpl',
+  'fn',
+  'quote'
+]);
+
 export class ElixirBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
@@ -235,6 +250,12 @@ export class ElixirBlockParser extends BaseBlockParser {
 
     // Check for keyword argument (e.g., if:)
     if (this.isKeywordArgument(source, position + keyword.length)) {
+      return false;
+    }
+
+    // Reject definition keywords preceded by '..' range operator (e.g., 1..def)
+    // Control flow keywords (if, case, etc.) are valid after '..' since they return values
+    if (position >= 2 && source[position - 1] === '.' && source[position - 2] === '.' && DEFINITION_KEYWORDS.has(keyword)) {
       return false;
     }
 
@@ -524,6 +545,16 @@ export class ElixirBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Checks if a block keyword is used as a bare value (followed by comma)
+  // e.g., "if cond, do: v" - "cond" is a value, not starting a nested block
+  private isKeywordUsedAsValue(source: string, afterPos: number): boolean {
+    let j = afterPos;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+      j++;
+    }
+    return j < source.length && source[j] === ',';
+  }
+
   // Checks if this is a do: one-liner
   private isDoColonOneLiner(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const doColonKeywords = [
@@ -600,7 +631,7 @@ export class ElixirBlockParser extends BaseBlockParser {
           if (
             word === 'end' &&
             innerBlockDepth > 0 &&
-            !/[?!]/.test(source[i + word.length] || '') &&
+            !/[?!:]/.test(source[i + word.length] || '') &&
             !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@')) &&
             !this.isAdjacentToUnicodeLetter(source, i, 3)
           ) {
@@ -608,7 +639,7 @@ export class ElixirBlockParser extends BaseBlockParser {
             i += word.length;
             continue;
           }
-          if (this.isBlockKeywordAt(source, i)) {
+          if (this.isBlockKeywordAt(source, i) && !this.isKeywordUsedAsValue(source, i + word.length)) {
             innerBlockDepth++;
             i += word.length;
             continue;
@@ -616,12 +647,6 @@ export class ElixirBlockParser extends BaseBlockParser {
           i += word.length;
           continue;
         }
-      }
-
-      // Skip do/do: that belongs to inner blocks
-      if (innerBlockDepth > 0) {
-        i++;
-        continue;
       }
 
       const slice4 = source.slice(i, i + 4);
@@ -643,6 +668,21 @@ export class ElixirBlockParser extends BaseBlockParser {
         const afterDo = source[doStart + 2];
         if (afterDo !== undefined && /[a-zA-Z0-9_]/.test(afterDo)) {
           i++;
+          continue;
+        }
+
+        // Track do/do: for inner blocks to decrement innerBlockDepth
+        if (innerBlockDepth > 0) {
+          let j = doStart + 2;
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+            j++;
+          }
+          if (source[j] === ':' && j === doStart + 2) {
+            // do: one-liner for inner block
+            innerBlockDepth--;
+          }
+          // Both do: and bare do belong to inner blocks; skip past "do"
+          i = doStart + 2;
           continue;
         }
 
@@ -668,6 +708,12 @@ export class ElixirBlockParser extends BaseBlockParser {
         // Bare 'do' found (not do:) - this is a block do, not a one-liner
         return false;
       }
+
+      // Skip non-do characters that belong to inner blocks
+      if (innerBlockDepth > 0) {
+        i++;
+        continue;
+      }
       i++;
     }
 
@@ -679,7 +725,20 @@ export class ElixirBlockParser extends BaseBlockParser {
   private isPrecededByIdentifier(source: string, pos: number): boolean {
     if (pos === 0) return false;
     const prev = source[pos - 1];
-    if (!/[a-zA-Z0-9_]/.test(prev)) return false;
+    if (!/[a-zA-Z0-9_]/.test(prev)) {
+      // Check for Unicode letter (Elixir 1.5+ allows Unicode identifiers)
+      if (prev.charCodeAt(0) > 127 && /\p{L}/u.test(prev)) return true;
+      // Check for surrogate pair: prev may be low surrogate
+      if (pos >= 2) {
+        const high = source.charCodeAt(pos - 2);
+        const low = prev.charCodeAt(0);
+        if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) {
+          const codePoint = (high - 0xd800) * 0x400 + (low - 0xdc00) + 0x10000;
+          if (/\p{L}/u.test(String.fromCodePoint(codePoint))) return true;
+        }
+      }
+      return false;
+    }
     // Scan back past letter characters to check if they are sigil modifiers
     let j = pos - 1;
     while (j >= 0 && /[a-zA-Z]/.test(source[j])) {

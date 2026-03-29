@@ -401,7 +401,26 @@ export function isPostfixConditional(source: string, position: number, excludedR
   }
 
   // Block keyword before means not postfix
-  const precedingBlockKeywords = ['do', 'then', 'else', 'elsif', 'begin', 'rescue', 'ensure', 'when', 'in', 'not', 'and', 'or'];
+  const precedingBlockKeywords = [
+    'if',
+    'unless',
+    'while',
+    'until',
+    'for',
+    'case',
+    'do',
+    'then',
+    'else',
+    'elsif',
+    'begin',
+    'rescue',
+    'ensure',
+    'when',
+    'in',
+    'not',
+    'and',
+    'or'
+  ];
 
   const normalizedBefore = beforeKeyword.replace(/[ \t]+/g, ' ');
   for (const kw of precedingBlockKeywords) {
