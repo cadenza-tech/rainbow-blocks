@@ -492,29 +492,73 @@ export class PascalBlockParser extends BaseBlockParser {
           i -= 5;
           continue;
         }
-        // Skip 'class' as method modifier (followed by function, procedure, var, property, constructor, destructor, operator)
+        // Skip 'class' as forward declaration (class; or class(Parent);)
+        if (this.isForwardDeclarationAfter(source, i + 1, excludedRegions)) {
+          i -= 5;
+          continue;
+        }
+        // Skip 'class of' (class reference type, no matching end)
+        // Also skips excluded regions (comments) between 'class' and 'of'
         {
-          let cj = i + 2; // i points at last char of 'class', move past it
-          while (cj < source.length) {
-            if (this.isInExcludedRegion(cj, excludedRegions)) {
-              const region = this.findExcludedRegionAt(cj, excludedRegions);
-              if (region) {
-                cj = region.end;
-                continue;
-              }
-              cj++;
+          let ck = i + 1;
+          while (ck < source.length) {
+            if (source[ck] === ' ' || source[ck] === '\t' || source[ck] === '\n' || source[ck] === '\r') {
+              ck++;
               continue;
             }
-            if (source[cj] === ' ' || source[cj] === '\t' || source[cj] === '\n' || source[cj] === '\r') {
-              cj++;
-              continue;
+            if (this.isInExcludedRegion(ck, excludedRegions)) {
+              const rgn = this.findExcludedRegionAt(ck, excludedRegions);
+              if (rgn) {
+                ck = rgn.end;
+                continue;
+              }
             }
             break;
           }
-          const afterClass = lowerSource.slice(cj, cj + 12);
-          if (/^(function|procedure|var|property|constructor|destructor|operator)\b/.test(afterClass)) {
+          if (ck + 1 < source.length && lowerSource.slice(ck, ck + 2) === 'of' && (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))) {
             i -= 5;
             continue;
+          }
+        }
+        // Check if preceded by '=' (type definition): skip method modifier check
+        {
+          let eqCheck = ci;
+          // Skip type modifiers (abstract, sealed, packed) to find '='
+          if (eqCheck >= 0 && /[a-zA-Z]/.test(source[eqCheck])) {
+            let wordStart = eqCheck;
+            while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
+            const word = lowerSource.slice(wordStart, eqCheck + 1);
+            if (TYPE_MODIFIERS.includes(word)) {
+              eqCheck = wordStart - 1;
+              while (eqCheck >= 0 && (source[eqCheck] === ' ' || source[eqCheck] === '\t' || source[eqCheck] === '\n' || source[eqCheck] === '\r'))
+                eqCheck--;
+            }
+          }
+          // If preceded by '=', it's a type definition - don't check for method modifier
+          if (eqCheck < 0 || source[eqCheck] !== '=') {
+            // Skip 'class' as method modifier (followed by function, procedure, var, property, constructor, destructor, operator)
+            let cj = i + 2;
+            while (cj < source.length) {
+              if (this.isInExcludedRegion(cj, excludedRegions)) {
+                const region = this.findExcludedRegionAt(cj, excludedRegions);
+                if (region) {
+                  cj = region.end;
+                  continue;
+                }
+                cj++;
+                continue;
+              }
+              if (source[cj] === ' ' || source[cj] === '\t' || source[cj] === '\n' || source[cj] === '\r') {
+                cj++;
+                continue;
+              }
+              break;
+            }
+            const afterClass = lowerSource.slice(cj, cj + 12);
+            if (/^(function|procedure|var|property|constructor|destructor|operator)\b/.test(afterClass)) {
+              i -= 5;
+              continue;
+            }
           }
         }
         if (depth > 0) depth--;
@@ -544,6 +588,11 @@ export class PascalBlockParser extends BaseBlockParser {
           break;
         }
         if (ii >= 0 && source[ii] === ':') {
+          i -= 9;
+          continue;
+        }
+        // Skip 'interface' as forward declaration (interface; or interface(IParent);)
+        if (this.isForwardDeclarationAfter(source, i + 1, excludedRegions)) {
           i -= 9;
           continue;
         }
@@ -672,8 +721,8 @@ export class PascalBlockParser extends BaseBlockParser {
         while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
         if (j < source.length && source[j] === ':') {
           j++;
-          // Skip whitespace after ':'
-          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+          // Skip whitespace and newlines after ':'
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) j++;
           // '(' indicates variant case field list
           return j < source.length && source[j] === '(';
         }
@@ -818,5 +867,66 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     return pairs;
+  }
+
+  // Checks if a class/interface keyword is a forward declaration (followed by ';' or '(Parent);')
+  private isForwardDeclarationAfter(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = pos;
+    // Skip whitespace, newlines, and excluded regions (comments)
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+        j++;
+        continue;
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (j >= source.length) return false;
+    // class; or interface;
+    if (source[j] === ';') return true;
+    // class(TBase); or interface(IBase); or class(TBase, IFace);
+    if (source[j] === '(') {
+      let depth = 1;
+      j++;
+      while (j < source.length && depth > 0) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          const region = this.findExcludedRegionAt(j, excludedRegions);
+          if (region) {
+            j = region.end;
+            continue;
+          }
+        }
+        if (source[j] === '(') depth++;
+        else if (source[j] === ')') depth--;
+        j++;
+      }
+      // Skip whitespace, newlines, and excluded regions after closing paren
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          const region = this.findExcludedRegionAt(j, excludedRegions);
+          if (region) {
+            j = region.end;
+            continue;
+          }
+          j++;
+          continue;
+        }
+        if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+          j++;
+          continue;
+        }
+        break;
+      }
+      if (j < source.length && source[j] === ';') return true;
+    }
+    return false;
   }
 }

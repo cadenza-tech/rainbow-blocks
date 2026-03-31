@@ -235,7 +235,10 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     if (keyword === 'fork') {
-      return this.isValidForkOpen(source, position, excludedRegions);
+      if (!this.isValidForkOpen(source, position, excludedRegions)) {
+        return false;
+      }
+      // Fall through to label colon and other checks below
     }
 
     // Reject 'property' or 'sequence' when preceded by assertion verbs
@@ -250,8 +253,18 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject modifier-prefixed keywords (virtual interface, extern module/function/task, typedef class)
+    // Reject modifier-prefixed keywords (extern module/function/task, typedef class, pure virtual function/task)
     if (this.isPrecededByModifierKeyword(source, position, keyword)) {
+      return false;
+    }
+
+    // Reject function/task in DPI import/export declarations (no body)
+    if ((keyword === 'function' || keyword === 'task') && this.isOnDpiLine(source, position)) {
+      return false;
+    }
+
+    // Reject interface used as port type inside parenthesized port list
+    if (keyword === 'interface' && this.isInsideParens(source, position, excludedRegions)) {
       return false;
     }
 
@@ -352,6 +365,13 @@ export class VerilogBlockParser extends BaseBlockParser {
       const region = this.findExcludedRegionAt(k, excludedRegions);
       if (region) {
         k = region.start - 1;
+        // After skipping a block comment, skip whitespace before it
+        // But not after escaped identifiers (\name) which are word-like excluded regions
+        if (source[region.start] !== '\\') {
+          while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+            k--;
+          }
+        }
       } else {
         k--;
       }
@@ -370,18 +390,17 @@ export class VerilogBlockParser extends BaseBlockParser {
   }
 
   // Returns true if keyword is preceded by a modifier keyword that indicates a non-block usage
-  // (e.g., virtual interface, extern module, typedef class)
+  // (e.g., extern module/function/task, typedef class, pure virtual function/task)
   private isPrecededByModifierKeyword(source: string, position: number, keyword: string): boolean {
     const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
-      interface: ['virtual'],
-      class: ['virtual', 'typedef'],
-      function: ['virtual', 'extern'],
-      task: ['virtual', 'extern'],
+      class: ['typedef', 'extern'],
+      interface: ['extern'],
+      function: ['extern'],
+      task: ['extern'],
       module: ['extern'],
       program: ['extern']
     };
     const validModifiers = MODIFIER_MAP[keyword];
-    if (!validModifiers) return false;
 
     let j = position - 1;
     while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
@@ -394,12 +413,61 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     if (wordEnd === j) return false;
     const word = source.slice(j + 1, wordEnd + 1);
-    if (validModifiers.includes(word)) {
+
+    // For function/task: "pure virtual function/task" has no body, but "virtual function/task" does
+    if (word === 'virtual' && (keyword === 'function' || keyword === 'task')) {
+      return this.isPrecededByWord(source, j, 'pure');
+    }
+
+    if (validModifiers?.includes(word)) {
       if (j < 0 || !/[a-zA-Z0-9_$]/.test(source[j])) {
         return true;
       }
     }
     return false;
+  }
+
+  // Returns true if the position is preceded (skipping whitespace) by the given word with a word boundary
+  private isPrecededByWord(source: string, pos: number, targetWord: string): boolean {
+    let j = pos;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    if (j < 0) return false;
+    const wordEnd = j;
+    while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) {
+      j--;
+    }
+    if (wordEnd === j) return false;
+    const word = source.slice(j + 1, wordEnd + 1);
+    if (word === targetWord) {
+      return j < 0 || !/[a-zA-Z0-9_$]/.test(source[j]);
+    }
+    return false;
+  }
+
+  // Returns true if function/task at position is on a DPI import/export line
+  // (e.g., import "DPI-C" function void f(); or export "DPI-C" task t;)
+  private isOnDpiLine(source: string, position: number): boolean {
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    const lineBeforeKeyword = source.slice(lineStart, position);
+    return /^\s*(?:import|export)\b/.test(lineBeforeKeyword);
+  }
+
+  // Returns true if position is inside unmatched parentheses (e.g., port list)
+  private isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    for (let i = 0; i < position; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      if (source[i] === '(') depth++;
+      else if (source[i] === ')') {
+        if (depth > 0) depth--;
+      }
+    }
+    return depth > 0;
   }
 
   // Scans forward from a control keyword to find 'begin' before any statement terminator

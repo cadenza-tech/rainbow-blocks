@@ -314,7 +314,15 @@ export class AdaBlockParser extends BaseBlockParser {
               }
               // Stop scanning at lines that are not type declaration continuations
               // Continue if inside parenthesized discriminant (scanParenDepth > 0) or line starts with (
+              // Also continue past plain identifier lines (e.g., type name on its own line)
               if (!isTypeDecl && scanParenDepth <= 0 && !/^\(/.test(prevLine)) {
+                // Allow one extra line if this line is just an identifier (type name)
+                if (/^[a-zA-Z_][a-zA-Z0-9_]*[ \t]*$/.test(prevLine)) {
+                  scanPos = prevStart - 1;
+                  if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+                  if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                  continue;
+                }
                 break;
               }
               scanPos = prevStart - 1;
