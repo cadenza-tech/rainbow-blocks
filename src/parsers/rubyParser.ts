@@ -673,7 +673,7 @@ export class RubyBlockParser extends BaseBlockParser {
     // Symbol must start with letter, underscore, quote, or operator character
     // Operator symbols: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
     // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
-    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^\[`]/.test(nextChar)) {
+    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^[`]/.test(nextChar)) {
       return false;
     }
 
@@ -743,7 +743,7 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // Operator symbol: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
     // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
-    if (/[+\-*/%<>=!~&|^\[`]/.test(nextChar)) {
+    if (/[+\-*/%<>=!~&|^[`]/.test(nextChar)) {
       if (nextChar === '`') return { start: pos, end: pos + 2 };
       if (nextChar === '[') {
         let i = pos + 2;
@@ -850,7 +850,12 @@ export class RubyBlockParser extends BaseBlockParser {
   // Matches double-quoted string with #{} interpolation
   private matchInterpolatedString(source: string, pos: number): ExcludedRegion {
     const heredocState: HeredocState = { pendingEnd: -1 };
-    const result = matchInterpolatedString(source, pos, (s, p) => skipInterpolationShared(s, p, this.interpolationHandlers, heredocState));
+    const result = matchInterpolatedString(
+      source,
+      pos,
+      (s, p) => skipInterpolationShared(s, p, this.interpolationHandlers, heredocState),
+      heredocState
+    );
     if (heredocState.pendingEnd > result.end) {
       return { start: result.start, end: heredocState.pendingEnd };
     }

@@ -543,9 +543,10 @@ export class CobolBlockParser extends BaseBlockParser {
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
       i--;
     }
-    // Check if preceded by closing == of another pseudo-text (e.g., ==text== BY ==replacement==)
+    // If preceded by closing == of another pseudo-text, scan backward through the == chain
+    // to find the actual context keyword (REPLACING/REPLACE) and verify COPY context
     if (i >= 1 && source[i] === '=' && source[i - 1] === '=') {
-      return true;
+      return this.isPrecededByReplacingOrReplace(source, i);
     }
     // Extract the word ending at position i
     const wordEnd = i + 1;
@@ -559,24 +560,93 @@ export class CobolBlockParser extends BaseBlockParser {
     }
     // REPLACING (in COPY ... REPLACING ==old== BY ==new==) - must be in a COPY statement
     if (word === 'REPLACING') {
-      const beforeReplacing = source.slice(0, i + 1).toUpperCase();
-      const lastPeriod = beforeReplacing.lastIndexOf('.');
-      const statement = beforeReplacing.slice(lastPeriod + 1);
-      return /\bCOPY\b/.test(statement);
+      return this.isInCopyStatement(source, i);
     }
     // ALSO (in REPLACE ALSO ==old== BY ==new==) - must be preceded by REPLACE, not EVALUATE
     if (word === 'ALSO') {
       return this.isPrecededByKeyword(source, i, 'REPLACE');
     }
-    // BY (in ==old== BY ==new==) - must be preceded by REPLACING, REPLACE, or ALSO in a COPY REPLACING / REPLACE context
+    // BY (in ==old== BY ==new==) - must be preceded by REPLACING (in COPY context), REPLACE, or ALSO
     if (word === 'BY') {
-      return (
-        this.isPrecededByKeyword(source, i, 'REPLACING') ||
-        this.isPrecededByKeyword(source, i, 'REPLACE') ||
-        this.isPrecededByKeyword(source, i, 'ALSO')
-      );
+      return this.isPrecededByReplacingOrReplace(source, i);
     }
     return false;
+  }
+
+  // Checks if position is within a COPY statement by looking for COPY before the last period
+  // Scans backward for COPY, skipping content inside strings, comments, and directive lines
+  private isInCopyStatement(source: string, posBeforeKeyword: number): boolean {
+    const beforeKeyword = source.slice(0, posBeforeKeyword + 1);
+    const lastPeriod = beforeKeyword.lastIndexOf('.');
+    const stmtStart = lastPeriod + 1;
+    // Search for COPY word-boundary match, verifying each match is not inside a string or comment
+    const copyPattern = /\bCOPY\b/gi;
+    const statement = beforeKeyword.slice(stmtStart);
+    for (const match of statement.matchAll(copyPattern)) {
+      const absPos = stmtStart + match.index;
+      // Skip if on a fixed-format comment line or >> compiler directive line
+      if (this.isOnExcludedLine(source, absPos)) continue;
+      // Quick check: skip if inside a quoted string (scan backward for unmatched quote)
+      let inString = false;
+      for (let k = stmtStart; k < absPos; k++) {
+        if (source[k] === "'" || source[k] === '"') {
+          const quote = source[k];
+          k++;
+          while (k < absPos) {
+            if (source[k] === quote) {
+              if (k + 1 < source.length && source[k + 1] === quote) {
+                k += 2;
+                continue;
+              }
+              break;
+            }
+            k++;
+          }
+          if (k >= absPos) {
+            inString = true;
+            break;
+          }
+        } else if (source[k] === '*' && k + 1 < source.length && source[k + 1] === '>') {
+          // Skip inline comment *> to end of line
+          k += 2;
+          while (k < absPos && source[k] !== '\n' && source[k] !== '\r') k++;
+          if (k >= absPos) {
+            inString = true;
+            break;
+          }
+        }
+      }
+      if (!inString) return true;
+    }
+    return false;
+  }
+
+  // Checks if the given position is on a fixed-format comment line or >> compiler directive line
+  private isOnExcludedLine(source: string, pos: number): boolean {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    // Check fixed-format column 7 comment line
+    if (this.isFixedFormatCommentLine(source, lineStart)) return true;
+    // Check >> compiler directive line (skip leading whitespace)
+    let j = lineStart;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j + 1 < source.length && source[j] === '>' && source[j + 1] === '>') return true;
+    return false;
+  }
+
+  // Scans backward through pseudo-text blocks and BY keywords to find REPLACING or REPLACE
+  // For REPLACING, additionally verifies it is part of a COPY statement
+  private isPrecededByReplacingOrReplace(source: string, posEnd: number): boolean {
+    const replacingPos = this.findPrecedingKeywordPosition(source, posEnd, 'REPLACING');
+    if (replacingPos >= 0) {
+      return this.isInCopyStatement(source, replacingPos);
+    }
+    if (this.isPrecededByKeyword(source, posEnd, 'REPLACE')) {
+      return true;
+    }
+    return this.isPrecededByKeyword(source, posEnd, 'ALSO');
   }
 
   // Scans backward from position i to check if the preceding word matches target keyword
@@ -639,6 +709,70 @@ export class CobolBlockParser extends BaseBlockParser {
     }
     const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
     return prevWord === target;
+  }
+
+  // Like isPrecededByKeyword but returns the position before the found keyword (for context verification)
+  // Returns -1 if the target keyword is not found
+  private findPrecedingKeywordPosition(source: string, i: number, target: string): number {
+    let j = i;
+    // Skip whitespace
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    if (j < 0) {
+      return -1;
+    }
+    // Skip multiple consecutive pseudo-text blocks and BY keywords
+    while (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
+      j -= 2;
+      // Skip pseudo-text content to find opening ==
+      while (j >= 1) {
+        if (source[j] === '=' && source[j - 1] === '=') {
+          j -= 2;
+          break;
+        }
+        j--;
+      }
+      // Skip whitespace
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+        j--;
+      }
+      if (j < 0) {
+        return -1;
+      }
+      // If we landed on another closing ==, let the loop handle it directly
+      if (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
+        continue;
+      }
+      // Check if the preceding word is BY; if so, skip it and continue the loop
+      const byEnd = j + 1;
+      let byStart = j;
+      while (byStart >= 0 && /[a-zA-Z]/.test(source[byStart])) {
+        byStart--;
+      }
+      const byWord = source.slice(byStart + 1, byEnd).toUpperCase();
+      if (byWord !== 'BY') {
+        break;
+      }
+      // Skip past BY and whitespace, then continue to next pseudo-text block
+      j = byStart;
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+        j--;
+      }
+      if (j < 0) {
+        return -1;
+      }
+    }
+    // Extract the preceding word
+    const wordEnd = j + 1;
+    while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
+      j--;
+    }
+    const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
+    if (prevWord === target) {
+      return j;
+    }
+    return -1;
   }
 
   // Match pseudo-text delimiters ==...==

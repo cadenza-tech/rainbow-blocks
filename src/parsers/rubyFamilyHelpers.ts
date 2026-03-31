@@ -81,8 +81,14 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
 }
 
 // Matches a double-quoted interpolated string starting at pos
-export function matchInterpolatedString(source: string, pos: number, skipInterpolation: SkipInterpolationFn): ExcludedRegion {
+export function matchInterpolatedString(
+  source: string,
+  pos: number,
+  skipInterpolation: SkipInterpolationFn,
+  heredocState?: HeredocState
+): ExcludedRegion {
   let i = pos + 1;
+  let pendingHeredocEnd = -1;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
@@ -91,9 +97,24 @@ export function matchInterpolatedString(source: string, pos: number, skipInterpo
     // Handle #{} interpolation
     if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
       i = skipInterpolation(source, i + 2);
+      // Track pending heredoc body to skip later
+      if (heredocState && heredocState.pendingEnd > i) {
+        pendingHeredocEnd = heredocState.pendingEnd;
+        heredocState.pendingEnd = -1;
+      }
+      continue;
+    }
+    // Skip heredoc body: at newline, if a heredoc is pending, jump past it
+    if (pendingHeredocEnd > i && (source[i] === '\n' || source[i] === '\r')) {
+      i = pendingHeredocEnd;
+      pendingHeredocEnd = -1;
       continue;
     }
     if (source[i] === '"') {
+      // Propagate pending heredoc end back to heredocState so the caller can skip the body
+      if (pendingHeredocEnd > i + 1 && heredocState) {
+        heredocState.pendingEnd = pendingHeredocEnd;
+      }
       return { start: pos, end: i + 1 };
     }
     i++;

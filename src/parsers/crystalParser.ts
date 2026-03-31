@@ -130,7 +130,11 @@ export class CrystalBlockParser extends BaseBlockParser {
         ) {
           const quoteType = source[i + 3];
           i = i + 4;
-          // Skip closing quote of empty heredoc identifier (e.g., <<-"" or <<-'')
+          // Scan forward to skip the closing quote on the same line
+          while (i < source.length && source[i] !== quoteType && source[i] !== '\n' && source[i] !== '\r') {
+            i++;
+          }
+          // Skip the closing quote itself
           if (i < source.length && source[i] === quoteType) {
             i++;
           }
@@ -165,7 +169,7 @@ export class CrystalBlockParser extends BaseBlockParser {
 
     // Question mark char literal (?x, ?\n, ?\uXXXX, etc.)
     // Skip when followed by " or ' — that is a ternary operator before a string, not a char literal
-    if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_]/.test(source[pos - 1]))) {
+    if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_)\]}]/.test(source[pos - 1]))) {
       const nextChar = source[pos + 1];
       if (nextChar === '"' || nextChar === "'") return null;
       if (nextChar === '\\' && pos + 2 < source.length) {
@@ -497,7 +501,12 @@ export class CrystalBlockParser extends BaseBlockParser {
   // Matches double-quoted string with #{} interpolation
   private matchInterpolatedString(source: string, pos: number): ExcludedRegion {
     const heredocState: HeredocState = { pendingEnd: -1 };
-    const result = matchInterpolatedString(source, pos, (s, p) => skipInterpolationShared(s, p, this.interpolationHandlers, heredocState));
+    const result = matchInterpolatedString(
+      source,
+      pos,
+      (s, p) => skipInterpolationShared(s, p, this.interpolationHandlers, heredocState),
+      heredocState
+    );
     if (heredocState.pendingEnd > result.end) {
       return { start: result.start, end: heredocState.pendingEnd };
     }
