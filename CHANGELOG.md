@@ -5,6 +5,47 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.23] - 2026-03-31
+
+### Fixed
+
+- Base: Distinguish `block_middle` and `block_open` intermediates in nest level calculation for correct sibling vs child detection
+- Ada: Continue type declaration backward scan past plain identifier lines (type name on its own line)
+- AppleScript: Reject `if` keyword nested inside another `if`/`repeat` condition expression
+- AppleScript: Fix `set`/`copy` keyword-as-variable patterns to allow preceding content on the same line
+- Bash: Fix command position detection across line continuations with excluded regions
+- Bash: Add `time` command with flags (`-p`, `--`) as command position prefix
+- Bash: Fix environment variable assignment detection for consecutive `=` characters (`===`)
+- Bash: Add glob character handling in case patterns (`if*`, `for?`, `while[abc]`)
+- Bash: Handle empty case statement (`case $x in esac`) by detecting `in` before `esac`
+- COBOL: Scan backward through `==...== BY ==...==` chains to find REPLACING/REPLACE context keyword
+- COBOL: Verify COPY statement context for REPLACING keyword with string/comment-aware scanning
+- Crystal: Fix heredoc identifier scanning to read full identifier between quotes (not assume empty)
+- Crystal: Reject character literal `?` after closing brackets (`)`, `]`, `}`) as ternary operator
+- Crystal: Propagate heredocState through string interpolation for correct heredoc body skipping
+- Erlang: Improve `catch` context detection to distinguish clause separator from expression prefix using forward `->` scan
+- Erlang: Allow newline between `fun` and `(` in type annotation context
+- Fortran: Validate no executable content between closing `)` and `then` keyword
+- Julia: Skip keywords followed by `!` (mutating function naming convention)
+- Julia: Track unmatched block openers in bracket/paren context to distinguish completed block expressions from comprehensions
+- Julia: Detect comma at depth zero to distinguish tuples/calls from generators
+- Julia: Check for block openers between `[` and keyword in square bracket validation
+- Lua: Skip whitespace between dot/colon operator and keyword (`obj . end`)
+- Pascal: Skip `class`/`interface` forward declarations (`class;`, `class(TBase);`)
+- Pascal: Skip `class of` class reference type (no matching `end`)
+- Pascal: Check for `=` before `class` to distinguish type definitions from method modifiers
+- Pascal: Allow newlines after `:` in variant case field detection
+- Ruby: Propagate heredocState through string interpolation for correct heredoc body skipping
+- Verilog: Allow `fork` to fall through to label colon and other validation checks
+- Verilog: Reject `function`/`task` in DPI import/export declarations
+- Verilog: Reject `interface` used as port type inside parenthesized port list
+- Verilog: Only reject `pure virtual function`/`task` (not `virtual function`/`task` which has a body)
+- Verilog: Skip whitespace before block comments in label colon backward scan
+- VHDL: Increase backward scan limit from 2 to 5 lines for `is` context detection
+- VHDL: Track parenthesis depth across lines in `for` validation to handle multi-line port/generic maps
+- VHDL: Increase backward scan limit from 5 to 10 lines for `for` generate validation
+- VHDL: Increase backward scan limit from 5 to 15 lines for `loop` validation
+
 ## [1.1.22] - 2026-03-29
 
 ### Fixed
@@ -1064,6 +1105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.23]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.22...v1.1.23
 [1.1.22]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.21...v1.1.22
 [1.1.21]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.20...v1.1.21
 [1.1.20]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.19...v1.1.20
