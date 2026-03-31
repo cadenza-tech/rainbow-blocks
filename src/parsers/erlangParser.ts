@@ -9,6 +9,12 @@ const MODULE_ATTR_PAREN_PATTERN = /^[ \t]*-[ \t]*[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\($
 // Matches -record( specifically at line start (record brace bodies contain real expressions)
 const RECORD_ATTR_PATTERN = /^[ \t]*-[ \t]*record[ \t]*\($/;
 
+// Keywords that can precede 'catch' as expression prefix (catch is first expression in block body)
+const CATCH_EXPR_PRECEDING_KEYWORDS = new Set(['begin', 'case', 'receive', 'if', 'fun', 'maybe', 'when', 'catch']);
+
+// Keywords where catch can be either expression prefix or clause separator depending on context
+const CATCH_AMBIGUOUS_KEYWORDS = new Set(['try', 'of', 'after']);
+
 export class ErlangBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['begin', 'if', 'case', 'receive', 'try', 'fun', 'maybe'],
@@ -84,7 +90,7 @@ export class ErlangBlockParser extends BaseBlockParser {
 
     // fun() in type annotation context (after ::)
     // Handles: handler :: fun((atom()) -> ok) in -record declarations
-    if (/^[ \t]*\(/.test(afterFun)) {
+    if (/^[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?\(/.test(afterFun)) {
       let j = position - 1;
       while (j >= 0) {
         if (this.isInExcludedRegion(j, excludedRegions)) {
@@ -156,7 +162,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     }
 
     // fun() in type context (inside parentheses of -spec/-type)
-    if (/^[ \t]*\(/.test(afterFun)) {
+    if (/^[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?\(/.test(afterFun)) {
       // Check if in a -spec/-type context by scanning back for attribute
       // Must search for actual attribute pattern, not just '-'
       // (to avoid matching '-' in '->' operator)
@@ -314,21 +320,81 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (j < 0) return false;
     const ch = source[j];
     // Preceded by operator, assignment, or opening bracket → expression prefix
-    return (
+    if (
       ch === '=' ||
       ch === '(' ||
       ch === '[' ||
       ch === '{' ||
-      ch === ',' ||
       ch === '!' ||
       ch === '+' ||
       ch === '-' ||
       ch === '*' ||
       ch === '/' ||
       ch === '<' ||
-      ch === '>' ||
       ch === '|'
-    );
+    ) {
+      return true;
+    }
+    // Comma: could be end of sequence before catch expression,
+    // or end of last expression before catch clause separator.
+    // If catch is followed by a clause pattern (->), it's a clause separator
+    if (ch === ',') {
+      return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
+    }
+    // > as comparison operator → expression prefix, but -> (clause arrow) is not
+    if (ch === '>') {
+      if (j > 0 && source[j - 1] === '-') {
+        return false;
+      }
+      return true;
+    }
+    // Preceded by a block-opening or intermediate keyword → expression prefix
+    if (/[a-z]/i.test(ch)) {
+      const wordEnd = j + 1;
+      let wordStart = j;
+      while (wordStart > 0 && /[a-z_]/i.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.slice(wordStart, wordEnd);
+      if (CATCH_EXPR_PRECEDING_KEYWORDS.has(word)) {
+        return true;
+      }
+      // For try/of/after, check forward: if catch is followed by a clause pattern (->),
+      // it's a clause separator, not an expression prefix
+      if (CATCH_AMBIGUOUS_KEYWORDS.has(word)) {
+        return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
+      }
+    }
+    return false;
+  }
+
+  // Checks if there's a -> (clause arrow) after catch before the next catch/after/end/;.
+  private isCatchFollowedByClausePattern(source: string, afterCatch: number, excludedRegions: ExcludedRegion[]): boolean {
+    let k = afterCatch;
+    while (k < source.length) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        k++;
+        continue;
+      }
+      const ch = source[k];
+      // Found clause arrow -> it's a clause separator context
+      if (ch === '-' && k + 1 < source.length && source[k + 1] === '>') {
+        return true;
+      }
+      // Hit a structural boundary without finding -> it's an expression prefix
+      if (ch === ';' || ch === '.') return false;
+      // Check for structural keywords
+      if (/[a-z]/i.test(ch)) {
+        let wEnd = k + 1;
+        while (wEnd < source.length && /[a-z_]/i.test(source[wEnd])) wEnd++;
+        const w = source.slice(k, wEnd);
+        if (w === 'catch' || w === 'after' || w === 'end') return false;
+        k = wEnd;
+        continue;
+      }
+      k++;
+    }
+    return false;
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {

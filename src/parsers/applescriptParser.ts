@@ -103,6 +103,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return true;
     }
 
+    // Check if 'if' is inside another if/repeat condition (e.g., 'if if then')
+    if (this.isInsideIfCondition(source, position, keyword.length, excludedRegions)) {
+      return false;
+    }
+
     // Find end of logical line (following ¬ continuations)
     const lineEnd = this.findLogicalLineEnd(source, position + keyword.length, excludedRegions);
 
@@ -843,14 +848,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     const afterKwNorm = rawAfterKwText.replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ');
 
     // 'set <keyword> to' pattern (only on same logical line, not across plain newlines)
-    if (/^set[ \t]+$/.test(lineBefore)) {
+    if (/(?:^|[ \t])set[ \t]+$/.test(lineBefore)) {
       if (/^[ \t]+to\b/.test(afterKwNorm)) {
         return true;
       }
     }
 
     // 'copy <keyword> to' pattern (only on same logical line, not across plain newlines)
-    if (/^copy[ \t]+$/.test(lineBefore)) {
+    if (/(?:^|[ \t])copy[ \t]+$/.test(lineBefore)) {
       if (/^[ \t]+to\b/.test(afterKwNorm)) {
         return true;
       }

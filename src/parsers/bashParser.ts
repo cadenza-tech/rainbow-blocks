@@ -255,6 +255,7 @@ export class BashBlockParser extends BaseBlockParser {
           i--;
         }
         // Skip excluded regions again after crossing line continuation
+        let skippedExcludedAfterCont = false;
         let skippedAgain = true;
         while (skippedAgain) {
           skippedAgain = false;
@@ -262,6 +263,7 @@ export class BashBlockParser extends BaseBlockParser {
             if (i >= region.start && i < region.end) {
               i = region.start - 1;
               skippedAgain = true;
+              skippedExcludedAfterCont = true;
               while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
                 i--;
               }
@@ -269,13 +271,18 @@ export class BashBlockParser extends BaseBlockParser {
             }
           }
         }
+        // If we reached start of file after skipping excluded regions,
+        // the continuation follows actual code → not command position
+        if (i < 0 && skippedExcludedAfterCont) {
+          return false;
+        }
       } else {
         // Normal line ending (not a continuation) -> keyword is at command position
         return true;
       }
     }
 
-    // At start of file
+    // At start of file: always command position (even after line continuation)
     if (i < 0) {
       return true;
     }
@@ -373,6 +380,31 @@ export class BashBlockParser extends BaseBlockParser {
       }
     }
 
+    // time command with flags: time -p cmd, time -- cmd, time -p -- cmd
+    if (i >= 0 && source[i] !== '\n' && source[i] !== '\r') {
+      let ts = i;
+      // Skip backward past -p and -- flags
+      while (ts >= 0) {
+        const flag = source.slice(Math.max(0, ts - 1), ts + 1);
+        if (flag === '-p' || flag === '--') {
+          ts -= 2;
+          while (ts >= 0 && (source[ts] === ' ' || source[ts] === '\t')) ts--;
+          continue;
+        }
+        break;
+      }
+      if (ts >= 3 && source.slice(ts - 3, ts + 1) === 'time') {
+        const tStart = ts - 3;
+        if (tStart === 0 || !/[a-zA-Z0-9_]/.test(source[tStart - 1])) {
+          let p = tStart - 1;
+          while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
+          if (p < 0 || ';|&\n\r()'.includes(source[p]) || source[p] === '`' || source[p] === '{' || source[p] === '}') {
+            return true;
+          }
+        }
+      }
+    }
+
     // Environment variable prefix: VAR=value before a command keyword
     // Handles: FOO=bar if, A=1 B=2 if, FOO="quoted" if, FOO= if
     if (i >= 0) {
@@ -383,7 +415,13 @@ export class BashBlockParser extends BaseBlockParser {
         }
         eqScan = eqScan > 0 && source[eqScan - 1] === '=' ? eqScan - 1 : -1;
       }
-      if (eqScan >= 0 && source[eqScan] === '=' && (eqScan + 1 >= source.length || source[eqScan + 1] !== '=')) {
+      // Scan backward past consecutive '=' to find the first one (assignment operator)
+      if (eqScan >= 0 && source[eqScan] === '=') {
+        while (eqScan > 0 && source[eqScan - 1] === '=') {
+          eqScan--;
+        }
+      }
+      if (eqScan >= 0 && source[eqScan] === '=') {
         let varPos = eqScan - 1;
         while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
           varPos--;
@@ -401,10 +439,6 @@ export class BashBlockParser extends BaseBlockParser {
   // Check if keyword is followed by ) → case pattern (e.g., for), done))
   // But not inside subshell (...) where ) closes the subshell
   private isCasePattern(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
-    // Block close keywords (esac, fi, done) are never case patterns
-    if (keyword === 'esac' || keyword === 'fi' || keyword === 'done') {
-      return false;
-    }
     let j = position + keyword.length;
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
       j++;
@@ -435,7 +469,25 @@ export class BashBlockParser extends BaseBlockParser {
         return false;
       }
     } else if (source[j] !== ')') {
-      return false;
+      // Check for glob characters after keyword: if*, for?, while[abc], etc.
+      if (source[j] === '*' || source[j] === '?' || source[j] === '[') {
+        let bracketInGlob = 0;
+        let found = false;
+        while (j < source.length) {
+          if (source[j] === '[') bracketInGlob++;
+          else if (source[j] === ']' && bracketInGlob > 0) bracketInGlob--;
+          else if (bracketInGlob === 0 && (source[j] === ')' || source[j] === '|')) {
+            found = true;
+            break;
+          } else if (source[j] === '\n' || source[j] === '\r' || source[j] === ';') {
+            break;
+          }
+          j++;
+        }
+        if (!found) return false;
+      } else {
+        return false;
+      }
     }
 
     // Check if inside unmatched parentheses (subshell or POSIX case pattern)
@@ -484,6 +536,12 @@ export class BashBlockParser extends BaseBlockParser {
       if (/^[ \t]*$/.test(textBefore) || /;;[ \t]*$|;&[ \t]*$|;;&[ \t]*$/.test(textBefore) || /\bin[ \t]*$/.test(textBefore)) {
         return true;
       }
+    }
+
+    // Block close keywords (esac, fi, done) should only be treated as case patterns
+    // when confirmed by the unmatched parenthesis check above, not by separator heuristics
+    if (keyword === 'esac' || keyword === 'fi' || keyword === 'done') {
+      return false;
     }
 
     // Default: check if preceded by case separator (;;, ;&, ;;&) or `in` keyword
@@ -546,7 +604,10 @@ export class BashBlockParser extends BaseBlockParser {
       return false;
     }
     if (!this.isAtCommandPosition(source, position, excludedRegions)) {
-      return false;
+      // esac directly after 'in' in case statement (e.g., 'case $x in esac')
+      if (!(keyword === 'esac' && this.isPrecededByIn(source, position, excludedRegions))) {
+        return false;
+      }
     }
     if (this.isCasePattern(source, position, keyword, excludedRegions)) {
       return false;
@@ -555,6 +616,19 @@ export class BashBlockParser extends BaseBlockParser {
       return false;
     }
     return true;
+  }
+
+  // Checks if keyword is preceded by 'in' (for empty case: case $x in esac)
+  private isPrecededByIn(source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    let j = position - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+    if (j >= 1 && source[j] === 'n' && source[j - 1] === 'i') {
+      const inStart = j - 1;
+      if (inStart === 0 || !/[a-zA-Z0-9_]/.test(source[inStart - 1])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Checks if keyword is used as variable assignment (done=value, fi+=1, done[0]=value)
