@@ -2124,5 +2124,79 @@ end.`;
     });
   });
 
+  suite('Regression: isInsideRecord with class/interface types', () => {
+    test('should suppress variant case in record with class type definition followed by procedure', () => {
+      const pairs = parser.parse(
+        'type\n  TRec = record\n    TInner = class\n      procedure DoIt;\n    end;\n    case Integer of\n      0: (IntVal: Integer);\n  end;'
+      );
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'class');
+      findBlock(pairs, 'record');
+    });
+
+    test('should suppress variant case in record with class reference type', () => {
+      const pairs = parser.parse('type\n  TRec = record\n    TRef = class of TBase;\n    case Integer of\n      0: (IntVal: Integer);\n  end;');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should suppress variant case in record with class forward declaration', () => {
+      const pairs = parser.parse('type\n  TRec = record\n    TInner = class;\n    case Integer of\n      0: (IntVal: Integer);\n  end;');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should suppress variant case in record with interface forward declaration', () => {
+      const pairs = parser.parse('type\n  TRec = record\n    IInner = interface;\n    case Integer of\n      0: (IntVal: Integer);\n  end;');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Regression: forward declaration with newline before semicolon', () => {
+    test('should handle class with newline before semicolon inside record', () => {
+      const pairs = parser.parse('TRec = record\n  TInner = class\n  ;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should handle interface with newline before semicolon inside record', () => {
+      const pairs = parser.parse('TRec = record\n  IInner = interface\n  ;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should handle class(TBase) with newline before semicolon inside record', () => {
+      const pairs = parser.parse('TRec = record\n  TInner = class(TBase)\n  ;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Regression: class-of with comment between class and of', () => {
+    test('should handle class { comment } of inside record', () => {
+      const pairs = parser.parse('TRec = record\n  TRef = class { comment } of TBase;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should handle class (* comment *) of inside record', () => {
+      const pairs = parser.parse('TRec = record\n  TRef = class (* comment *) of TBase;\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Regression: forward declaration with comment after parenthesized base', () => {
+    test('should detect forward declaration with comment after class parenthesized base', () => {
+      const pairs = parser.parse('TRec = record\n  TInner = class(TBase) { comment };\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('should suppress forward declaration with comment after class keyword', () => {
+      const pairs = parser.parse('TRec = record\n  TInner = class { forward };\n  case Integer of\n    0: (IntVal: Integer);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should suppress variant case with newline before paren', () => {
+      const pairs = parser.parse('TRec = record\n  case Integer of\n    0:\n      (Field: Byte);\n  case Byte of\n    0: (B: Byte);\nend');
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

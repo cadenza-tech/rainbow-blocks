@@ -2393,12 +2393,12 @@ end if;`;
       assert.ok(intermediates.includes('is'), 'is should be an intermediate of case (not filtered as type is)');
     });
 
-    // BUG 1 variant: backward scan crosses non-type line to find type declaration
-    test('BUG1: should not filter is when non-type line exists between type and is', () => {
+    // Type declaration with name on a separate line between type and is
+    test('BUG1: should filter is when identifier line exists between type and is', () => {
       const source = 'type T\nX_Value\n  is';
       const tokens = parser.getTokens(source);
       const isToken = tokens.find((t) => t.value.toLowerCase() === 'is');
-      assert.ok(isToken, 'is should be present as a token (not filtered as type is)');
+      assert.ok(!isToken, 'is should be filtered as part of type declaration');
     });
 
     // BUG 2: lineBefore ending with ')' triggers backward scan that finds distant type
@@ -2491,6 +2491,22 @@ end if;`;
       const source = 'procedure P is\n  type T(\n    D : Integer\n    ) "(" is range 1..100;\nbegin\n  null;\nend P;';
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+  });
+
+  suite('Regression: type on separate line from is', () => {
+    test('should filter is when type is on its own line', () => {
+      const source = 'procedure Main is\nbegin\n  type\n    Percent\n  is range 0..100;\nend Main;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should filter is when subtype is on its own line', () => {
+      const source = 'procedure Main is\nbegin\n  subtype\n    Small\n  is Integer range 1..10;\nend Main;';
+      const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end');
       assertIntermediates(pairs[0], ['is', 'begin']);
     });

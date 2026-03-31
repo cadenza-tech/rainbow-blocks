@@ -3236,5 +3236,12 @@ end`;
     });
   });
 
+  suite('Regression: heredoc in string interpolation with string closing on same line', () => {
+    test('should exclude heredoc body when heredoc opens in interpolation and string closes on same line', () => {
+      const pairs = parser.parse('"#{<<~HEREDOC}"\n  if true\n  end\nHEREDOC\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

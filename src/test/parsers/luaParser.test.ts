@@ -1079,5 +1079,27 @@ end`;
     });
   });
 
+  suite('Regression: dot/colon with whitespace before keyword', () => {
+    test('should reject end after dot with space', () => {
+      const pairs = parser.parse('function f() return obj . end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject if after dot with space', () => {
+      const pairs = parser.parse('function f() return t . if\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject end after colon with space', () => {
+      const pairs = parser.parse('function f() obj : end()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject end after dot with tab', () => {
+      const pairs = parser.parse('function f() return obj.\tend\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

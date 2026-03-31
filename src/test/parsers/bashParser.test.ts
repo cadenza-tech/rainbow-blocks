@@ -1818,6 +1818,48 @@ esac`;
     });
   });
 
+  suite('Regression: block close keywords in case patterns', () => {
+    test('should treat done) as case pattern inside for loop', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    done) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'case');
+    });
+
+    test('should treat fi) as case pattern inside if block', () => {
+      const pairs = parser.parse('if true; then\n  case $x in\n    fi) echo ok;;\n  esac\nfi');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'case');
+    });
+
+    test('should treat esac) as case pattern inside nested case', () => {
+      const pairs = parser.parse('case $a in\n  x)\n    case $b in\n      esac) echo ok;;\n    esac\n    ;;\nesac');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should handle pipe-separated done pattern', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    x|done) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'case');
+    });
+
+    test('should handle POSIX-style (done) pattern', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    (done) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'case');
+    });
+
+    test('should handle glob done*) pattern', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    done*) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'case');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {
@@ -4980,6 +5022,45 @@ fi`;
     test('should not treat [[ after select-in as conditional command', () => {
       const pairs = parser.parse('select opt in [[; do\n  echo $opt\ndone');
       assertSingleBlock(pairs, 'select', 'done');
+    });
+  });
+
+  suite('Regression: keyword context validation', () => {
+    test('should detect block after env var with == value', () => {
+      const pairs = parser.parse('FOO==bar if true; then echo ok; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not detect block after continuation from excluded region line', () => {
+      const pairs = parser.parse('"hello"\\\nif true; then\n  echo ok\nfi');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect if in case pattern with glob suffix', () => {
+      const pairs = parser.parse('case $x in\n  if*) echo match;;\nesac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not detect for in case pattern with ? glob', () => {
+      const pairs = parser.parse('case $x in\n  for?) echo match;;\nesac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('should handle backslash-newline at file start', () => {
+      const pairs = parser.parse('\\\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should pair case in esac on same line', () => {
+      const pairs = parser.parse('case $x in esac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not treat time -p flag as blocking if detection', () => {
+      const pairs = parser.parse('time -p if true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
     });
   });
 });

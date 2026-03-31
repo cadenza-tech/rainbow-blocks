@@ -1555,5 +1555,64 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: false pseudo-text detection in isInPseudoTextContext', () => {
+    test('should not create pseudo-text excluded regions when == follows closing == outside COPY/REPLACE', () => {
+      // Flaw 1: The second == pair was incorrectly treated as pseudo-text because
+      // it was preceded by the closing == of the first pair, even though neither
+      // is in a COPY REPLACING or REPLACE context
+      const source = 'MOVE ==X== ==Y== TO Z.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should not create pseudo-text excluded regions when BY precedes == outside COPY/REPLACE', () => {
+      // Flaw 2: REPLACING here is not part of a COPY statement, but BY -> REPLACING
+      // backward scan did not verify the COPY context, creating false excluded regions
+      const source = 'DISPLAY X. REPLACING ==a== BY ==b==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should still detect pseudo-text in valid COPY REPLACING with chained ==', () => {
+      // Ensure the fix does not break valid multi-pair COPY REPLACING
+      const source = 'COPY X REPLACING ==old== BY ==IF END-IF==.\nPERFORM\n  DISPLAY X\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still detect pseudo-text in valid REPLACE with chained ==', () => {
+      const source = 'REPLACE ==old== BY ==IF END-IF==.\nPERFORM\n  DISPLAY X\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: COPY in column 7 comment and >> directive', () => {
+    test('should not create pseudo-text regions when COPY is in column 7 comment', () => {
+      const source = '       DISPLAY X\n      * COPY MYFILE\n       REPLACING ==IF X > 0 END-IF== BY ==NEW-CODE==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should not create pseudo-text regions when COPY is in >> directive', () => {
+      const source = '       DISPLAY X\n>>COPY MYFILE\n       REPLACING ==IF X > 0 END-IF== BY ==NEW-CODE==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('should not create pseudo-text excluded regions for COPY keyword inside string', () => {
+      const source = 'DISPLAY "COPY X" REPLACING ==IF END-IF== BY ==DISPLAY OK==.\nIF A > 0\nEND-IF';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2040,11 +2040,11 @@ end`;
       assertBlockCount(pairs, 2);
     });
 
-    test('should not detect begin inside indexing brackets', () => {
+    test('should detect begin/end block inside indexing brackets', () => {
       const source = 'x = a[begin, end]\nfunction foo()\nend';
       const pairs = parser.parse(source);
-      // a[...] is indexing, block keywords are rejected
-      assertSingleBlock(pairs, 'function', 'end');
+      // begin..end inside indexing brackets is a block expression
+      assertBlockCount(pairs, 2);
     });
 
     test('should detect function inside array construction brackets', () => {
@@ -3172,6 +3172,70 @@ end`;
     test('should still treat <= as comparison in generator context', () => {
       const source = 'function foo()\n  result = (x <= 10 for x in 1:10)\nend';
       const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: block expressions in indexing brackets', () => {
+    test('should detect begin/end block inside indexing brackets', () => {
+      const pairs = parser.parse('a[begin; 1; end]');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should detect if/end block inside indexing brackets', () => {
+      const pairs = parser.parse('a[if true 1 else 2 end]');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect nested block inside indexing brackets with enclosing function', () => {
+      const pairs = parser.parse('function foo(arr)\n  x = arr[if true 1 else 2 end]\n  return x\nend');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: generator for after block expression', () => {
+    test('should treat for as generator after completed begin-end in parentheses', () => {
+      const pairs = parser.parse('function foo()\n  x = sum(begin i^2 end for i in 1:10)\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should treat for as generator after completed if-end in parentheses', () => {
+      const pairs = parser.parse('function foo()\n  x = (if true 1 else 2 end for i in 1:10)\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'if');
+    });
+
+    test('should treat for as generator after completed begin-end in brackets', () => {
+      const pairs = parser.parse('function foo()\n  x = [begin i^2 end for i in 1:10]\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should keep for as block keyword when preceded by comma in parentheses', () => {
+      const pairs = parser.parse('(begin\n  1\nend, for x in 1:3\n  x\nend)');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Regression: keywords followed by exclamation mark', () => {
+    test('should not treat end! as block close', () => {
+      const pairs = parser.parse('function foo()\n  end!(x)\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat for! as block open', () => {
+      const pairs = parser.parse('for! = true\nif for!\n  println("yes")\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat begin! as block open', () => {
+      const pairs = parser.parse('begin!(x)\nfunction foo()\nend');
       assertSingleBlock(pairs, 'function', 'end');
     });
   });

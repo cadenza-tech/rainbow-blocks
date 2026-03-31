@@ -2367,6 +2367,20 @@ end package;`;
       const thenCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'then').length;
       assert.strictEqual(thenCount, 1, 'if block should have only 1 then intermediate, not 2');
     });
+
+    test('BUG4: is filtering should use 5-line lookback limit', () => {
+      const source = 'package my_pkg is\n  type\n    my_type\n    more_stuff\n    is (idle, active);\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      const isIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1, 'package should have exactly 1 is intermediate');
+    });
+
+    test('BUG5: loop should pair with preceding for within maxLines 15', () => {
+      const source = 'for i in 0 to 7\n\n\n\n\nloop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+    });
   });
 
   suite('Regression: multi-line use entity/configuration for binding', () => {
@@ -2591,6 +2605,37 @@ end package;`;
         assert.strictEqual(gen.nestLevel, 1);
       }
       assertNestLevel(pairs, 'if', 0);
+    });
+  });
+
+  suite('Regression: multi-line port/generic map in for binding', () => {
+    test('should reject for in use entity binding with multi-line port map', () => {
+      const source =
+        'configuration cfg of test is\n  for all : comp\n    use entity work.impl\n      port map (\n        a => b\n      )\n      for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'configuration');
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Regression: multi-line port map in for validation', () => {
+    test('should reject for in multi-line use entity port map binding', () => {
+      const source =
+        'configuration cfg of ent is\n  for inst : comp\n    use entity work.impl\n      port map (\n        a => b\n      )\n      for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.startOffset, source.indexOf('for inst'));
+    });
+
+    test('should reject for in multi-line generic map binding', () => {
+      const source =
+        'configuration cfg of ent is\n  for inst : comp\n    use entity work.impl\n      generic map (\n        N => 4\n      )\n      for rtl;\n  end for;\nend configuration;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.startOffset, source.indexOf('for inst'));
     });
   });
 

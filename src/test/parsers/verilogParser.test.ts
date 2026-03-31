@@ -2223,5 +2223,131 @@ endmodule`;
     });
   });
 
+  suite('Regression: virtual class, function, task', () => {
+    test('should parse virtual class as block (abstract class definition)', () => {
+      const pairs = parser.parse('virtual class MyClass;\n  int x;\nendclass');
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should still reject typedef class (forward declaration)', () => {
+      const pairs = parser.parse('module m;\n  typedef class MyClass;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should parse virtual function as block (has body)', () => {
+      const pairs = parser.parse('class C;\n  virtual function void f();\n    x = 1;\n  endfunction\nendclass');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'class');
+    });
+
+    test('should parse virtual task as block (has body)', () => {
+      const pairs = parser.parse('class C;\n  virtual task t();\n    x = 1;\n  endtask\nendclass');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'task');
+      findBlock(pairs, 'class');
+    });
+
+    test('should reject pure virtual function (no body)', () => {
+      const pairs = parser.parse('class C;\n  pure virtual function void f();\nendclass');
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should reject pure virtual task (no body)', () => {
+      const pairs = parser.parse('class C;\n  pure virtual task t();\nendclass');
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+  });
+
+  suite('Regression: DPI import/export declarations', () => {
+    test('should not tokenize function in DPI import as block open', () => {
+      const tokens = parser.getTokens('import "DPI-C" function void c_func();');
+      assert.ok(!tokens.some((t) => t.value === 'function'), 'DPI import function should not produce a token');
+    });
+
+    test('should not tokenize task in DPI import as block open', () => {
+      const tokens = parser.getTokens('import "DPI-C" task c_task();');
+      assert.ok(!tokens.some((t) => t.value === 'task'), 'DPI import task should not produce a token');
+    });
+
+    test('should not tokenize function in DPI export as block open', () => {
+      const tokens = parser.getTokens('export "DPI-C" function sv_func;');
+      assert.ok(!tokens.some((t) => t.value === 'function'), 'DPI export function should not produce a token');
+    });
+
+    test('should still parse normal function inside module', () => {
+      const pairs = parser.parse('module m;\n  function void f();\n    x = 1;\n  endfunction\nendmodule');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+    });
+  });
+
+  suite('Regression: interface in port declarations', () => {
+    test('should not tokenize interface as block open inside port list', () => {
+      const tokens = parser.getTokens('module test(interface bus);\nendmodule');
+      assert.ok(!tokens.some((t) => t.value === 'interface'), 'interface in port list should not produce a token');
+    });
+
+    test('should not tokenize interface in multi-port list', () => {
+      const tokens = parser.getTokens('module test(\n  input clk,\n  interface bus,\n  output valid\n);\nendmodule');
+      assert.ok(!tokens.some((t) => t.value === 'interface'), 'interface in multi-port list should not produce a token');
+    });
+
+    test('should still parse standalone interface block', () => {
+      const pairs = parser.parse('interface my_if;\n  logic valid;\nendinterface');
+      assertSingleBlock(pairs, 'interface', 'endinterface');
+    });
+  });
+
+  suite('Regression: label colon check with comments', () => {
+    test('should reject module after label colon with block comment', () => {
+      const pairs = parser.parse('begin /* comment */ : module\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should reject begin after label colon with block comment on end keyword', () => {
+      const pairs = parser.parse('begin : label\n  fork /* comment */ : begin\n    x = 1;\n  join\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'fork');
+    });
+  });
+
+  suite('Regression: fork bypasses label colon check', () => {
+    test('should reject fork used as label name after colon', () => {
+      const pairs = parser.parse('begin : fork\n  x = 1;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair first fork when second fork is label name', () => {
+      const pairs = parser.parse('fork : fork\n  #10 a = 1;\njoin');
+      assertSingleBlock(pairs, 'fork', 'join');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+  });
+
+  suite('Regression: else-if chain nest level consistency', () => {
+    test('should have consistent nest levels for if and else-if begin blocks', () => {
+      const pairs = parser.parse('always @(posedge clk)\n  if (a) begin\n    x <= 1;\n  end else if (b) begin\n    x <= 2;\n  end');
+      const begins = pairs.filter((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(begins.length, 2);
+      assert.strictEqual(begins[0].nestLevel, begins[1].nestLevel);
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('should not treat extern class as block opener', () => {
+      const pairs = parser.parse('class RealClass;\n  int x;\n  extern class FwdDecl;\nendclass');
+      assertSingleBlock(pairs, 'class', 'endclass');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+
+    test('should not treat extern interface as block opener', () => {
+      const pairs = parser.parse('interface RealIf;\n  logic valid;\n  extern interface FwdDecl;\nendinterface');
+      assertSingleBlock(pairs, 'interface', 'endinterface');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+  });
+
   generateCommonTests(config);
 });

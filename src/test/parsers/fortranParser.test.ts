@@ -4326,5 +4326,24 @@ end program`;
     });
   });
 
+  suite('Regression: single-line if with then as variable', () => {
+    test('should reject block if when content exists between ) and then', () => {
+      const pairs = parser.parse('program test\n  if (x>0) a = then\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should reject block if with call statement before then', () => {
+      const pairs = parser.parse('program test\n  if (x>0) call then\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should still accept valid block if with then at end of line', () => {
+      const pairs = parser.parse('program test\n  if (x>0) then\n    a = 1\n  end if\nend program');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'program');
+    });
+  });
+
   generateCommonTests(config);
 });

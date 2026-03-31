@@ -2340,5 +2340,28 @@ end try`;
     });
   });
 
+  suite('Regression: keyword context validation', () => {
+    test('should suppress repeat as variable in mid-line set statement', () => {
+      const pairs = parser.parse('on run\n  if true then set repeat to 5\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should suppress repeat as variable in mid-line copy statement', () => {
+      const pairs = parser.parse('on run\n  if true then copy repeat to x\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should handle if as condition value in if statement', () => {
+      const pairs = parser.parse('if if then\n  beep\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+
+    test('should handle if as condition value in repeat while', () => {
+      const pairs = parser.parse('repeat while if\n  beep\nend repeat');
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
   generateCommonTests(config);
 });

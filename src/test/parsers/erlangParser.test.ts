@@ -178,6 +178,12 @@ end`;
       assertSingleBlock(pairs, 'try', 'end');
       assertIntermediates(pairs[0], ['catch', 'after']);
     });
+
+    test('should detect catch as clause separator when preceded by comma', () => {
+      const pairs = parser.parse('try\n  connect(),\n  send_data(Data),\ncatch\n  error:Reason -> handle(Reason)\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
   });
 
   suite('Nested blocks', () => {
@@ -2085,6 +2091,47 @@ bar() -> fun() -> ok end.`;
       const pairs = parser.parse('try\n  X = A || catch throw(hello),\n  ok\ncatch\n  _:_ -> error\nend');
       assertSingleBlock(pairs, 'try', 'end');
       assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
+  suite('Regression: catch expression prefix after block keyword', () => {
+    test('should treat catch after try keyword as expression prefix', () => {
+      const pairs = parser.parse('try\n  catch throw(error)\ncatch\n  _:_ -> ok\nend');
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after begin keyword as expression prefix', () => {
+      const pairs = parser.parse('begin\n  catch error\nend');
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+  });
+
+  suite('Regression: catch catch expression', () => {
+    test('should treat nested catch catch as expression prefix', () => {
+      const pairs = parser.parse('try\n  catch catch throw(error)\ncatch\n  _:_ -> err\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('should treat catch after try as clause separator', () => {
+      const pairs = parser.parse('try\ncatch\n  _:_ -> ok\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after -> arrow as clause separator', () => {
+      const pairs = parser.parse('try X of\n  {ok, V} ->\ncatch\n  _:_ -> err\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['of', 'catch']);
+    });
+
+    test('should not treat fun in -spec multiline as block opener', () => {
+      const pairs = parser.parse('-spec foo() ->\n  fun\n  (() -> ok).\nfoo() -> begin ok end.');
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 
