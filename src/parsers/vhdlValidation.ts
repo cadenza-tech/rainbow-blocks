@@ -48,7 +48,8 @@ export function isValidForOpen(source: string, position: number, excludedRegions
     if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
       scanEnd--;
     }
-    for (let attempt = 0; attempt < 5; attempt++) {
+    let mapParenDepth = 0;
+    for (let attempt = 0; attempt < 10; attempt++) {
       const prevNl = Math.max(textBefore.lastIndexOf('\n', scanEnd - 1), textBefore.lastIndexOf('\r', scanEnd - 1));
       const rawPrevLine = textBefore.slice(prevNl + 1, scanEnd);
       const prevLine = rawPrevLine.trimStart();
@@ -98,6 +99,24 @@ export function isValidForOpen(source: string, position: number, excludedRegions
           scanEnd--;
         }
         continue;
+      }
+      // Track parenthesis depth: continue scanning upward through multi-line port/generic map content
+      // Accumulate depth across lines (not reset per line)
+      {
+        const lineAbsStart = prevNl + 1;
+        for (let ci = lineAbsStart + rawPrevLine.length - 1; ci >= lineAbsStart; ci--) {
+          if (callbacks.isInExcludedRegion(ci, excludedRegions)) continue;
+          if (source[ci] === ')') mapParenDepth++;
+          else if (source[ci] === '(') mapParenDepth--;
+        }
+        if (mapParenDepth > 0) {
+          if (prevNl <= 0) break;
+          scanEnd = prevNl;
+          if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
+            scanEnd--;
+          }
+          continue;
+        }
       }
       break;
     }
@@ -277,7 +296,7 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
   const textBefore = source.slice(0, position).toLowerCase();
   // Split on \r\n, \r, or \n to handle all line ending types
   const lines = textBefore.split(/\r\n|\r|\n/);
-  const maxLines = Math.min(lines.length, 5);
+  const maxLines = Math.min(lines.length, 15);
 
   // Track loop positions that have been paired with a preceding for/while
   const pairedLoopPositions = new Set<number>();

@@ -189,12 +189,32 @@ export class FortranBlockParser extends BaseBlockParser {
       }
 
       // Check for 'then' keyword only at top-level (not inside parentheses)
+      // 'then' must directly follow ')' (with only whitespace/comments between) to be a block if
+      // If other content exists between ')' and 'then', it's a single-line if with 'then' as variable
       if (
         parenDepth === 0 &&
         source.slice(i, i + 4).toLowerCase() === 'then' &&
         (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
         (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
       ) {
+        // Verify no executable content between closing ')' and 'then'
+        let hasContentBeforeThen = false;
+        for (let bi = i - 1; bi >= position + keyword.length; bi--) {
+          const btRegion = this.findExcludedRegionAt(bi, excludedRegions);
+          if (btRegion) {
+            bi = btRegion.start;
+            continue;
+          }
+          if (source[bi] === ' ' || source[bi] === '\t' || source[bi] === '&') continue;
+          if (source[bi] === ')') break;
+          if (source[bi] === '\n' || source[bi] === '\r') continue;
+          hasContentBeforeThen = true;
+          break;
+        }
+        if (hasContentBeforeThen) {
+          i += 4;
+          continue;
+        }
         // Verify 'then' is at end-of-line (only whitespace, comments, or & follow)
         // If other content follows, 'then' is a variable name, not a block keyword
         let k = i + 4;

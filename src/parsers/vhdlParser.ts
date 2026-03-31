@@ -271,7 +271,7 @@ export class VhdlBlockParser extends BaseBlockParser {
           if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
           if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
           let linesChecked = 0;
-          while (scanPos >= 0 && linesChecked < 2) {
+          while (scanPos >= 0 && linesChecked < 5) {
             const prevLineStart = findLineStart(source, scanPos);
             const prevLine = source
               .slice(prevLineStart, scanPos + 1)

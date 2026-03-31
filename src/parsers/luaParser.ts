@@ -31,16 +31,21 @@ export class LuaBlockParser extends BaseBlockParser {
   }
 
   // Checks if keyword is preceded by '.' or ':' (table field/method access)
-  // But not '::' which is goto label syntax (::label::keyword)
+  // But not '..' (concatenation) or '::' (goto label syntax)
+  // Skips whitespace between operator and keyword since Lua allows 'obj . end'
   private isPrecededByDotOrColon(source: string, position: number): boolean {
-    if (position <= 0) return false;
-    if (source[position - 1] === '.') {
-      // .. is string concatenation operator, not field access
-      return !(position >= 2 && source[position - 2] === '.');
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+      i--;
     }
-    if (source[position - 1] === ':') {
+    if (i < 0) return false;
+    if (source[i] === '.') {
+      // .. is string concatenation operator, not field access
+      return !(i >= 1 && source[i - 1] === '.');
+    }
+    if (source[i] === ':') {
       // :: is goto label closing, not method call
-      return !(position >= 2 && source[position - 2] === ':');
+      return !(i >= 1 && source[i - 1] === ':');
     }
     return false;
   }
