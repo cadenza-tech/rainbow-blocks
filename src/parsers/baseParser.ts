@@ -25,14 +25,20 @@ export abstract class BaseBlockParser {
           other.openKeyword.startOffset < pair.openKeyword.startOffset &&
           other.closeKeyword.startOffset >= pair.closeKeyword.startOffset
         ) {
-          // When sharing the same close offset, skip if pair opens after
-          // other's last intermediate (siblings, not parent-child)
+          // When sharing the same close offset and pair opens after other's
+          // last intermediate, check the intermediate type to distinguish siblings
+          // from children. block_middle intermediates (e.g., VHDL elsif) are section
+          // boundaries → pair is a sibling. block_open intermediates (e.g., Verilog
+          // if inside else) are sub-block qualifiers → pair is a child.
           if (
             other.closeKeyword.startOffset === pair.closeKeyword.startOffset &&
             other.intermediates.length > 0 &&
             pair.openKeyword.startOffset > other.intermediates[other.intermediates.length - 1].startOffset
           ) {
-            continue;
+            const lastIntermediate = other.intermediates[other.intermediates.length - 1];
+            if (lastIntermediate.type === 'block_middle') {
+              continue;
+            }
           }
           level++;
         }
