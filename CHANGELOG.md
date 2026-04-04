@@ -5,6 +5,71 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.24] - 2026-04-04
+
+### Fixed
+
+- Ada: Add Unicode letter adjacency check for compound end keywords in tokenization
+- Ada: Handle `protected`/`task` preceding `type` on previous line in type declaration scanning
+- Ada: Skip `type`/`subtype` inside parentheses in type declaration detection
+- Ada: Restrict `begin` context merge to valid context keywords (`procedure`, `function`, etc.)
+- AppleScript: Replace `isInsideIfCondition` and `isInsideTellToOneLiner` with unified `isAtLogicalLineStart` check
+- AppleScript: Extend bare `end` preposition rejection to include `by`, `before`, `after`, `at`
+- Bash: Distinguish brace expansion (`{a,b}`) from command group closer (`}`) in command position
+- Bash: Verify whitespace between `time` command and flags (`-p`, `--`)
+- Bash: Handle `+=` compound assignment operator in variable assignment detection
+- Bash: Exclude `#` from assignment scan stop characters
+- Bash: Handle excluded regions (strings, substitutions) adjacent to case pattern keywords
+- Bash: Add `)` and `}` as command position characters, and `fi`/`done`/`esac` as preceding shell keywords
+- Bash: Handle heredoc terminator followed by `)` in subshell context
+- Bash: Reject keywords concatenated with preceding excluded region (no newline separator)
+- COBOL: Use string/comment-aware period scanning in COPY statement context detection
+- COBOL: Prevent string literals from spanning multiple lines
+- Crystal: Handle character literals (`?{`, `?}`, `?"`) inside macro template strings
+- Crystal: Limit octal escape sequences to 3 digits in character literals
+- Crystal: Treat `?"` and `?'` as valid character literals (not ternary before string)
+- Crystal: Handle surrogate pairs in character literal detection
+- Elixir: Exclude `&&` operator from capture operator `&` prefix detection
+- Elixir: Detect keyword followed by `do` as value context (not nested block)
+- Erlang: Check for top-level comma after `::` type annotation to allow catch in function arguments
+- Erlang: Distinguish comments from value expressions in catch clause backward scan
+- Erlang: Check catch clause pattern after `->` to distinguish clause body from try-catch section
+- Erlang: Track block nesting depth in `isCatchFollowedByClausePattern` forward scan
+- Fortran: Skip comment-only lines in `isAfterDoubleColon` continuation line scanning
+- Fortran: Reject block open keywords preceded by operator/expression context
+- Fortran: Reject block open keywords used as variable names in assignments
+- Fortran: Skip block open keywords inside parenthesized expressions in `matchBlocks`
+- Julia: Detect `for` at start of brackets/parentheses as block (not generator)
+- Julia: Replace `hasBlockOpenerBetween` with depth-tracking `hasUnmatchedBlockOpenerBetween`
+- Julia: Handle unmatched `[` (unclosed bracket) to keep keywords valid
+- Julia: Skip dot-preceded keywords (field access like `range.begin`) in block opener detection
+- Julia: Include `;` in comma-at-depth-zero check for matrix literal semicolons
+- Julia: Remove block keyword boundary check from string macro suffix consumption
+- Lua: Restrict `isPrecededByDotOrColon` to same-line whitespace (stop at newlines)
+- Lua: Track pending loop-do depths per nesting level instead of flat counter
+- MATLAB: Handle hex (`0xFF`) and binary (`0b1010`) literal prefixes in numeric detection
+- Octave: Support additional compound assignment operators (`\=`, `**=`, `.**=`, `.\=`)
+- Pascal: Support multiple consecutive type modifiers (`packed sealed class`)
+- Pascal: Detect comparison context for `=` sign (e.g., `if x = class` is not a type definition)
+- Pascal: Stop `class of` detection at newlines and multi-line comments
+- Pascal: Support Delphi GUID bracket syntax (`interface['{GUID}']`) in forward declaration detection
+- Ruby: Track last excluded region for context-aware regex detection after comments
+- Ruby: Support implicit operator line continuation in logical line start detection
+- Ruby: Handle `$$` global variable in `$;` semicolon detection
+- Ruby: Handle `$$` and `?$` context in `$'`/`$"`/`` $` `` global variable detection
+- Ruby: Include trailing regex flags in `%r` percent regex excluded region
+- Ruby: Disable backslash escaping when backslash is the percent literal delimiter
+- Verilog: Skip comments between modifier keywords and block keywords in validation
+- Verilog: Handle `final` and `#0` delay qualifiers in assertion verb detection
+- Verilog: Reject `virtual interface` as variable type declaration (not a block)
+- Verilog: Handle qualifier keywords between `extern` and `function`/`task`
+- Verilog: Tighten DPI import detection to require `"DPI` after `import`/`export`
+- Verilog: Add `` `include <file.vh> `` angle-bracket filename as excluded region
+- VHDL: Handle `: type` pattern before `is` on same line in type declaration detection
+- VHDL: Handle loop labels between `exit`/`next` and `when` keyword
+- VHDL: Reject `for` in configuration specifications (`for <id> : <id> use entity ...`)
+- VHDL: Verify `else` in signal assignment is not inside `if`/`elsif` then-branch
+
 ## [1.1.23] - 2026-03-31
 
 ### Fixed
@@ -1105,6 +1170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.24]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.23...v1.1.24
 [1.1.23]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.22...v1.1.23
 [1.1.22]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.21...v1.1.22
 [1.1.21]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.20...v1.1.21
