@@ -11,7 +11,8 @@ export interface VhdlValidationCallbacks {
 // Keywords that can be followed by 'loop'
 const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
 
-// Validates 'for' keyword: rejects 'wait for' timing statements and 'use entity/configuration ... for' binding clauses
+// Validates 'for' keyword: rejects 'wait for' timing statements, 'use entity/configuration ... for' binding clauses,
+// and configuration specifications ('for <id/all/others> : <id> use entity/configuration ... ;')
 export function isValidForOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
   const textBefore = source.slice(0, position).toLowerCase();
   const lastNewline = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
@@ -121,7 +122,78 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       break;
     }
   }
+  // Forward scan: reject 'for' in configuration specifications where
+  // 'use entity' or 'use configuration' appears AFTER the 'for' keyword
+  // Pattern: for <id/all/others> : <id> use entity/configuration ... ;
+  if (hasUseEntityOrConfigAfterFor(source, position, excludedRegions, callbacks)) {
+    return false;
+  }
   return true;
+}
+
+// Scans forward from a 'for' keyword to detect configuration specification pattern
+// Pattern: for <id/all/others> : <id> use entity/configuration ... ;
+// Only matches when 'use entity' or 'use configuration' appears on the same line as 'for'
+// (configuration blocks have 'use entity' on a separate indented line)
+function hasUseEntityOrConfigAfterFor(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  const forKeywordLength = 3;
+  let j = position + forKeywordLength;
+  const len = source.length;
+  while (j < len) {
+    if (callbacks.isInExcludedRegion(j, excludedRegions)) {
+      j++;
+      continue;
+    }
+    const ch = source[j];
+    // Newline ends the same-line scan; config specs are single-line statements
+    if (ch === '\n' || ch === '\r') {
+      return false;
+    }
+    // Semicolon terminates the statement; no use entity/configuration found
+    if (ch === ';') {
+      return false;
+    }
+    // Check for word boundaries to detect keywords
+    if (/[a-zA-Z_]/.test(ch)) {
+      const wordStart = j;
+      while (j < len && /[a-zA-Z0-9_]/.test(source[j])) {
+        j++;
+      }
+      const word = source.slice(wordStart, j).toLowerCase();
+      // If we hit 'loop' or 'generate', this is a real block opener (not a config spec)
+      if (word === 'loop' || word === 'generate') {
+        return false;
+      }
+      // Check for 'use' followed by 'entity' or 'configuration'
+      if (word === 'use') {
+        // Skip whitespace (spaces/tabs only, not newlines) after 'use'
+        let k = j;
+        while (k < len && (source[k] === ' ' || source[k] === '\t')) {
+          k++;
+        }
+        if (k < len && /[a-zA-Z_]/.test(source[k])) {
+          const nextWordStart = k;
+          while (k < len && /[a-zA-Z0-9_]/.test(source[k])) {
+            k++;
+          }
+          const nextWord = source.slice(nextWordStart, k).toLowerCase();
+          if (nextWord === 'entity' || nextWord === 'configuration') {
+            if (!callbacks.isInExcludedRegion(wordStart, excludedRegions)) {
+              return true;
+            }
+          }
+        }
+      }
+      continue;
+    }
+    j++;
+  }
+  return false;
 }
 
 // Validates 'while' keyword: rejects 'wait while' (not a loop construct)
@@ -452,6 +524,53 @@ export function isInSignalAssignment(
       // If scanning for 'else' and no 'when' found yet, this <= may be a comparison
       // operator (e.g., `sig <= '1' when x <= 5 else '0'`), so continue scanning
       if (keyword === 'when' || foundWhen) {
+        // For 'else': verify the <= is not inside a then-branch of an if/elsif block
+        // by scanning backward from <= looking for 'then' before ';'
+        if (keyword === 'else') {
+          let j = i - 2;
+          let foundThenBeforeLe = false;
+          while (j >= 0) {
+            const rj = callbacks.findExcludedRegionAt(j, excludedRegions);
+            if (rj) {
+              j = rj.start - 1;
+              continue;
+            }
+            // Semicolon means the <= starts a new statement; it's a valid signal assignment
+            if (source[j] === ';') break;
+            // Check for 'then' keyword boundary
+            if (j >= 3) {
+              const thenSlice = lowerSource.slice(j - 3, j + 1);
+              if (
+                thenSlice === 'then' &&
+                (j - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[j - 4])) &&
+                (j + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 1]))
+              ) {
+                foundThenBeforeLe = true;
+                break;
+              }
+            }
+            j--;
+          }
+          // When 'then' is found before '<=' (first statement in if/elsif block),
+          // the <= IS a signal assignment. Check if this 'else' has a value expression
+          // on the same line (e.g., "else b;") to confirm it is part of the signal
+          // assignment, not the if-block's else on its own line
+          if (foundThenBeforeLe) {
+            const elseEnd = position + keyword.length;
+            let k = elseEnd;
+            while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
+              k++;
+            }
+            // If next non-space character is a newline or end of source, this else
+            // is likely the if-block's else, not part of the signal assignment
+            if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+              return false;
+            }
+            // Otherwise, there's content on the same line after else (value expression),
+            // so this else IS part of the conditional signal assignment
+            return true;
+          }
+        }
         return true;
       }
       // Skip past the < of <= and continue scanning for the real signal assignment <=

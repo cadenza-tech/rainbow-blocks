@@ -265,7 +265,7 @@ export class VhdlBlockParser extends BaseBlockParser {
         }
         // Check previous lines for type/subtype declaration (multi-line case)
         // e.g., "type state_t\n  is (idle, active);"
-        if (stmtBefore.length === 0 || /^\(/.test(stmtBefore)) {
+        if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore)) {
           let skipThisIs = false;
           let scanPos = lineStart - 1;
           if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
@@ -352,7 +352,7 @@ export class VhdlBlockParser extends BaseBlockParser {
         return false;
       }
       const kw = token.value.toLowerCase();
-      // Filter 'when' in 'exit when' and 'next when' statements (may span lines)
+      // Filter 'when' in 'exit [label] when' and 'next [label] when' statements (may span lines)
       if (kw === 'when') {
         let p = token.startOffset - 1;
         while (p >= 0) {
@@ -366,6 +366,31 @@ export class VhdlBlockParser extends BaseBlockParser {
             continue;
           }
           break;
+        }
+        // If we landed on an identifier, it might be a loop label — skip past it
+        if (p >= 0 && /[a-zA-Z0-9_]/.test(source[p])) {
+          const identEnd = p;
+          while (p >= 0 && /[a-zA-Z0-9_]/.test(source[p])) {
+            p--;
+          }
+          const ident = source.slice(p + 1, identEnd + 1).toLowerCase();
+          // Check if the identifier itself is exit/next
+          if ((ident === 'exit' || ident === 'next') && (p < 0 || !/[a-zA-Z0-9_]/.test(source[p]))) {
+            return false;
+          }
+          // Otherwise skip whitespace/excluded regions again to find exit/next before the label
+          while (p >= 0) {
+            const region = this.findExcludedRegionAt(p, excludedRegions);
+            if (region) {
+              p = region.start - 1;
+              continue;
+            }
+            if (source[p] === ' ' || source[p] === '\t' || source[p] === '\n' || source[p] === '\r') {
+              p--;
+              continue;
+            }
+            break;
+          }
         }
         if (p >= 3) {
           const prevWord = source.slice(p - 3, p + 1).toLowerCase();

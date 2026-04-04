@@ -135,7 +135,10 @@ export class ErlangBlockParser extends BaseBlockParser {
             continue;
           }
           if (k > 0 && ch === ':' && source[k - 1] === ':' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
-            return false;
+            if (!this.hasTopLevelCommaBetween(source, k + 1, position, excludedRegions)) {
+              return false;
+            }
+            break;
           }
           // Skip => (map arrow) and := (map update) inside type expressions
           if (ch === '=' && k + 1 < source.length && source[k + 1] === '>') {
@@ -309,6 +312,11 @@ export class ErlangBlockParser extends BaseBlockParser {
     while (j >= 0) {
       const region = this.findExcludedRegionAt(j, excludedRegions);
       if (region) {
+        // Comments are transparent: skip and continue scanning backward
+        // String/atom/char literals are expression values: catch after them is a clause separator
+        if (source[region.start] !== '%') {
+          return false;
+        }
         j = region.start - 1;
         while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
           j--;
@@ -341,10 +349,12 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (ch === ',') {
       return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
     }
-    // > as comparison operator → expression prefix, but -> (clause arrow) is not
+    // > as comparison operator → expression prefix
+    // -> (clause arrow): catch in a clause body is expression prefix,
+    // but catch starting a try-catch section is a clause separator
     if (ch === '>') {
       if (j > 0 && source[j - 1] === '-') {
-        return false;
+        return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
       }
       return true;
     }
@@ -368,27 +378,52 @@ export class ErlangBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Checks if there's a comma at bracket depth 0 between two positions (forward scan)
+  private hasTopLevelCommaBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === '(' || ch === '{' || ch === '[') {
+        depth++;
+      } else if (ch === ')' || ch === '}' || ch === ']') {
+        depth = Math.max(0, depth - 1);
+      } else if (ch === ',' && depth === 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Checks if there's a -> (clause arrow) after catch before the next catch/after/end/;.
+  // Tracks block nesting depth so -> inside nested blocks (e.g. fun(X) -> X end) is ignored
   private isCatchFollowedByClausePattern(source: string, afterCatch: number, excludedRegions: ExcludedRegion[]): boolean {
     let k = afterCatch;
+    let depth = 0;
     while (k < source.length) {
       if (this.isInExcludedRegion(k, excludedRegions)) {
         k++;
         continue;
       }
       const ch = source[k];
-      // Found clause arrow -> it's a clause separator context
-      if (ch === '-' && k + 1 < source.length && source[k + 1] === '>') {
+      // Only match -> at top level (not inside nested blocks)
+      if (depth === 0 && ch === '-' && k + 1 < source.length && source[k + 1] === '>') {
         return true;
       }
-      // Hit a structural boundary without finding -> it's an expression prefix
-      if (ch === ';' || ch === '.') return false;
+      // Hit a structural boundary at top level without finding -> it's an expression prefix
+      if (depth === 0 && (ch === ';' || ch === '.')) return false;
       // Check for structural keywords
       if (/[a-z]/i.test(ch)) {
         let wEnd = k + 1;
         while (wEnd < source.length && /[a-z_]/i.test(source[wEnd])) wEnd++;
         const w = source.slice(k, wEnd);
-        if (w === 'catch' || w === 'after' || w === 'end') return false;
+        if (depth === 0 && (w === 'catch' || w === 'after' || w === 'end')) return false;
+        // Track block nesting: openers increase depth, end decreases depth
+        if (w === 'if' || w === 'case' || w === 'receive' || w === 'try' || w === 'begin' || w === 'fun' || w === 'maybe') {
+          depth++;
+        } else if (w === 'end' && depth > 0) {
+          depth--;
+        }
         k = wEnd;
         continue;
       }
@@ -696,7 +731,7 @@ export class ErlangBlockParser extends BaseBlockParser {
           braceDepth--;
         } else {
           // Unmatched '{' at depth 0: check if this is a record (#name{...}) or map (#{...}) literal
-          // Record/map brace bodies contain real expressions that should not be filtered
+          // Both record and map brace bodies contain real expressions that should not be filtered
           let j = i - 1;
           while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) j--;
           if (j >= 0 && source[j] === '#') {
