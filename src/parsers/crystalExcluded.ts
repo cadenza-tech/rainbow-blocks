@@ -147,6 +147,16 @@ function skipMacroString(source: string, pos: number, quote: string): number {
           if (i < source.length) i++;
           continue;
         }
+        // Character literal: ?{, ?}, ?" etc.
+        if (
+          (source[i] === '{' || source[i] === '}' || source[i] === '"') &&
+          i > pos &&
+          source[i - 1] === '?' &&
+          (i - 1 === pos || !/\w/.test(source[i - 2]))
+        ) {
+          i++;
+          continue;
+        }
         if (source[i] === '{') {
           depth++;
         } else if (source[i] === '}') {
@@ -202,9 +212,10 @@ export function matchCharLiteral(source: string, pos: number): ExcludedRegion | 
         i++;
       }
     } else if (source[i] === 'o') {
-      // \oNNN form (octal digits)
+      // \oNNN form (octal digits, max 3)
       i++;
-      while (i < source.length && /[0-7]/.test(source[i])) {
+      const octalEnd = Math.min(i + 3, source.length);
+      while (i < octalEnd && /[0-7]/.test(source[i])) {
         i++;
       }
     } else if (/[0-7]/.test(source[i])) {

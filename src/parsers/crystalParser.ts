@@ -168,10 +168,10 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
 
     // Question mark char literal (?x, ?\n, ?\uXXXX, etc.)
-    // Skip when followed by " or ' — that is a ternary operator before a string, not a char literal
+    // ?" and ?' are valid char literals (the quote character itself)
     if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_)\]}]/.test(source[pos - 1]))) {
       const nextChar = source[pos + 1];
-      if (nextChar === '"' || nextChar === "'") return null;
+      if (nextChar === '"' || nextChar === "'") return { start: pos, end: pos + 2 };
       if (nextChar === '\\' && pos + 2 < source.length) {
         const escChar = source[pos + 2];
         // \u{XXXX} brace form
@@ -210,6 +210,10 @@ export class CrystalBlockParser extends BaseBlockParser {
         return { start: pos, end: pos + 3 };
       }
       if (nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r') {
+        const code = nextChar.charCodeAt(0);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          return { start: pos, end: pos + 3 };
+        }
         return { start: pos, end: pos + 2 };
       }
     }

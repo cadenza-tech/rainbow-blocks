@@ -31,7 +31,8 @@ function getMatchingDelimiter(open: string): string | null {
 }
 
 // Determines whether / at pos is a regex start (true) or division operator (false)
-export function isRegexStart(source: string, pos: number, regexPrecedingKeywords: ReadonlySet<string>): boolean {
+// lastExcludedRegion: the most recently found excluded region (for context-aware scanning)
+export function isRegexStart(source: string, pos: number, regexPrecedingKeywords: ReadonlySet<string>, lastExcludedRegion?: ExcludedRegion): boolean {
   if (pos === 0) return true;
 
   // Look back for context, skipping whitespace
@@ -41,6 +42,22 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
   }
 
   if (i < 0) return true;
+
+  // If backward scan lands inside the last excluded region, the region itself provides context
+  if (lastExcludedRegion && i >= lastExcludedRegion.start && i < lastExcludedRegion.end) {
+    // Comments are not value expressions: skip past and continue scanning
+    if (source[lastExcludedRegion.start] === '#' || source.slice(lastExcludedRegion.start, lastExcludedRegion.start + 6) === '=begin') {
+      i = lastExcludedRegion.start - 1;
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+        i--;
+      }
+      if (i < 0) return true;
+      // Fall through to normal checks below
+    } else {
+      // Value expressions (strings, char literals, regex, etc.): / is division
+      return false;
+    }
+  }
 
   // Check ? and ! - could be method name suffix or operator
   if (source[i] === '?' || source[i] === '!') {
@@ -309,8 +326,11 @@ export function matchPercentLiteral(
   let depth = 1;
   const isPaired = openDelimiter !== closeDelimiter;
 
+  // When backslash is the delimiter, it cannot also serve as an escape character
+  const escapeEnabled = closeDelimiter !== '\\';
+
   while (i < source.length && depth > 0) {
-    if (source[i] === '\\' && i + 1 < source.length) {
+    if (escapeEnabled && source[i] === '\\' && i + 1 < source.length) {
       i += 2;
       continue;
     }

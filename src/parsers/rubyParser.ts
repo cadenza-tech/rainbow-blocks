@@ -61,6 +61,10 @@ export class RubyBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'elsif', 'rescue', 'ensure', 'when', 'in', 'then']
   };
 
+  // Tracks the last excluded region found during findExcludedRegions scanning,
+  // so tryMatchExcludedRegion can avoid misinterpreting characters inside prior regions
+  private _lastExcludedRegion: ExcludedRegion | null = null;
+
   // Validates block open keywords, excluding postfix conditionals
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords preceded by dot (method calls like obj.class, obj. begin)
@@ -169,13 +173,13 @@ export class RubyBlockParser extends BaseBlockParser {
   }
 
   // Checks if 'rescue' is used as a postfix modifier (e.g., risky rescue nil)
-  // Find the start of a logical line, following backslash line continuations
+  // Find the start of a logical line, following backslash and implicit operator continuations
   private findLogicalLineStart(source: string, position: number, excludedRegions?: ExcludedRegion[]): number {
     let lineStart = position;
     while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
       lineStart--;
     }
-    // Check if previous line ends with backslash continuation
+    // Check if previous line ends with backslash or operator continuation
     while (lineStart >= 2) {
       const prevChar = source[lineStart - 1];
       // Previous line must end with \n or \r
@@ -209,11 +213,58 @@ export class RubyBlockParser extends BaseBlockParser {
           prevLineStart--;
         }
         lineStart = prevLineStart;
+      } else if (this.endsWithContinuationOperator(source, checkPos, excludedRegions)) {
+        // Implicit continuation: line ends with binary operator or opening bracket
+        let prevLineStart = checkPos;
+        while (prevLineStart > 0 && source[prevLineStart - 1] !== '\n' && source[prevLineStart - 1] !== '\r') {
+          prevLineStart--;
+        }
+        lineStart = prevLineStart;
       } else {
         break;
       }
     }
     return lineStart;
+  }
+
+  // Checks if the content before checkPos (a newline position) ends with an operator
+  // that causes implicit line continuation in Ruby
+  private endsWithContinuationOperator(source: string, checkPos: number, excludedRegions?: ExcludedRegion[]): boolean {
+    // Scan backward from checkPos, skipping whitespace
+    let i = checkPos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 0) return false;
+
+    // Skip if the trailing character is inside an excluded region (e.g., string or comment)
+    if (excludedRegions && this.isInExcludedRegion(i, excludedRegions)) {
+      return false;
+    }
+
+    const ch = source[i];
+
+    // Opening brackets always cause continuation
+    if (ch === '(' || ch === '[' || ch === '{') return true;
+
+    // Comma causes continuation
+    if (ch === ',') return true;
+
+    // Dot causes continuation (method chain)
+    if (ch === '.') {
+      // But not range operator (..)
+      if (i > 0 && source[i - 1] === '.') return false;
+      return true;
+    }
+
+    // Two-character operators: &&, ||
+    if (ch === '&' && i > 0 && source[i - 1] === '&') return true;
+    if (ch === '|' && i > 0 && source[i - 1] === '|') return true;
+
+    // Single-character binary operators: |, &
+    if (ch === '|' || ch === '&') return true;
+
+    return false;
   }
 
   private isPostfixRescue(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -222,7 +273,11 @@ export class RubyBlockParser extends BaseBlockParser {
     // Skip semicolons that are part of $; global variable
     let lastSemicolonPos = -1;
     for (let i = position - 1; i >= lineStart; i--) {
-      if (source[i] === ';' && !this.isInExcludedRegion(i, excludedRegions) && !(i > 0 && source[i - 1] === '$')) {
+      if (
+        source[i] === ';' &&
+        !this.isInExcludedRegion(i, excludedRegions) &&
+        !(i > 0 && source[i - 1] === '$' && (i < 2 || source[i - 2] !== '$'))
+      ) {
         lastSemicolonPos = i;
         break;
       }
@@ -270,7 +325,11 @@ export class RubyBlockParser extends BaseBlockParser {
     // Skip semicolons that are part of $; global variable
     let lastSemicolonPos = -1;
     for (let i = position - 1; i >= lineStart; i--) {
-      if (source[i] === ';' && !this.isInExcludedRegion(i, excludedRegions) && !(i > 0 && source[i - 1] === '$')) {
+      if (
+        source[i] === ';' &&
+        !this.isInExcludedRegion(i, excludedRegions) &&
+        !(i > 0 && source[i - 1] === '$' && (i < 2 || source[i - 2] !== '$'))
+      ) {
         lastSemicolonPos = i;
         break;
       }
@@ -384,7 +443,10 @@ export class RubyBlockParser extends BaseBlockParser {
     for (let i = beforeDo.length - 1; i >= 0; i--) {
       if (beforeDo[i] === ';') {
         const absolutePos = lineStart + i;
-        if (!this.isInExcludedRegion(absolutePos, excludedRegions) && !(absolutePos > 0 && source[absolutePos - 1] === '$')) {
+        if (
+          !this.isInExcludedRegion(absolutePos, excludedRegions) &&
+          !(absolutePos > 0 && source[absolutePos - 1] === '$' && (absolutePos < 2 || source[absolutePos - 2] !== '$'))
+        ) {
           lastValidSemicolon = i;
           break;
         }
@@ -486,6 +548,7 @@ export class RubyBlockParser extends BaseBlockParser {
   // Finds excluded regions: comments, strings, regex, heredocs, percent literals, symbols
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
+    this._lastExcludedRegion = null;
     let i = 0;
 
     while (i < source.length) {
@@ -503,10 +566,12 @@ export class RubyBlockParser extends BaseBlockParser {
             }
             const gapResult = this.tryMatchExcludedRegion(source, j);
             if (gapResult) {
-              regions.push({
+              const gapRegion = {
                 start: gapResult.start,
                 end: Math.min(gapResult.end, result.start)
-              });
+              };
+              regions.push(gapRegion);
+              this._lastExcludedRegion = gapRegion;
               j = gapResult.end;
             } else {
               j++;
@@ -514,6 +579,7 @@ export class RubyBlockParser extends BaseBlockParser {
           }
         }
         regions.push(result);
+        this._lastExcludedRegion = result;
         i = result.end;
       } else {
         i++;
@@ -620,7 +686,13 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // $', $", $` are global variables, not string/backtick starts
     if (pos > 0 && source[pos - 1] === '$' && (char === '"' || char === "'" || char === '`')) {
-      return { start: pos, end: pos + 1 };
+      const dollarInLastRegion =
+        this._lastExcludedRegion !== null && pos - 1 >= this._lastExcludedRegion.start && pos - 1 < this._lastExcludedRegion.end;
+      // Skip if $ is inside previous excluded region (e.g., ?$ char literal)
+      // or if preceded by another $ not in excluded region ($$ global variable)
+      if (!dollarInLastRegion && !(pos >= 2 && source[pos - 2] === '$' && !this.isPrevCharInLastRegion(pos - 2))) {
+        return { start: pos, end: pos + 1 };
+      }
     }
 
     // Double-quoted string (with #{} interpolation support)
@@ -799,7 +871,12 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Checks if slash is regex start (not division)
   private isRegexStart(source: string, pos: number): boolean {
-    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS);
+    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS, this._lastExcludedRegion ?? undefined);
+  }
+
+  // Checks if position is inside the last excluded region
+  private isPrevCharInLastRegion(charPos: number): boolean {
+    return this._lastExcludedRegion !== null && charPos >= this._lastExcludedRegion.start && charPos < this._lastExcludedRegion.end;
   }
 
   // Checks if % at position is a modulo operator (not a percent literal)
@@ -843,6 +920,18 @@ export class RubyBlockParser extends BaseBlockParser {
     );
     if (result && heredocState.pendingEnd > result.end) {
       return { end: heredocState.pendingEnd };
+    }
+    if (!result) return null;
+    // For %r (percent regex), include trailing regex flags in excluded region
+    const specifier = source[pos + 1];
+    if (specifier === 'r') {
+      let flagEnd = result.end;
+      while (flagEnd < source.length && REGEX_FLAGS_PATTERN.test(source[flagEnd])) {
+        flagEnd++;
+      }
+      if (flagEnd > result.end) {
+        return { end: flagEnd };
+      }
     }
     return result;
   }
