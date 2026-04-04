@@ -147,6 +147,10 @@ export class AdaBlockParser extends BaseBlockParser {
       const pos = match.index;
       if (!this.isInExcludedRegion(pos, excludedRegions)) {
         const fullMatch = match[0];
+        if (this.isAdjacentToUnicodeLetter(source, pos, fullMatch.length)) {
+          match = COMPOUND_END_PATTERN.exec(source);
+          continue;
+        }
         const endType = match[1].toLowerCase();
         compoundEndPositions.set(pos, {
           keyword: fullMatch, // Preserve original case
@@ -192,6 +196,22 @@ export class AdaBlockParser extends BaseBlockParser {
         const lineStart = findLineStart(source, startOffset);
         const lineBefore = source.slice(lineStart, startOffset).toLowerCase().trimStart();
         let isTypeDeclLine = /^(type|subtype)\b/.test(lineBefore);
+        // When the line starts with 'type', check if 'protected' or 'task' precedes it
+        // on a previous line (e.g., "protected\ntype Foo is" should be a block, not a type decl)
+        if (isTypeDeclLine && /^type\b/.test(lineBefore)) {
+          let scanPos = lineStart - 1;
+          while (scanPos >= 0 && (source[scanPos] === ' ' || source[scanPos] === '\t' || source[scanPos] === '\n' || source[scanPos] === '\r')) {
+            scanPos--;
+          }
+          if (scanPos >= 0) {
+            const prevEnd = scanPos + 1;
+            const prevLineStart = findLineStart(source, prevEnd);
+            const prevToken = source.slice(prevLineStart, prevEnd).toLowerCase().trimEnd();
+            if (/\b(?:protected|task)$/.test(prevToken)) {
+              isTypeDeclLine = false;
+            }
+          }
+        }
         // Check for type/subtype keyword before this 'is' on the same line,
         // not separated by a semicolon
         // (e.g., "procedure Test is type T is range 1..10;")
@@ -201,10 +221,31 @@ export class AdaBlockParser extends BaseBlockParser {
           for (const m of lineSlice.matchAll(/\b(type|subtype)\b/gi)) {
             const absPos = lineStart + m.index;
             if (this.isInExcludedRegion(absPos, excludedRegions)) continue;
+            // Skip type/subtype inside parentheses (e.g., parameter type names)
+            let parenDepthAtMatch = 0;
+            for (let pi = lineStart; pi < absPos; pi++) {
+              if (this.isInExcludedRegion(pi, excludedRegions)) continue;
+              if (source[pi] === '(') parenDepthAtMatch++;
+              else if (source[pi] === ')') parenDepthAtMatch--;
+            }
+            if (parenDepthAtMatch > 0) continue;
             // Skip 'type' when preceded by 'protected' or 'task' (these are block, not type decl)
             if (m[1].toLowerCase() === 'type') {
               const beforeType = source.slice(lineStart, absPos).toLowerCase().trimEnd();
               if (/\b(?:protected|task)$/.test(beforeType)) continue;
+              // When 'type' is at the start of the line, check previous lines
+              if (beforeType.length === 0) {
+                let sp = lineStart - 1;
+                while (sp >= 0 && (source[sp] === ' ' || source[sp] === '\t' || source[sp] === '\n' || source[sp] === '\r')) {
+                  sp--;
+                }
+                if (sp >= 0) {
+                  const pe = sp + 1;
+                  const ps = findLineStart(source, pe);
+                  const pt = source.slice(ps, pe).toLowerCase().trimEnd();
+                  if (/\b(?:protected|task)$/.test(pt)) continue;
+                }
+              }
             }
             lastTypeDeclPos = absPos;
           }
@@ -309,6 +350,28 @@ export class AdaBlockParser extends BaseBlockParser {
                 break;
               }
               if (/^(type|subtype)\b/.test(prevLine)) {
+                // Check if 'protected' or 'task' precedes this type/subtype on a prior line
+                // (e.g., "protected\ntype Foo\nis" should be a block, not a type decl)
+                if (/^type\b/.test(prevLine)) {
+                  let checkPos = prevStart - 1;
+                  while (
+                    checkPos >= 0 &&
+                    (source[checkPos] === ' ' || source[checkPos] === '\t' || source[checkPos] === '\n' || source[checkPos] === '\r')
+                  ) {
+                    checkPos--;
+                  }
+                  if (checkPos >= 0) {
+                    const checkEnd = checkPos + 1;
+                    const checkLineStart = findLineStart(source, checkEnd);
+                    const checkToken = source.slice(checkLineStart, checkEnd).toLowerCase().trimEnd();
+                    if (/\b(?:protected|task)$/.test(checkToken)) {
+                      scanPos = prevStart - 1;
+                      if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+                      if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                      continue;
+                    }
+                  }
+                }
                 isTypeDecl = true;
                 typeDeclStart = prevStart;
               }
@@ -519,7 +582,11 @@ export class AdaBlockParser extends BaseBlockParser {
             if (matchIndex >= 0) {
               // Check if 'begin' is on the stack above the matched opener
               const beginIndex = matchIndex + 1;
-              if (beginIndex < stack.length && stack[beginIndex].token.value.toLowerCase() === 'begin') {
+              if (
+                beginIndex < stack.length &&
+                stack[beginIndex].token.value.toLowerCase() === 'begin' &&
+                BEGIN_CONTEXT_KEYWORDS.includes(stack[matchIndex].token.value.toLowerCase())
+              ) {
                 // Merge context keyword + begin into a single pair
                 const contextBlock = stack.splice(matchIndex, 1)[0];
                 // beginIndex shifted by -1 after removing contextBlock

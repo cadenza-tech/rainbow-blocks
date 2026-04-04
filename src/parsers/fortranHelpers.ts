@@ -658,6 +658,14 @@ export function isAfterDoubleColon(source: string, position: number, excludedReg
       contentLine = prevLine.slice(0, commentIdx);
     }
     const trimmedContent = contentLine.trimEnd();
+    // Skip comment-only lines (empty after stripping comment)
+    if (trimmedContent.length === 0 && commentIdx >= 0) {
+      prevLineEnd = prevLineStart - 1;
+      if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+        prevLineEnd--;
+      }
+      continue;
+    }
     // If previous line does not end with &, stop searching
     if (!trimmedContent.endsWith('&')) {
       break;

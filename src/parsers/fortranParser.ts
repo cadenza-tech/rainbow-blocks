@@ -12,7 +12,13 @@ import {
   matchElseWhere,
   matchFortranString
 } from './fortranHelpers';
-import { isAtLineStartAllowingWhitespace, isInsideParentheses, isValidFortranBlockClose, isValidProcedureOpen } from './fortranValidation';
+import {
+  isAtLineStartAllowingWhitespace,
+  isInsideParentheses,
+  isPrecededByOperator,
+  isValidFortranBlockClose,
+  isValidProcedureOpen
+} from './fortranValidation';
 import { findLastOpenerByType, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
@@ -113,6 +119,20 @@ export class FortranBlockParser extends BaseBlockParser {
 
     if (lowerKeyword === 'if') {
       return this.isValidIfOpen(keyword, source, position, excludedRegions);
+    }
+
+    // Skip keywords preceded by operator/expression context (e.g., 'x = do + 1')
+    // Only for keywords that never follow ')' in valid block-opening context.
+    // Excludes function/subroutine which can follow type specifiers like type(integer)
+    if (lowerKeyword !== 'function' && lowerKeyword !== 'subroutine' && isPrecededByOperator(source, position)) {
+      return false;
+    }
+
+    // Skip keywords used as variable names in assignments (e.g., 'do = 5', 'subroutine = 1')
+    const afterKw = source.slice(position + keyword.length);
+    const collapsed = collapseContinuationLines(afterKw);
+    if (/^[ \t]*=[^=]/.test(collapsed) || /^[ \t]*=[ \t]*$/.test(collapsed)) {
+      return false;
     }
 
     return true;
@@ -408,6 +428,11 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Validate block open keywords (e.g., skip single-line if)
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Skip block_open keywords inside parenthesized expressions (function arguments, conditions)
+      if (type === 'block_open' && isInsideParentheses(source, startOffset)) {
         continue;
       }
 

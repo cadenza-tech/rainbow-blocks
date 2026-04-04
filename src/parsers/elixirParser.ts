@@ -296,7 +296,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         return false;
       }
       // Capture operator prefix: &end, &fn, &else, etc. are function references, not keywords
-      if (token.startOffset > 0 && source[token.startOffset - 1] === '&') {
+      // But not the && operator (second & of &&)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '&' && (token.startOffset < 2 || source[token.startOffset - 2] !== '&')) {
         return false;
       }
       if (token.type === 'block_middle' && token.endOffset < source.length && source[token.endOffset] === ':') {
@@ -468,7 +469,11 @@ export class ElixirBlockParser extends BaseBlockParser {
         // Exclude fn: (keyword argument syntax), .fn (method call), @fn (module attribute), fn() (function call)
         if (
           source.slice(i, i + 2) === 'fn' &&
-          (i === 0 || (!/[a-zA-Z0-9_]/.test(source[i - 1]) && source[i - 1] !== '.' && source[i - 1] !== '@')) &&
+          (i === 0 ||
+            (!/[a-zA-Z0-9_]/.test(source[i - 1]) &&
+              source[i - 1] !== '.' &&
+              source[i - 1] !== '@' &&
+              !(source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
           (i + 2 >= source.length || (!/[a-zA-Z0-9_:?!]/.test(source[i + 2]) && source[i + 2] !== '(')) &&
           !this.isAdjacentToUnicodeLetter(source, i, 2)
         ) {
@@ -484,6 +489,7 @@ export class ElixirBlockParser extends BaseBlockParser {
             !/[a-zA-Z0-9_]/.test(beforeEnd) &&
             beforeEnd !== '.' &&
             beforeEnd !== '@' &&
+            !(beforeEnd === '&' && (i < 2 || source[i - 2] !== '&')) &&
             (afterEnd === undefined || !/[a-zA-Z0-9_:?!]/.test(afterEnd)) &&
             !this.isAdjacentToUnicodeLetter(source, i, 3)
           ) {
@@ -508,7 +514,7 @@ export class ElixirBlockParser extends BaseBlockParser {
     // Must have word boundary before (also reject . and @ prefixes)
     if (pos > 0) {
       const before = source[pos - 1];
-      if (/[a-zA-Z0-9_]/.test(before) || before === '.' || before === '@') {
+      if (/[a-zA-Z0-9_]/.test(before) || before === '.' || before === '@' || (before === '&' && (pos < 2 || source[pos - 2] !== '&'))) {
         return false;
       }
       // Handle surrogate pairs: low surrogate preceded by high surrogate
@@ -553,14 +559,26 @@ export class ElixirBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if a block keyword is used as a bare value (followed by comma)
-  // e.g., "if cond, do: v" - "cond" is a value, not starting a nested block
+  // Checks if a block keyword is used as a bare value rather than starting a nested block
+  // Detects two patterns:
+  //   1. Followed by comma: "if cond, do: v" - cond is a value
+  //   2. Followed by "do" keyword: "if cond do" - cond is a variable, do belongs to outer if
   private isKeywordUsedAsValue(source: string, afterPos: number): boolean {
     let j = afterPos;
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
       j++;
     }
-    return j < source.length && source[j] === ',';
+    if (j < source.length && source[j] === ',') {
+      return true;
+    }
+    // Check if directly followed by "do" with word boundary
+    if (source.slice(j, j + 2) === 'do') {
+      const afterDo = source[j + 2];
+      if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Checks if this is a do: one-liner
@@ -629,7 +647,7 @@ export class ElixirBlockParser extends BaseBlockParser {
           if (
             word === 'fn' &&
             !/[?!]/.test(source[i + word.length] || '') &&
-            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@')) &&
+            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@' || (source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
             !this.isAdjacentToUnicodeLetter(source, i, 2)
           ) {
             innerBlockDepth++;
@@ -640,7 +658,7 @@ export class ElixirBlockParser extends BaseBlockParser {
             word === 'end' &&
             innerBlockDepth > 0 &&
             !/[?!:]/.test(source[i + word.length] || '') &&
-            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@')) &&
+            !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@' || (source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
             !this.isAdjacentToUnicodeLetter(source, i, 3)
           ) {
             innerBlockDepth--;

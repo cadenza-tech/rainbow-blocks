@@ -344,7 +344,7 @@ function skipContinuationBackward(source: string, i: number): number {
 // (operator, assignment =, or closing paren) indicating it is used
 // as a variable in an expression, not as a block closer.
 // Follows & continuation lines backward when the keyword is at a line boundary.
-function isPrecededByOperator(source: string, position: number): boolean {
+export function isPrecededByOperator(source: string, position: number): boolean {
   let i = position - 1;
   while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
     i--;

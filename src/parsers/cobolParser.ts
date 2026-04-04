@@ -577,7 +577,7 @@ export class CobolBlockParser extends BaseBlockParser {
   // Scans backward for COPY, skipping content inside strings, comments, and directive lines
   private isInCopyStatement(source: string, posBeforeKeyword: number): boolean {
     const beforeKeyword = source.slice(0, posBeforeKeyword + 1);
-    const lastPeriod = beforeKeyword.lastIndexOf('.');
+    const lastPeriod = this.findLastPeriodOutsideStrings(beforeKeyword);
     const stmtStart = lastPeriod + 1;
     // Search for COPY word-boundary match, verifying each match is not inside a string or comment
     const copyPattern = /\bCOPY\b/gi;
@@ -600,6 +600,10 @@ export class CobolBlockParser extends BaseBlockParser {
               }
               break;
             }
+            // String cannot span multiple lines in COBOL
+            if (source[k] === '\n' || source[k] === '\r') {
+              break;
+            }
             k++;
           }
           if (k >= absPos) {
@@ -619,6 +623,67 @@ export class CobolBlockParser extends BaseBlockParser {
       if (!inString) return true;
     }
     return false;
+  }
+
+  // Finds the last period that is not inside a string literal, inline comment, compiler directive, or column-7 comment line
+  // Scans forward tracking quote state with COBOL doubled-quote escaping ('' and "")
+  private findLastPeriodOutsideStrings(text: string): number {
+    let lastPeriod = -1;
+    let i = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      // Skip *> inline comments to end of line
+      if (ch === '*' && i + 1 < text.length && text[i + 1] === '>') {
+        i += 2;
+        while (i < text.length && text[i] !== '\n' && text[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      // Skip >> compiler directives to end of line
+      if (ch === '>' && i + 1 < text.length && text[i + 1] === '>') {
+        i += 2;
+        while (i < text.length && text[i] !== '\n' && text[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        i++;
+        while (i < text.length) {
+          if (text[i] === ch) {
+            if (i + 1 < text.length && text[i + 1] === ch) {
+              i += 2;
+              continue;
+            }
+            break;
+          }
+          // String cannot span multiple lines in COBOL
+          if (text[i] === '\n' || text[i] === '\r') {
+            break;
+          }
+          i++;
+        }
+        i++;
+        continue;
+      }
+      if (ch === '.') {
+        if (!this.isOnFixedFormatCommentLine(text, i)) {
+          lastPeriod = i;
+        }
+      }
+      i++;
+    }
+    return lastPeriod;
+  }
+
+  // Checks if the given position is on a fixed-format column 7 comment line (*, /, D, d)
+  private isOnFixedFormatCommentLine(source: string, pos: number): boolean {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    return this.isFixedFormatCommentLine(source, lineStart);
   }
 
   // Checks if the given position is on a fixed-format comment line or >> compiler directive line
