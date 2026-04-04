@@ -52,6 +52,7 @@ export class BashBlockParser extends BaseBlockParser {
         i += 2;
         continue;
       }
+      // [[ ]] can span multiple lines in Bash; do not reset doubleBracketDepth on newlines
       // Skip comment detection when inside [[ ]] (# is not a comment there)
       if (doubleBracketDepth > 0 && source[i] === '#') {
         i++;
@@ -220,6 +221,11 @@ export class BashBlockParser extends BaseBlockParser {
       skippedRegion = false;
       for (const region of excludedRegions) {
         if (i >= region.start && i < region.end) {
+          // If excluded region ends immediately before the keyword with no newline separator, it's a concatenated word
+          // (e.g., "string"keyword). But heredocs include trailing newline, so region.end === position with a newline is valid.
+          if (region.end === position && (position === 0 || (source[position - 1] !== '\n' && source[position - 1] !== '\r'))) {
+            return false;
+          }
           i = region.start - 1;
           skippedRegion = true;
           while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
@@ -345,8 +351,15 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     // After `}` (end of command group) — allows `} && if ...` or `} || for ...`
+    // Only if } is a command group closer (preceded by ; or newline), not brace expansion ({a,b})
     if (source[i] === '}') {
-      return true;
+      let b = i - 1;
+      while (b >= 0 && (source[b] === ' ' || source[b] === '\t')) {
+        b--;
+      }
+      if (b < 0 || source[b] === ';' || source[b] === '\n' || source[b] === '\r' || source[b] === '&') {
+        return true;
+      }
     }
 
     // After shell keywords that introduce a new command context
@@ -383,6 +396,7 @@ export class BashBlockParser extends BaseBlockParser {
     // time command with flags: time -p cmd, time -- cmd, time -p -- cmd
     if (i >= 0 && source[i] !== '\n' && source[i] !== '\r') {
       let ts = i;
+      const beforeFlags = ts;
       // Skip backward past -p and -- flags
       while (ts >= 0) {
         const flag = source.slice(Math.max(0, ts - 1), ts + 1);
@@ -392,6 +406,10 @@ export class BashBlockParser extends BaseBlockParser {
           continue;
         }
         break;
+      }
+      // Verify whitespace between time and first flag when flags were consumed
+      if (ts !== beforeFlags && (ts < 0 || (source[ts + 1] !== ' ' && source[ts + 1] !== '\t'))) {
+        ts = -1;
       }
       if (ts >= 3 && source.slice(ts - 3, ts + 1) === 'time') {
         const tStart = ts - 3;
@@ -410,7 +428,7 @@ export class BashBlockParser extends BaseBlockParser {
     if (i >= 0) {
       let eqScan = i;
       if (source[eqScan] !== '=') {
-        while (eqScan > 0 && source[eqScan - 1] !== '=' && /[^\s;|&(){}#`]/.test(source[eqScan - 1])) {
+        while (eqScan > 0 && source[eqScan - 1] !== '=' && /[^\s;|&(){}`]/.test(source[eqScan - 1])) {
           eqScan--;
         }
         eqScan = eqScan > 0 && source[eqScan - 1] === '=' ? eqScan - 1 : -1;
@@ -422,12 +440,17 @@ export class BashBlockParser extends BaseBlockParser {
         }
       }
       if (eqScan >= 0 && source[eqScan] === '=') {
-        let varPos = eqScan - 1;
+        // Skip past += compound assignment operator
+        let varEnd = eqScan;
+        if (varEnd > 0 && source[varEnd - 1] === '+') {
+          varEnd--;
+        }
+        let varPos = varEnd - 1;
         while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
           varPos--;
         }
         const varStart = varPos + 1;
-        if (varStart < eqScan && /[a-zA-Z_]/.test(source[varStart])) {
+        if (varStart < varEnd && /[a-zA-Z_]/.test(source[varStart])) {
           return this.isAtCommandPosition(source, varStart, excludedRegions);
         }
       }
@@ -444,6 +467,7 @@ export class BashBlockParser extends BaseBlockParser {
       j++;
     }
     if (j >= source.length) return false;
+    let hasGlobSuffix = false;
 
     // Handle pipe-separated alternatives: if|then), for|while|until)
     // Pipe at end of line continues the pattern on the next line
@@ -469,11 +493,20 @@ export class BashBlockParser extends BaseBlockParser {
         return false;
       }
     } else if (source[j] !== ')') {
-      // Check for glob characters after keyword: if*, for?, while[abc], etc.
-      if (source[j] === '*' || source[j] === '?' || source[j] === '[') {
+      // Check for glob characters or excluded regions (strings, substitutions) directly adjacent to keyword
+      // Glob chars: if*, for?, while[abc]; Excluded regions: for"bar"), for'x'), for$(cmd)), for`cmd`)
+      const isGlobChar = source[j] === '*' || source[j] === '?' || source[j] === '[';
+      const hasExcludedRegion = this.findExcludedRegionAt(j, excludedRegions) !== null;
+      if (isGlobChar || hasExcludedRegion) {
         let bracketInGlob = 0;
         let found = false;
         while (j < source.length) {
+          // Skip excluded regions (strings, command substitutions) inside the pattern
+          const excludedRegion = this.findExcludedRegionAt(j, excludedRegions);
+          if (excludedRegion) {
+            j = excludedRegion.end;
+            continue;
+          }
           if (source[j] === '[') bracketInGlob++;
           else if (source[j] === ']' && bracketInGlob > 0) bracketInGlob--;
           else if (bracketInGlob === 0 && (source[j] === ')' || source[j] === '|')) {
@@ -485,6 +518,7 @@ export class BashBlockParser extends BaseBlockParser {
           j++;
         }
         if (!found) return false;
+        hasGlobSuffix = true;
       } else {
         return false;
       }
@@ -539,8 +573,8 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     // Block close keywords (esac, fi, done) should only be treated as case patterns
-    // when confirmed by the unmatched parenthesis check above, not by separator heuristics
-    if (keyword === 'esac' || keyword === 'fi' || keyword === 'done') {
+    // when confirmed by the unmatched parenthesis check above or by glob suffix (done?, fi*)
+    if ((keyword === 'esac' || keyword === 'fi' || keyword === 'done') && !hasGlobSuffix) {
       return false;
     }
 
@@ -676,7 +710,19 @@ export class BashBlockParser extends BaseBlockParser {
     while (prev >= 0 && (source[prev] === ' ' || source[prev] === '\t')) prev--;
     if (prev < 0) return true;
     const ch = source[prev];
-    if (ch === '\n' || ch === '\r' || ch === ';' || ch === '|' || ch === '&' || ch === '(' || ch === '`' || ch === '{' || ch === '!') {
+    if (
+      ch === '\n' ||
+      ch === '\r' ||
+      ch === ';' ||
+      ch === '|' ||
+      ch === '&' ||
+      ch === '(' ||
+      ch === ')' ||
+      ch === '`' ||
+      ch === '{' ||
+      ch === '}' ||
+      ch === '!'
+    ) {
       return true;
     }
     // Check if preceded by a shell keyword (then, else, elif, do, in)
@@ -693,7 +739,10 @@ export class BashBlockParser extends BaseBlockParser {
         word === 'if' ||
         word === 'while' ||
         word === 'until' ||
-        word === 'time'
+        word === 'time' ||
+        word === 'fi' ||
+        word === 'done' ||
+        word === 'esac'
       ) {
         return true;
       }

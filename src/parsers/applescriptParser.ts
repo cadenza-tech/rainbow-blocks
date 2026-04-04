@@ -352,16 +352,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
-      // Reject compound block openers used as condition values in 'if ... then' pattern
+      // Reject compound block openers not at logical line start (covers if-condition, tell...to one-liner, and mid-line contexts)
       if (type === 'block_open') {
-        if (this.isInsideIfCondition(source, i, keyword.length, excludedRegions)) {
-          return { nextPos: flexMatch };
-        }
-      }
-
-      // Reject compound block openers inside tell...to one-liner context
-      if (type === 'block_open') {
-        if (this.isInsideTellToOneLiner(source, i, excludedRegions)) {
+        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
           return { nextPos: flexMatch };
         }
       }
@@ -432,9 +425,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
-      // 'considering' and 'ignoring' should not be block openers inside tell...to one-liners
+      // 'considering' and 'ignoring' are block openers only at logical line start
       if (type === 'block_open' && (keyword === 'considering' || keyword === 'ignoring')) {
-        if (this.isInsideTellToOneLiner(source, i, excludedRegions)) {
+        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
           return { nextPos: endPos };
         }
       }
@@ -721,36 +714,6 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if a compound block opener is inside a tell...to one-liner
-  // e.g., 'tell application "X" to open with timeout of 30 seconds'
-  private isInsideTellToOneLiner(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const lineStart = this.findLogicalLineStart(source, position, excludedRegions);
-    // Scan backward from position for 'to' keyword on the same logical line
-    for (let i = position - 1; i >= lineStart; i--) {
-      if (this.isInExcludedRegion(i, excludedRegions)) continue;
-      if (
-        i + 2 <= position &&
-        source.slice(i, i + 2).toLowerCase() === 'to' &&
-        (i === 0 || !/\w/.test(source[i - 1])) &&
-        (i + 2 >= source.length || !/\w/.test(source[i + 2]))
-      ) {
-        // Found 'to' keyword; now check if there's a 'tell' before it on the same logical line
-        for (let j = i - 1; j >= lineStart; j--) {
-          if (this.isInExcludedRegion(j, excludedRegions)) continue;
-          if (
-            j + 4 <= i &&
-            source.slice(j, j + 4).toLowerCase() === 'tell' &&
-            (j === 0 || !/\w/.test(source[j - 1])) &&
-            (j + 4 >= source.length || !/\w/.test(source[j + 4]))
-          ) {
-            return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
-
   // Checks if a keyword is used inside an 'if ... then' condition
   // e.g., 'if tell then' uses 'tell' as a condition value, not a block opener
   private isInsideIfCondition(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -920,8 +883,8 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     // Bare 'end' after prepositions in expression context
-    // e.g., 'repeat with i from 1 to end', 'items thru end', 'items through end', 'from end'
-    if (keyword === 'end' && /\b(?:to|thru|through|from)[ \t]+$/i.test(lineBefore)) {
+    // e.g., 'repeat with i from 1 to end', 'items thru end', 'by end', 'before end', 'after end', 'at end'
+    if (keyword === 'end' && /\b(?:to|thru|through|from|by|before|after|at)[ \t]+$/i.test(lineBefore)) {
       return true;
     }
 

@@ -49,7 +49,14 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
 }
 
 // Matches the body of a heredoc (from body start to terminator line)
-export function matchHeredocBody(source: string, bodyStart: number, stripTabs: boolean, terminator: string): ExcludedRegion | null {
+// When inSubshell is true, also recognizes terminator immediately followed by ')' (e.g., EOF))
+export function matchHeredocBody(
+  source: string,
+  bodyStart: number,
+  stripTabs: boolean,
+  terminator: string,
+  inSubshell = false
+): ExcludedRegion | null {
   let i = bodyStart;
 
   while (i < source.length) {
@@ -74,6 +81,18 @@ export function matchHeredocBody(source: string, bodyStart: number, stripTabs: b
       return {
         start: bodyStart,
         end: regionEnd
+      };
+    }
+
+    // Inside subshell: terminator at line start followed by ')' closes the heredoc
+    // Content after ')' (e.g., 'EOF) file') belongs outside the subshell
+    if (inSubshell && trimmedLine.startsWith(`${terminator})`)) {
+      // End the heredoc region at the position of the ')', not past it
+      const trimOffset = stripTabs ? line.length - line.replace(/^\t*/, '').length : 0;
+      const parenPos = lineStart + trimOffset + terminator.length;
+      return {
+        start: bodyStart,
+        end: parenPos
       };
     }
 

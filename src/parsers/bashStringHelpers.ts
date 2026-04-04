@@ -473,7 +473,7 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
         bodyStart++;
       }
       for (const hd of pendingHeredocs) {
-        const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator);
+        const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator, true);
         bodyStart = body ? body.end : bodyStart;
       }
       pendingHeredocs.length = 0;
@@ -582,7 +582,7 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
             bodyStart++;
           }
           for (const hd of pendingHeredocs) {
-            const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator);
+            const body = matchHeredocBody(source, bodyStart, hd.stripTabs, hd.terminator, true);
             bodyStart = body ? body.end : bodyStart;
           }
           // Exclude the trailing newline so isAtCommandPosition can see the line boundary
