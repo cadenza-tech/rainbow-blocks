@@ -147,6 +147,10 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (this.hasCommaAtDepthZero(source, i + 1, position, excludedRegions)) {
             return false;
           }
+          // for at start of brackets is a block, not a generator (generators need expr before for)
+          if (this.isOnlyWhitespaceBetween(source, i + 1, position)) {
+            return false;
+          }
           return true;
         }
         bracketDepth--;
@@ -177,7 +181,12 @@ export class JuliaBlockParser extends BaseBlockParser {
         bracketDepth++;
       } else if (char === '[') {
         if (bracketDepth === 0) {
-          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+          if (this.hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+            return false;
+          }
+          // Unmatched '[' (no closing ']') means the bracket is unclosed (likely during editing)
+          // Keywords after it should still be valid block keywords
+          if (!this.hasMatchingCloseBracket(source, position + 3, excludedRegions)) {
             return false;
           }
           return this.isIndexingBracket(source, i);
@@ -187,7 +196,7 @@ export class JuliaBlockParser extends BaseBlockParser {
         parenDepth++;
       } else if (char === '(') {
         if (parenDepth === 0 && bracketDepth === 0) {
-          if (this.hasBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
+          if (this.hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
             return false;
           }
           // No block opener between ( and end: check if this paren group closes after end
@@ -203,6 +212,22 @@ export class JuliaBlockParser extends BaseBlockParser {
         } else {
           parenDepth--;
         }
+      }
+    }
+    return false;
+  }
+
+  // Checks if there is a matching ']' that closes the current bracket group after 'from'
+  private hasMatchingCloseBracket(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 1;
+    for (let i = from; i < source.length; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === '[') {
+        depth++;
+      } else if (ch === ']') {
+        depth--;
+        if (depth === 0) return true;
       }
     }
     return false;
@@ -241,30 +266,6 @@ export class JuliaBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if there's a block-opening keyword between two positions (not in excluded regions)
-  // Used to distinguish a[f(end)] (lastindex) from [f(begin...end)] (block close)
-  private hasBlockOpenerBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Exclude 'for' since it is itself subject to parenthesis rejection (generator expressions)
-    // Only count block openers like 'begin', 'function', 'struct', 'if', etc.
-    const blockOpeners = this.keywords.blockOpen.filter((kw) => kw !== 'for');
-    for (let i = start; i < end; i++) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        continue;
-      }
-      for (const keyword of blockOpeners) {
-        if (i + keyword.length <= end && source.slice(i, i + keyword.length) === keyword) {
-          // Check word boundaries (ASCII + Unicode with surrogate pair support)
-          const before = i > 0 ? source[i - 1] : ' ';
-          const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
-          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
-          if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
   // Checks if there's an unmatched block opener between two positions
   // Tracks depth by counting openers and 'end' closers to handle completed block expressions
   // e.g., "begin i^2 end" → depth 0 (matched), "begin i^2" → depth 1 (unmatched)
@@ -292,6 +293,8 @@ export class JuliaBlockParser extends BaseBlockParser {
           const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
           if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
           if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+          // Skip dot-preceded keywords (field access like range.begin, not block opener)
+          if (before === '.') continue;
           depth++;
           i += keyword.length - 1;
           break;
@@ -312,6 +315,8 @@ export class JuliaBlockParser extends BaseBlockParser {
           const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
           if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
           if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+          // Skip dot-preceded keywords (field access like range.begin, not block opener)
+          if (before === '.') continue;
           return true;
         }
       }
@@ -406,6 +411,10 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (this.hasCommaAtDepthZero(source, i + 1, position, excludedRegions)) {
             return false;
           }
+          // for at start of parentheses is a block, not a generator (generators need expr before for)
+          if (this.isOnlyWhitespaceBetween(source, i + 1, position)) {
+            return false;
+          }
           // Check for named tuple context: (name = for ...)
           // If there's a '=' (not '==') between '(' and the keyword, it's assignment
           if (this.hasAssignmentBetween(source, i + 1, position, excludedRegions)) {
@@ -461,11 +470,20 @@ export class JuliaBlockParser extends BaseBlockParser {
         depth++;
       } else if (ch === ')' || ch === ']' || ch === '}') {
         depth--;
-      } else if (depth === 0 && ch === ',') {
+      } else if (depth === 0 && (ch === ',' || ch === ';')) {
         return true;
       }
     }
     return false;
+  }
+
+  // Checks if there is only whitespace between two positions
+  private isOnlyWhitespaceBetween(source: string, start: number, end: number): boolean {
+    for (let i = start; i < end; i++) {
+      const ch = source[i];
+      if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') return false;
+    }
+    return true;
   }
 
   // Checks if position is inside square brackets only (for other block keywords)
@@ -486,7 +504,7 @@ export class JuliaBlockParser extends BaseBlockParser {
           // If inside parentheses within brackets, the keyword is valid
           if (parenDepth > 0) return false;
           // If there's a block opener between [ and the keyword, the block expression is valid
-          if (this.hasBlockOpenerBetween(source, i + 1, position + keywordLength, excludedRegions)) {
+          if (this.hasUnmatchedBlockOpenerBetween(source, i + 1, position + keywordLength, excludedRegions)) {
             return false;
           }
           // Only indexing brackets exclude block keywords, not array construction
@@ -664,10 +682,9 @@ export class JuliaBlockParser extends BaseBlockParser {
         }
         // Regular prefixed string (no interpolation, raw content except b"...")
         let stringEnd = this.findPrefixedStringEnd(source, prefixEnd + 1, '"', prefix === 'b');
-        // Consume string macro suffix characters (e.g., custom"content"flags)
-        // Stop before block keywords to avoid swallowing them (e.g., r"pattern"end)
+        // Consume string macro suffix characters (e.g., custom"content"flags, r"pattern"for)
+        // In Julia, all identifier characters after the closing quote are part of the suffix
         while (stringEnd < source.length && /[a-zA-Z0-9_]/.test(source[stringEnd])) {
-          if (this.startsWithBlockKeyword(source, stringEnd)) break;
           stringEnd++;
         }
         return { start: pos, end: stringEnd };
@@ -680,20 +697,6 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if a word is a block keyword
   private isBlockKeyword(word: string): boolean {
     return this.keywords.blockOpen.includes(word) || this.keywords.blockClose.includes(word) || this.keywords.blockMiddle.includes(word);
-  }
-
-  // Checks if source at pos starts with a block keyword followed by a non-word char or end of string
-  private startsWithBlockKeyword(source: string, pos: number): boolean {
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-    for (const kw of allKeywords) {
-      if (source.startsWith(kw, pos)) {
-        const afterPos = pos + kw.length;
-        if (afterPos >= source.length || !/[a-zA-Z0-9_]/.test(source[afterPos])) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   // Matches prefixed triple-quoted string (no interpolation, raw content except b"...")
@@ -711,9 +714,8 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (source.slice(i, i + 3) === '"""') {
         let end = i + 3;
         // Consume string macro suffix characters
-        // Stop before block keywords to avoid swallowing them
+        // In Julia, all identifier characters after the closing quote are part of the suffix
         while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) {
-          if (this.startsWithBlockKeyword(source, end)) break;
           end++;
         }
         return { start: pos, end };

@@ -254,7 +254,7 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject modifier-prefixed keywords (extern module/function/task, typedef class, pure virtual function/task)
-    if (this.isPrecededByModifierKeyword(source, position, keyword)) {
+    if (this.isPrecededByModifierKeyword(source, position, keyword, excludedRegions)) {
       return false;
     }
 
@@ -317,22 +317,35 @@ export class VerilogBlockParser extends BaseBlockParser {
   }
 
   // Returns true if 'property' or 'sequence' at the given position is preceded by an assertion verb
-  // (assert, assume, cover, expect, restrict) with whitespace or comments between them
+  // (assert, assume, cover, expect, restrict) with whitespace or comments between them.
+  // Handles assertion qualifiers like 'final' and '#0' that may appear between the verb and keyword
   private isPrecededByAssertionVerb(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const ASSERTION_VERBS = ['assert', 'assume', 'cover', 'expect', 'restrict'];
-    let j = position - 1;
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-      j--;
-    }
-    while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
-      const region = this.findExcludedRegionAt(j, excludedRegions);
-      if (region) {
-        j = region.start - 1;
-        while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-          j--;
+    let j = this.skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions);
+    // Skip assertion qualifiers: 'final' and '#<digits>' (e.g., #0)
+    // These can appear in any combination between the verb and property/sequence
+    let skipped = true;
+    while (skipped) {
+      skipped = false;
+      // Skip 'final' qualifier
+      if (j >= 4 && source.slice(j - 4, j + 1) === 'final') {
+        const beforeFinal = j - 5;
+        if (beforeFinal < 0 || !/[a-zA-Z0-9_$]/.test(source[beforeFinal])) {
+          j = this.skipBackwardWhitespaceAndComments(source, j - 5, excludedRegions);
+          skipped = true;
+          continue;
         }
-      } else {
-        j--;
+      }
+      // Skip '#<digits>' delay qualifier (e.g., #0)
+      if (j >= 0 && /[0-9]/.test(source[j])) {
+        let k = j;
+        while (k >= 0 && /[0-9]/.test(source[k])) {
+          k--;
+        }
+        if (k >= 0 && source[k] === '#') {
+          j = this.skipBackwardWhitespaceAndComments(source, k - 1, excludedRegions);
+          skipped = true;
+        }
       }
     }
     for (const verb of ASSERTION_VERBS) {
@@ -346,6 +359,26 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
     }
     return false;
+  }
+
+  // Skips backward over whitespace and excluded regions (comments), returning the new position
+  private skipBackwardWhitespaceAndComments(source: string, startPos: number, excludedRegions: ExcludedRegion[]): number {
+    let pos = startPos;
+    while (pos >= 0 && (source[pos] === ' ' || source[pos] === '\t' || source[pos] === '\n' || source[pos] === '\r')) {
+      pos--;
+    }
+    while (pos >= 0 && this.isInExcludedRegion(pos, excludedRegions)) {
+      const region = this.findExcludedRegionAt(pos, excludedRegions);
+      if (region) {
+        pos = region.start - 1;
+        while (pos >= 0 && (source[pos] === ' ' || source[pos] === '\t' || source[pos] === '\n' || source[pos] === '\r')) {
+          pos--;
+        }
+      } else {
+        pos--;
+      }
+    }
+    return pos;
   }
 
   // Returns true if keyword at position is preceded by a label colon (e.g., begin : module, end : end)
@@ -391,7 +424,7 @@ export class VerilogBlockParser extends BaseBlockParser {
 
   // Returns true if keyword is preceded by a modifier keyword that indicates a non-block usage
   // (e.g., extern module/function/task, typedef class, pure virtual function/task)
-  private isPrecededByModifierKeyword(source: string, position: number, keyword: string): boolean {
+  private isPrecededByModifierKeyword(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
     const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
       class: ['typedef', 'extern'],
       interface: ['extern'],
@@ -406,6 +439,18 @@ export class VerilogBlockParser extends BaseBlockParser {
     while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
       j--;
     }
+    // Skip over excluded regions (comments, strings) between modifier and keyword
+    while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.start - 1;
+        while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+          j--;
+        }
+      } else {
+        j--;
+      }
+    }
     if (j < 0) return false;
     const wordEnd = j;
     while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) {
@@ -416,7 +461,24 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // For function/task: "pure virtual function/task" has no body, but "virtual function/task" does
     if (word === 'virtual' && (keyword === 'function' || keyword === 'task')) {
-      return this.isPrecededByWord(source, j, 'pure');
+      return this.isPrecededByWord(source, j, 'pure', excludedRegions);
+    }
+
+    // Check for 'virtual interface' (variable type declaration, not a block)
+    if (word === 'virtual' && keyword === 'interface') {
+      if (j < 0 || !/[a-zA-Z0-9_$]/.test(source[j])) {
+        return true;
+      }
+    }
+
+    // Check for qualifier between extern and keyword (e.g., extern protected function)
+    const QUALIFIER_KEYWORDS = new Set(['protected', 'local', 'static', 'virtual', 'forkjoin']);
+    if (QUALIFIER_KEYWORDS.has(word) && validModifiers?.includes('extern')) {
+      if (j < 0 || !/[a-zA-Z0-9_$]/.test(source[j])) {
+        if (this.isPrecededByWord(source, j, 'extern', excludedRegions)) {
+          return true;
+        }
+      }
     }
 
     if (validModifiers?.includes(word)) {
@@ -427,11 +489,22 @@ export class VerilogBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Returns true if the position is preceded (skipping whitespace) by the given word with a word boundary
-  private isPrecededByWord(source: string, pos: number, targetWord: string): boolean {
+  // Returns true if the position is preceded (skipping whitespace and excluded regions) by the given word with a word boundary
+  private isPrecededByWord(source: string, pos: number, targetWord: string, excludedRegions: ExcludedRegion[]): boolean {
     let j = pos;
     while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
       j--;
+    }
+    while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.start - 1;
+        while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+          j--;
+        }
+      } else {
+        j--;
+      }
     }
     if (j < 0) return false;
     const wordEnd = j;
@@ -454,7 +527,7 @@ export class VerilogBlockParser extends BaseBlockParser {
       lineStart--;
     }
     const lineBeforeKeyword = source.slice(lineStart, position);
-    return /^\s*(?:import|export)\b/.test(lineBeforeKeyword);
+    return /^\s*(?:import|export)\s+"DPI/.test(lineBeforeKeyword);
   }
 
   // Returns true if position is inside unmatched parentheses (e.g., port list)
@@ -772,6 +845,18 @@ export class VerilogBlockParser extends BaseBlockParser {
     // SystemVerilog escaped identifier: \<chars> terminated by whitespace
     if (char === '\\' && pos + 1 < source.length && /[^\s]/.test(source[pos + 1])) {
       return matchEscapedIdentifier(source, pos);
+    }
+
+    // `include with angle-bracket filename: `include <file.vh>
+    if (char === '`' && source.slice(pos, pos + 8) === '`include') {
+      let j = pos + 8;
+      while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+      if (j < source.length && source[j] === '<') {
+        let k = j + 1;
+        while (k < source.length && source[k] !== '>' && source[k] !== '\n' && source[k] !== '\r') k++;
+        if (k < source.length && source[k] === '>') return { start: j, end: k + 1 };
+        return { start: j, end: k };
+      }
     }
 
     // SystemVerilog attribute: (* ... *) but not sensitivity list @(*)

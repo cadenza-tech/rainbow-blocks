@@ -35,7 +35,7 @@ export class LuaBlockParser extends BaseBlockParser {
   // Skips whitespace between operator and keyword since Lua allows 'obj . end'
   private isPrecededByDotOrColon(source: string, position: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
       i--;
     }
     if (i < 0) return false;
@@ -85,8 +85,8 @@ export class LuaBlockParser extends BaseBlockParser {
       let nestedLoopEndDepth = 0;
       let otherBlockDepth = 0;
       let foundOurDo = false;
-      // Track pending for/while inside non-loop blocks that await their do keyword
-      let pendingLoopDo = 0;
+      // Track depths at which for/while inside non-loop blocks await their do keyword
+      const pendingLoopDoDepths: number[] = [];
 
       for (const innerMatch of matches) {
         const absolutePos = afterLoopStart + innerMatch.index;
@@ -105,18 +105,20 @@ export class LuaBlockParser extends BaseBlockParser {
           otherBlockDepth++;
         } else if ((word === 'end' || word === 'until') && otherBlockDepth > 0) {
           otherBlockDepth--;
-          if (otherBlockDepth === 0) {
-            pendingLoopDo = 0;
+          // Remove pending loop-dos at depths above the new otherBlockDepth
+          // (their for/while was closed without a matching do)
+          while (pendingLoopDoDepths.length > 0 && pendingLoopDoDepths[pendingLoopDoDepths.length - 1] > otherBlockDepth) {
+            pendingLoopDoDepths.pop();
           }
         } else if (otherBlockDepth > 0) {
           // Inside a non-loop block, track sub-blocks so their end keywords
           // don't prematurely close the outer scope
           if (word === 'for' || word === 'while') {
             otherBlockDepth++;
-            pendingLoopDo++;
+            pendingLoopDoDepths.push(otherBlockDepth);
           } else if (word === 'do') {
-            if (pendingLoopDo > 0) {
-              pendingLoopDo--;
+            if (pendingLoopDoDepths.length > 0 && pendingLoopDoDepths[pendingLoopDoDepths.length - 1] === otherBlockDepth) {
+              pendingLoopDoDepths.pop();
             } else {
               otherBlockDepth++;
             }

@@ -7,6 +7,9 @@ import { findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 // Type modifier keywords that can appear between '=' and class/object/interface
 const TYPE_MODIFIERS = ['abstract', 'sealed', 'packed'];
 
+// Keywords that indicate comparison context (= is comparison, not type definition)
+const COMPARISON_CONTEXT_KEYWORDS = new Set(['if', 'while', 'until', 'then', 'or', 'and', 'not', 'xor', 'else']);
+
 export class PascalBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['begin', 'case', 'repeat', 'try', 'record', 'class', 'object', 'interface', 'asm'],
@@ -166,28 +169,87 @@ export class PascalBlockParser extends BaseBlockParser {
       break;
     }
 
-    // If we found a type modifier keyword (packed, sealed, abstract) before class/object/interface, scan further back for '='
-    for (const modifier of TYPE_MODIFIERS) {
-      const len = modifier.length;
-      if (i >= len - 1 && source.slice(i - len + 1, i + 1).toLowerCase() === modifier && (i < len || !/[a-zA-Z0-9_]/.test(source[i - len]))) {
-        i -= len;
-        while (i >= 0) {
-          if (this.isInExcludedRegion(i, excludedRegions)) {
-            i--;
-            continue;
+    // If we found type modifier keywords (packed, sealed, abstract) before class/object/interface, scan further back for '='
+    // Multiple modifiers can appear: e.g. 'packed sealed class'
+    {
+      let foundModifier = true;
+      while (foundModifier) {
+        foundModifier = false;
+        for (const modifier of TYPE_MODIFIERS) {
+          const len = modifier.length;
+          if (i >= len - 1 && source.slice(i - len + 1, i + 1).toLowerCase() === modifier && (i < len || !/[a-zA-Z0-9_]/.test(source[i - len]))) {
+            i -= len;
+            while (i >= 0) {
+              if (this.isInExcludedRegion(i, excludedRegions)) {
+                i--;
+                continue;
+              }
+              if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+                i--;
+                continue;
+              }
+              break;
+            }
+            foundModifier = true;
+            break;
           }
-          if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
-            i--;
-            continue;
-          }
-          break;
         }
-        break;
       }
     }
 
     // Must be '=' but not ':=' (assignment operator)
-    return i >= 0 && source[i] === '=' && (i === 0 || source[i - 1] !== ':');
+    if (!(i >= 0 && source[i] === '=' && (i === 0 || ![':', '>', '<', '+', '-', '*', '/'].includes(source[i - 1])))) {
+      return false;
+    }
+
+    // Check if '=' is in a comparison context (not a type definition)
+    // e.g. 'if x = class' should not treat class as block opener
+    {
+      let ci = i - 1;
+      while (ci >= 0) {
+        if (this.isInExcludedRegion(ci, excludedRegions)) {
+          ci--;
+          continue;
+        }
+        if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') {
+          ci--;
+          continue;
+        }
+        break;
+      }
+      // Extract the word ending at ci
+      if (ci >= 0 && /[a-zA-Z0-9_]/.test(source[ci])) {
+        const wordEnd = ci;
+        while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
+        const word = source.slice(ci, wordEnd + 1).toLowerCase();
+        if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
+          return false;
+        }
+        // Also check one more word back (e.g. 'if x = class' where x is an identifier)
+        let ci2 = ci - 1;
+        while (ci2 >= 0) {
+          if (this.isInExcludedRegion(ci2, excludedRegions)) {
+            ci2--;
+            continue;
+          }
+          if (source[ci2] === ' ' || source[ci2] === '\t' || source[ci2] === '\n' || source[ci2] === '\r') {
+            ci2--;
+            continue;
+          }
+          break;
+        }
+        if (ci2 >= 0 && /[a-zA-Z0-9_]/.test(source[ci2])) {
+          const wordEnd2 = ci2;
+          while (ci2 > 0 && /[a-zA-Z0-9_]/.test(source[ci2 - 1])) ci2--;
+          const word2 = source.slice(ci2, wordEnd2 + 1).toLowerCase();
+          if (COMPARISON_CONTEXT_KEYWORDS.has(word2)) {
+            return false;
+          }
+        }
+      }
+    }
+
+    return true;
   }
 
   // Extends base to add ASM block excluded regions
@@ -499,23 +561,42 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         // Skip 'class of' (class reference type, no matching end)
         // Also skips excluded regions (comments) between 'class' and 'of'
+        // Stop at newlines: 'class\n  of' is NOT a reference type (consistent with isValidBlockOpen)
         {
           let ck = i + 1;
+          let hasNewline = false;
           while (ck < source.length) {
-            if (source[ck] === ' ' || source[ck] === '\t' || source[ck] === '\n' || source[ck] === '\r') {
+            if (source[ck] === '\n' || source[ck] === '\r') {
+              hasNewline = true;
+              break;
+            }
+            if (source[ck] === ' ' || source[ck] === '\t') {
               ck++;
               continue;
             }
             if (this.isInExcludedRegion(ck, excludedRegions)) {
               const rgn = this.findExcludedRegionAt(ck, excludedRegions);
               if (rgn) {
+                // Track newlines inside excluded regions (multi-line comments)
+                for (let ri = rgn.start; ri < rgn.end; ri++) {
+                  if (source[ri] === '\n' || source[ri] === '\r') {
+                    hasNewline = true;
+                    break;
+                  }
+                }
+                if (hasNewline) break;
                 ck = rgn.end;
                 continue;
               }
             }
             break;
           }
-          if (ck + 1 < source.length && lowerSource.slice(ck, ck + 2) === 'of' && (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))) {
+          if (
+            !hasNewline &&
+            ck + 1 < source.length &&
+            lowerSource.slice(ck, ck + 2) === 'of' &&
+            (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))
+          ) {
             i -= 5;
             continue;
           }
@@ -869,7 +950,7 @@ export class PascalBlockParser extends BaseBlockParser {
     return pairs;
   }
 
-  // Checks if a class/interface keyword is a forward declaration (followed by ';' or '(Parent);')
+  // Checks if a class/interface keyword is a forward declaration (followed by ';', '(Parent);', or '[GUID];')
   private isForwardDeclarationAfter(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     let j = pos;
     // Skip whitespace, newlines, and excluded regions (comments)
@@ -909,6 +990,41 @@ export class PascalBlockParser extends BaseBlockParser {
         j++;
       }
       // Skip whitespace, newlines, and excluded regions after closing paren
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          const region = this.findExcludedRegionAt(j, excludedRegions);
+          if (region) {
+            j = region.end;
+            continue;
+          }
+          j++;
+          continue;
+        }
+        if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+          j++;
+          continue;
+        }
+        break;
+      }
+      if (j < source.length && source[j] === ';') return true;
+    }
+    // interface['{GUID}']; (Delphi GUID bracket syntax)
+    if (source[j] === '[') {
+      let depth = 1;
+      j++;
+      while (j < source.length && depth > 0) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          const region = this.findExcludedRegionAt(j, excludedRegions);
+          if (region) {
+            j = region.end;
+            continue;
+          }
+        }
+        if (source[j] === '[') depth++;
+        else if (source[j] === ']') depth--;
+        j++;
+      }
+      // Skip whitespace, newlines, and excluded regions after closing bracket
       while (j < source.length) {
         if (this.isInExcludedRegion(j, excludedRegions)) {
           const region = this.findExcludedRegionAt(j, excludedRegions);
