@@ -210,22 +210,27 @@ export class MatlabBlockParser extends BaseBlockParser {
           i = nlStart - 1;
           continue;
         }
+        // Note: bare trailing dot without ... is NOT a continuation in MATLAB/Octave
+        // obj.\nend means end is on a new line (not preceded by dot for struct access)
       }
       break;
     }
     // Distinguish struct field access dot (obj.end, data1.end) from numeric decimal point (10.)
     if (i >= 0 && source[i] === '.') {
-      // Scan backward past digits and letters that form numeric literals
+      // Scan backward past digits, hex letters, and hex/binary prefix letters that form numeric literals
       let j = i - 1;
-      while (j >= 0 && /[0-9a-fA-F_]/.test(source[j])) {
+      while (j >= 0 && /[0-9a-fA-FxXbB_]/.test(source[j])) {
         j--;
       }
       // Check for numeric literal patterns: digits only, exponent (1e5), imaginary (1i/5j),
       // hex prefix (0xFF), binary prefix (0b1010)
       if (j < i - 1) {
         const numPart = source.slice(j + 1, i);
-        // Pure digits, or digits with trailing exponent/imaginary/hex suffixes
-        if (/^[0-9][0-9a-fA-F_]*$/.test(numPart) && (j < 0 || !(/[a-zA-Z_]/.test(source[j]) || /\p{L}/u.test(source[j])))) {
+        // Pure digits, hex literals (0x...), binary literals (0b...), or digits with suffixes
+        if (
+          (/^[0-9][0-9a-fA-F_]*$/.test(numPart) || /^0[xX][0-9a-fA-F_]+$/.test(numPart) || /^0[bB][01_]+$/.test(numPart)) &&
+          (j < 0 || !(/[a-zA-Z_]/.test(source[j]) || /\p{L}/u.test(source[j])))
+        ) {
           return false;
         }
       }

@@ -108,7 +108,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     });
   }
 
-  // Checks if position is followed by = or compound assignment (+=, -=, *=, /=, ^=, .+=, .-=, .*=, ./=, .^=)
+  // Checks if position is followed by = or compound assignment (+=, -=, *=, /=, \=, ^=, **=, .+=, .-=, .*=, ./=, .\=, .^=, .**=)
   // but not == (comparison)
   protected isFollowedByAssignment(source: string, afterPos: number): boolean {
     let i = afterPos;
@@ -138,12 +138,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
       return true;
     }
-    // Compound assignment: +=, -=, *=, /=, ^=, |=, &=
+    // Two-character compound assignment: **=
+    if (source[i] === '*' && i + 2 < source.length && source[i + 1] === '*' && source[i + 2] === '=') {
+      return true;
+    }
+    // Single-character compound assignment: +=, -=, *=, /=, \=, ^=, |=, &=
     if (
       (source[i] === '+' ||
         source[i] === '-' ||
         source[i] === '*' ||
         source[i] === '/' ||
+        source[i] === '\\' ||
         source[i] === '^' ||
         source[i] === '|' ||
         source[i] === '&') &&
@@ -152,11 +157,20 @@ export class OctaveBlockParser extends MatlabBlockParser {
     ) {
       return true;
     }
-    // Element-wise compound assignment: .+=, .-=, .*=, ./=, .^=
+    // Element-wise three-character compound assignment: .**=
+    if (source[i] === '.' && i + 3 < source.length && source[i + 1] === '*' && source[i + 2] === '*' && source[i + 3] === '=') {
+      return true;
+    }
+    // Element-wise two-character compound assignment: .+=, .-=, .*=, ./=, .\=, .^=
     if (
       source[i] === '.' &&
       i + 2 < source.length &&
-      (source[i + 1] === '+' || source[i + 1] === '-' || source[i + 1] === '*' || source[i + 1] === '/' || source[i + 1] === '^') &&
+      (source[i + 1] === '+' ||
+        source[i + 1] === '-' ||
+        source[i + 1] === '*' ||
+        source[i + 1] === '/' ||
+        source[i + 1] === '\\' ||
+        source[i + 1] === '^') &&
       source[i + 2] === '='
     ) {
       return true;
