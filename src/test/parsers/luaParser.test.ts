@@ -1101,5 +1101,22 @@ end`;
     });
   });
 
+  suite('Regression: comment ending with punctuation should not affect next line keywords', () => {
+    test('should not reject keywords on line after comment ending with period', () => {
+      const pairs = parser.parse('-- This is a comment.\nif true then\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not reject keywords on line after comment ending with colon', () => {
+      const pairs = parser.parse('-- Note:\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still reject dot-preceded keywords on same line', () => {
+      const pairs = parser.parse('t.do');
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

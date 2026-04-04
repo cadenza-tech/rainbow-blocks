@@ -897,6 +897,22 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
 
+    suite('Regression: pseudo-text detection after unterminated string and comment', () => {
+      test('should detect pseudo-text after unterminated string on previous line', () => {
+        const source = "'unterminated\nCOPY X REPLACING ==IF== BY ==WHEN==.";
+        const regions = parser.getExcludedRegions(source);
+        // Should find the unterminated string AND the pseudo-text regions
+        assert.ok(regions.length >= 2, 'Should detect pseudo-text regions after unterminated string');
+      });
+
+      test('should detect pseudo-text when inline comment with period separates COPY and REPLACING', () => {
+        const source = 'COPY X *> comment.\n REPLACING ==IF== BY ==WHEN==.';
+        const regions = parser.getExcludedRegions(source);
+        // Should find the comment AND the pseudo-text regions
+        assert.ok(regions.length >= 3, 'Should detect pseudo-text regions despite comment with period');
+      });
+    });
+
     suite('Regression: multi-pair COPY REPLACING / REPLACE', () => {
       test('should exclude all pseudo-text in 2-pair COPY REPLACING', () => {
         const source = 'COPY X REPLACING ==a== BY ==b== ==c== BY ==IF x END-IF==.\nPERFORM UNTIL DONE\n  DISPLAY X\nEND-PERFORM';
@@ -1611,6 +1627,18 @@ END-PERFORM`;
       const regions = parser.getExcludedRegions(source);
       const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
       assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should not treat period inside string as COPY statement boundary', () => {
+      const source = "MOVE 'X.' COPY Z REPLACING ==IF== BY ==END-IF==.\nIF COND\nEND-IF";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not treat period on column 7 comment line as statement boundary', () => {
+      const source = 'COPY X\n      * comment with period.\n       REPLACING ==IF== BY ==END-IF==.\nIF A > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
     });
   });
 

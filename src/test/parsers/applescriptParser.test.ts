@@ -1875,7 +1875,8 @@ end try`;
     });
 
     test('should parse compound keywords after U+0130 character', () => {
-      const source = '\u0130 using terms from application "Finder"\n  activate\nend using terms from';
+      // U+0130 on previous line; compound keyword at logical line start
+      const source = '\u0130\nusing terms from application "Finder"\n  activate\nend using terms from';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'using terms from', 'end using terms from');
     });
@@ -2340,6 +2341,24 @@ end try`;
     });
   });
 
+  suite('Regression: mid-line compound keyword false positive', () => {
+    test('should not detect mid-line with timeout as block opener', () => {
+      const pairs = parser.parse(
+        'with timeout of 60 seconds\n  tell application "X"\n    activate with timeout of 30 seconds\n  end tell\nend timeout'
+      );
+      assertBlockCount(pairs, 2);
+      const wt = findBlock(pairs, 'with timeout');
+      assert.strictEqual(wt.openKeyword.line, 0);
+      assert.strictEqual(wt.closeKeyword.line, 4);
+    });
+
+    test('should not detect mid-line considering as block opener', () => {
+      const pairs = parser.parse('considering case\n  do something considering case\nend considering');
+      assertSingleBlock(pairs, 'considering', 'end considering');
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+    });
+  });
+
   suite('Regression: keyword context validation', () => {
     test('should suppress repeat as variable in mid-line set statement', () => {
       const pairs = parser.parse('on run\n  if true then set repeat to 5\nend');
@@ -2360,6 +2379,28 @@ end try`;
     test('should handle if as condition value in repeat while', () => {
       const pairs = parser.parse('repeat while if\n  beep\nend repeat');
       assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
+  suite('Regression: bare end after prepositions', () => {
+    test('should not treat end as block closer after by preposition', () => {
+      const pairs = parser.parse('repeat with i from 1 to 10 by end\n  beep\nend repeat');
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should not treat end as block closer after before preposition', () => {
+      const pairs = parser.parse('on run\n  insert x before end\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat end as block closer after after preposition', () => {
+      const pairs = parser.parse('on run\n  insert x after end\nend');
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat end as block closer after at preposition', () => {
+      const pairs = parser.parse('on run\n  insert x at end\nend');
+      assertSingleBlock(pairs, 'on', 'end');
     });
   });
 

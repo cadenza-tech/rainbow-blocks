@@ -1758,12 +1758,14 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
-    test('should not consume end as string macro suffix', () => {
+    test('should consume end as string macro suffix', () => {
+      // In Julia, r"pattern"end has "end" as suffix flags, not a block keyword
       const pairs = parser.parse('begin\nr"pattern"end');
-      assertSingleBlock(pairs, 'begin', 'end');
+      assertNoBlocks(pairs);
     });
 
-    test('should not consume else as string macro suffix', () => {
+    test('should consume else as string macro suffix', () => {
+      // In Julia, r"p"else has "else" as suffix flags, not a block keyword
       const pairs = parser.parse('if true\nr"p"else\n  x\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
@@ -3237,6 +3239,88 @@ end`;
     test('should not treat begin! as block open', () => {
       const pairs = parser.parse('begin!(x)\nfunction foo()\nend');
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: for block at start of parentheses and brackets', () => {
+    test('should detect for block at start of parentheses', () => {
+      const pairs = parser.parse('(for i in 1:10\n  println(i)\nend)');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should detect for block at start of brackets', () => {
+      const pairs = parser.parse('[for i in 1:10; push!(arr, i); end]');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should recognize semicolon as separator in parentheses', () => {
+      const pairs = parser.parse('function f()\n  (x; for i in 1:10; println(i); end)\nend');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: end after completed block expression inside indexing brackets', () => {
+    test('should treat end as lastindex after completed begin-end in indexing brackets', () => {
+      const source = 'function f()\n  x = a[begin 1 end, end]\nend';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 2);
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should treat end as lastindex after completed if-end in indexing brackets', () => {
+      const source = 'function f()\n  x = a[if true 1 else 2 end, end]\nend';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 2);
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'if');
+    });
+
+    test('should treat end as lastindex after multiple completed blocks in indexing brackets', () => {
+      const source = 'x = a[begin 1 end + begin 2 end, end]';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 2);
+    });
+  });
+
+  suite('Regression: unbalanced indexing bracket should not reject subsequent end keywords', () => {
+    test('should parse function/end when data[ has no closing ]', () => {
+      const source = 'function foo()\n  x = data[\n  return x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should parse function/end when arr[ has no closing ] with expression', () => {
+      const source = 'function bar()\n  y = arr[1 +\n  z = 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: dot-preceded keywords should not count as block openers in bracket helpers', () => {
+    test('should not treat range.begin as block opener inside indexing brackets', () => {
+      const source = 'function foo(arr)\n  x = arr[range.begin:end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The function should pair with the final 'end' (offset 49), not the inner 'end' (offset 40)
+      const endOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, endOffset);
+    });
+
+    test('should not treat obj.for as block opener inside brackets', () => {
+      const source = 'function foo(arr)\n  x = arr[obj.for]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The function should pair with the final 'end', not any token inside brackets
+      const endOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, endOffset);
     });
   });
 

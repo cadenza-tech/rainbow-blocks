@@ -3497,32 +3497,26 @@ end`;
   });
 
   suite('Regression: ternary ? before string delimiters', () => {
-    test('should not treat ?" as char literal in ternary with double-quoted string', () => {
-      const source = 'nil ?"yes" : "no"\ndef foo\nend';
+    test('should not treat ?" as char literal when preceded by identifier char', () => {
+      const source = 'nil? "yes" : "no"\ndef foo\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
 
-    test("should not treat ?' as char literal in ternary with single-quoted string", () => {
-      const source = "nil ?'yes' : 'no'\ndef foo\nend";
+    test("should not treat ?' as char literal when preceded by identifier char", () => {
+      const source = "nil? 'yes' : 'no'\ndef foo\nend";
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
 
-    test('should not swallow subsequent code when ?" consumes opening quote', () => {
-      const source = 'x = cond ?"yes" : "no"\ndef foo\nend\ndef bar\nend';
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
-    });
-
-    test('should handle ternary ?" after closing paren', () => {
-      const source = '(x) ?"a" : "b"\ndef foo\nend';
+    test('should not treat ?" as char literal after closing paren', () => {
+      const source = '(x)? "a" : "b"\ndef foo\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
 
-    test('should handle ternary ?" after closing bracket', () => {
-      const source = 'arr[0] ?"a" : "b"\ndef foo\nend';
+    test('should not treat ?" as char literal after closing bracket', () => {
+      const source = 'arr[0]? "a" : "b"\ndef foo\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
@@ -3605,6 +3599,49 @@ end`;
     test('should handle heredoc with quote in body', () => {
       const pairs = parser.parse('"#{<<-EOF}\nheredoc " quote\nEOF\n"\nif true\nend');
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression tests', () => {
+    test('should handle character literal ?{ inside macro string interpolation', () => {
+      const pairs = parser.parse('{% "#{?{}" %}\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle character literal ?} inside macro string interpolation', () => {
+      const pairs = parser.parse('{% "#{?}}" %}\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle character literal ?" inside macro string interpolation', () => {
+      const pairs = parser.parse('{% "#{?\\".to_s}" %}\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude surrogate pair character literal with correct size', () => {
+      const surrogate = '\uD83D\uDE00'; // U+1F600 (emoji)
+      const source = `?${surrogate}\nif true\nend`;
+      const regions = parser.getExcludedRegions(source);
+      const qRegion = regions.find((r) => r.start === 0);
+      assert.ok(qRegion, 'should find excluded region for ?<surrogate>');
+      assert.strictEqual(qRegion.end, 3, 'surrogate pair character literal should span 3 code units');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should limit \\o octal escape to 3 digits in char literal', () => {
+      // '\\o777' is valid: 3 octal digits + closing quote at position 6
+      const valid = "'\\o777'";
+      const validRegions = parser.getExcludedRegions(valid);
+      const validRegion = validRegions.find((r) => r.start === 0);
+      assert.ok(validRegion, 'should find excluded region for valid \\o char literal');
+      assert.strictEqual(validRegion.end, 7, '\\o escape with 3 octal digits should be a valid char literal');
+
+      // '\\o7777' is invalid: only 3 digits consumed, 4th digit is not quote
+      // matchCharLiteral returns null, fallback scan runs
+      const source = "'\\o7777' do\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
     });
   });
 

@@ -3584,5 +3584,44 @@ end`;
     });
   });
 
+  suite('Regression: &-prefixed keywords in hasDoKeyword', () => {
+    test('should not treat &fn as real fn in hasDoKeyword', () => {
+      const pairs = parser.parse('if &fn do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat &end as real end in hasDoKeyword', () => {
+      const pairs = parser.parse('if &end do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: && operator should not trigger & capture filter', () => {
+    test('should not filter end adjacent to && operator', () => {
+      // &&end: the second & of && should not trigger the capture operator filter
+      const tokens = parser.getTokens('x &&end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1, 'end after && should not be filtered');
+    });
+
+    test('should not filter else adjacent to && operator', () => {
+      const tokens = parser.getTokens('x &&else');
+      const elseTokens = tokens.filter((t) => t.value === 'else');
+      assert.strictEqual(elseTokens.length, 1, 'else after && should not be filtered');
+    });
+
+    test('should still filter &end (single & capture operator)', () => {
+      const tokens = parser.getTokens('x &end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 0, 'end after single & should be filtered');
+    });
+
+    test('should still filter &fn (single & capture operator)', () => {
+      const tokens = parser.getTokens('&fn');
+      const fnTokens = tokens.filter((t) => t.value === 'fn');
+      assert.strictEqual(fnTokens.length, 0, 'fn after single & should be filtered');
+    });
+  });
+
   generateCommonTests(config);
 });

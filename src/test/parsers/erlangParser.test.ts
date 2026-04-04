@@ -2129,9 +2129,64 @@ bar() -> fun() -> ok end.`;
       assertIntermediates(pairs[0], ['of', 'catch']);
     });
 
+    test('should treat catch after -> in clause body as expression prefix', () => {
+      const pairs = parser.parse('try X of\n  ok -> catch err\ncatch\n  _:_ -> err\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['of', 'catch']);
+    });
+
+    test('should treat catch as clause separator when nested fun contains ->', () => {
+      const pairs = parser.parse('try 1, catch fun(X) -> X end\ncatch\n  _:_ -> err\nend');
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
     test('should not treat fun in -spec multiline as block opener', () => {
       const pairs = parser.parse('-spec foo() ->\n  fun\n  (() -> ok).\nfoo() -> begin ok end.');
       assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: extended :: backward scan should stop at comma separator', () => {
+    test('should detect fun() after comma following type annotation', () => {
+      const pairs = parser.parse('A :: B, fun() -> ok end');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+  });
+
+  suite('Regression: maybe keyword in isCatchFollowedByClausePattern depth tracking', () => {
+    test('should treat catch as intermediate when maybe...end appears in try body', () => {
+      const pairs = parser.parse('try 1, catch maybe end -> ok end');
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+  });
+
+  suite('Regression: catch clause separator after excluded region value', () => {
+    test('should treat catch after string literal as clause separator', () => {
+      const pairs = parser.parse('try catch "x" catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after atom literal as clause separator', () => {
+      const pairs = parser.parse("try catch 'x' catch _:_ -> ok end");
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after string with assignment as clause separator', () => {
+      const pairs = parser.parse('try X = "hello" catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after character literal as clause separator', () => {
+      const pairs = parser.parse('try catch $x catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
     });
   });
 

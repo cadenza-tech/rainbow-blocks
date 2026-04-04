@@ -2162,6 +2162,38 @@ endmodule`;
     });
   });
 
+  suite('Regression: assertion qualifiers between verb and property/sequence', () => {
+    test('should skip final qualifier in assert final property', () => {
+      const pairs = parser.parse('assert final property (@(posedge clk) a |-> b);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip #0 qualifier in assert #0 property', () => {
+      const pairs = parser.parse('assert #0 property (@(posedge clk) a |-> b);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip #0 qualifier in cover #0 property', () => {
+      const pairs = parser.parse('cover #0 property (@(posedge clk) a |-> b);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip final and #0 combined in assert final #0 property', () => {
+      const pairs = parser.parse('assert final #0 property (@(posedge clk) a |-> b);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip #0 qualifier for sequence', () => {
+      const pairs = parser.parse('cover #0 sequence (s1);');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect standalone property block', () => {
+      const pairs = parser.parse('property p1;\n  a |-> b;\nendproperty');
+      assertSingleBlock(pairs, 'property', 'endproperty');
+    });
+  });
+
   suite('Regression: block labels should not open nested blocks', () => {
     test('should not treat keyword after label colon as block open', () => {
       const pairs = parser.parse('begin : module\n  x = 1;\nend');
@@ -2335,6 +2367,24 @@ endmodule`;
     });
   });
 
+  suite('Regression: extern, include angle brackets, and virtual interface', () => {
+    test('should not detect extern protected function as block', () => {
+      const pairs = parser.parse('extern protected function void f();');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect keywords in include angle brackets', () => {
+      const pairs = parser.parse('module test;\n  `include <endmodule.vh>\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not detect virtual interface as block', () => {
+      const pairs = parser.parse('interface real_if;\n  virtual interface my_if vif;\nendinterface');
+      assertSingleBlock(pairs, 'interface', 'endinterface');
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+    });
+  });
+
   suite('Bug investigation: confirmed bugs', () => {
     test('should not treat extern class as block opener', () => {
       const pairs = parser.parse('class RealClass;\n  int x;\n  extern class FwdDecl;\nendclass');
@@ -2346,6 +2396,33 @@ endmodule`;
       const pairs = parser.parse('interface RealIf;\n  logic valid;\n  extern interface FwdDecl;\nendinterface');
       assertSingleBlock(pairs, 'interface', 'endinterface');
       assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+
+    test('should skip comment between typedef and class in modifier detection', () => {
+      const pairs = parser.parse('typedef /* comment */ class MyClass;\nendclass');
+      assertNoBlocks(pairs);
+    });
+
+    test('should skip comment between extern and module in modifier detection', () => {
+      const pairs = parser.parse('extern /* comment */ module ext_mod();\nendmodule');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('DPI line false positive regression', () => {
+    test('should not reject function on package import line', () => {
+      const pairs = parser.parse('import my_pkg::*; function void f();\n  x = 1;\nendfunction');
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    test('should not reject task on package export line', () => {
+      const pairs = parser.parse('export pkg::func; task t();\n  x = 1;\nendtask');
+      assertSingleBlock(pairs, 'task', 'endtask');
+    });
+
+    test('should still skip DPI import function', () => {
+      const pairs = parser.parse('import "DPI-C" function void foo();');
+      assertNoBlocks(pairs);
     });
   });
 

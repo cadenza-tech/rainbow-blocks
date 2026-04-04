@@ -4345,5 +4345,99 @@ end program`;
     });
   });
 
+  suite('Regression: assignment and parenthesized context for block_open', () => {
+    test('should not treat subroutine as block opener in assignment', () => {
+      const source = 'subroutine test()\n  integer :: subroutine\n  subroutine = 1\nend subroutine';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should not treat do as block opener in assignment', () => {
+      const source = 'do i = 1, 10\n  do = 5\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should not treat block_open keyword inside parentheses as block opener', () => {
+      const source = 'function foo(function)\n  integer :: function\nend function';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+  });
+
+  suite('Regression: isValidBlockOpen preceded by operator', () => {
+    test('should not treat do as block opener when preceded by operator', () => {
+      const source = 'program test\n  x = do + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should not treat block as block opener when preceded by operator', () => {
+      const source = 'program test\n  x = block + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should not treat associate as block opener when preceded by operator', () => {
+      const source = 'program test\n  x = associate + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should not treat critical as block opener when preceded by operator', () => {
+      const source = 'program test\n  x = critical + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should not treat enum as block opener when preceded by operator', () => {
+      const source = 'program test\n  x = enum + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should reject interface preceded by operator', () => {
+      const pairs = parser.parse('subroutine test\n  x = 1 + interface\nend');
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+
+    test('should reject program preceded by operator', () => {
+      const pairs = parser.parse('subroutine test\n  x = 1 + program\nend');
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+
+    test('should still accept valid do block opener', () => {
+      const source = 'do i = 1, 10\n  x = 1\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+  });
+
+  suite('Regression: isAfterDoubleColon skips comment-only lines in continuation', () => {
+    test('should skip keywords on continuation lines after :: with comment-only line between', () => {
+      const source = 'program test\n  integer :: a, &\n    ! comment\n    do, &\n    end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should skip keywords on continuation lines after :: with multiple comment-only lines', () => {
+      const source = 'program test\n  integer :: a, &\n    ! comment 1\n    ! comment 2\n    do, &\n    end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should still detect :: on same line without comments', () => {
+      const source = 'integer :: do, end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect :: through continuation without comment-only lines', () => {
+      const source = 'integer :: a, &\n  do, &\n  end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

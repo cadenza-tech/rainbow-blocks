@@ -1262,6 +1262,68 @@ end`;
     });
   });
 
+  suite('Bug: missing \\=, **=, .\\=, .**= compound assignment recognition', () => {
+    test('should not treat end \\= 1 as block close', () => {
+      // \= is left-division assignment in Octave; end used as variable
+      const source = 'function f()\n  end \\= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should be closed by the last end, not the one followed by \\=');
+    });
+
+    test('should not treat end **= 1 as block close', () => {
+      // **= is power assignment in Octave; end used as variable
+      const source = 'function f()\n  end **= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should be closed by the last end, not the one followed by **=');
+    });
+
+    test('should not treat end .\\= 1 as block close', () => {
+      // .\= is element-wise left-division assignment in Octave; end used as variable
+      const source = 'function f()\n  end .\\= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should be closed by the last end, not the one followed by .\\=');
+    });
+
+    test('should not treat end .**= 1 as block close', () => {
+      // .**= is element-wise power assignment in Octave; end used as variable
+      const source = 'function f()\n  end .**= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should be closed by the last end, not the one followed by .**=');
+    });
+
+    test('should not treat if \\= 1 as block open', () => {
+      // \= is left-division assignment in Octave; if used as variable
+      const tokens = parser.getTokens('if \\= 1;\nfor i = 1:10\nend');
+      const ifToken = tokens.find((t) => t.value === 'if');
+      assert.strictEqual(ifToken, undefined, 'if followed by \\= should not be tokenized as block_open');
+    });
+
+    test('should not treat if **= 1 as block open', () => {
+      // **= is power assignment in Octave; if used as variable
+      const tokens = parser.getTokens('if **= 1;\nfor i = 1:10\nend');
+      const ifToken = tokens.find((t) => t.value === 'if');
+      assert.strictEqual(ifToken, undefined, 'if followed by **= should not be tokenized as block_open');
+    });
+
+    test('should not treat do .\\= 1 as block open', () => {
+      // .\= is element-wise left-division assignment in Octave; do used as variable
+      const source = 'do .\\= 1;\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat do .**= 1 as block open', () => {
+      // .**= is element-wise power assignment in Octave; do used as variable
+      const source = 'do .**= 1;\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression: transpose after double-quoted string', () => {
     test('should treat single quote after closing double quote as transpose', () => {
       const regions = parser.getExcludedRegions('"x"\'');

@@ -1463,5 +1463,38 @@ end`;
     });
   });
 
+  suite('Regression: isPrecededByDot with hex literal prefix', () => {
+    test('should not filter end after 0xFF. as struct field access', () => {
+      // 0xFF.end: the dot follows a hex literal, not a struct; end should not be filtered
+      const tokens = parser.getTokens('0xFF.end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1, 'end after hex literal dot should not be filtered');
+    });
+
+    test('should not filter end after 0xAB. as struct field access', () => {
+      const tokens = parser.getTokens('0xAB.end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1, 'end after hex literal dot should not be filtered');
+    });
+
+    test('should not filter end after 0b1010. as struct field access', () => {
+      const tokens = parser.getTokens('0b1010.end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1, 'end after binary literal dot should not be filtered');
+    });
+
+    test('should still filter end after obj. as struct field access', () => {
+      const tokens = parser.getTokens('obj.end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 0, 'end after struct dot should be filtered');
+    });
+
+    test('should still treat end after 10. as numeric decimal point (not struct access)', () => {
+      const tokens = parser.getTokens('10.end');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1, 'end after numeric dot should not be filtered');
+    });
+  });
+
   generateCommonTests(config);
 });

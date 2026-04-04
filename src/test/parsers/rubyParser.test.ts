@@ -3195,6 +3195,13 @@ end`;
     });
   });
 
+  suite('Regression: $$ global variable semicolon', () => {
+    test('should recognize semicolon after $$ as statement separator', () => {
+      const pairs = parser.parse('$$; if true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Bug: dot-space-keyword not filtered as method call', () => {
     test('should not treat obj. end (dot space end) as block close', () => {
       // Ruby allows whitespace between dot and method name: obj. end means obj.end()
@@ -3239,6 +3246,134 @@ end`;
   suite('Regression: heredoc in string interpolation with string closing on same line', () => {
     test('should exclude heredoc body when heredoc opens in interpolation and string closes on same line', () => {
       const pairs = parser.parse('"#{<<~HEREDOC}"\n  if true\n  end\nHEREDOC\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: implicit line continuation with binary operators in loop-do', () => {
+    test('should treat do after while with && continuation as loop do', () => {
+      const source = 'while cond &&\n  other do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat do after until with || continuation as loop do', () => {
+      const source = 'until x ||\n  y do\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'until', 'end');
+    });
+
+    test('should treat do after for with comma continuation as loop do', () => {
+      const source = 'for x in foo(a,\n  b) do\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should treat do after while with dot continuation as loop do', () => {
+      const source = 'while cond.\n  ready? do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat do after while with single | continuation as loop do', () => {
+      const source = 'while flags |\n  mask do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should not treat range operator (..) as dot continuation', () => {
+      const source = 'x = (1..\n10)\nwhile true do\n  break\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should not follow continuation into excluded regions', () => {
+      const source = '# trailing &&\nwhile true do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  suite('Regression: backslash as percent literal delimiter', () => {
+    test('should handle backslash as percent literal delimiter', () => {
+      const source = '%q\\if end\\\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle %Q with backslash delimiter', () => {
+      const source = '%Q\\do while until\\\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: %r percent regex literal flags', () => {
+    test('should not detect flags after %r as tokens', () => {
+      const source = '%r{pattern}imx';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.length, 0);
+    });
+
+    test('should include single regex flag in %r excluded region', () => {
+      const source = '%r{pattern}i';
+      const regions = parser.getExcludedRegions(source);
+      // The excluded region should cover '%r{pattern}i' (flags included)
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should include multi-character regex flags in %r excluded region', () => {
+      const source = '%r{pattern}imx';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should exclude in as flag after %r preventing false intermediate', () => {
+      // 'in' immediately after %r is treated as regex flags, not as keyword
+      const source = 'for x %r{pat}in arr\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      const block = findBlock(pairs, 'for');
+      // 'in' is consumed as regex flag, not detected as intermediate
+      assertIntermediates(block, []);
+    });
+
+    test('should not scan flags for non-regex percent literals', () => {
+      const source = '%q{pattern}imx';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      // %q should NOT include trailing letters as flags
+      assert.strictEqual(regions[0].end, '%q{pattern}'.length);
+    });
+  });
+
+  suite('Regression: ?$ and $$ before string delimiter', () => {
+    test('should not break string detection after ?$ char literal', () => {
+      const pairs = parser.parse('?$"if end"\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not break string detection after $$ global variable', () => {
+      const pairs = parser.parse('$$"if end"\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not break string detection after ?\\$ char literal', () => {
+      const pairs = parser.parse('?\\$"if end"\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: ?/ char literal before division', () => {
+    test('should treat / as division after ?/ char literal', () => {
+      const pairs = parser.parse('?/ / 2\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat / as division after ?! char literal', () => {
+      const pairs = parser.parse('?! / 2\nif true\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
   });

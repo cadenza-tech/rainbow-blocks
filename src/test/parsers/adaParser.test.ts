@@ -2512,5 +2512,76 @@ end if;`;
     });
   });
 
+  suite('Regression: compound end should not merge begin when opener is not a context keyword', () => {
+    test('should not merge begin with if when end if closes if+begin', () => {
+      const source = 'if X then\n  begin\n    null;\nend if;';
+      const pairs = parser.parse(source);
+      // if/end if should pair, begin should be left unmatched
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not merge begin with loop when end loop closes loop+begin', () => {
+      const source = 'loop\n  begin\n    null;\nend loop;';
+      const pairs = parser.parse(source);
+      // loop/end loop should pair, begin should be left unmatched
+      assertSingleBlock(pairs, 'loop', 'end loop');
+    });
+  });
+
+  suite('Regression: type/subtype inside parentheses should not suppress is intermediate', () => {
+    test('should include is in intermediates when Type appears as parameter type', () => {
+      const source = 'procedure X(Param : Type) is\nbegin\n  null;\nend X;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should include is in intermediates when Subtype appears as parameter type', () => {
+      const source = 'function F(X : Subtype) return Integer is\nbegin\n  null;\nend F;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+  });
+
+  suite('Regression: is intermediate when protected/task is on previous line', () => {
+    test('should detect is intermediate when protected is on previous line', () => {
+      const pairs = parser.parse('protected\ntype Foo is\n  entry Bar;\nend Foo;');
+      assertSingleBlock(pairs, 'protected', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should detect is intermediate when task is on previous line', () => {
+      const pairs = parser.parse('task\ntype T is\n  entry E;\nend T;');
+      assertSingleBlock(pairs, 'task', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should detect is intermediate when protected, type, and is are on 3 separate lines', () => {
+      const pairs = parser.parse('protected\ntype Foo\nis\n  entry Bar;\nend Foo;');
+      assertSingleBlock(pairs, 'protected', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should detect is intermediate when task, type, and is are on 3 separate lines', () => {
+      const pairs = parser.parse('task\ntype T\nis\n  entry E;\nend T;');
+      assertSingleBlock(pairs, 'task', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
+  suite('Regression: compound end should respect Unicode letter adjacency', () => {
+    test('should not match end if as compound end when type part is adjacent to Unicode letter', () => {
+      const source = 'if True then\n  null;\nend if\u03b1;';
+      const tokens = parser.getTokens(source);
+      // 'end ifα' should NOT be tokenized as compound 'end if' (ifα is an identifier)
+      const compoundEndTokens = tokens.filter((t) => t.value.toLowerCase() === 'end if');
+      assert.strictEqual(compoundEndTokens.length, 0, 'should not detect compound end if');
+      // 'end' alone should still be detected as block_close
+      const endTokens = tokens.filter((t) => t.value.toLowerCase() === 'end');
+      assert.strictEqual(endTokens.length, 1, 'standalone end should be detected');
+    });
+  });
+
   generateCommonTests(config);
 });

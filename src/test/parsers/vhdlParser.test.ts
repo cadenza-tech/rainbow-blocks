@@ -2383,6 +2383,14 @@ end package;`;
     });
   });
 
+  suite('Regression: is filter in multi-line attribute declaration', () => {
+    test('should filter is in multi-line attribute declaration', () => {
+      const pairs = parser.parse('package p is\n  attribute keep\n    of sig : signal is true;\nend package;');
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   suite('Regression: multi-line use entity/configuration for binding', () => {
     test('should reject for in multi-line use entity ... for binding', () => {
       const source = 'configuration cfg of test is\n  for all : comp\n    use entity\n      work.impl for rtl;\n  end for;\nend configuration;';
@@ -2636,6 +2644,78 @@ end package;`;
       assertBlockCount(pairs, 2);
       const forBlock = findBlock(pairs, 'for');
       assert.strictEqual(forBlock.openKeyword.startOffset, source.indexOf('for inst'));
+    });
+  });
+
+  suite('Regression: isInSignalAssignment false positive for else after unterminated when', () => {
+    test('should treat else as intermediate when signal assignment has when but no semicolon', () => {
+      const source = 'if cond then\n  sig <= val1 when sel\nelse\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should still filter else in valid conditional signal assignment', () => {
+      const source = "architecture rtl of test is\nbegin\n  sig <= '1' when sel else '0';\nend architecture;";
+      const pairs = parser.parse(source);
+      const archPair = findBlock(pairs, 'architecture');
+      assertIntermediates(archPair, ['is', 'begin']);
+    });
+
+    test('should still filter else in multi-line chained signal assignment', () => {
+      const source = 'process (clk)\nbegin\n  sig <= a when c1\n         else b when c2\n         else c;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+      const nonBeginIntermediates = pairs[0].intermediates.filter((i) => i.value !== 'begin');
+      assert.strictEqual(nonBeginIntermediates.length, 0);
+    });
+
+    test('should treat else as intermediate when signal assignment with when is after then', () => {
+      const source = 'if cond then\n  sig <= val when sel\nelse\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+  });
+
+  suite('Regression: conditional signal assignment else not filtered when first statement after then', () => {
+    test('should filter else in conditional signal assignment as first statement after then', () => {
+      const source = 'if cond then\n  sig <= a when cond2 else b;\nelse\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should filter else in conditional signal assignment after semicolon in then block', () => {
+      const source = 'if cond then\n  x := 0;\n  sig <= a when cond2 else b;\nelse\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should filter else in conditional signal assignment as first statement after elsif then', () => {
+      const source = 'if a then\n  null;\nelsif b then\n  sig <= x when c else y;\nelse\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'elsif', 'then', 'else']);
+    });
+  });
+
+  suite('Regression: exit/next with loop label before when', () => {
+    test('should filter when in next label when statement', () => {
+      const source = 'case x is\n  when 0 =>\n    next my_loop when done;\n  when others =>\n    null;\nend case;';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      const whenIntermediates = casePair.intermediates.filter((i) => i.value === 'when');
+      assert.strictEqual(whenIntermediates.length, 2);
+    });
+
+    test('should filter when in exit label when statement', () => {
+      const source = 'case x is\n  when 0 =>\n    exit my_loop when done;\n  when others =>\n    null;\nend case;';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      const whenIntermediates = casePair.intermediates.filter((i) => i.value === 'when');
+      assert.strictEqual(whenIntermediates.length, 2);
     });
   });
 

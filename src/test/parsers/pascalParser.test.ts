@@ -2056,6 +2056,12 @@ end.`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'interface', 'end');
     });
+
+    test('should suppress variant case in record with interface GUID bracket forward declaration', () => {
+      const source = "TRec = record\n  IInner = interface['{GUID}'];\n  case Integer of\n    0: (IntVal: Integer);\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
   });
 
   suite('Regression: class operator as method modifier in isInsideRecord', () => {
@@ -2195,6 +2201,152 @@ end.`;
     test('should suppress variant case with newline before paren', () => {
       const pairs = parser.parse('TRec = record\n  case Integer of\n    0:\n      (Field: Byte);\n  case Byte of\n    0: (B: Byte);\nend');
       assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
+  suite('Bug: isInsideRecord class-of check inconsistent with isValidBlockOpen newline guard', () => {
+    test('should treat class as block opener when of is after newline in isInsideRecord', () => {
+      // isInsideRecord backward scan: class followed by newline then of
+      // Should NOT be treated as 'class of' reference type (newline breaks the detection)
+      // class is a block opener -> depth-- at depth 0 -> returns false (not inside record)
+      const source = 'TRef = class\n  of TBase;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'class');
+      findBlock(pairs, 'case');
+    });
+
+    test('should still treat class of on same line as reference type in isInsideRecord', () => {
+      // class of on same line should still be skipped (not a block opener)
+      const source = 'TRec = record\n  TRef = class of TBase;\n  case Integer of\n    0: (IntVal: Integer);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should treat class as block opener when multi-line comment with newline before of in isInsideRecord', () => {
+      // class followed by multi-line comment containing newline, then of
+      // Should NOT be treated as 'class of' reference type
+      const source = 'TRef = class { comment\n} of TBase;\nend;\ncase X of\n  1: DoOne;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'class');
+      findBlock(pairs, 'case');
+    });
+  });
+
+  suite('Bug: false positive for class/interface/object after comparison =', () => {
+    test('should not treat class after if comparison as block opener', () => {
+      const source = 'begin\n  if x = class then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after while comparison as block opener', () => {
+      const source = 'begin\n  while x = class do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after then comparison as block opener', () => {
+      const source = 'begin\n  if x then y = class\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after or comparison as block opener', () => {
+      const source = 'begin\n  if a or b = class then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after and comparison as block opener', () => {
+      const source = 'begin\n  if a and b = class then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after not comparison as block opener', () => {
+      const source = 'begin\n  if not x = class then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after xor comparison as block opener', () => {
+      const source = 'begin\n  if a xor b = class then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after else comparison as block opener', () => {
+      const source = 'begin\n  else x = class\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class after until comparison as block opener', () => {
+      const source = 'repeat\n  x := 1;\nuntil y = class';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'until');
+    });
+
+    test('should still treat class after type definition = as block opener', () => {
+      const source = 'TFoo = class\n  FValue: Integer;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat interface after if comparison as block opener', () => {
+      const source = 'begin\n  if x = interface then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat object after while comparison as block opener', () => {
+      const source = 'begin\n  while x = object do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not detect class after >= operator', () => {
+      const pairs = parser.parse('begin\n  if x >= class then\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not detect object after <= operator', () => {
+      const pairs = parser.parse('begin\n  if x <= object then\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Bug: only one type modifier handled', () => {
+    test('should recognize packed sealed class as block opener', () => {
+      const source = 'type\n  TFoo = packed sealed class\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should recognize abstract packed object as block opener', () => {
+      const source = 'type\n  TBar = abstract packed object\n    X: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should recognize sealed abstract class as block opener', () => {
+      const source = 'type\n  TBaz = sealed abstract class\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should recognize packed sealed abstract class as block opener', () => {
+      const source = 'type\n  TAll = packed sealed abstract class\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should reject packed sealed class without = before modifiers', () => {
+      const source = 'packed sealed class\n  FValue: Integer;\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 

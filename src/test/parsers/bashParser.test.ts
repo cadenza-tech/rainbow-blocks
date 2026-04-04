@@ -1860,6 +1860,73 @@ esac`;
     });
   });
 
+  suite('Regression tests', () => {
+    test('should not treat time-p as time with -p flag', () => {
+      const pairs = parser.parse('time-p if true; then echo ok; fi');
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect [[ after done (block close keyword)', () => {
+      const pairs = parser.parse('for i in 1 2; do echo; done [[ $x == #* ]] && if true; then echo; fi');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect [[ after ) (subshell end)', () => {
+      const pairs = parser.parse('(echo ok) [[ $x == #* ]] && if true; then echo; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should treat # as literal in env var value FOO=bar#baz', () => {
+      const pairs = parser.parse('FOO=bar#baz if true; then echo ok; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: += compound assignment as env var prefix', () => {
+    test('should detect if/fi after FOO+=bar', () => {
+      const pairs = parser.parse('FOO+=bar if true; then echo ok; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if/fi after multiple += assignments', () => {
+      const pairs = parser.parse('A+=1 B+=2 if true; then echo ok; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: block close keywords with glob suffix in case patterns', () => {
+    test('should treat done?) as case pattern, not block close', () => {
+      const source = 'for i in 1; do\n  case $x in\n    done?) echo ok;;\n  esac\ndone';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.closeKeyword.line, 4);
+      assert.strictEqual(forBlock.nestLevel, 0);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.nestLevel, 1);
+    });
+
+    test('should treat fi*) as case pattern, not block close', () => {
+      const source = 'if true; then\n  case $x in\n    fi*) echo ok;;\n  esac\nfi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.line, 4);
+    });
+  });
+
+  suite('Regression: brace expansion } should not act as command separator', () => {
+    test('should not detect blocks after brace expansion', () => {
+      const pairs = parser.parse('echo {a,b} if true; then echo ok; fi');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect blocks after command group }', () => {
+      const pairs = parser.parse('{ echo ok; }\nif true; then echo ok; fi');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {
@@ -5061,6 +5128,138 @@ fi`;
     test('should not treat time -p flag as blocking if detection', () => {
       const pairs = parser.parse('time -p if true; then\n  echo ok\nfi');
       assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: [[ after block close keyword and parameter expansion adjacency', () => {
+    test('should not treat # as comment inside [[ ]] when fi precedes without semicolon', () => {
+      // Fix: fi was not recognized as valid predecessor for [[ command position
+      // Without fix, [[ after fi (no ; between) would not track doubleBracketDepth,
+      // so bare # inside [[ ]] would create a false comment excluding the for keyword
+      const source = 'if true; then echo; fi [[ x == #test ]] && for i in 1 2; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'for');
+    });
+
+    test('should not detect keyword concatenated with parameter expansion', () => {
+      const pairs = parser.parse('$' + '{HOME}if true; then\n  echo ok\nfi');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: heredoc terminator followed by ) in subshell', () => {
+    test('should recognize heredoc terminator immediately followed by ) in command substitution', () => {
+      // EOF) on a line means EOF is the terminator and ) closes the $()
+      const source = 'x=$(cat <<EOF\nhello\nEOF)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize heredoc terminator immediately followed by ) in process substitution', () => {
+      const source = 'diff <(cat <<EOF\nhello\nEOF) file\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize heredoc terminator followed by ) with CRLF', () => {
+      const source = 'x=$(cat <<EOF\r\nhello\r\nEOF)\r\nif true; then\r\n  echo ok\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize heredoc terminator followed by ) with CR-only line endings', () => {
+      const source = 'x=$(cat <<EOF\rhello\rEOF)\rif true; then\r  echo ok\rfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize strip-tabs heredoc terminator followed by ) in subshell', () => {
+      // <<- strips leading tabs from terminator line
+      const source = 'x=$(cat <<-EOF\n\thello\n\tEOF)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still match exact terminator without ) in subshell', () => {
+      // Normal case: terminator on its own line followed by ) on next line
+      const source = 'x=$(cat <<EOF\nhello\nEOF\n)\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle multiple blocks after heredoc with ) terminator', () => {
+      const source = 'x=$(cat <<EOF\nhello\nEOF)\nif true; then\n  echo ok\nfi\nfor i in 1; do\n  echo $i\ndone';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'if');
+      findBlock(pairs, 'for');
+    });
+  });
+
+  suite('Regression: multi-line [[ ]] with # on continuation line', () => {
+    test('should not treat # inside multi-line [[ ]] as comment', () => {
+      // Bug: doubleBracketDepth reset on newline caused # on line 2 of [[ ]] to start a comment
+      const source = 'if [[ $x ==\n#test ]]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat # inside multi-line [[ ]] as comment with CRLF', () => {
+      const source = 'if [[ $x ==\r\n#test ]]; then\r\n  echo ok\r\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still treat # outside [[ ]] as comment on next line', () => {
+      const source = '[[ $x == y ]]\n# if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should handle [[ ]] spanning three lines with # on each continuation', () => {
+      const source = 'if [[ $x == #test ||\n$y == #foo ||\n$z == #bar ]]; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: case pattern with string between keyword and )', () => {
+    test('should not detect for as block keyword when string follows it in case pattern', () => {
+      // Bug: isCasePattern did not skip excluded regions; "bar" after for caused false return
+      // Without fix, for is falsely detected as block_open (not filtered as case pattern)
+      const source = 'case $x in\n  for"bar") echo ;;\nesac';
+      const tokens = parser.getTokens(source);
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0, 'for inside case pattern should not be detected');
+    });
+
+    test('should not detect for as block keyword with single-quoted string in case pattern', () => {
+      const source = "case $x in\n  for'bar') echo ;;\nesac";
+      const tokens = parser.getTokens(source);
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0, 'for inside case pattern should not be detected');
+    });
+
+    test('should not detect for as block keyword with command substitution in case pattern', () => {
+      const source = 'case $x in\n  for$(cmd)) echo ;;\nesac';
+      const tokens = parser.getTokens(source);
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0, 'for inside case pattern should not be detected');
+    });
+
+    test('should not detect for as block keyword with backtick in case pattern', () => {
+      const source = 'case $x in\n  for`cmd`) echo ;;\nesac';
+      const tokens = parser.getTokens(source);
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0, 'for inside case pattern should not be detected');
+    });
+
+    test('should still detect normal case pattern without strings', () => {
+      const source = 'case $x in\n  for) echo ;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
     });
   });
 });
