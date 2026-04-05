@@ -519,7 +519,15 @@ export class AdaBlockParser extends BaseBlockParser {
       filtered.push(token);
     }
 
-    return filtered;
+    // Filter out block_middle tokens inside parenthesized expressions
+    // (e.g., Ada 2012 conditional expressions: (if A then B else C))
+    const cb = this.validationCallbacks;
+    return filtered.filter((token) => {
+      if (token.type === 'block_middle') {
+        return !isInsideParens(source, token.startOffset, excludedRegions, cb);
+      }
+      return true;
+    });
   }
 
   // Custom matching to handle compound end keywords

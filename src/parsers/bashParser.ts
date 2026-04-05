@@ -609,6 +609,9 @@ export class BashBlockParser extends BaseBlockParser {
     if (this.isFollowedByHyphen(source, position, keyword)) {
       return false;
     }
+    if (this.isFollowedByExcludedRegion(position, keyword, excludedRegions)) {
+      return false;
+    }
     if (this.isInsideExtglob(source, position, excludedRegions)) {
       return false;
     }
@@ -629,6 +632,9 @@ export class BashBlockParser extends BaseBlockParser {
 
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isFollowedByHyphen(source, position, keyword)) {
+      return false;
+    }
+    if (this.isFollowedByExcludedRegion(position, keyword, excludedRegions)) {
       return false;
     }
     if (this.isInsideExtglob(source, position, excludedRegions)) {
@@ -677,25 +683,18 @@ export class BashBlockParser extends BaseBlockParser {
     if (source[afterPos] === '+' && afterPos + 1 < source.length && source[afterPos + 1] === '=') {
       return true;
     }
-    // Array element assignment: keyword[idx]=value or keyword[idx]+=value
+    // Array element reference: keyword[...] is always a variable, not a keyword
     if (source[afterPos] === '[') {
-      let depth = 1;
-      let j = afterPos + 1;
-      while (j < source.length && depth > 0) {
-        if (source[j] === '[') depth++;
-        else if (source[j] === ']') depth--;
-        j++;
-      }
-      if (depth === 0 && j < source.length) {
-        if (source[j] === '=' && (j + 1 >= source.length || source[j + 1] !== '=')) {
-          return true;
-        }
-        if (source[j] === '+' && j + 1 < source.length && source[j + 1] === '=') {
-          return true;
-        }
-      }
+      return true;
     }
     return false;
+  }
+
+  // Checks if keyword is immediately followed by an excluded region (word concatenation like done"x", fi$(cmd))
+  private isFollowedByExcludedRegion(position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
+    const afterPos = position + keyword.length;
+    const region = this.findExcludedRegionAt(afterPos, excludedRegions);
+    return region !== null && region.start === afterPos;
   }
 
   // Checks if keyword is part of a hyphenated command name (done-handler, fi-nalize)
@@ -842,6 +841,16 @@ export class BashBlockParser extends BaseBlockParser {
               source.slice(k - 7, k + 1) === 'function' &&
               (k - 8 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 8])) &&
               this.isAtCommandPosition(source, k - 7, excludedRegions)
+            ) {
+              isFuncDef = true;
+            }
+            // coproc NAME { ... } (Bash 4+ named coprocess)
+            if (
+              !isFuncDef &&
+              k >= 5 &&
+              source.slice(k - 5, k + 1) === 'coproc' &&
+              (k - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 6])) &&
+              this.isAtCommandPosition(source, k - 5, excludedRegions)
             ) {
               isFuncDef = true;
             }

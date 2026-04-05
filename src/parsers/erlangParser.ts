@@ -356,6 +356,10 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (j > 0 && source[j - 1] === '-') {
         return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
       }
+      // >> (binary close): catch after binary expression is likely a clause separator
+      if (j > 0 && source[j - 1] === '>') {
+        return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
+      }
       return true;
     }
     // Preceded by a block-opening or intermediate keyword → expression prefix

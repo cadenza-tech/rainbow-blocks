@@ -217,15 +217,16 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     // Chevron/guillemet syntax: \u00AB...\u00BB (raw Apple Events, data constants, class/property references)
+    // Supports nesting: \u00ABa \u00ABb\u00BB c\u00BB
     if (char === '\u00AB') {
       let j = pos + 1;
-      while (j < source.length && source[j] !== '\u00BB') {
+      let depth = 1;
+      while (j < source.length && depth > 0) {
+        if (source[j] === '\u00AB') depth++;
+        else if (source[j] === '\u00BB') depth--;
         j++;
       }
-      if (j < source.length) {
-        return { start: pos, end: j + 1 };
-      }
-      return { start: pos, end: source.length };
+      return { start: pos, end: j };
     }
 
     return null;

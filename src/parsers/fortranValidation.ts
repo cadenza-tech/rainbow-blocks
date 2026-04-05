@@ -611,6 +611,24 @@ function skipConsecutiveParenGroups(source: string, start: number): number {
     let depth = 1;
     j++;
     while (j < source.length && depth > 0) {
+      // Skip string literals inside parenthesized expressions
+      if ((source[j] === "'" || source[j] === '"') && depth > 0) {
+        const quote = source[j];
+        j++;
+        while (j < source.length) {
+          if (source[j] === quote) {
+            j++;
+            // Doubled quote is an escape, not a terminator
+            if (j < source.length && source[j] === quote) {
+              j++;
+              continue;
+            }
+            break;
+          }
+          j++;
+        }
+        continue;
+      }
       if (source[j] === '(') depth++;
       else if (source[j] === ')') depth--;
       j++;
