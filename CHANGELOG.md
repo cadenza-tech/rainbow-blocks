@@ -5,6 +5,27 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.25] - 2026-04-05
+
+### Fixed
+
+- Ada: Filter `block_middle` tokens (`then`, `else`, `elsif`, `when`, `is`) inside parenthesized expressions (Ada 2012 conditional/case expressions)
+- AppleScript: Support nesting in chevron/guillemet (`\u00AB...\u00BB`) excluded region matcher
+- Bash: Reject keywords immediately followed by an excluded region as word concatenation (e.g., `done"x"`, `fi$(cmd)`)
+- Bash: Reject `keyword[` as array variable reference regardless of what follows `]`
+- Bash: Recognize `coproc NAME { }` as command grouping in tokenization
+- Erlang: Handle `>>` (binary close) before `catch` in `isCatchExpressionPrefix` using clause pattern disambiguation
+- Fortran: Skip string literals containing `)` in `skipConsecutiveParenGroups`
+- Julia: Consume suffix characters after closing backtick in prefixed command macros (`cmd\`test\`flags`)
+- Julia: Skip dot-preceded `end` in `hasUnmatchedBlockOpenerBetween` (field access like `obj.end`)
+- Julia: Skip dot-preceded `for` in `hasForBetween` (field access like `obj.for`)
+- Julia: Use Unicode category checks (`\p{L}`, `\p{N}`) in `matchSymbolLiteral` to distinguish identifier vs operator symbols
+- Pascal: Recognize `#nn` character constants as valid variant case labels in `isVariantCase`
+- Pascal: Loop through multiple type modifiers before `class` in `isInsideRecord` backward scan
+- Ruby: Treat range operators (`..`, `...`) as implicit line continuation in `endsWithContinuationOperator`
+- Ruby: Filter keywords used as method names after `def` (e.g., `def do`, `def end`)
+- VHDL: Strip excluded regions (block comments) when building statement text for `is` keyword filtering
+
 ## [1.1.24] - 2026-04-04
 
 ### Fixed
@@ -1170,6 +1191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.25]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.24...v1.1.25
 [1.1.24]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.23...v1.1.24
 [1.1.23]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.22...v1.1.23
 [1.1.22]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.21...v1.1.22
