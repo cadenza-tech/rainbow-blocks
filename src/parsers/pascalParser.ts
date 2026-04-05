@@ -605,11 +605,15 @@ export class PascalBlockParser extends BaseBlockParser {
         {
           let eqCheck = ci;
           // Skip type modifiers (abstract, sealed, packed) to find '='
-          if (eqCheck >= 0 && /[a-zA-Z]/.test(source[eqCheck])) {
+          // Loop to handle multiple modifiers (e.g., 'sealed abstract class')
+          let foundModifier = true;
+          while (foundModifier && eqCheck >= 0 && /[a-zA-Z]/.test(source[eqCheck])) {
+            foundModifier = false;
             let wordStart = eqCheck;
             while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
             const word = lowerSource.slice(wordStart, eqCheck + 1);
             if (TYPE_MODIFIERS.includes(word)) {
+              foundModifier = true;
               eqCheck = wordStart - 1;
               while (eqCheck >= 0 && (source[eqCheck] === ' ' || source[eqCheck] === '\t' || source[eqCheck] === '\n' || source[eqCheck] === '\r'))
                 eqCheck--;
@@ -779,11 +783,17 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         continue;
       }
-      // Look for label: digits, identifier, range (..), negative (-), comma-separated, hex ($xx) followed by ':'
-      if (/[a-zA-Z0-9_$-]/.test(source[j])) {
-        while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
-        // Continue scanning past range dots, negatives, commas, spaces, newlines, qualified names, parentheses
-        while (j < source.length && (/[., \t()\p{L}0-9_$-]/u.test(source[j]) || source[j] === '\n' || source[j] === '\r')) {
+      // Look for label: digits, identifier, range (..), negative (-), comma-separated, hex ($xx), char constant (#nn) followed by ':'
+      if (/[a-zA-Z0-9_$#-]/.test(source[j])) {
+        // Consume initial label token (identifier, number, $hex, #charcode)
+        if (source[j] === '#') {
+          j++;
+          while (j < source.length && /[0-9]/.test(source[j])) j++;
+        } else {
+          while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
+        }
+        // Continue scanning past range dots, negatives, commas, spaces, newlines, qualified names, parentheses, char constants
+        while (j < source.length && (/[.,# \t()\p{L}0-9_$-]/u.test(source[j]) || source[j] === '\n' || source[j] === '\r')) {
           // Skip excluded regions within labels (e.g., char constants in range labels)
           const innerRegion = this.findExcludedRegionAt(j, excludedRegions);
           if (innerRegion) {

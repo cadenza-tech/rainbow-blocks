@@ -127,6 +127,10 @@ export class RubyBlockParser extends BaseBlockParser {
       if (this.isDotPreceded(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Filter out keywords used as method names after 'def' (e.g., def do, def begin, def end)
+      if (this.isAfterDefKeyword(source, token.startOffset)) {
+        return false;
+      }
       // Filter out :: scope resolution (e.g., Module::Class::Begin)
       if (token.startOffset > 1 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
         return false;
@@ -227,6 +231,17 @@ export class RubyBlockParser extends BaseBlockParser {
     return lineStart;
   }
 
+  // Checks if keyword is used as a method name after 'def' (e.g., def do, def begin, def end)
+  private isAfterDefKeyword(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i >= 2 && source.slice(i - 2, i + 1) === 'def') {
+      const defStart = i - 2;
+      return defStart === 0 || !/[a-zA-Z0-9_]/.test(source[defStart - 1]);
+    }
+    return false;
+  }
+
   // Checks if the content before checkPos (a newline position) ends with an operator
   // that causes implicit line continuation in Ruby
   private endsWithContinuationOperator(source: string, checkPos: number, excludedRegions?: ExcludedRegion[]): boolean {
@@ -252,8 +267,8 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // Dot causes continuation (method chain)
     if (ch === '.') {
-      // But not range operator (..)
-      if (i > 0 && source[i - 1] === '.') return false;
+      // Range operators (.., ...) also cause continuation in Ruby
+      if (i > 0 && source[i - 1] === '.') return true;
       return true;
     }
 

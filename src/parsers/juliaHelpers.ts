@@ -130,6 +130,7 @@ export function skipNestedJuliaString(source: string, pos: number): number {
 
 // Skips a backtick command string (for use inside interpolation/nested string scanning)
 export function skipBacktickString(source: string, pos: number): number {
+  const isPrefixed = pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1]);
   // Check for triple backtick
   if (source.slice(pos, pos + 3) === '```') {
     let i = pos + 3;
@@ -143,7 +144,11 @@ export function skipBacktickString(source: string, pos: number): number {
         continue;
       }
       if (source.slice(i, i + 3) === '```') {
-        return i + 3;
+        let end = i + 3;
+        if (isPrefixed) {
+          while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
+        }
+        return end;
       }
       i++;
     }
@@ -161,7 +166,11 @@ export function skipBacktickString(source: string, pos: number): number {
       continue;
     }
     if (source[i] === '`') {
-      return i + 1;
+      let end = i + 1;
+      if (isPrefixed) {
+        while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
+      }
+      return end;
     }
     i++;
   }

@@ -280,7 +280,10 @@ export class JuliaBlockParser extends BaseBlockParser {
         const after = i + 3 < source.length ? source[i + 3] : ' ';
         if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
           if (!this.isAdjacentToUnicodeLetter(source, i, 3)) {
-            if (depth > 0) depth--;
+            // Skip dot-preceded end (field access like obj.end, not block closer)
+            if (before !== '.') {
+              if (depth > 0) depth--;
+            }
             i += 2;
             continue;
           }
@@ -381,7 +384,8 @@ export class JuliaBlockParser extends BaseBlockParser {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + 3 < source.length ? source[i + 3] : ' ';
         if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && !this.isAdjacentToUnicodeLetter(source, i, 3)) {
-          return true;
+          // Skip dot-preceded for (field access like obj.for, not keyword)
+          if (before !== '.') return true;
         }
       }
     }
@@ -757,11 +761,13 @@ export class JuliaBlockParser extends BaseBlockParser {
     const firstChar = source[i];
 
     // Determine if this is an identifier symbol or operator symbol
-    if (/[\w]/.test(firstChar) || firstChar.charCodeAt(0) > 127) {
-      // Identifier symbol: consume word characters, Unicode, and trailing !
+    // Unicode letters/numbers (e.g., alpha, pi) are identifiers; Unicode symbols (e.g., math operators) are operators
+    const isUnicodeIdent = (c: string) => c.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(c);
+    if (/[\w]/.test(firstChar) || isUnicodeIdent(firstChar)) {
+      // Identifier symbol: consume word characters, Unicode identifiers, and trailing !
       while (i < source.length) {
         const char = source[i];
-        if (/[\w]/.test(char) || char.charCodeAt(0) > 127) {
+        if (/[\w]/.test(char) || isUnicodeIdent(char)) {
           i++;
           continue;
         }
@@ -773,19 +779,24 @@ export class JuliaBlockParser extends BaseBlockParser {
         break;
       }
     } else {
-      // Operator symbol: consume only operator characters
+      // Operator symbol: consume ASCII and Unicode operator characters
       while (i < source.length) {
         const char = source[i];
         if (/[!%&*+\-/<=>?\\^|~@]/.test(char)) {
           i++;
           // If @ was consumed and next char starts an identifier, consume the full identifier
           // This handles :@macro_name patterns where @ is the macro prefix
-          if (char === '@' && i < source.length && (/[\w]/.test(source[i]) || source[i].charCodeAt(0) > 127)) {
-            while (i < source.length && (/[\w!]/.test(source[i]) || source[i].charCodeAt(0) > 127)) {
+          if (char === '@' && i < source.length && (/[\w]/.test(source[i]) || isUnicodeIdent(source[i]))) {
+            while (i < source.length && (/[\w!]/.test(source[i]) || isUnicodeIdent(source[i]))) {
               i++;
             }
             break;
           }
+          continue;
+        }
+        // Unicode non-letter/non-number characters are operators (e.g., math symbols like +, -, etc.)
+        if (char.charCodeAt(0) > 127 && !isUnicodeIdent(char)) {
+          i++;
           continue;
         }
         break;
@@ -830,6 +841,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Matches triple backtick command string: ``` ... ```
   private matchTripleBacktickCommand(source: string, pos: number): ExcludedRegion {
     let i = pos + 3;
+    const isPrefixed = pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1]);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -842,7 +854,14 @@ export class JuliaBlockParser extends BaseBlockParser {
         continue;
       }
       if (source.slice(i, i + 3) === '```') {
-        return { start: pos, end: i + 3 };
+        let end = i + 3;
+        // Consume command macro suffix characters when prefixed (e.g., cmd```test```flags)
+        if (isPrefixed) {
+          while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) {
+            end++;
+          }
+        }
+        return { start: pos, end };
       }
       i++;
     }
@@ -878,6 +897,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Matches command string (backtick)
   private matchCommandString(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
+    const isPrefixed = pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1]);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -890,7 +910,14 @@ export class JuliaBlockParser extends BaseBlockParser {
         continue;
       }
       if (source[i] === '`') {
-        return { start: pos, end: i + 1 };
+        let end = i + 1;
+        // Consume command macro suffix characters when prefixed (e.g., cmd`test`flags)
+        if (isPrefixed) {
+          while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) {
+            end++;
+          }
+        }
+        return { start: pos, end };
       }
       i++;
     }

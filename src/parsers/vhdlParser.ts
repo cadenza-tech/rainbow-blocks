@@ -259,7 +259,13 @@ export class VhdlBlockParser extends BaseBlockParser {
             stmtStart = si + 1;
           }
         }
-        const stmtBefore = lineSlice.slice(stmtStart).toLowerCase().trimStart();
+        // Build statement text skipping excluded regions (block comments like /* ... */)
+        let stmtText = '';
+        for (let si = lineStart + stmtStart; si < startOffset; si++) {
+          if (this.isInExcludedRegion(si, excludedRegions)) continue;
+          stmtText += source[si];
+        }
+        const stmtBefore = stmtText.toLowerCase().trimStart();
         if (/^(type|subtype|alias|attribute|file|group)\b/.test(stmtBefore)) {
           continue;
         }
@@ -273,10 +279,13 @@ export class VhdlBlockParser extends BaseBlockParser {
           let linesChecked = 0;
           while (scanPos >= 0 && linesChecked < 5) {
             const prevLineStart = findLineStart(source, scanPos);
-            const prevLine = source
-              .slice(prevLineStart, scanPos + 1)
-              .toLowerCase()
-              .trimStart();
+            // Build line text skipping excluded regions (block comments like /* ... */)
+            let prevLineText = '';
+            for (let ci = prevLineStart; ci <= scanPos; ci++) {
+              if (this.isInExcludedRegion(ci, excludedRegions)) continue;
+              prevLineText += source[ci];
+            }
+            const prevLine = prevLineText.toLowerCase().trimStart();
             if (prevLine.length > 0) {
               // Skip comment-only lines (single-line -- or block comment /* ... */)
               const isCommentOnlyLine =
