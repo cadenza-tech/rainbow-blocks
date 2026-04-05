@@ -2404,5 +2404,13 @@ end try`;
     });
   });
 
+  suite('Regression: nested chevron/guillemet syntax', () => {
+    test('should handle nested chevrons without exposing inner keywords', () => {
+      const pairs = parser.parse('tell application "X"\n  set x to \u00ABa \u00ABb\u00BB end tell \u00BB\nend tell');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

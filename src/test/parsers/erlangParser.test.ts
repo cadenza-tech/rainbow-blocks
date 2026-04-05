@@ -2190,5 +2190,19 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: catch after binary close >>', () => {
+    test('should detect catch as intermediate after >> in try block', () => {
+      const pairs = parser.parse('try <<1,2,3>> catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should detect catch as intermediate after <<>> in try block', () => {
+      const pairs = parser.parse('try <<>> catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
   generateCommonTests(config);
 });

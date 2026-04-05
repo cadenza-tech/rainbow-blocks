@@ -4439,5 +4439,12 @@ end program`;
     });
   });
 
+  suite('Regression: string containing ) in parenthesized group', () => {
+    test('should not treat end(index(str, ")")) = val as block close', () => {
+      const pairs = parser.parse('program test\n  character :: end(10)\n  end(index(str, ")")) = trim(val)\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
   generateCommonTests(config);
 });

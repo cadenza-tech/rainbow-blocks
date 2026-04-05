@@ -2350,5 +2350,28 @@ end.`;
     });
   });
 
+  suite('Regression: variant case with character constant labels', () => {
+    test('should recognize #nn character constant as variant case label', () => {
+      const pairs = parser.parse(
+        'TRec = record\n  begin\n    case Char of\n      #65: (Field: Byte);\n  end;\n  case Integer of\n    0: (IntVal: Integer);\nend'
+      );
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(pairs[1].openKeyword.value.toLowerCase(), 'begin');
+    });
+  });
+
+  suite('Regression: multiple type modifiers before class in record', () => {
+    test('should handle sealed abstract class inside record', () => {
+      const pairs = parser.parse(
+        'type\n  TRec = record\n    T = sealed abstract class\n      procedure DoSomething;\n    end;\n    case Integer of\n      0: (IntVal: Integer);\n  end;'
+      );
+      assertBlockCount(pairs, 2);
+      const classPair = findBlock(pairs, 'class');
+      assert.ok(classPair);
+      const recordPair = findBlock(pairs, 'record');
+      assert.ok(recordPair);
+    });
+  });
+
   generateCommonTests(config);
 });

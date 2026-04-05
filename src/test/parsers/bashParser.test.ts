@@ -1927,6 +1927,43 @@ esac`;
     });
   });
 
+  suite('Regression: keyword adjacency and array variables', () => {
+    test('should not treat done"x" as keyword', () => {
+      const pairs = parser.parse('for i in 1; do\n  echo hi\ndone"x"\ndone');
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test("should not treat done'x' as keyword", () => {
+      const pairs = parser.parse("for i in 1; do\n  echo hi\ndone'x'\ndone");
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not treat done$(cmd) as keyword', () => {
+      const pairs = parser.parse('for i in 1; do\n  echo hi\ndone$(cmd)\ndone');
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not treat fi[0] as keyword', () => {
+      const pairs = parser.parse('if true; then\n  echo hi\nfi[0]\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not treat done[0]==x as keyword', () => {
+      const pairs = parser.parse('for i in 1; do\n  echo hi\ndone[0]==x\ndone');
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should recognize coproc NAME { } as command grouping', () => {
+      const pairs = parser.parse('coproc MYPROC {\n  echo hello\n}');
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {

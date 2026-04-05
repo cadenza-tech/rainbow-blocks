@@ -2719,5 +2719,19 @@ end package;`;
     });
   });
 
+  suite('Regression: is filter with block comments before declaration keyword', () => {
+    test('should filter is when block comment precedes type on same line', () => {
+      const pairs = parser.parse('package my_pkg is\n  /* comment */ type state_t is (idle, active);\nend package;');
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should filter is when block comment precedes type on previous line', () => {
+      const pairs = parser.parse('package my_pkg is\n  /* comment */ type state_t\n    is (idle, active);\nend package;');
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   generateCommonTests(config);
 });

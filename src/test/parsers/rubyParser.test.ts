@@ -3378,5 +3378,31 @@ end`;
     });
   });
 
+  suite('Regression: range operator as line continuation', () => {
+    test('should treat .. as line continuation for while-do', () => {
+      const pairs = parser.parse('while x ..\n  y do\n  body\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat ... as line continuation for while-do', () => {
+      const pairs = parser.parse('while x ...\n  y do\n  body\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  suite('Regression: keywords as method names after def', () => {
+    test('should not treat do after def as block opener', () => {
+      const pairs = parser.parse('class Foo\n  def do\n    1\n  end\nend');
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'class'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def'));
+    });
+
+    test('should not treat end after def as block closer', () => {
+      const pairs = parser.parse('def end\n  1\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

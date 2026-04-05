@@ -2583,5 +2583,25 @@ end if;`;
     });
   });
 
+  suite('Regression: parenthesized conditional expression intermediates', () => {
+    test('should not leak else from parenthesized if expression', () => {
+      const pairs = parser.parse('procedure P is\nbegin\n  X := (if A then B else C);\nend P;');
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should not leak then/else from parenthesized if in if block', () => {
+      const pairs = parser.parse('if Condition then\n  X := (if A then B else C);\nend if;');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should not leak is/when from parenthesized case expression', () => {
+      const pairs = parser.parse('procedure P is\nbegin\n  X := (case Y is when 1 => A, when others => B);\nend P;');
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+  });
+
   generateCommonTests(config);
 });

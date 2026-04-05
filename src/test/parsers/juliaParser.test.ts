@@ -3324,5 +3324,38 @@ end`;
     });
   });
 
+  suite('Regression: backtick command macro suffix', () => {
+    test('should consume suffix characters after prefixed backtick command', () => {
+      const pairs = parser.parse('function foo()\n  cmd`test`end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not consume suffix for plain backtick command', () => {
+      const pairs = parser.parse('function foo()\n  `test`\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: dot-preceded end and for in bracket context', () => {
+    test('should ignore dot-preceded end in hasUnmatchedBlockOpenerBetween', () => {
+      const pairs = parser.parse('a[begin obj.end end]');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should ignore dot-preceded for in hasForBetween', () => {
+      const pairs = parser.parse('f(obj.for, if true 1 else 2 end)');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: Unicode operator symbol literal', () => {
+    test('should not consume adjacent ASCII identifier after Unicode operator symbol', () => {
+      const regions = parser.getExcludedRegions(':\u2208for');
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
