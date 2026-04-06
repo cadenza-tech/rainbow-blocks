@@ -615,7 +615,7 @@ export class VerilogBlockParser extends BaseBlockParser {
       // Skip labels: identifier followed by ':'
       // Support both regular identifiers and escaped identifiers (\name)
       if (/[a-zA-Z_]/.test(source[i]) || source[i] === '\\') {
-        const labelEnd = trySkipLabel(source, i);
+        const labelEnd = trySkipLabel(source, i, excludedRegions);
         if (labelEnd > i) {
           i = labelEnd;
           continue;
@@ -701,7 +701,6 @@ export class VerilogBlockParser extends BaseBlockParser {
       // Handle base-specifier format: [size]'[s/S][base]digits (e.g., 32'd0, 8'hFF, 4'sb1010)
       if (i < source.length && source[i] === "'") {
         i = this.skipBaseSpecifierSuffix(source, i);
-        return i;
       }
       // Handle exponent notation (e.g., 1.5e-3, 2.0E+6)
       if (i < source.length && (source[i] === 'e' || source[i] === 'E')) {
@@ -713,6 +712,11 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
       // Skip time unit (e.g., ns, ps)
       while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
+      // Skip arithmetic operators and continue parsing the rest of the expression
+      if (i < source.length && /[+\-*/%]/.test(source[i])) {
+        i++;
+        return this.skipDelayExpression(source, i, excludedRegions);
+      }
       return i;
     }
     // Handle unsized base-specifier literals: '[s/S][base]digits (e.g., 'd5, 'hFF)
@@ -729,6 +733,10 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
       while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+      if (i < source.length && /[+\-*/%]/.test(source[i])) {
+        i++;
+        return this.skipDelayExpression(source, i, excludedRegions);
+      }
       return i;
     }
     // Backtick-prefixed macro identifier: `MACRO_NAME or `(expr)
@@ -738,6 +746,10 @@ export class VerilogBlockParser extends BaseBlockParser {
         return this.skipParenGroup(source, i, excludedRegions);
       }
       while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+      if (i < source.length && /[+\-*/%]/.test(source[i])) {
+        i++;
+        return this.skipDelayExpression(source, i, excludedRegions);
+      }
       return i;
     }
     return i;

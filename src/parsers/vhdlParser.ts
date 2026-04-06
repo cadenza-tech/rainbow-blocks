@@ -286,24 +286,25 @@ export class VhdlBlockParser extends BaseBlockParser {
               prevLineText += source[ci];
             }
             const prevLine = prevLineText.toLowerCase().trimStart();
+            // Skip comment-only lines (all non-whitespace chars are inside excluded regions)
+            const isCommentOnlyLine =
+              (prevLine.length > 0 && /^--/.test(prevLine)) ||
+              (() => {
+                let hasNonWs = false;
+                for (let ci = prevLineStart; ci <= scanPos; ci++) {
+                  if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\r' || source[ci] === '\n') continue;
+                  hasNonWs = true;
+                  if (!this.isInExcludedRegion(ci, excludedRegions)) return false;
+                }
+                return hasNonWs;
+              })();
+            if (isCommentOnlyLine) {
+              scanPos = prevLineStart - 1;
+              if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
+              if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+              continue;
+            }
             if (prevLine.length > 0) {
-              // Skip comment-only lines (single-line -- or block comment /* ... */)
-              const isCommentOnlyLine =
-                /^--/.test(prevLine) ||
-                (() => {
-                  // Check if all non-whitespace characters on this line are inside excluded regions
-                  for (let ci = prevLineStart; ci <= scanPos; ci++) {
-                    if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\r' || source[ci] === '\n') continue;
-                    if (!this.isInExcludedRegion(ci, excludedRegions)) return false;
-                  }
-                  return true;
-                })();
-              if (isCommentOnlyLine) {
-                scanPos = prevLineStart - 1;
-                if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-                if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
-                continue;
-              }
               if (/^(type|subtype|alias|attribute|file|group)\b/.test(prevLine)) {
                 // Check no semicolon between declaration and this 'is'
                 let hasSemicolon = false;

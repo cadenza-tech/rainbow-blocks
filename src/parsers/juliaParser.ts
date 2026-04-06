@@ -105,7 +105,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // Other block keywords inside parentheses are block expressions
     // Only exclude them inside square brackets
     if (keyword !== 'for' && keyword !== 'if') {
-      if (this.isInsideSquareBrackets(source, position, excludedRegions, keyword.length)) {
+      if (this.isInsideSquareBrackets(source, position, excludedRegions)) {
         return false;
       }
     }
@@ -493,7 +493,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if position is inside square brackets only (for other block keywords)
   // Julia allows block expressions inside parentheses, so only [] excludes them
   // Keywords inside parentheses within brackets are valid (e.g., a[map(1:3) do x ... end])
-  private isInsideSquareBrackets(source: string, position: number, excludedRegions: ExcludedRegion[], keywordLength = 0): boolean {
+  private isInsideSquareBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -508,7 +508,7 @@ export class JuliaBlockParser extends BaseBlockParser {
           // If inside parentheses within brackets, the keyword is valid
           if (parenDepth > 0) return false;
           // If there's a block opener between [ and the keyword, the block expression is valid
-          if (this.hasUnmatchedBlockOpenerBetween(source, i + 1, position + keywordLength, excludedRegions)) {
+          if (this.hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions)) {
             return false;
           }
           // Only indexing brackets exclude block keywords, not array construction
