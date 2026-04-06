@@ -2373,5 +2373,56 @@ end.`;
     });
   });
 
+  suite('Regression: if-then-else inside case/try blocks', () => {
+    test('should not attach if-then-else else to case block', () => {
+      const pairs = parser.parse('case X of\n  1: if Y then DoA else DoB;\nend');
+      assertSingleBlock(pairs, 'case', 'end');
+      const intermediates = pairs[0].intermediates.map((i) => i.value.toLowerCase());
+      assert.ok(!intermediates.includes('else'));
+    });
+
+    test('should not attach if-then-else else to try block', () => {
+      const pairs = parser.parse('try\n  if X then DoA else DoB;\nexcept\n  HandleError;\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      const intermediates = pairs[0].intermediates.map((i) => i.value.toLowerCase());
+      assert.ok(!intermediates.includes('else'));
+    });
+
+    test('should still detect case else as intermediate', () => {
+      const pairs = parser.parse('case X of\n  1: DoA;\nelse\n  DoDefault;\nend');
+      assertSingleBlock(pairs, 'case', 'end');
+      const intermediates = pairs[0].intermediates.map((i) => i.value.toLowerCase());
+      assert.ok(intermediates.includes('else'));
+    });
+  });
+
+  suite('Regression: type declaration of inside case', () => {
+    test('should not attach array of to case block', () => {
+      const pairs = parser.parse('case X of\n  1: var A: array of Integer;\nend');
+      const ofCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'of').length;
+      assert.strictEqual(ofCount, 1);
+    });
+  });
+
+  suite('Regression: isTypeDeclarationOf should skip excluded regions properly', () => {
+    test('should filter of when brace comment separates array from of', () => {
+      const pairs = parser.parse('case X of\n  1: var A: array { comment } of Integer;\nend');
+      const ofCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'of').length;
+      assert.strictEqual(ofCount, 1);
+    });
+
+    test('should filter of when paren-star comment separates array from of', () => {
+      const pairs = parser.parse('case X of\n  1: var A: array (* comment *) of Integer;\nend');
+      const ofCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'of').length;
+      assert.strictEqual(ofCount, 1);
+    });
+
+    test('should filter of when comment separates set from of', () => {
+      const pairs = parser.parse('case X of\n  1: var S: set { comment } of Byte;\nend');
+      const ofCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'of').length;
+      assert.strictEqual(ofCount, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

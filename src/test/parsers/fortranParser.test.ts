@@ -4446,5 +4446,17 @@ end program`;
     });
   });
 
+  suite('Regression: end with parenthesized index and component access', () => {
+    test('should not treat end(1)%x = 42 as block close', () => {
+      const pairs = parser.parse('program test\n  end(1)%x = 42\nend program');
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat end(n)%field as block close', () => {
+      const pairs = parser.parse('subroutine foo\n  end(n)%field = val\nend subroutine');
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+  });
+
   generateCommonTests(config);
 });

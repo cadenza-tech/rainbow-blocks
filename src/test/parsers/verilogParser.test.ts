@@ -2426,5 +2426,38 @@ endmodule`;
     });
   });
 
+  suite('Regression: label with comment between identifier and colon', () => {
+    test('should skip label with block comment before colon', () => {
+      const pairs = parser.parse('always @(posedge clk) my_label /* comment */ : begin\n  q <= d;\nend');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should skip label with line comment before colon on next line', () => {
+      const pairs = parser.parse('always @(posedge clk) my_label // comment\n : begin\n  q <= d;\nend');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: arithmetic delay expressions should not break control keyword pairing', () => {
+    test('should pair always with end when delay has division', () => {
+      const pairs = parser.parse('always #10/2 begin\n  clk = ~clk;\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should pair always with end when macro delay has division', () => {
+      const pairs = parser.parse('always #`CLK/2 begin\n  clk = ~clk;\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+    });
+
+    test('should pair always with end when delay has multiplication', () => {
+      const pairs = parser.parse('always #`PERIOD*2 begin\n  clk = ~clk;\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+    });
+  });
+
   generateCommonTests(config);
 });

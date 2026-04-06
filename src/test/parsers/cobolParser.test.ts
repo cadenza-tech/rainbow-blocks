@@ -1642,5 +1642,22 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: PERFORM with single-word COBOL verb', () => {
+    test('should detect PERFORM DISPLAY block', () => {
+      const pairs = parser.parse('PERFORM DISPLAY\nEND-PERFORM');
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should detect PERFORM IF with nested END-IF', () => {
+      const pairs = parser.parse('PERFORM IF\n  DISPLAY Y\nEND-IF\nEND-PERFORM');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect PERFORM COMPUTE block', () => {
+      const pairs = parser.parse('PERFORM COMPUTE\nEND-PERFORM');
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
   generateCommonTests(config);
 });

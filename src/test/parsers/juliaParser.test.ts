@@ -2042,11 +2042,11 @@ end`;
       assertBlockCount(pairs, 2);
     });
 
-    test('should detect begin/end block inside indexing brackets', () => {
+    test('should treat begin as firstindex inside indexing brackets', () => {
       const source = 'x = a[begin, end]\nfunction foo()\nend';
       const pairs = parser.parse(source);
-      // begin..end inside indexing brackets is a block expression
-      assertBlockCount(pairs, 2);
+      // begin inside indexing brackets is firstindex, not a block opener
+      assertSingleBlock(pairs, 'function', 'end');
     });
 
     test('should detect function inside array construction brackets', () => {
@@ -3178,10 +3178,10 @@ end`;
     });
   });
 
-  suite('Regression: block expressions in indexing brackets', () => {
-    test('should detect begin/end block inside indexing brackets', () => {
+  suite('Regression: begin as firstindex in indexing brackets', () => {
+    test('should treat begin as firstindex inside indexing brackets', () => {
       const pairs = parser.parse('a[begin; 1; end]');
-      assertSingleBlock(pairs, 'begin', 'end');
+      assertNoBlocks(pairs);
     });
 
     test('should detect if/end block inside indexing brackets', () => {
@@ -3192,6 +3192,33 @@ end`;
     test('should detect nested block inside indexing brackets with enclosing function', () => {
       const pairs = parser.parse('function foo(arr)\n  x = arr[if true 1 else 2 end]\n  return x\nend');
       assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: begin as firstindex inside indexing brackets', () => {
+    test('should not detect begin as block opener in arr[begin:end]', () => {
+      const pairs = parser.parse('function foo(arr)\n  x = arr[begin:end]\n  return x\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect begin as block opener in arr[begin:5]', () => {
+      const pairs = parser.parse('function foo(arr)\n  x = arr[begin:5]\n  return x\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect begin as block opener in arr[begin]', () => {
+      const pairs = parser.parse('function foo(arr)\n  x = arr[begin]\n  return x\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not detect begin as block opener in arr[begin+1:end-1]', () => {
+      const pairs = parser.parse('function foo(arr)\n  x = arr[begin+1:end-1]\n  return x\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still detect begin as block opener in array construction', () => {
+      const pairs = parser.parse('[begin 42 end]');
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 
@@ -3260,15 +3287,11 @@ end`;
   });
 
   suite('Regression: end after completed block expression inside indexing brackets', () => {
-    test('should treat end as lastindex after completed begin-end in indexing brackets', () => {
+    test('should treat begin as firstindex in indexing brackets (not block expression)', () => {
       const source = 'function f()\n  x = a[begin 1 end, end]\nend';
-      const tokens = parser.getTokens(source);
-      const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 2);
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'function');
-      findBlock(pairs, 'begin');
+      // begin inside indexing brackets is firstindex, not a block opener
+      assertSingleBlock(pairs, 'function', 'end');
     });
 
     test('should treat end as lastindex after completed if-end in indexing brackets', () => {
@@ -3338,9 +3361,10 @@ end`;
   });
 
   suite('Regression: dot-preceded end and for in bracket context', () => {
-    test('should ignore dot-preceded end in hasUnmatchedBlockOpenerBetween', () => {
+    test('should treat begin as firstindex in indexing brackets with dot-preceded end', () => {
       const pairs = parser.parse('a[begin obj.end end]');
-      assertSingleBlock(pairs, 'begin', 'end');
+      // begin inside indexing brackets is firstindex, not a block opener
+      assertNoBlocks(pairs);
     });
 
     test('should ignore dot-preceded for in hasForBetween', () => {

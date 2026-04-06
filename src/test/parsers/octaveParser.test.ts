@@ -1479,5 +1479,12 @@ end`;
     });
   });
 
+  suite('Regression: surrogate pair Unicode letter before transpose', () => {
+    test('should treat single quote after surrogate pair letter as transpose', () => {
+      const pairs = parser.parse("\u{20000}'; if true; end");
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

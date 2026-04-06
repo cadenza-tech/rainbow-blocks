@@ -2412,5 +2412,22 @@ end try`;
     });
   });
 
+  suite('Regression: compound close keywords should not be suppressed by of pattern', () => {
+    test('should detect end tell even when followed by of on same line', () => {
+      const pairs = parser.parse('tell application "Finder"\nend tell of myList');
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should detect end if even when followed by of on same line', () => {
+      const pairs = parser.parse('if true then\n  beep\nend if of myList');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect end repeat even when followed by of on same line', () => {
+      const pairs = parser.parse('repeat 3 times\n  beep\nend repeat of myList');
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
   generateCommonTests(config);
 });

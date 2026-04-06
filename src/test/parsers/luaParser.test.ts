@@ -1118,5 +1118,47 @@ end`;
     });
   });
 
+  suite('Regression: dot/colon preceded keywords across newlines', () => {
+    test('should reject end preceded by dot across LF', () => {
+      const pairs = parser.parse('function f()\n  return obj.\n  end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should reject do preceded by colon across LF', () => {
+      const pairs = parser.parse('function f()\n  obj:\n  do()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject end preceded by dot across CRLF', () => {
+      const pairs = parser.parse('function f()\r\n  return t.\r\n  end\r\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not be affected by comment ending with dot', () => {
+      const pairs = parser.parse('-- comment.\nif true then\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: trailing-dot number literal should not trigger field access check', () => {
+    test('should detect function/end when end follows return 1.', () => {
+      const pairs = parser.parse('function f()\n  return 1.\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should detect if/end with then when condition uses trailing-dot number', () => {
+      const pairs = parser.parse('if 2. then\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should still detect identifier.end as field access', () => {
+      const pairs = parser.parse('if true then\n  x = a1.\nend');
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

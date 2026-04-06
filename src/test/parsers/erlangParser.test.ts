@@ -2204,5 +2204,25 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: catch after closing brackets should use forward heuristic', () => {
+    test('should detect expression-prefix catch after ) in try block', () => {
+      const pairs = parser.parse('try\n  compute(X)\n  catch throw(val)\ncatch\n  _:_ -> ok\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should detect expression-prefix catch after ] in try block', () => {
+      const pairs = parser.parse('try\n  lists:last([1,2])\n  catch throw(val)\ncatch\n  _:_ -> ok\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should detect expression-prefix catch after } in try block', () => {
+      const pairs = parser.parse('try\n  {ok, X} = get()\n  catch throw(val)\ncatch\n  _:_ -> ok\nend');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
   generateCommonTests(config);
 });

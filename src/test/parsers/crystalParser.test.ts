@@ -3645,5 +3645,44 @@ end`;
     });
   });
 
+  suite('Regression: block keyword after macro template should not be postfix', () => {
+    test('should detect if block after {% %} macro template', () => {
+      const pairs = parser.parse('{% x %} if condition\n  body\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect unless block after {{ }} macro template', () => {
+      const pairs = parser.parse('{{ x }} unless condition\n  body\nend');
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+
+    test('should detect while block after {% %} macro template', () => {
+      const pairs = parser.parse('{% x %} while condition\n  body\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  suite('Regression: Crystal global variables should not suppress postfix conditional', () => {
+    test('should treat $? if as postfix conditional', () => {
+      const pairs = parser.parse('x = $? if condition\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat $! unless as postfix conditional', () => {
+      const pairs = parser.parse('x = $! unless condition\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat $~ while as postfix conditional', () => {
+      const pairs = parser.parse('x = $~ while condition\nend');
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat $. until as postfix conditional', () => {
+      const pairs = parser.parse('x = $. until condition\nend');
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

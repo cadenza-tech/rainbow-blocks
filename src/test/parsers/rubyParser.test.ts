@@ -3404,5 +3404,24 @@ end`;
     });
   });
 
+  suite('Regression: double percent should not create unterminated literal', () => {
+    test('should detect if/end after %% in expression', () => {
+      const pairs = parser.parse('x = 5 %% 2\nif true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: second regex on same line should be excluded', () => {
+    test('should not tokenize keywords inside second regex literal', () => {
+      const pairs = parser.parse('/regex1/ /if end/\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle regex after regex with keywords', () => {
+      const pairs = parser.parse('/a/ /while true do end/\ndef bar\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

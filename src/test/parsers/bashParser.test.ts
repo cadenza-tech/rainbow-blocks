@@ -1964,6 +1964,30 @@ esac`;
     });
   });
 
+  suite('Regression: case as argument in subshell should not trigger caseDepth', () => {
+    test('should detect if/fi after $(echo case)', () => {
+      const pairs = parser.parse('x=$(echo case)\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if/fi after $(cat case)', () => {
+      const pairs = parser.parse('x=$(cat case)\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect if/fi after process substitution with case argument', () => {
+      const pairs = parser.parse('diff <(echo case) file\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: [[ ]] inside subshell should not treat # as comment', () => {
+    test('should detect if/fi after $([[ ... #* ... ]])', () => {
+      const pairs = parser.parse('x=$([[ $var == #* ]] && echo ok)\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {

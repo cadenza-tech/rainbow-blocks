@@ -3623,5 +3623,25 @@ end`;
     });
   });
 
+  suite('Regression: keywords after :: type spec operator should be filtered', () => {
+    test('should not treat end after :: as block close', () => {
+      const pairs = parser.parse('def foo do\n  @type t :: end\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end after :: without space as block close', () => {
+      const pairs = parser.parse('def foo do\n  @type t ::end\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat else after :: as intermediate', () => {
+      const pairs = parser.parse('def foo do\n  @spec bar :: else\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   generateCommonTests(config);
 });

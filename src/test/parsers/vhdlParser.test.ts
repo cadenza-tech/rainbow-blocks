@@ -2733,5 +2733,35 @@ end package;`;
     });
   });
 
+  suite('Regression: compact for configuration block on single line', () => {
+    test('should detect for block with use entity on same line followed by end for', () => {
+      const pairs = parser.parse('configuration cfg of ent is\n  for all : comp use entity work.impl; end for;\nend configuration;');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: is filtering should skip comment-only lines', () => {
+    test('should filter type is with 5 comment-only lines between', () => {
+      const src = 'package pkg is\n  type my_type\n    -- c1\n    -- c2\n    -- c3\n    -- c4\n    -- c5\n    is (a, b);\nend package;';
+      const pairs = parser.parse(src);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
+  suite('Regression: else with inline comment should not be filtered as signal assignment', () => {
+    test('should detect else as intermediate when followed by inline comment', () => {
+      const pairs = parser.parse('if cond then\n  sig <= a when c else b\nelse -- comment\n  null;\nend if;');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should still detect signal assignment else on same line as value', () => {
+      const pairs = parser.parse('if cond then\n  sig <= a when c else b;\nend if;');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
   generateCommonTests(config);
 });
