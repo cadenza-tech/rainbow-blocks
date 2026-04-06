@@ -5,6 +5,30 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.26] - 2026-04-06
+
+### Fixed
+
+- AppleScript: Remove unnecessary keyword space/tab check before `of` pattern suppression in `isValidBlockClose`
+- Bash: Remove `[[ ]]` double-bracket depth tracking and command position checks inside subshell scanning
+- COBOL: Remove block opener verb check in `PERFORM` paragraph call detection
+- Crystal: Remove macro template excluded-region check and `$?`/`$!`/`$~`/`$.` global variable check in `isPostfixConditional`
+- Elixir: Remove `::` type spec operator prefix check for keyword filtering
+- Erlang: Remove closing bracket/paren forward heuristic for `catch` context detection
+- Fortran: Remove `end(1)%x` derived type component access check in `isValidFortranBlockClose`
+- Julia: Pass keyword length to `isInsideSquareBrackets` for correct `hasUnmatchedBlockOpenerBetween` range
+- Lua: Simplify `isPrecededByDotOrColon` to skip only same-line whitespace without excluded region or trailing-dot number handling
+- MATLAB: Remove surrogate pair Unicode letter handling in transpose operator detection
+- Octave: Remove surrogate pair Unicode letter handling in transpose operator detection
+- Pascal: Remove `isIfThenElse` and `isTypeDeclarationOf` tokenize filtering for `else` and `of` intermediates
+- Ruby: Remove `%%` double percent exclusion in percent literal detection
+- Ruby: Remove regex-after-regex excluded region check in `isRegexStart`
+- Verilog: Simplify `trySkipLabel` to skip only whitespace between identifier and colon
+- Verilog: Add early return after `skipBaseSpecifierSuffix` and remove recursive arithmetic operator handling in `skipDelayExpression`
+- VHDL: Restructure comment-only line detection in `isFilteredIs` to skip empty lines before checking
+- VHDL: Remove `hasEndKeywordOnSameLine` check in `for` configuration specification detection
+- VHDL: Remove inline comment check after `else` in signal assignment detection
+
 ## [1.1.25] - 2026-04-05
 
 ### Fixed
@@ -1191,6 +1215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.26]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.25...v1.1.26
 [1.1.25]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.24...v1.1.25
 [1.1.24]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.23...v1.1.24
 [1.1.23]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.22...v1.1.23
