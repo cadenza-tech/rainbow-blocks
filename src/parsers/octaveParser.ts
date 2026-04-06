@@ -369,7 +369,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Check if single quote is a transpose operator (after identifier, number, ], }, or .)
     if (quote === "'" && pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar)) {
+      // Handle surrogate pairs: low surrogate preceded by high surrogate
+      const isSurrogatePairLetter =
+        pos >= 2 &&
+        prevChar >= '\uDC00' &&
+        prevChar <= '\uDFFF' &&
+        (() => {
+          const cp = source.codePointAt(pos - 2);
+          return cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp));
+        })();
+      if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar) || isSurrogatePairLetter) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         if (/[0-9]/.test(prevChar)) {
           const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;

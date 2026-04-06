@@ -456,11 +456,23 @@ interface SubshellScanConfig {
   readonly regionStart: number;
 }
 
+// Checks if a position in a subshell is at a command start (after separator, newline, or start)
+function isAtSubshellCommandPosition(source: string, pos: number): boolean {
+  let j = pos - 1;
+  while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
+    j--;
+  }
+  if (j < 0) return true;
+  const ch = source[j];
+  return ch === ';' || ch === '|' || ch === '&' || ch === '(' || ch === '{' || ch === '\n' || ch === '\r' || ch === '`';
+}
+
 function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedRegion {
   const { initialPos, regionStart } = config;
   let i = initialPos;
   let depth = 1;
   let caseDepth = 0;
+  let doubleBracketDepth = 0;
   const pendingHeredocs: { stripTabs: boolean; terminator: string }[] = [];
 
   while (i < source.length && depth > 0) {
@@ -501,8 +513,20 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
       continue;
     }
 
-    // Skip comments (# to end of line, but not $# special variable)
-    if (char === '#' && isCommentStart(source, i) && !isDollarHashVariable(source, i)) {
+    // Track [[ and ]] depth: # is not a comment inside [[ ]] conditional expressions
+    if (char === '[' && i + 1 < source.length && source[i + 1] === '[' && isAtSubshellCommandPosition(source, i)) {
+      doubleBracketDepth++;
+      i += 2;
+      continue;
+    }
+    if (char === ']' && i + 1 < source.length && source[i + 1] === ']' && doubleBracketDepth > 0) {
+      doubleBracketDepth--;
+      i += 2;
+      continue;
+    }
+
+    // Skip comments (# to end of line, but not $# special variable, not inside [[ ]])
+    if (char === '#' && doubleBracketDepth === 0 && isCommentStart(source, i) && !isDollarHashVariable(source, i)) {
       while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
         i++;
       }
@@ -547,13 +571,13 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
     }
 
     // Track case/esac nesting to avoid `)` in case patterns closing the substitution
-    // Skip $case/$esac (variable names, not keywords)
-    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'case')) {
+    // Only match case at command position (not as argument like `echo case`)
+    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'case') && isAtSubshellCommandPosition(source, i)) {
       caseDepth++;
       i += 4;
       continue;
     }
-    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'esac')) {
+    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'esac') && isAtSubshellCommandPosition(source, i)) {
       if (caseDepth > 0) caseDepth--;
       i += 4;
       continue;

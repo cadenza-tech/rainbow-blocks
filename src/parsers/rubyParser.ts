@@ -921,7 +921,8 @@ export class RubyBlockParser extends BaseBlockParser {
     }
     // Non-paired delimiter without specifier is also a percent literal
     // e.g. puts %|text|, %~text~
-    if (next < source.length && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
+    // Exclude %% (double percent) — treat first % as modulo to avoid unterminated literals
+    if (next < source.length && source[next] !== '%' && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
       return false;
     }
     return true;

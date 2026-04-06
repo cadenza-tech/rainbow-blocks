@@ -54,8 +54,18 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
       if (i < 0) return true;
       // Fall through to normal checks below
     } else {
-      // Value expressions (strings, char literals, regex, etc.): / is division
-      return false;
+      // Regex literal closing /: the next / is a regex start (e.g., /regex1/ /regex2/)
+      if (source[lastExcludedRegion.start] === '/') {
+        i = lastExcludedRegion.start - 1;
+        while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+          i--;
+        }
+        if (i < 0) return true;
+        // Fall through to normal checks below
+      } else {
+        // Value expressions (strings, char literals, etc.): / is division
+        return false;
+      }
     }
   }
 

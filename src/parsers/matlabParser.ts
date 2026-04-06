@@ -414,7 +414,16 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Check if this is a transpose operator (after identifier, number, ], }, or .)
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar)) {
+      // Handle surrogate pairs: low surrogate preceded by high surrogate
+      const isSurrogatePairLetter =
+        pos >= 2 &&
+        prevChar >= '\uDC00' &&
+        prevChar <= '\uDFFF' &&
+        (() => {
+          const cp = source.codePointAt(pos - 2);
+          return cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp));
+        })();
+      if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar) || isSurrogatePairLetter) {
         // After a digit, check if ' starts a string (e.g., [1'text'])
         // If immediately followed by a letter, it's more likely a string
         if (/[0-9]/.test(prevChar)) {

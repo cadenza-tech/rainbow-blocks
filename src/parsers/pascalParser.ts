@@ -863,6 +863,20 @@ export class PascalBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Filter 'else' from if-then-else (not a case/try intermediate)
+      if (type === 'block_middle' && keyword === 'else') {
+        if (this.isIfThenElse(source, startOffset, excludedRegions)) {
+          continue;
+        }
+      }
+
+      // Filter 'of' from type declarations (array of, set of, file of)
+      if (type === 'block_middle' && keyword === 'of') {
+        if (this.isTypeDeclarationOf(source, startOffset, excludedRegions)) {
+          continue;
+        }
+      }
+
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
       tokens.push({
@@ -899,6 +913,71 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     return { start: pos, end: source.length };
+  }
+
+  // Checks if 'else' at position is part of an if-then-else (not a case/try else)
+  // Scans backward tracking begin/end depth to find 'then' at the same nesting level
+  private isIfThenElse(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    let i = position - 1;
+    while (i >= 0) {
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+        i--;
+        continue;
+      }
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        i--;
+        continue;
+      }
+      if (source[i] === ';' && depth === 0) {
+        return false;
+      }
+      if (/[a-zA-Z_]/i.test(source[i])) {
+        const wordEnd = i;
+        while (i >= 0 && /[a-zA-Z0-9_]/i.test(source[i])) {
+          i--;
+        }
+        const word = source.slice(i + 1, wordEnd + 1).toLowerCase();
+        if (word === 'end' || word === 'until') {
+          depth++;
+        } else if (word === 'begin' || word === 'case' || word === 'try' || word === 'repeat' || word === 'record' || word === 'asm') {
+          depth--;
+          if (depth < 0) return false;
+        } else if (word === 'then' && depth === 0) {
+          return true;
+        }
+        continue;
+      }
+      i--;
+    }
+    return false;
+  }
+
+  // Checks if 'of' at position is from a type declaration (array of, set of, file of)
+  private isTypeDeclarationOf(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+      i--;
+    }
+    if (i < 0) return false;
+    if (this.isInExcludedRegion(i, excludedRegions)) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+      } else {
+        i--;
+      }
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+        i--;
+      }
+    }
+    if (i < 0 || !/[a-zA-Z]/i.test(source[i])) return false;
+    const wordEnd = i;
+    while (i >= 0 && /[a-zA-Z0-9_]/i.test(source[i])) {
+      i--;
+    }
+    const word = source.slice(i + 1, wordEnd + 1).toLowerCase();
+    return word === 'array' || word === 'set' || word === 'file';
   }
 
   // Matches blocks with special handling: until only closes repeat, end closes others
