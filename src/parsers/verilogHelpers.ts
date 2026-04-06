@@ -1,6 +1,7 @@
 // Verilog/SystemVerilog pure helper functions for excluded region matching
 
 import type { ExcludedRegion } from '../types';
+import { isInExcludedRegion } from './parserUtils';
 
 // Rejects any keyword preceded or followed by $ (part of identifier like $end, fork$sig)
 export function hasDollarAdjacent(source: string, position: number, keyword: string): boolean {
@@ -240,7 +241,8 @@ export function matchUndefDirective(source: string, pos: number): ExcludedRegion
 }
 
 // Tries to skip a label (identifier: or \escaped_name:), returns new position or original if not a label
-export function trySkipLabel(source: string, pos: number): number {
+// Skips whitespace, comments, and newlines between identifier and colon
+export function trySkipLabel(source: string, pos: number, excludedRegions: ExcludedRegion[] = []): number {
   let i = pos;
   if (source[i] === '\\') {
     // Escaped identifier: \name terminated by whitespace
@@ -249,9 +251,25 @@ export function trySkipLabel(source: string, pos: number): number {
   } else {
     while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
   }
-  // Skip whitespace after identifier
+  // Skip whitespace, newlines, and excluded regions (comments) after identifier
   let afterIdent = i;
-  while (afterIdent < source.length && /[ \t]/.test(source[afterIdent])) afterIdent++;
+  while (afterIdent < source.length) {
+    if (source[afterIdent] === ' ' || source[afterIdent] === '\t' || source[afterIdent] === '\n' || source[afterIdent] === '\r') {
+      afterIdent++;
+      continue;
+    }
+    if (isInExcludedRegion(afterIdent, excludedRegions)) {
+      // Find end of excluded region
+      for (const region of excludedRegions) {
+        if (afterIdent >= region.start && afterIdent < region.end) {
+          afterIdent = region.end;
+          break;
+        }
+      }
+      continue;
+    }
+    break;
+  }
   if (afterIdent < source.length && source[afterIdent] === ':' && (afterIdent + 1 >= source.length || source[afterIdent + 1] !== ':')) {
     return afterIdent + 1;
   }

@@ -135,6 +135,34 @@ export function isValidForOpen(source: string, position: number, excludedRegions
 // Pattern: for <id/all/others> : <id> use entity/configuration ... ;
 // Only matches when 'use entity' or 'use configuration' appears on the same line as 'for'
 // (configuration blocks have 'use entity' on a separate indented line)
+// Checks if 'end' keyword appears after current position on the same line
+// Used to detect compact configuration blocks: for ... use entity ...; end for;
+function hasEndKeywordOnSameLine(
+  source: string,
+  pos: number,
+  len: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  let j = pos;
+  while (j < len) {
+    if (callbacks.isInExcludedRegion(j, excludedRegions)) {
+      j++;
+      continue;
+    }
+    const ch = source[j];
+    if (ch === '\n' || ch === '\r') return false;
+    if (/[a-zA-Z_]/.test(ch)) {
+      const ws = j;
+      while (j < len && /[a-zA-Z0-9_]/.test(source[j])) j++;
+      if (source.slice(ws, j).toLowerCase() === 'end') return true;
+      continue;
+    }
+    j++;
+  }
+  return false;
+}
+
 function hasUseEntityOrConfigAfterFor(
   source: string,
   position: number,
@@ -184,6 +212,11 @@ function hasUseEntityOrConfigAfterFor(
           const nextWord = source.slice(nextWordStart, k).toLowerCase();
           if (nextWord === 'entity' || nextWord === 'configuration') {
             if (!callbacks.isInExcludedRegion(wordStart, excludedRegions)) {
+              // Check if 'end' follows later on the same line (compact configuration block)
+              // If so, this is a block, not a single-line config spec
+              if (hasEndKeywordOnSameLine(source, k, len, excludedRegions, callbacks)) {
+                return false;
+              }
               return true;
             }
           }
@@ -561,9 +594,13 @@ export function isInSignalAssignment(
             while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
               k++;
             }
-            // If next non-space character is a newline or end of source, this else
-            // is likely the if-block's else, not part of the signal assignment
+            // If next non-space character is a newline, end of source, or inline comment,
+            // this else is likely the if-block's else, not part of the signal assignment
             if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+              return false;
+            }
+            // Inline comment (--) after else means no value expression follows
+            if (k + 1 < source.length && source[k] === '-' && source[k + 1] === '-') {
               return false;
             }
             // Otherwise, there's content on the same line after else (value expression),

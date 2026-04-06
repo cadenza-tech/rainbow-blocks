@@ -835,7 +835,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // to avoid matching 'of' across continuation lines
     const afterPhysLines = rawAfterKwText.split(/\r\n|\r|\n/);
     const firstPhysLine = afterPhysLines[0];
-    if (/^[ \t]+of\b/.test(firstPhysLine)) {
+    if (!keyword.includes(' ') && !keyword.includes('\t') && /^[ \t]+of\b/.test(firstPhysLine)) {
       return true;
     }
     // '<keyword> of' across continuation (only when keyword is in expression context)

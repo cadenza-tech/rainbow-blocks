@@ -411,6 +411,24 @@ export function isPostfixConditional(source: string, position: number, excludedR
     return false;
   }
 
+  // Check if all non-whitespace content before keyword is inside excluded regions
+  // (e.g., macro templates like {% x %} or {{ x }} are excluded regions)
+  let hasNonExcludedContent = false;
+  for (let ci = lineStart; ci < position; ci++) {
+    if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') continue;
+    if (!isInExcludedRegion(ci, excludedRegions)) {
+      // Check for semicolons: content after the last semicolon is what matters
+      if (source[ci] === ';') {
+        hasNonExcludedContent = false;
+        continue;
+      }
+      hasNonExcludedContent = true;
+    }
+  }
+  if (!hasNonExcludedContent) {
+    return false;
+  }
+
   // Block keyword before means not postfix
   const precedingBlockKeywords = [
     'if',
@@ -456,6 +474,15 @@ export function isPostfixConditional(source: string, position: number, excludedR
       checkPos--;
     }
     if (checkPos >= lineStart && isInExcludedRegion(checkPos, excludedRegions)) {
+      return true;
+    }
+    // Crystal global variables $?, $!, $~, $. are complete values, not operators
+    const lastChar = beforeKeyword[beforeKeyword.length - 1];
+    if (
+      (lastChar === '?' || lastChar === '!' || lastChar === '~' || lastChar === '.') &&
+      beforeKeyword.length >= 2 &&
+      beforeKeyword[beforeKeyword.length - 2] === '$'
+    ) {
       return true;
     }
     return false;

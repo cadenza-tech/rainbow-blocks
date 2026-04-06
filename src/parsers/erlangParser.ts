@@ -343,6 +343,11 @@ export class ErlangBlockParser extends BaseBlockParser {
     ) {
       return true;
     }
+    // Closing bracket/paren: end of sub-expression.
+    // Use forward heuristic to distinguish expression-prefix from clause separator
+    if (ch === ')' || ch === ']' || ch === '}') {
+      return !this.isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
+    }
     // Comma: could be end of sequence before catch expression,
     // or end of last expression before catch clause separator.
     // If catch is followed by a clause pattern (->), it's a clause separator

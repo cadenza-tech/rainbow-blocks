@@ -162,11 +162,16 @@ export class CobolBlockParser extends BaseBlockParser {
               } else {
                 // Check if only whitespace/newline/period follows the first word (paragraph call)
                 // If there's more content on the same line, it's likely a block PERFORM with inline statements
-                // Strip inline COBOL comments (*>) before checking
-                const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/, '');
-                const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
-                if (!hasMoreContent) {
-                  continue;
+                // Exception: if the word is a known COBOL block opener verb (DISPLAY, IF, etc.),
+                // it's an inline statement even when alone on the line (e.g., PERFORM DISPLAY\nEND-PERFORM)
+                const isBlockOpenerVerb = this.keywords.blockOpen.some((kw) => kw === word);
+                if (!isBlockOpenerVerb) {
+                  // Strip inline COBOL comments (*>) before checking
+                  const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/, '');
+                  const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
+                  if (!hasMoreContent) {
+                    continue;
+                  }
                 }
               }
             }

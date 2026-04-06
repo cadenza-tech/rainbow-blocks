@@ -558,6 +558,10 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
     if (j < source.length && source[j] === '=' && (j + 1 >= source.length || source[j + 1] !== '=')) {
       return false;
     }
+    // end(1)%x = ... (derived type component access)
+    if (j < source.length && source[j] === '%') {
+      return false;
+    }
   }
   return true;
 }

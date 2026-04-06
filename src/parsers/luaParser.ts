@@ -14,7 +14,7 @@ export class LuaBlockParser extends BaseBlockParser {
   // Validates block open keywords, excluding do that's part of while/for loop
   // Also rejects keywords preceded by '.' or ':' (table field/method access like t.end, obj:repeat)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (this.isPrecededByDotOrColon(source, position)) {
+    if (this.isPrecededByDotOrColon(source, position, excludedRegions)) {
       return false;
     }
 
@@ -26,22 +26,45 @@ export class LuaBlockParser extends BaseBlockParser {
   }
 
   // Validates block close: rejects keywords preceded by '.' or ':'
-  protected isValidBlockClose(_keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
-    return !this.isPrecededByDotOrColon(source, position);
+  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    return !this.isPrecededByDotOrColon(source, position, excludedRegions);
   }
 
   // Checks if keyword is preceded by '.' or ':' (table field/method access)
   // But not '..' (concatenation) or '::' (goto label syntax)
-  // Skips whitespace between operator and keyword since Lua allows 'obj . end'
-  private isPrecededByDotOrColon(source: string, position: number): boolean {
+  // Skips whitespace (including newlines) and excluded regions between operator and keyword
+  private isPrecededByDotOrColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
-      i--;
+    while (i >= 0) {
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+        i--;
+        continue;
+      }
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        // Skip the entire excluded region (e.g., comment ending with '.')
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+        i--;
+        continue;
+      }
+      break;
     }
     if (i < 0) return false;
     if (source[i] === '.') {
       // .. is string concatenation operator, not field access
-      return !(i >= 1 && source[i - 1] === '.');
+      if (i >= 1 && source[i - 1] === '.') return false;
+      // Trailing dot after a number literal (e.g., 1., 2.) is not field access
+      if (i >= 1 && /[0-9]/.test(source[i - 1])) {
+        let k = i - 1;
+        while (k > 0 && /[a-zA-Z0-9_]/.test(source[k - 1])) {
+          k--;
+        }
+        if (/[0-9]/.test(source[k])) return false;
+      }
+      return true;
     }
     if (source[i] === ':') {
       // :: is goto label closing, not method call
@@ -68,7 +91,7 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isAdjacentToUnicodeLetter(source, loopAbsolutePos, loopMatch[0].length)) {
         continue;
       }
-      if (this.isPrecededByDotOrColon(source, loopAbsolutePos)) {
+      if (this.isPrecededByDotOrColon(source, loopAbsolutePos, excludedRegions)) {
         continue;
       }
 
@@ -96,7 +119,7 @@ export class LuaBlockParser extends BaseBlockParser {
         if (this.isAdjacentToUnicodeLetter(source, absolutePos, innerMatch[0].length)) {
           continue;
         }
-        if (this.isPrecededByDotOrColon(source, absolutePos)) {
+        if (this.isPrecededByDotOrColon(source, absolutePos, excludedRegions)) {
           continue;
         }
         const word = innerMatch[1];
@@ -160,7 +183,7 @@ export class LuaBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
-      if (token.type === 'block_middle' && this.isPrecededByDotOrColon(source, token.startOffset)) {
+      if (token.type === 'block_middle' && this.isPrecededByDotOrColon(source, token.startOffset, excludedRegions)) {
         return false;
       }
       return true;

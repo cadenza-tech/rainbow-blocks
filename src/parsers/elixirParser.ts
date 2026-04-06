@@ -295,6 +295,16 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {
         return false;
       }
+      // Type spec operator :: prefix: keywords after :: are type names, not block keywords
+      if (token.startOffset >= 2) {
+        let bi = token.startOffset - 1;
+        while (bi >= 0 && (source[bi] === ' ' || source[bi] === '\t')) {
+          bi--;
+        }
+        if (bi >= 1 && source[bi] === ':' && source[bi - 1] === ':') {
+          return false;
+        }
+      }
       // Capture operator prefix: &end, &fn, &else, etc. are function references, not keywords
       // But not the && operator (second & of &&)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '&' && (token.startOffset < 2 || source[token.startOffset - 2] !== '&')) {
