@@ -5,6 +5,17 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.27] - 2026-04-09
+
+### Fixed
+
+- Ada: Filter `is` block_middle tokens followed by non-body keywords (`separate`, `abstract`, `new`, `null`, `<>`) to prevent leaked intermediates from filtered subprogram declarations
+- COBOL: Stop pseudo-text `==` scanning at `END-EXEC`/`END-EXECUTE` boundaries inside EXEC blocks to prevent excluded region from extending past the block
+- Erlang: Include digits in word scanning within `isCatchExpressionPrefix` and `isCatchFollowedByClausePattern` to correctly handle identifiers like `end2` and `error1`
+- Fortran: Reject `module function` and `module subroutine` as `module` block openers (not just `module procedure`) inside submodule `contains` sections
+- Ruby: Set heredoc excluded region end to terminator line end (excluding trailing newline) to prevent `isRegexStart` from misclassifying `/` as division on the following line
+- VHDL: Skip multiple consecutive blank lines when scanning backward for entity instantiation colon in `isValidEntityOrConfigOpen`
+
 ## [1.1.26] - 2026-04-06
 
 ### Fixed
@@ -1215,6 +1226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.27]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.26...v1.1.27
 [1.1.26]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.25...v1.1.26
 [1.1.25]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.24...v1.1.25
 [1.1.24]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.23...v1.1.24
