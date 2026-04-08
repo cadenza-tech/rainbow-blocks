@@ -117,17 +117,9 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     if (trimmedLine === currentTerminator.terminator) {
       terminatorIndex++;
       if (terminatorIndex === terminators.length) {
-        let endPos = contentLineEnd;
-        if (endPos < source.length) {
-          if (source[endPos] === '\r' && endPos + 1 < source.length && source[endPos + 1] === '\n') {
-            endPos += 2;
-          } else {
-            endPos += 1;
-          }
-        }
         return {
           contentStart,
-          end: endPos
+          end: contentLineEnd
         };
       }
     }
