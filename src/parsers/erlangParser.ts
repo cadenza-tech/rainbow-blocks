@@ -371,7 +371,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (/[a-z]/i.test(ch)) {
       const wordEnd = j + 1;
       let wordStart = j;
-      while (wordStart > 0 && /[a-z_]/i.test(source[wordStart - 1])) {
+      while (wordStart > 0 && /[a-z0-9_]/i.test(source[wordStart - 1])) {
         wordStart--;
       }
       const word = source.slice(wordStart, wordEnd);
@@ -424,7 +424,7 @@ export class ErlangBlockParser extends BaseBlockParser {
       // Check for structural keywords
       if (/[a-z]/i.test(ch)) {
         let wEnd = k + 1;
-        while (wEnd < source.length && /[a-z_]/i.test(source[wEnd])) wEnd++;
+        while (wEnd < source.length && /[a-z0-9_]/i.test(source[wEnd])) wEnd++;
         const w = source.slice(k, wEnd);
         if (depth === 0 && (w === 'catch' || w === 'after' || w === 'end')) return false;
         // Track block nesting: openers increase depth, end decreases depth

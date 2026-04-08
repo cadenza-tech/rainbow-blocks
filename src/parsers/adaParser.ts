@@ -1,7 +1,14 @@
 // Ada block parser: procedure, function, if, loop, case with compound end keywords
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
-import { isOrElseShortCircuit, matchAdaString, matchCharacterLiteral, scanForwardToIs, skipAdaWhitespaceAndComments } from './adaHelpers';
+import {
+  isAdaWordAt,
+  isOrElseShortCircuit,
+  matchAdaString,
+  matchCharacterLiteral,
+  scanForwardToIs,
+  skipAdaWhitespaceAndComments
+} from './adaHelpers';
 import type { AdaValidationCallbacks } from './adaValidation';
 import {
   isInsideParens,
@@ -427,6 +434,20 @@ export class AdaBlockParser extends BaseBlockParser {
               continue;
             }
           }
+        }
+        // Skip 'is' that is part of a non-body declaration (is separate/abstract/new/null/<>)
+        // These 'is' keywords follow subprogram/task/entry/package keywords that were filtered out
+        const afterIsPos = skipAdaWhitespaceAndComments(source, startOffset + keyword.length);
+        if (
+          isAdaWordAt(source, afterIsPos, 'separate') ||
+          isAdaWordAt(source, afterIsPos, 'abstract') ||
+          isAdaWordAt(source, afterIsPos, 'new') ||
+          isAdaWordAt(source, afterIsPos, 'null')
+        ) {
+          continue;
+        }
+        if (afterIsPos < source.length && source[afterIsPos] === '<' && afterIsPos + 1 < source.length && source[afterIsPos + 1] === '>') {
+          continue;
         }
       }
 

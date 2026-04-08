@@ -792,6 +792,30 @@ end Test;`;
       assertSingleBlock(pairs, 'package', 'end');
     });
 
+    test('should not leak is intermediate from filtered subprogram declarations', () => {
+      const source = `package body Pkg is
+  procedure Helper is separate;
+begin
+  null;
+end Pkg;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      const isIntermediates = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1);
+    });
+
+    test('should not leak is intermediate from is abstract declaration', () => {
+      const source = `package body Pkg is
+  procedure Helper is abstract;
+begin
+  null;
+end Pkg;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      const isIntermediates = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isIntermediates.length, 1);
+    });
+
     test('Bug 16: is null on separate lines', () => {
       const source = `procedure Test is
   procedure Inner is
@@ -1648,8 +1672,8 @@ end P;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end');
       const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
-      // The is after procedure + the standalone is (with semicolon before it) = 2
-      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 2);
+      // Only the is after procedure; the 'is new' is a generic instantiation, not an intermediate
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
     });
 
     // Covers line 543: then as valid intermediate for select block
