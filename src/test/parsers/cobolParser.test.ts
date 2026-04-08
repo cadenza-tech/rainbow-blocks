@@ -1569,6 +1569,13 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
+
+    test('should not extend EXEC region past END-EXEC when == in EXEC and == in COPY REPLACING', () => {
+      const source =
+        '       EXEC SQL\n         WHERE A == B\n       END-EXEC\n       COPY X REPLACING ==OLD== BY ==NEW==.\n       IF COND\n         DISPLAY OK\n       END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
   });
 
   suite('Regression: false pseudo-text detection in isInPseudoTextContext', () => {

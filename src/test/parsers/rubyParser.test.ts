@@ -3423,5 +3423,17 @@ end`;
     });
   });
 
+  suite('Regression: regex after heredoc misclassified as division', () => {
+    test('should exclude regex literal on line after heredoc terminator', () => {
+      const pairs = parser.parse('<<EOF\ncontent\nEOF\n/do end/\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude regex after indented heredoc terminator', () => {
+      const pairs = parser.parse('<<~EOF\n  content\n  EOF\n/do end/\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

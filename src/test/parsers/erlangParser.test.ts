@@ -2224,5 +2224,19 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: identifiers with digits in catch clause scanning', () => {
+    test('should detect catch as clause separator when clause matches identifier with digits', () => {
+      const pairs = parser.parse('try risky() catch end2 -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should detect catch as clause separator when clause matches identifier with trailing digits', () => {
+      const pairs = parser.parse('try risky() catch error1:reason2 -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
   generateCommonTests(config);
 });

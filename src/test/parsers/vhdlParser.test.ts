@@ -1916,6 +1916,18 @@ end loop;`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should reject entity when colon is separated by blank lines', () => {
+      const source = 'architecture rtl of test is\nbegin\n  inst1 :\n\n  entity work.adder\n    port map (a => b);\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end');
+    });
+
+    test('should reject entity when colon is separated by multiple blank lines', () => {
+      const source = 'architecture rtl of test is\nbegin\n  inst1 :\n\n\n  entity work.adder\n    port map (a => b);\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end');
+    });
   });
 
   suite('Regression: multiple for loops on same line', () => {

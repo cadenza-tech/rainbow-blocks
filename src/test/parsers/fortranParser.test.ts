@@ -497,6 +497,26 @@ end`;
       assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'submodule');
       assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'procedure');
     });
+
+    test('should not treat module function as module block', () => {
+      const pairs = parser.parse(
+        'module mymod\ncontains\n  module function myfunc(x) result(y)\n    y = x * 2\n  end function myfunc\nend module mymod'
+      );
+      assert.strictEqual(pairs.length, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'module');
+      assert.strictEqual(sorted[0].openKeyword.startOffset, 0);
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'function');
+    });
+
+    test('should not treat module subroutine as module block', () => {
+      const pairs = parser.parse('module mymod\ncontains\n  module subroutine mysub(x)\n    x = x + 1\n  end subroutine mysub\nend module mymod');
+      assert.strictEqual(pairs.length, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'module');
+      assert.strictEqual(sorted[0].openKeyword.startOffset, 0);
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'subroutine');
+    });
   });
 
   suite('Line continuation procedure', () => {
