@@ -334,23 +334,33 @@ export function isValidEntityOrConfigOpen(
       }
     }
     if (/^[ \t]*$/.test(lineBeforeNoComment) && lastNl > 0) {
-      // Skip the \r in \r\n pair to avoid finding the same line ending
-      let searchEnd = lastNl - 1;
-      if (searchEnd >= 0 && textBefore[searchEnd] === '\r') {
-        searchEnd--;
-      }
-      const prevNl = Math.max(textBefore.lastIndexOf('\n', searchEnd), textBefore.lastIndexOf('\r', searchEnd));
-      let prevLineEnd = lastNl;
-      if (prevLineEnd > 0 && textBefore[prevLineEnd - 1] === '\r') {
-        prevLineEnd--;
-      }
-      const prevLine = textBefore.slice(prevNl + 1, prevLineEnd);
-      const prevColonMatch = prevLine.match(/:[ \t]*$/);
-      if (prevColonMatch) {
-        const prevColonOffset = prevNl + 1 + (prevLine.length - prevColonMatch[0].length);
-        if (!callbacks.isInExcludedRegion(prevColonOffset, excludedRegions)) {
-          return false;
+      // Skip blank lines to find the preceding non-blank line with a colon
+      let currentEnd = lastNl;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        let searchEnd = currentEnd - 1;
+        if (searchEnd >= 0 && textBefore[searchEnd] === '\r') {
+          searchEnd--;
         }
+        if (searchEnd < 0) break;
+        const prevNl = Math.max(textBefore.lastIndexOf('\n', searchEnd), textBefore.lastIndexOf('\r', searchEnd));
+        let prevLineEnd = currentEnd;
+        if (prevLineEnd > 0 && textBefore[prevLineEnd - 1] === '\r') {
+          prevLineEnd--;
+        }
+        const prevLine = textBefore.slice(prevNl + 1, prevLineEnd);
+        if (/^[ \t]*$/.test(prevLine)) {
+          currentEnd = prevNl >= 0 ? prevNl : 0;
+          if (currentEnd <= 0) break;
+          continue;
+        }
+        const prevColonMatch = prevLine.match(/:[ \t]*$/);
+        if (prevColonMatch) {
+          const prevColonOffset = prevNl + 1 + (prevLine.length - prevColonMatch[0].length);
+          if (!callbacks.isInExcludedRegion(prevColonOffset, excludedRegions)) {
+            return false;
+          }
+        }
+        break;
       }
     }
   }

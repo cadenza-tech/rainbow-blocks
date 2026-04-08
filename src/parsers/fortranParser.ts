@@ -99,11 +99,11 @@ export class FortranBlockParser extends BaseBlockParser {
       }
     }
 
-    // 'module procedure' inside submodule is not a new module block
+    // 'module procedure/function/subroutine' inside submodule is not a new module block
     if (lowerKeyword === 'module') {
       let afterModule = source.slice(position + keyword.length);
       afterModule = collapseContinuationLines(afterModule);
-      if (/^[ \t]+procedure\b/i.test(afterModule)) {
+      if (/^[ \t]+(procedure|function|subroutine)\b/i.test(afterModule)) {
         return false;
       }
     }
