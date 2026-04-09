@@ -5,6 +5,20 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.28] - 2026-04-10
+
+### Fixed
+
+- Bash: Remove early return for `done` and `fi` in `isCasePattern` so the backward scan for `;;`/`;&`/`;;&`/`in`/`|` separators runs correctly when these keywords appear as case patterns on their own line
+- COBOL: Replace `\bCOPY\b` with lookbehind/lookahead pattern in `isInCopyStatement` to prevent false matches on hyphenated identifiers like `COPY-RECORD` and `MY-COPY`
+- Crystal: Add `_lastExcludedRegion` tracking in `findExcludedRegions` and pass it to `isRegexStart` so that a regex with flags (`/a/i`) followed by another regex (`/if end/`) is correctly excluded
+- Fortran: Add `rank` to `blockMiddle` keywords for Fortran 2018 `select rank` construct, skip the first `rank` after `select` as opening guard, and restrict `rank` intermediates to `select` blocks only
+- Fortran: Add `isFollowedByAssignmentOp` check to skip `block_middle` keywords used as variable names in assignment LHS (e.g., `else = 1`, `case = n`)
+- Verilog: Reject bare backslash (`\` followed by whitespace) as escaped identifier in `trySkipLabel` to prevent false label detection
+- Verilog: Add `isPrecededByExternThroughQualifiers` to handle 2+ qualifiers between `extern` and `function`/`task` (e.g., `extern protected static function`), and check for `extern` before `virtual function`/`task`
+- VHDL: Add semicolon as statement boundary in `isInsideParens` to prevent unclosed `(` from prior statements from suppressing keywords
+- VHDL: Skip blank lines without incrementing `linesChecked` in the `is` keyword filter backward scan to correctly handle type declarations with many blank lines before `is`
+
 ## [1.1.27] - 2026-04-09
 
 ### Fixed
@@ -1226,6 +1240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.28]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.27...v1.1.28
 [1.1.27]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.26...v1.1.27
 [1.1.26]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.25...v1.1.26
 [1.1.25]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.24...v1.1.25
