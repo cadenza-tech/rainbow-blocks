@@ -248,6 +248,8 @@ export function trySkipLabel(source: string, pos: number, excludedRegions: Exclu
     // Escaped identifier: \name terminated by whitespace
     i++;
     while (i < source.length && !/\s/.test(source[i])) i++;
+    // Bare backslash (no non-whitespace chars consumed) is not a valid escaped identifier
+    if (i === pos + 1) return pos;
   } else {
     while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
   }

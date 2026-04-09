@@ -74,7 +74,7 @@ export class FortranBlockParser extends BaseBlockParser {
       'enum'
     ],
     blockClose: ['end'],
-    blockMiddle: ['else', 'elseif', 'elsewhere', 'case', 'then', 'contains']
+    blockMiddle: ['else', 'elseif', 'elsewhere', 'case', 'rank', 'then', 'contains']
   };
 
   // Finds excluded regions: comments and strings
@@ -358,6 +358,18 @@ export class FortranBlockParser extends BaseBlockParser {
     return null;
   }
 
+  // Checks if a keyword is followed by = (assignment), excluding == and =>
+  private isFollowedByAssignmentOp(source: string, afterPos: number): boolean {
+    let i = afterPos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    if (i >= source.length || source[i] !== '=') return false;
+    // Not == (comparison) or => (pointer assignment)
+    if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '>')) return false;
+    return true;
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Find all compound end keywords and their positions
@@ -443,6 +455,11 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Skip block_middle keywords inside parenthesized expressions (conditions, function arguments)
       if (type === 'block_middle' && isInsideParentheses(source, startOffset)) {
+        continue;
+      }
+
+      // Skip block_middle keywords used as variable names in assignment LHS (e.g., else = 1)
+      if (type === 'block_middle' && this.isFollowedByAssignmentOp(source, startOffset + keyword.length)) {
         continue;
       }
 
@@ -565,8 +582,8 @@ export class FortranBlockParser extends BaseBlockParser {
             const topBlock = stack[stack.length - 1];
             const middleValue = token.value.toLowerCase();
             const openerValue = topBlock.token.value.toLowerCase();
-            // Skip the first case after select case (it's the opening guard)
-            if (middleValue === 'case' && openerValue === 'select' && !firstCaseSkipped.has(topBlock)) {
+            // Skip the first case/rank after select (it's the opening guard: select case/rank (x))
+            if ((middleValue === 'case' || middleValue === 'rank') && openerValue === 'select' && !firstCaseSkipped.has(topBlock)) {
               firstCaseSkipped.add(topBlock);
               break;
             }
@@ -574,7 +591,7 @@ export class FortranBlockParser extends BaseBlockParser {
             if (middleValue === 'then' && openerValue !== 'if') {
               break;
             }
-            if (middleValue === 'case' && openerValue !== 'select') {
+            if ((middleValue === 'case' || middleValue === 'rank') && openerValue !== 'select') {
               break;
             }
             // Check if this is an else-where variant (elsewhere, else where, else &\n where)

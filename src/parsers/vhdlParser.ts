@@ -327,10 +327,10 @@ export class VhdlBlockParser extends BaseBlockParser {
               linesChecked++;
               continue;
             }
+            // Blank lines don't count toward the line limit
             scanPos = prevLineStart - 1;
             if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
             if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
-            linesChecked++;
           }
           if (skipThisIs) {
             continue;

@@ -720,6 +720,11 @@ export function isInsideParens(source: string, position: number, excludedRegions
   for (let i = position - 1; i >= 0; i--) {
     if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
     const ch = source[i];
+    // Semicolon is a statement boundary in VHDL (never valid inside parentheses);
+    // encountering one means any unmatched ( belongs to a prior/broken statement
+    if (ch === ';') {
+      return false;
+    }
     if (ch === ')') {
       depth++;
     } else if (ch === '(') {

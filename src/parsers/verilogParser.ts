@@ -460,8 +460,21 @@ export class VerilogBlockParser extends BaseBlockParser {
     const word = source.slice(j + 1, wordEnd + 1);
 
     // For function/task: "pure virtual function/task" has no body, but "virtual function/task" does
+    // Also check for "extern [qualifiers] virtual function/task"
     if (word === 'virtual' && (keyword === 'function' || keyword === 'task')) {
-      return this.isPrecededByWord(source, j, 'pure', excludedRegions);
+      if (this.isPrecededByWord(source, j, 'pure', excludedRegions)) {
+        return true;
+      }
+      if (this.isPrecededByWord(source, j, 'extern', excludedRegions)) {
+        return true;
+      }
+      // Check for "extern qualifier virtual function/task" (e.g., extern local virtual function)
+      if (validModifiers?.includes('extern')) {
+        if (this.isPrecededByExternThroughQualifiers(source, j, excludedRegions)) {
+          return true;
+        }
+      }
+      return false;
     }
 
     // Check for 'virtual interface' (variable type declaration, not a block)
@@ -471,11 +484,16 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
     }
 
-    // Check for qualifier between extern and keyword (e.g., extern protected function)
+    // Check for qualifiers between extern and keyword (e.g., extern protected static function)
+    // Iteratively scan backward through all qualifiers to reach extern
     const QUALIFIER_KEYWORDS = new Set(['protected', 'local', 'static', 'virtual', 'forkjoin']);
     if (QUALIFIER_KEYWORDS.has(word) && validModifiers?.includes('extern')) {
       if (j < 0 || !/[a-zA-Z0-9_$]/.test(source[j])) {
         if (this.isPrecededByWord(source, j, 'extern', excludedRegions)) {
+          return true;
+        }
+        // Check through additional qualifiers (e.g., extern protected static function)
+        if (this.isPrecededByExternThroughQualifiers(source, j, excludedRegions)) {
           return true;
         }
       }
@@ -515,6 +533,42 @@ export class VerilogBlockParser extends BaseBlockParser {
     const word = source.slice(j + 1, wordEnd + 1);
     if (word === targetWord) {
       return j < 0 || !/[a-zA-Z0-9_$]/.test(source[j]);
+    }
+    return false;
+  }
+
+  // Iteratively scans backward through qualifier keywords to find 'extern'
+  private isPrecededByExternThroughQualifiers(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    const QUALIFIER_KEYWORDS = new Set(['protected', 'local', 'static', 'virtual', 'forkjoin']);
+    let j = pos;
+    for (let depth = 0; depth < 5; depth++) {
+      // Skip whitespace and excluded regions
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+        j--;
+      }
+      while (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.start - 1;
+          while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+            j--;
+          }
+        } else {
+          j--;
+        }
+      }
+      if (j < 0) return false;
+      const wordEnd = j;
+      while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) {
+        j--;
+      }
+      if (wordEnd === j) return false;
+      const word = source.slice(j + 1, wordEnd + 1);
+      if (word === 'extern') {
+        return j < 0 || !/[a-zA-Z0-9_$]/.test(source[j]);
+      }
+      if (!QUALIFIER_KEYWORDS.has(word)) return false;
+      if (j >= 0 && /[a-zA-Z0-9_$]/.test(source[j])) return false;
     }
     return false;
   }
