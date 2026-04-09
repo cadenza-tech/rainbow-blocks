@@ -1858,6 +1858,34 @@ esac`;
       findBlock(pairs, 'for');
       findBlock(pairs, 'case');
     });
+
+    test('should close for at correct done when done) is case pattern on own line after ;;', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    a) echo a;;\n    done) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(forPair.closeKeyword.line, 5);
+    });
+
+    test('should close if at correct fi when fi) is case pattern on own line after ;;', () => {
+      const pairs = parser.parse('if true; then\n  case $x in\n    fi) echo ok;;\n  esac\nfi');
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.line, 4);
+    });
+
+    test('should handle done) as case pattern after ;;&', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    a) echo a;;&\n    done) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(forPair.closeKeyword.line, 5);
+    });
+
+    test('should handle done) as first case pattern after in on new line', () => {
+      const pairs = parser.parse('for i in 1; do\n  case $x in\n    done) echo ok;;\n  esac\ndone');
+      assertBlockCount(pairs, 2);
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(forPair.closeKeyword.line, 4);
+    });
   });
 
   suite('Regression tests', () => {

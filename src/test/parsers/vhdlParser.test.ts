@@ -2775,5 +2775,32 @@ end package;`;
     });
   });
 
+  suite('Regression: isInsideParens semicolon boundary', () => {
+    test('should detect blocks after semicolon-terminated statement with unclosed paren', () => {
+      const pairs = parser.parse(
+        'architecture rtl of test is\nbegin\n  inst: entity work.comp port map (a => b;\n  process begin null; end process;\nend architecture;'
+      );
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'process');
+      findBlock(pairs, 'architecture');
+    });
+  });
+
+  suite('Regression: is filter with many blank lines', () => {
+    test('should filter type is with 15 blank lines between type and is', () => {
+      const blanks = '\n'.repeat(15);
+      const pairs = parser.parse(`package p is\n  type state_t${blanks}    is (a, b);\nend package;`);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should filter type is with 30 blank lines', () => {
+      const blanks = '\n'.repeat(30);
+      const pairs = parser.parse(`package p is\n  type state_t${blanks}    is (a, b);\nend package;`);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   generateCommonTests(config);
 });

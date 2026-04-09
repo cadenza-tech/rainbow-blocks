@@ -1666,5 +1666,28 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: COPY in hyphenated identifiers', () => {
+    test('should not exclude pseudo-text after COPY-RECORD', () => {
+      const source = 'COPY-RECORD REPLACING ==IF== BY ==WHEN==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should not exclude pseudo-text after MY-COPY', () => {
+      const source = 'MY-COPY REPLACING ==IF== BY ==WHEN==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should still exclude pseudo-text after real COPY', () => {
+      const source = 'COPY MYLIB REPLACING ==IF== BY ==WHEN==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2459,5 +2459,38 @@ endmodule`;
     });
   });
 
+  suite('Regression: trySkipLabel bare backslash', () => {
+    test('should not treat bare backslash followed by colon as label', () => {
+      const pairs = parser.parse('always @(posedge clk) \\ : begin\n  q <= d;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: extern with multiple qualifiers', () => {
+    test('should filter extern protected static function', () => {
+      const tokens = parser.getTokens('class C;\n  extern protected static function void f();\nendclass');
+      const funcTokens = tokens.filter((t) => t.value === 'function');
+      assert.strictEqual(funcTokens.length, 0);
+    });
+
+    test('should filter extern local virtual function', () => {
+      const tokens = parser.getTokens('class C;\n  extern local virtual function void f();\nendclass');
+      const funcTokens = tokens.filter((t) => t.value === 'function');
+      assert.strictEqual(funcTokens.length, 0);
+    });
+
+    test('should filter extern virtual function', () => {
+      const tokens = parser.getTokens('class C;\n  extern virtual function void f();\nendclass');
+      const funcTokens = tokens.filter((t) => t.value === 'function');
+      assert.strictEqual(funcTokens.length, 0);
+    });
+
+    test('should still detect non-extern function', () => {
+      const tokens = parser.getTokens('function void f();\n  x = 1;\nendfunction');
+      const funcTokens = tokens.filter((t) => t.value === 'function');
+      assert.strictEqual(funcTokens.length, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

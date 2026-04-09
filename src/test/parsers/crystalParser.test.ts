@@ -3684,5 +3684,23 @@ end`;
     });
   });
 
+  suite('Regression: regex with flags followed by regex', () => {
+    test('should exclude both regex literals when first has i flag', () => {
+      const pairs = parser.parse('/a/i /if end/\nif real\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.line, 1);
+    });
+
+    test('should exclude both regex literals when first has m flag', () => {
+      const pairs = parser.parse('/a/m /if end/\nif real\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should exclude both regex literals when first has x flag', () => {
+      const pairs = parser.parse('/a/x /if end/\nif real\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

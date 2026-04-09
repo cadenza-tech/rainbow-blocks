@@ -4478,5 +4478,39 @@ end program`;
     });
   });
 
+  suite('Regression: select rank intermediates', () => {
+    test('should detect rank as intermediate in select rank', () => {
+      const pairs = parser.parse('select rank (x)\n  rank (0)\n    x = 1\n  rank default\n    y = 1\nend select');
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['rank', 'rank']);
+    });
+
+    test('should skip first rank after select (opening guard)', () => {
+      const pairs = parser.parse('select rank (x)\n  rank (0)\n    x = 1\nend select');
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['rank']);
+    });
+  });
+
+  suite('Regression: block_middle keywords as variable assignment LHS', () => {
+    test('should not detect else = 1 as intermediate', () => {
+      const pairs = parser.parse('if (cond) then\n  else = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should not detect case = n as intermediate', () => {
+      const pairs = parser.parse('select case (x)\n  case (1)\n    case = n\nend select');
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should still detect real else as intermediate', () => {
+      const pairs = parser.parse('if (cond) then\n  x = 1\nelse\n  y = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+  });
+
   generateCommonTests(config);
 });
