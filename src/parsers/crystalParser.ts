@@ -57,6 +57,8 @@ function isCrystalInterpolatingPercent(specifier: string, hasSpecifier: boolean)
 }
 
 export class CrystalBlockParser extends BaseBlockParser {
+  private _lastExcludedRegion: ExcludedRegion | null = null;
+
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       // Ruby-like
@@ -89,6 +91,7 @@ export class CrystalBlockParser extends BaseBlockParser {
   // Finds excluded regions: comments, strings, regex, heredocs, macro templates
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
+    this._lastExcludedRegion = null;
     let i = 0;
 
     while (i < source.length) {
@@ -106,10 +109,12 @@ export class CrystalBlockParser extends BaseBlockParser {
             }
             const gapResult = this.tryMatchExcludedRegion(source, j);
             if (gapResult) {
-              regions.push({
+              const gapRegion = {
                 start: gapResult.start,
                 end: Math.min(gapResult.end, result.start)
-              });
+              };
+              regions.push(gapRegion);
+              this._lastExcludedRegion = gapRegion;
               j = gapResult.end;
             } else {
               j++;
@@ -117,6 +122,7 @@ export class CrystalBlockParser extends BaseBlockParser {
           }
         }
         regions.push(result);
+        this._lastExcludedRegion = result;
         i = result.end;
       } else {
         // Skip past quote in failed heredoc opener (e.g., <<-"FOO without closing quote)
@@ -455,7 +461,7 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Checks if slash is regex start (not division)
   private isRegexStart(source: string, pos: number): boolean {
-    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS);
+    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS, this._lastExcludedRegion ?? undefined);
   }
 
   // Checks if % at position is a modulo operator (not a percent literal)

@@ -598,7 +598,7 @@ export class CobolBlockParser extends BaseBlockParser {
     const lastPeriod = this.findLastPeriodOutsideStrings(beforeKeyword);
     const stmtStart = lastPeriod + 1;
     // Search for COPY word-boundary match, verifying each match is not inside a string or comment
-    const copyPattern = /\bCOPY\b/gi;
+    const copyPattern = /(?<![a-zA-Z0-9_-])COPY(?![a-zA-Z0-9_-])/gi;
     const statement = beforeKeyword.slice(stmtStart);
     for (const match of statement.matchAll(copyPattern)) {
       const absPos = stmtStart + match.index;

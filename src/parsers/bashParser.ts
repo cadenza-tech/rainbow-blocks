@@ -467,7 +467,6 @@ export class BashBlockParser extends BaseBlockParser {
       j++;
     }
     if (j >= source.length) return false;
-    let hasGlobSuffix = false;
 
     // Handle pipe-separated alternatives: if|then), for|while|until)
     // Pipe at end of line continues the pattern on the next line
@@ -518,7 +517,6 @@ export class BashBlockParser extends BaseBlockParser {
           j++;
         }
         if (!found) return false;
-        hasGlobSuffix = true;
       } else {
         return false;
       }
@@ -572,9 +570,9 @@ export class BashBlockParser extends BaseBlockParser {
       }
     }
 
-    // Block close keywords (esac, fi, done) should only be treated as case patterns
-    // when confirmed by the unmatched parenthesis check above or by glob suffix (done?, fi*)
-    if ((keyword === 'esac' || keyword === 'fi' || keyword === 'done') && !hasGlobSuffix) {
+    // esac) is almost always case-close + subshell-close, not a case pattern;
+    // the backward scan below would falsely match ;; from the last case arm
+    if (keyword === 'esac') {
       return false;
     }
 
