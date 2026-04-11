@@ -3,6 +3,32 @@
 import type { ExcludedRegion } from '../types';
 import { findInlineCommentIndex, findLineEnd } from './fortranHelpers';
 
+// Scans backward from pos looking for an unclosed 'interface' block.
+// Returns true when the nearest enclosing unclosed block is 'interface'.
+function isInsideInterfaceBlock(
+  source: string,
+  pos: number,
+  isInExcludedRegion: (p: number, regions: ExcludedRegion[]) => boolean,
+  excludedRegions: ExcludedRegion[]
+): boolean {
+  const beforeLower = source.slice(0, pos).toLowerCase();
+  const pattern = /\b(interface|end\s+interface)\b/g;
+  let depth = 0;
+  let match = pattern.exec(beforeLower);
+  const matches: { start: number; isEnd: boolean }[] = [];
+  while (match !== null) {
+    if (!isInExcludedRegion(match.index, excludedRegions)) {
+      matches.push({ start: match.index, isEnd: match[1].startsWith('end') });
+    }
+    match = pattern.exec(beforeLower);
+  }
+  for (const m of matches) {
+    if (m.isEnd) depth--;
+    else depth++;
+  }
+  return depth > 0;
+}
+
 // Checks if position is at line start allowing leading whitespace (for # preprocessor)
 export function isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
   if (pos === 0) return true;
@@ -14,6 +40,7 @@ export function isAtLineStartAllowingWhitespace(source: string, pos: number): bo
 }
 
 // Validates 'procedure': rejects type-bound procedure declarations (with ::)
+// and 'module procedure NAME' statements inside interface blocks
 export function isValidProcedureOpen(
   keyword: string,
   source: string,
@@ -21,6 +48,19 @@ export function isValidProcedureOpen(
   excludedRegions: ExcludedRegion[],
   isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean
 ): boolean {
+  // Reject 'module procedure NAME' when inside an unclosed 'interface' block.
+  // Within a module/submodule body (outside of interface), 'module procedure'
+  // introduces a procedure body and is a real block opener.
+  let k = position - 1;
+  while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+  if (k >= 5) {
+    const maybeModule = source.slice(k - 5, k + 1).toLowerCase();
+    if (maybeModule === 'module' && (k - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 6]))) {
+      if (isInsideInterfaceBlock(source, position, isInExcludedRegion, excludedRegions)) {
+        return false;
+      }
+    }
+  }
   let j = position + keyword.length;
   while (j < source.length) {
     const lineEnd = findLineEnd(source, j);

@@ -128,11 +128,42 @@ export class FortranBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject Fortran 77 labeled DO loops (e.g., 'do 100 i = 1, 10') because they
+    // close at a labeled 'continue' statement, not 'end do'. Matching them would
+    // require tracking labels, so we conservatively drop the block to avoid
+    // stealing an unrelated 'end'.
+    if (lowerKeyword === 'do') {
+      const afterDo = source.slice(position + keyword.length);
+      if (/^[ \t]+\d+\b/.test(afterDo)) {
+        return false;
+      }
+    }
+
     // Skip keywords used as variable names in assignments (e.g., 'do = 5', 'subroutine = 1')
+    // Also handles array-element assignments (e.g., 'do(1) = 5', 'block(i, j) = val')
     const afterKw = source.slice(position + keyword.length);
     const collapsed = collapseContinuationLines(afterKw);
     if (/^[ \t]*=[^=]/.test(collapsed) || /^[ \t]*=[ \t]*$/.test(collapsed)) {
       return false;
+    }
+    if (/^[ \t]*\(/.test(collapsed)) {
+      let depth = 0;
+      let pi = 0;
+      while (pi < collapsed.length) {
+        const ch = collapsed[pi];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          depth--;
+          if (depth === 0) {
+            const rest = collapsed.slice(pi + 1);
+            if (/^[ \t]*=[^=]/.test(rest) || /^[ \t]*=[ \t]*$/.test(rest)) {
+              return false;
+            }
+            break;
+          }
+        }
+        pi++;
+      }
     }
 
     return true;

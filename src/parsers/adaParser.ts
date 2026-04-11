@@ -25,7 +25,21 @@ import { BaseBlockParser } from './baseParser';
 import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
-const COMPOUND_END_TYPES = ['if', 'loop', 'case', 'select', 'record', 'procedure', 'function', 'package', 'task', 'protected', 'accept', 'entry'];
+const COMPOUND_END_TYPES = [
+  'if',
+  'loop',
+  'case',
+  'select',
+  'record',
+  'procedure',
+  'function',
+  'package',
+  'task',
+  'protected',
+  'accept',
+  'entry',
+  'return'
+];
 
 // Keywords that can precede 'begin' and are closed together with it
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
@@ -51,7 +65,8 @@ export class AdaBlockParser extends BaseBlockParser {
       'task',
       'protected',
       'accept',
-      'entry'
+      'entry',
+      'return'
     ],
     blockClose: ['end'],
     blockMiddle: ['else', 'elsif', 'when', 'then', 'exception', 'or', 'is']
@@ -119,7 +134,51 @@ export class AdaBlockParser extends BaseBlockParser {
       return isValidLoopOpen(source, position, excludedRegions, cb);
     }
 
+    // 'return' is a block opener only for extended return statements:
+    //   return X : T [:= E] do ... end return;
+    // Simple 'return;' or 'return expr;' are statements, not blocks.
+    if (lowerKeyword === 'return') {
+      return this.isExtendedReturn(source, position + keyword.length, excludedRegions);
+    }
+
     return true;
+  }
+
+  // Scans forward from after 'return' to detect extended-return form: ': TYPE ... do'
+  private isExtendedReturn(source: string, start: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = skipAdaWhitespaceAndComments(source, start);
+    const identMatch = source.slice(i).match(/^[a-zA-Z_]\w*/);
+    if (!identMatch) return false;
+    i += identMatch[0].length;
+    i = skipAdaWhitespaceAndComments(source, i);
+    if (source[i] !== ':' || source[i + 1] === '=') return false;
+    i++;
+    let parenDepth = 0;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+      else if (ch === ';' && parenDepth === 0) return false;
+      else if (parenDepth === 0 && (ch === 'd' || ch === 'D')) {
+        if (
+          i + 1 < source.length &&
+          (source[i + 1] === 'o' || source[i + 1] === 'O') &&
+          (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
+          (i + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 2]))
+        ) {
+          return true;
+        }
+      }
+      i++;
+    }
+    return false;
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
@@ -195,6 +254,29 @@ export class AdaBlockParser extends BaseBlockParser {
 
       if (type === 'block_open' && !this.isValidBlockOpen(keyword, source, startOffset, excludedRegions)) {
         continue;
+      }
+
+      // Skip 'exception' used as a type marker in declarations (e.g., 'E : exception;')
+      // rather than as an intermediate handler section separator.
+      if (type === 'block_middle' && keyword.toLowerCase() === 'exception') {
+        let bp = startOffset - 1;
+        while (bp >= 0) {
+          if (this.isInExcludedRegion(bp, excludedRegions)) {
+            const region = this.findExcludedRegionAt(bp, excludedRegions);
+            if (region) {
+              bp = region.start - 1;
+              continue;
+            }
+          }
+          if (source[bp] === ' ' || source[bp] === '\t' || source[bp] === '\n' || source[bp] === '\r') {
+            bp--;
+            continue;
+          }
+          break;
+        }
+        if (bp >= 0 && source[bp] === ':') {
+          continue;
+        }
       }
 
       // Skip 'is' in type/subtype declarations (type T is ... / subtype S is ...)

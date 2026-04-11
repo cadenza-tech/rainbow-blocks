@@ -323,6 +323,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       const type = this.getTokenType(keyword);
 
+      // Reject compound block closers not at physical line start (covers mid-line
+      // occurrences of `end tell`, `end if`, etc. inside expressions). Continuation
+      // lines from a previous physical line are still allowed.
+      if (type === 'block_close') {
+        if (!this.isAtPhysicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: flexMatch };
+        }
+      }
+
       // Check if compound close keyword is used as a variable name
       if (type === 'block_close' && this.isKeywordAsVariableName(source, i, source.slice(i, flexMatch), excludedRegions)) {
         return { nextPos: flexMatch };
@@ -443,6 +452,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return { nextPos: endPos };
       }
 
+      // Bare 'end' is only a block close at physical line start (allowing
+      // continuation from a previous line via ¬)
+      if (type === 'block_close' && keyword === 'end') {
+        if (!this.isAtPhysicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: endPos };
+        }
+      }
+
       // Check if 'end' is used as a variable/property name
       if (type === 'block_close' && keyword === 'end' && this.isKeywordAsVariableName(source, i, keyword, excludedRegions)) {
         return { nextPos: endPos };
@@ -461,6 +478,26 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     return null;
+  }
+
+  // Checks if a keyword is at the start of a physical line (only whitespace
+  // before it on the same physical line, skipping excluded regions). Unlike
+  // isAtLogicalLineStart, continuation from a previous line via ¬ is allowed.
+  private isAtPhysicalLineStart(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    let beforeText = source.substring(lineStart, pos);
+    const regionsBefore = excludedRegions.filter((region) => region.end > lineStart && region.start < pos);
+    for (const region of regionsBefore) {
+      const overlapStart = Math.max(region.start, lineStart);
+      const overlapEnd = Math.min(region.end, pos);
+      const regionLen = overlapEnd - overlapStart;
+      const relStart = overlapStart - lineStart;
+      beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
+    }
+    return /^[ \t]*$/.test(beforeText);
   }
 
   // Checks if a keyword is at the start of a logical line (allowing block comments before)

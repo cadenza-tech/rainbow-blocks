@@ -78,12 +78,82 @@ export class RubyBlockParser extends BaseBlockParser {
       return !this.isLoopDo(source, position, excludedRegions);
     }
 
+    // Reject Ruby 3.0+ endless method definitions (e.g., `def foo = expr`)
+    // which have no matching `end`.
+    if (keyword === 'def') {
+      if (this.isEndlessMethodDef(source, position + keyword.length, excludedRegions)) {
+        return false;
+      }
+    }
+
     // Only if, unless, while, until can be postfix conditionals
     if (!['if', 'unless', 'while', 'until'].includes(keyword)) {
       return true;
     }
 
     return !this.isPostfixConditional(source, position, excludedRegions);
+  }
+
+  // Detects Ruby 3.0+ endless method definitions: `def name [(args)] = expr`.
+  // Scans forward from after `def` past whitespace, the method name (possibly with
+  // receiver like self.foo or Class.foo, operator-style names, and ?/! suffixes),
+  // optional parameter list, optional return type (Sorbet style ignored), and checks
+  // whether the next significant character is `=` (but not `==`, `=~`, `=>`).
+  private isEndlessMethodDef(source: string, start: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = start;
+    const skipWs = () => {
+      while (i < source.length) {
+        const ch = source[i];
+        if (ch === ' ' || ch === '\t') {
+          i++;
+          continue;
+        }
+        if (this.isInExcludedRegion(i, excludedRegions)) {
+          const region = this.findExcludedRegionAt(i, excludedRegions);
+          if (region) {
+            i = region.end;
+            continue;
+          }
+        }
+        break;
+      }
+    };
+    skipWs();
+    // Optional receiver: self., Class., obj.
+    const receiverMatch = source.slice(i).match(/^(?:self\.|[A-Z][A-Za-z0-9_]*\.)/);
+    if (receiverMatch) {
+      i += receiverMatch[0].length;
+    }
+    skipWs();
+    // Method name: identifier with optional ? or !, or operator
+    const identMatch = source.slice(i).match(/^(?:[a-zA-Z_][a-zA-Z0-9_]*[?!=]?|\[\]=?|<=>|===|==|=~|!=|!~|<=|>=|<<|>>|\*\*|[+\-*/%&|^<>~!])/);
+    if (!identMatch) return false;
+    i += identMatch[0].length;
+    skipWs();
+    // Optional parameter list in parens
+    if (source[i] === '(') {
+      let depth = 1;
+      i++;
+      while (i < source.length && depth > 0) {
+        if (this.isInExcludedRegion(i, excludedRegions)) {
+          const region = this.findExcludedRegionAt(i, excludedRegions);
+          if (region) {
+            i = region.end;
+            continue;
+          }
+        }
+        const ch = source[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        i++;
+      }
+    }
+    skipWs();
+    // Must be `=` but not `==`, `=~`, `=>`
+    if (source[i] !== '=') return false;
+    const next = source[i + 1];
+    if (next === '=' || next === '~' || next === '>') return false;
+    return true;
   }
 
   // Filters out keywords used as hash keys, rescue modifiers, and method calls
