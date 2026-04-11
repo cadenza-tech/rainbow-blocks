@@ -493,6 +493,12 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
       continue;
     }
 
+    // Skip backslash-escaped characters (e.g., \" inside $(...) must not start a string)
+    if (char === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+
     // Skip double-quoted strings (Bash-aware: handles $(), ${}, backticks)
     if (char === '"') {
       i = findBashDoubleQuoteEnd(source, i);

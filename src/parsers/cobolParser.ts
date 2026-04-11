@@ -572,6 +572,10 @@ export class CobolBlockParser extends BaseBlockParser {
       i--;
     }
     const word = source.slice(i + 1, wordEnd).toUpperCase();
+    // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger data name)
+    if (i >= 0 && source[i] === '-') {
+      return false;
+    }
     // REPLACE (in REPLACE ==old== BY ==new==) - standalone statement
     if (word === 'REPLACE') {
       return true;
@@ -790,6 +794,10 @@ export class CobolBlockParser extends BaseBlockParser {
     while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
       j--;
     }
+    // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger data name)
+    if (j >= 0 && source[j] === '-') {
+      return false;
+    }
     const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
     return prevWord === target;
   }
@@ -851,6 +859,10 @@ export class CobolBlockParser extends BaseBlockParser {
     while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
       j--;
     }
+    // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger data name)
+    if (j >= 0 && source[j] === '-') {
+      return -1;
+    }
     const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
     if (prevWord === target) {
       return j;
@@ -868,7 +880,10 @@ export class CobolBlockParser extends BaseBlockParser {
       }
       i++;
     }
-    return { start: pos, end: source.length };
+    // Unterminated pseudo-text: limit the excluded region to the opening '=='
+    // rather than swallowing the rest of the source, so subsequent blocks can
+    // still be parsed while the user is mid-edit.
+    return { start: pos, end: pos + 2 };
   }
 
   // Custom block matching for COBOL-specific pairing rules

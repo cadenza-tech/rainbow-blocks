@@ -21,12 +21,17 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
 // Characters that indicate the preceding / is division, not regex
 const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$]/;
 
+// Closing bracket characters (reserved as paired-delimiter closers, never valid as openers)
+const CLOSE_BRACKET_CHARS: ReadonlySet<string> = new Set([')', ']', '}', '>']);
+
 // Returns the matching close delimiter for an open delimiter
 function getMatchingDelimiter(open: string): string | null {
   if (open in PAIRED_DELIMITERS) {
     return PAIRED_DELIMITERS[open];
   }
-  // Any non-alphanumeric, non-whitespace character can be its own delimiter
+  // Any non-alphanumeric, non-whitespace character can be its own delimiter,
+  // except closing bracket characters which are reserved as paired-delimiter closers.
+  if (CLOSE_BRACKET_CHARS.has(open)) return null;
   return /[^\sa-zA-Z0-9]/.test(open) ? open : null;
 }
 

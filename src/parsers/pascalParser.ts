@@ -960,7 +960,8 @@ export class PascalBlockParser extends BaseBlockParser {
       i--;
     }
     if (i < 0) return false;
-    if (this.isInExcludedRegion(i, excludedRegions)) {
+    // Skip over one or more consecutive comment regions with interleaving whitespace
+    while (i >= 0 && this.isInExcludedRegion(i, excludedRegions)) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
       if (region) {
         i = region.start - 1;
