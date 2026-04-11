@@ -9,6 +9,9 @@ const MODULE_ATTR_PAREN_PATTERN = /^[ \t]*-[ \t]*[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\($
 // Matches -record( specifically at line start (record brace bodies contain real expressions)
 const RECORD_ATTR_PATTERN = /^[ \t]*-[ \t]*record[ \t]*\($/;
 
+// Matches -define( specifically at line start (macro bodies contain real expressions)
+const DEFINE_ATTR_PATTERN = /^[ \t]*-[ \t]*define[ \t]*\($/;
+
 // Keywords that can precede 'catch' as expression prefix (catch is first expression in block body)
 const CATCH_EXPR_PRECEDING_KEYWORDS = new Set(['begin', 'case', 'receive', 'if', 'fun', 'maybe', 'when', 'catch']);
 
@@ -711,11 +714,17 @@ export class ErlangBlockParser extends BaseBlockParser {
     let parenDepth = 0;
     let braceDepth = 0;
     let insideUnmatchedBrace = false;
+    let sawCommaAtTopLevel = false;
+    let insideNestedCall = false;
     for (let i = pos - 1; i >= 0; i--) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
       }
       const ch = source[i];
+      if (ch === ',' && parenDepth === 0 && braceDepth === 0) {
+        sawCommaAtTopLevel = true;
+        continue;
+      }
       if (ch === ')' || ch === ']') {
         parenDepth++;
       } else if (ch === '(' || ch === '[') {
@@ -724,11 +733,17 @@ export class ErlangBlockParser extends BaseBlockParser {
         } else if (ch === '(') {
           if (!MODULE_ATTR_PAREN_PATTERN.test(this.getTextFromLineStart(source, i))) {
             // This '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
-            // Continue scanning backward to find the enclosing module attribute '('.
+            // Mark that we're inside a nested call and continue scanning backward.
+            insideNestedCall = true;
             continue;
           }
           // For -record, unmatched braces contain real expressions
           if (insideUnmatchedBrace && RECORD_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
+            return false;
+          }
+          // For -define, the body (after the first top-level ',') contains real expressions,
+          // but only outside tuple braces and outside nested function calls.
+          if (sawCommaAtTopLevel && !insideUnmatchedBrace && !insideNestedCall && DEFINE_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
             return false;
           }
           return true;
