@@ -5,6 +5,26 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.29] - 2026-04-11
+
+### Fixed
+
+- Ada: Add Ada 2005+ extended return statement support (`return X : T do ... end return`) by adding `return` to `blockOpen` and `COMPOUND_END_TYPES`, with `isExtendedReturn` helper that scans forward for `NAME : TYPE ... do` pattern to distinguish from simple `return;`/`return expr;` statements
+- Ada: Filter `exception` tokens immediately preceded by `:` so variable declarations like `E : exception;` no longer leak an intermediate into the enclosing block
+- AppleScript: Reject compound `end`/`end tell`/`end if`/`end repeat`/`end try` and bare `end` when not at physical line start, so mid-line occurrences inside expressions (e.g., `{item 1, item 2 end tell}`) no longer close outer blocks. Added `isAtPhysicalLineStart` helper that allows continuation via `¬`
+- Bash: Skip backslash-escaped characters in `scanSubshellBody` so `\"` inside `$(...)` does not start a double-quoted string and swallow the rest of the source
+- COBOL: Reject hyphenated identifiers ending in `REPLACE`/`REPLACING` (e.g., `MY-REPLACE`, `X-REPLACING`) in `isPrecededByKeyword` and `findPrecedingKeywordPosition` so `==...==` after such identifiers is not treated as pseudo-text
+- COBOL: Cap unterminated pseudo-text (`==unfinished...`) in `matchPseudoText` to the opening `==` so subsequent blocks remain parseable during incremental editing
+- Crystal/Ruby: Reject closing bracket characters (`)`, `]`, `}`, `>`) as percent-literal opening delimiters in `getMatchingDelimiter` via new `CLOSE_BRACKET_CHARS` set, so inputs like `%}` no longer swallow following code as unterminated literal
+- Fortran: Reject array-element assignments `KEYWORD(n) = value` (e.g., `do(1) = 5`, `block(i, j) = val`) in `isValidBlockOpen` by checking the text after the matching `)` for `=`
+- Fortran: Reject Fortran 77 labeled DO loops (`do <label> var = ...`) as block openers since they close via labeled `continue` rather than `end do`
+- Fortran: Reject `module procedure NAME` inside `interface` blocks via new `isInsideInterfaceBlock` helper that counts unclosed `interface`/`end interface` pairs, while keeping `module procedure` body in submodule `contains` sections as a real block
+- Pascal: Change excluded-region skip in `isTypeDeclarationOf` from single `if` to `while` loop so multiple consecutive comments between `array`/`set`/`file` and `of` (e.g., `array { c1 } { c2 } of Integer`) no longer cause `of` to be counted twice as intermediate
+- Ruby: Reject Ruby 3.0+ endless method definitions (`def foo = expr`, `def self.foo = 42`) via new `isEndlessMethodDef` helper that scans past the method name (with optional `self.`/`Class.` receiver, operator names, `?`/`!` suffixes, and parameter list) to detect a standalone `=`
+- Verilog: Close malformed `(*)` attribute immediately in `matchAttribute` instead of scanning to end of source, so stray `(*)` no longer hides the rest of the file
+- Verilog: Skip leading whitespace before arithmetic operators in `skipDelayExpression` so delay expressions like `#10 /2`, `#10 + 2`, and `#T / 2` no longer prevent `scanForBeginAfterControl` from finding `begin`
+- VHDL: Reject null procedure declarations (`procedure noop is null;`) and VHDL-2019 expression functions (`function f(...) is (expr);`) in `isValidFuncProcOpen` by inspecting the token after `is`, so parent blocks retain their `begin` intermediate
+
 ## [1.1.28] - 2026-04-10
 
 ### Fixed
@@ -1240,6 +1260,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.29]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.28...v1.1.29
 [1.1.28]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.27...v1.1.28
 [1.1.27]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.26...v1.1.27
 [1.1.26]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.25...v1.1.26
