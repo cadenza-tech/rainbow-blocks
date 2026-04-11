@@ -5,6 +5,23 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.30] - 2026-04-12
+
+### Fixed
+
+- Ada: Allow newlines and `--` line comments between `end` and the type keyword in `COMPOUND_END_PATTERN` so compound ends split across lines (e.g., `end\n  if`) are recognized as a single compound token, preventing nested `if` blocks from being mispaired
+- AppleScript: Require logical line start for `try` in `tryMatchSingleKeywordToken` so mid-line occurrences after expressions (e.g., `doStuff() try`) no longer open a spurious block that steals the enclosing handler's `end`
+- Bash: Exclude closing quotes (`"`, `'`, `` ` ``), closing parens/braces/brackets (`)`, `}`, `]`) from `isCommentStart` character class so `$(echo x)#tag`, `echo "foo"#tag`, and similar constructs no longer treat `#` as a comment start
+- Crystal: Skip backtick command literals in addition to quoted strings inside `{% %}` and `{{ }}` macro templates so `{% `cmd %}` %}` no longer prematurely closes the macro at `%}` inside the backtick body
+- Elixir: Treat `\\` as an escape sequence in uppercase sigil bodies (`~S`, `~R`) so `~S(\\)` correctly terminates at the closing delimiter instead of consuming the rest of the source
+- Erlang: Preserve block expressions (`fun/end`, `case/end`, `try/end`) inside `-define` macro body after the first top-level comma via new `DEFINE_ATTR_PATTERN` and `sawCommaAtTopLevel`/`insideNestedCall` tracking in `isInsideModuleAttributeArgs`, while still filtering tuple atoms (`{begin, end}`) and nested function calls (`nested(begin)`)
+- Fortran: Reject bare `procedure NAME` (without `::` or `module` prefix) inside generic `interface` blocks in `isValidProcedureOpen` so procedure references in generic interfaces no longer pollute the block stack with stale openers
+- Pascal: Add `isInsideParens` helper and reject `class`/`interface`/`object` as block openers when they appear inside unbalanced `(`, so parenthesized comparisons like `if (x = class)` no longer misinterpret the keyword as a type declaration
+- Pascal: Validate `asm` context in both `isValidBlockOpen` and `addAsmExcludedRegions` by checking the preceding character on the same physical line and the following character, rejecting `asm` used as an identifier (e.g., `var asm: Integer;`, `WriteLn(asm)`) so the enclosing `begin`/`end` block retains its pairing
+- Ruby: Accept bare multi-heredoc list after an identifier in `matchHeredoc` when the rest of the line contains `, <<`, so `raise <<A, <<A` correctly exposes both heredoc bodies instead of parsing the second heredoc's content as real code
+- Verilog: Skip leading whitespace before arithmetic operators in the backtick-macro branch of `skipDelayExpression` so delay expressions like `#\`CLK /2` and `#\`CLK + 2` no longer prevent `always` from pairing with its `begin`/`end`
+- VHDL: Add `context` to `blockOpen` keywords and `COMPOUND_END_TYPES` to support VHDL-2008 context declarations (`context name is ... end context name;`)
+
 ## [1.1.29] - 2026-04-11
 
 ### Fixed
@@ -1260,6 +1277,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.30]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.29...v1.1.30
 [1.1.29]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.28...v1.1.29
 [1.1.28]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.27...v1.1.28
 [1.1.27]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.26...v1.1.27
