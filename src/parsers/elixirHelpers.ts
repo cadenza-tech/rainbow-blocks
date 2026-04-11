@@ -282,7 +282,7 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
         isHeredoc = true;
       }
       if (source[j] === '\\' && j + 1 < source.length) {
-        if (isLowercase || source[j + 1] === tripleDelim[0]) {
+        if (isLowercase || source[j + 1] === tripleDelim[0] || source[j + 1] === '\\') {
           j += 2;
           continue;
         }
@@ -310,7 +310,7 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
 
   while (i < source.length && depth > 0) {
     if (source[i] === '\\' && i + 1 < source.length) {
-      if (isLowercase || source[i + 1] === closeDelimiter) {
+      if (isLowercase || source[i + 1] === closeDelimiter || source[i + 1] === '\\') {
         i += 2;
         continue;
       }
@@ -377,7 +377,7 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
       }
       // Handle escape sequences (lowercase: all escapes; uppercase: only escaped closing delimiter)
       if (source[i] === '\\' && i + 1 < source.length) {
-        if (isLowercase || source[i + 1] === tripleDelim[0]) {
+        if (isLowercase || source[i + 1] === tripleDelim[0] || source[i + 1] === '\\') {
           i += 2;
           continue;
         }
@@ -408,7 +408,7 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
   while (i < source.length && depth > 0) {
     // Handle escape sequences (lowercase: all escapes; uppercase: only escaped closing delimiter)
     if (source[i] === '\\' && i + 1 < source.length) {
-      if (isLowercase || source[i + 1] === closeDelimiter) {
+      if (isLowercase || source[i + 1] === closeDelimiter || source[i + 1] === '\\') {
         i += 2;
         continue;
       }

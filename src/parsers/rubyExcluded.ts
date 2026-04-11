@@ -51,7 +51,16 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
       if (!/[)\]}]/.test(source[i])) {
         const afterLtLt = source.slice(pos + 2);
         if (!/^[~-]/.test(afterLtLt)) {
-          return null;
+          // Exception: if the rest of the line contains ', <<' pattern, this is a
+          // multi-heredoc list (e.g. `raise <<A, <<A`), not a shift operator. Accept.
+          let lineEnd = pos;
+          while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+            lineEnd++;
+          }
+          const restOfLine = source.slice(pos + 2, lineEnd);
+          if (!/,\s*<</.test(restOfLine)) {
+            return null;
+          }
         }
       }
     }

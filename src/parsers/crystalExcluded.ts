@@ -17,8 +17,8 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         }
         continue;
       }
-      // Skip strings inside macro template
-      if (char === '"' || char === "'") {
+      // Skip strings and backtick command literals inside macro template
+      if (char === '"' || char === "'" || char === '`') {
         i = skipMacroString(source, i, char);
         continue;
       }
@@ -44,8 +44,8 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         }
         continue;
       }
-      // Skip strings inside macro template
-      if (char === '"' || char === "'") {
+      // Skip strings and backtick command literals inside macro template
+      if (char === '"' || char === "'" || char === '`') {
         i = skipMacroString(source, i, char);
         continue;
       }

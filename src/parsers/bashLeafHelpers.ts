@@ -3,14 +3,16 @@
 import type { ExcludedRegion } from '../types';
 
 // Checks if '#' at position is a comment start (at word boundary, not mid-word)
+// Real bash: `#` is only a comment when preceded by whitespace, start-of-line, or
+// unquoted command separators (;|&). After closing quotes/parens/braces/brackets,
+// `#` is part of the current word (e.g., echo "foo"#tag prints foo#tag).
 export function isCommentStart(source: string, pos: number): boolean {
   if (pos === 0) return true;
   const prev = source[pos - 1];
   // $ before # is handled separately (for $#, ${#, $$# special cases)
   if (prev === '$') return true;
-  // # after shell metacharacters or whitespace starts a comment
   // Note: < and > are excluded because >#file and <#file are redirects to files starting with #
-  return /[ \t\n\r;|&(){}"'`\]]/.test(prev);
+  return /[ \t\n\r;|&(]/.test(prev);
 }
 
 // Checks if '#' at position is part of $# variable (odd consecutive $ count before #)
