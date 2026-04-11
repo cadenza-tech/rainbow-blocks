@@ -766,10 +766,11 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
       // Skip time unit (e.g., ns, ps)
       while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
-      // Skip arithmetic operators and continue parsing the rest of the expression
-      if (i < source.length && /[+\-*/%]/.test(source[i])) {
-        i++;
-        return this.skipDelayExpression(source, i, excludedRegions);
+      // Skip arithmetic operators (allowing leading whitespace) and continue parsing
+      let op = i;
+      while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
+      if (op < source.length && /[+\-*/%]/.test(source[op])) {
+        return this.skipDelayExpression(source, op + 1, excludedRegions);
       }
       return i;
     }
@@ -787,9 +788,10 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
       while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
-      if (i < source.length && /[+\-*/%]/.test(source[i])) {
-        i++;
-        return this.skipDelayExpression(source, i, excludedRegions);
+      let op = i;
+      while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
+      if (op < source.length && /[+\-*/%]/.test(source[op])) {
+        return this.skipDelayExpression(source, op + 1, excludedRegions);
       }
       return i;
     }

@@ -51,6 +51,10 @@ export function matchEscapedIdentifier(source: string, pos: number): ExcludedReg
 
 // Matches SystemVerilog attribute: (* ... *)
 export function matchAttribute(source: string, pos: number): ExcludedRegion {
+  // Handle malformed '(*)': close immediately when the char after '(*' is ')'
+  if (pos + 2 < source.length && source[pos + 2] === ')') {
+    return { start: pos, end: pos + 3 };
+  }
   let i = pos + 2;
   while (i < source.length) {
     // Skip string literals inside attributes (terminate at newlines like Verilog strings)
