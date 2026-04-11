@@ -2424,5 +2424,19 @@ end.`;
     });
   });
 
+  suite('Regression 2026-04-11: multiple comments before type declaration of', () => {
+    test('should filter of when two brace comments separate array from of', () => {
+      const pairs = parser.parse('case X of\n  1: var A: array { c1 } { c2 } of Integer;\nend');
+      const ofCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'of').length;
+      assert.strictEqual(ofCount, 1);
+    });
+
+    test('should filter of when two block comments separate array from of', () => {
+      const pairs = parser.parse('case X of\n  1: var A: array (* c1 *) (* c2 *) of Integer;\nend');
+      const ofCount = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'of').length;
+      assert.strictEqual(ofCount, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

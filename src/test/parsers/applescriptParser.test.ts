@@ -2429,5 +2429,28 @@ end try`;
     });
   });
 
+  suite('Regression 2026-04-11: mid-line end keywords', () => {
+    test('should not treat end tell in the middle of a list literal as block close', () => {
+      const source = 'tell application "Finder"\n  set y to {item 1, item 2 end tell}\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat bare end mid-line as block close', () => {
+      const source = 'on foo()\n  set y to 1 end 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end if mid-line as block close', () => {
+      const source = 'if x > 0 then\n  set y to 1 end if 2\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

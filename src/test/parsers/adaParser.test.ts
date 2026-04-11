@@ -2627,5 +2627,39 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-04-11: extended return and exception declarations', () => {
+    test('should detect extended return block (Ada 2005+)', () => {
+      const source = 'function F return Integer is\nbegin\n  return R : Integer := 0 do\n    R := 42;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const returnBlock = findBlock(pairs, 'return');
+      assert.strictEqual(returnBlock.closeKeyword.value.toLowerCase(), 'end return');
+    });
+
+    test('should not treat simple return statement as a block opener', () => {
+      const pairs = parser.parse('procedure X is begin return; end X;');
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat return expression as a block opener', () => {
+      const pairs = parser.parse('function F return Integer is begin return 42; end F;');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not leak exception from variable declaration as intermediate', () => {
+      const source = 'package P is\n  Stack_Overflow : exception;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should still treat exception as intermediate for handler section', () => {
+      const source = 'procedure P is\n  My_Error : exception;\nbegin\n  null;\nexception\n  when My_Error => null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin', 'exception', 'when']);
+    });
+  });
+
   generateCommonTests(config);
 });

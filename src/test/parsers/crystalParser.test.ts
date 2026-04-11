@@ -3702,5 +3702,22 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-11: percent literal with closing-bracket delimiter', () => {
+    test('should not treat %} as a percent literal', () => {
+      const pairs = parser.parse('%}\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat %) as a percent literal', () => {
+      const pairs = parser.parse('%)\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat %] as a percent literal', () => {
+      const pairs = parser.parse('%]\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

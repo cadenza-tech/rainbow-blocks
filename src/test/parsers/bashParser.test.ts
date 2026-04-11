@@ -2016,6 +2016,18 @@ esac`;
     });
   });
 
+  suite('Regression 2026-04-11: backslash escape inside $(...) subshell', () => {
+    test('should not extend excluded region across backslash-escaped quote in $(...)', () => {
+      const pairs = parser.parse('$(\\") if true; then echo; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle backslash-escaped quote in realistic assignment', () => {
+      const pairs = parser.parse('x="$(echo \\"value\\")"\nif true; then\n  echo ok\nfi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {

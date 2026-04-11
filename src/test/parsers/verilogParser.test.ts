@@ -2492,5 +2492,26 @@ endmodule`;
     });
   });
 
+  suite('Regression 2026-04-11: malformed attributes and delay expression whitespace', () => {
+    test('should not swallow source when encountering malformed (*)', () => {
+      const pairs = parser.parse('(*)\nmodule m;\nendmodule');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should detect always block with delay expression containing leading-space operator', () => {
+      const pairs = parser.parse('always #10 /2 begin\n  clk = ~clk;\nend');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'always'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin'));
+    });
+
+    test('should detect always block with delay expression containing fully-spaced operator', () => {
+      const pairs = parser.parse('always #10 + 2 begin\n  clk = ~clk;\nend');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'always'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin'));
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -1689,5 +1689,27 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-04-11: hyphenated identifiers and unterminated pseudo-text', () => {
+    test('should not trigger pseudo-text context for hyphenated identifier MY-REPLACE', () => {
+      const source = 'MY-REPLACE ==A== BY ==B==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should not trigger pseudo-text context for X-REPLACING in COPY', () => {
+      const source = 'COPY X X-REPLACING ==IF== BY ==NEW==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0);
+    });
+
+    test('should not swallow entire source after unterminated pseudo-text', () => {
+      const source = 'COPY X REPLACING ==unfinished\nIF A > 0\n  DISPLAY "X"\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });

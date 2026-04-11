@@ -4512,5 +4512,43 @@ end program`;
     });
   });
 
+  suite('Regression 2026-04-11: module procedure inside interface and orphan blocks', () => {
+    test('should not emit stray procedure block for module procedure inside interface', () => {
+      const source = 'module m\n  interface g\n    module procedure g_int\n  end interface\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'module');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'interface');
+    });
+
+    test('should still treat module procedure with body as block inside submodule', () => {
+      const source = 'submodule (parent) child\ncontains\n  module procedure my_proc\n    x = 1\n  end procedure\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'submodule');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'procedure');
+    });
+
+    test('should not treat do(n) = value as a do block opener', () => {
+      const source = 'program test\n  integer :: do(10)\n  do(1) = 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should not treat block(n) = value as a block opener', () => {
+      const source = 'program test\n  integer :: block(10)\n  block(1) = 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should reject Fortran 77 labeled DO loop as a block opener', () => {
+      const source = '      program test\n      do 100 i = 1, 10\n        x = i\n100   continue\n      end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

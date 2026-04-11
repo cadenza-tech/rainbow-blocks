@@ -2802,5 +2802,23 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-04-11: null procedure and expression function declarations', () => {
+    test('should not treat null procedure declaration as a block opener', () => {
+      const source = 'architecture rtl of test is\n  procedure noop is null;\nbegin\n  null;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('begin'), 'begin should remain an intermediate of architecture');
+    });
+
+    test('should not treat VHDL-2019 expression function as a block opener', () => {
+      const source = 'architecture rtl of test is\n  function mul(x : integer) return integer is (x * 2);\nbegin\n  null;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediates.includes('begin'), 'begin should remain an intermediate of architecture');
+    });
+  });
+
   generateCommonTests(config);
 });

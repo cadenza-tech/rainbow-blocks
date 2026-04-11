@@ -3435,5 +3435,31 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-11: Ruby 3.0+ endless method definitions', () => {
+    test('should not treat endless def as a block opener', () => {
+      const pairs = parser.parse('class X\n  def a = 1\nend');
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat endless def with self receiver as block opener', () => {
+      const pairs = parser.parse('class X\n  def self.foo = 42\nend');
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should still treat normal def as a block opener alongside endless def', () => {
+      const pairs = parser.parse('class X\n  def a = 1\n  def b\n    1\n  end\nend');
+      assert.strictEqual(pairs.length, 2);
+      const classPair = pairs.find((p) => p.openKeyword.value === 'class');
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(classPair);
+      assert.ok(defPair);
+    });
+
+    test('should still treat normal def as a block opener', () => {
+      const pairs = parser.parse('class X\n  def foo\n    1\n  end\nend');
+      assert.strictEqual(pairs.length, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
