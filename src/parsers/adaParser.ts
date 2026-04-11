@@ -45,7 +45,8 @@ const COMPOUND_END_TYPES = [
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
 
 // Pattern to match compound end keywords (case insensitive)
-const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
+// Allows whitespace, newlines, and -- line comments between 'end' and the type keyword
+const COMPOUND_END_PATTERN = new RegExp(`\\bend(?:[ \\t\\r\\n]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 export class AdaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
