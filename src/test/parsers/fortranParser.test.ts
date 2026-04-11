@@ -4550,5 +4550,13 @@ end program`;
     });
   });
 
+  suite('Regression: generic interface procedure list', () => {
+    test('should not treat procedure references inside generic interface as block openers', () => {
+      const source = 'interface op\n  procedure op1\n  procedure op2\nend interface op\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end interface');
+    });
+  });
+
   generateCommonTests(config);
 });

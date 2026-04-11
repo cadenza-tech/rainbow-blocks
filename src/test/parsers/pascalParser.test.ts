@@ -2438,5 +2438,41 @@ end.`;
     });
   });
 
+  suite('Regression: class/interface/object in parenthesized comparison', () => {
+    test('should not treat class as block opener in if (x = class)', () => {
+      const source = 'begin\n  if (x = class) then\n    DoSomething;\n  WriteLn(y);\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat interface as block opener in if (x = interface)', () => {
+      const source = 'begin\n  if (x = interface) then\n    DoSomething;\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat object as block opener in if (x = object)', () => {
+      const source = 'begin\n  if (x = object) then\n    DoSomething;\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: asm used as identifier', () => {
+    test('should not treat asm as block opener when used as variable name', () => {
+      const source = 'procedure P;\nvar\n  asm: Integer;\nbegin\n  asm := 10;\n  WriteLn(asm);\nend;\n';
+      const pairs = parser.parse(source);
+      const beginEnd = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginEnd, 'should find begin/end pair');
+    });
+
+    test('should still treat asm as block opener in assembly code', () => {
+      const source = 'begin\n  asm\n    MOV AX, BX\n  end\nend;';
+      const pairs = parser.parse(source);
+      const asmPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.ok(asmPair, 'should find asm block');
+    });
+  });
+
   generateCommonTests(config);
 });

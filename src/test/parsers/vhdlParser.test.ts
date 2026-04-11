@@ -2820,5 +2820,20 @@ end package;`;
     });
   });
 
+  suite('Regression: VHDL-2008 context declarations', () => {
+    test('should detect context block with end context', () => {
+      const source = 'context my_ctx is\n  library ieee;\n  use ieee.std_logic_1164.all;\nend context my_ctx;\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'context', 'end context');
+    });
+
+    test('should detect context block with bare end', () => {
+      const source = 'context my_ctx is\n  library ieee;\nend my_ctx;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'context');
+    });
+  });
+
   generateCommonTests(config);
 });

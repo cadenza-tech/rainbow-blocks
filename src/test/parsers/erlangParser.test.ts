@@ -2238,5 +2238,29 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: block expressions inside -define macro body', () => {
+    test('should detect fun/end inside -define body', () => {
+      const pairs = parser.parse('-define(HANDLER, fun(X) -> X * 2 end).\n');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should detect try/end inside -define body', () => {
+      const pairs = parser.parse('-define(SAFE_RUN, try compute() catch _:_ -> error end).\n');
+      assertSingleBlock(pairs, 'try', 'end');
+    });
+
+    test('should still filter begin atom inside -define nested function call', () => {
+      const tokens = parser.getTokens('-define(MACRO, nested(begin)).');
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0);
+    });
+
+    test('should still filter begin/end atoms inside -define tuple literal', () => {
+      const source = '-define(MY_MACRO, {begin, end}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

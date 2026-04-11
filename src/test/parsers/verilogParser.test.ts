@@ -2511,6 +2511,20 @@ endmodule`;
       assert.ok(pairs.some((p) => p.openKeyword.value === 'always'));
       assert.ok(pairs.some((p) => p.openKeyword.value === 'begin'));
     });
+
+    test('should detect always block with backtick delay macro and whitespace-separated operator', () => {
+      const pairs = parser.parse('module m;\n  always #`CLK /2 begin\n    clk = ~clk;\n  end\nendmodule');
+      assert.strictEqual(pairs.length, 3);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'always'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'begin'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'module'));
+    });
+
+    test('should detect always block with backtick delay macro and fully-spaced operator', () => {
+      const pairs = parser.parse('always #`CLK / 2 begin\n  clk = ~clk;\nend');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'always'));
+    });
   });
 
   generateCommonTests(config);

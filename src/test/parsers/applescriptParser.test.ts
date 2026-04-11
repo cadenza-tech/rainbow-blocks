@@ -2452,5 +2452,13 @@ end try`;
     });
   });
 
+  suite('Regression: mid-line try should not be a block opener', () => {
+    test('should not tokenize try as block opener after method call', () => {
+      const source = 'on run\n  doStuff() try\n  log "x"\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

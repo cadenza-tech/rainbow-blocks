@@ -3719,5 +3719,12 @@ end`;
     });
   });
 
+  suite('Regression: backtick command inside {% %} macro body', () => {
+    test('should skip backtick content containing %} close-sequence', () => {
+      const pairs = parser.parse('{% `cmd %}` %}\nif cond\nend\n');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

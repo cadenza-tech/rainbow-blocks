@@ -3643,5 +3643,22 @@ end`;
     });
   });
 
+  suite('Regression: uppercase sigil escape handling', () => {
+    test('should treat \\\\ before closing delimiter as escape in ~S sigil', () => {
+      const pairs = parser.parse('def foo do\n  x = ~S(\\\\)\nend\n');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat \\\\ as escape in ~S with square brackets', () => {
+      const pairs = parser.parse('def foo do\n  x = ~S[\\\\]\nend\n');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat \\\\ as escape in ~R regex sigil', () => {
+      const pairs = parser.parse('def foo do\n  x = ~R(\\\\)\nend\n');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

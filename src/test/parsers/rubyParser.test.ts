@@ -3461,5 +3461,13 @@ end`;
     });
   });
 
+  suite('Regression: multi-heredoc with bare delimiters after identifier', () => {
+    test('should accept bare multi-heredoc list after identifier', () => {
+      const source = 'raise <<A, <<A\nfirst\nA\nif true\nelse\nend\nA\ndef foo\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

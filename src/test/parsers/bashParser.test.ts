@@ -2028,6 +2028,34 @@ esac`;
     });
   });
 
+  suite('Regression: # after closing quotes/parens/braces is not a comment', () => {
+    test('should not treat # after ) as comment', () => {
+      const pairs = parser.parse('$(echo x)#hash; if true; then echo ok; fi\n');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat # after " as comment', () => {
+      const pairs = parser.parse('echo "foo"#tag; if true; then echo ok; fi\n');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat # after } as comment', () => {
+      const source = 'echo $' + '{var}#tag; if true; then echo ok; fi\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat # after ` as comment', () => {
+      const pairs = parser.parse('echo `cmd`#tag; if true; then echo ok; fi\n');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still treat # after space as comment', () => {
+      const pairs = parser.parse('echo ok # comment fi\nif true; then echo ok; fi\n');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 
   suite('Token positions - language-specific', () => {

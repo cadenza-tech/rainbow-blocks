@@ -2661,5 +2661,26 @@ end if;`;
     });
   });
 
+  suite('Regression: compound end split across newlines and comments', () => {
+    test('should match "end\\n  if" as a compound end if token', () => {
+      const source = 'if A then\n  if B then\n    null;\n  end\n  if;\nend if;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outer, 'should find outer if block at nest 0');
+      assert.strictEqual(outer.nestLevel, 0);
+      const inner = pairs.find((p) => p.openKeyword.startOffset === 12);
+      assert.ok(inner, 'should find inner if block at nest 1');
+      assert.strictEqual(inner.nestLevel, 1);
+    });
+
+    test('should allow line comment between end and type keyword', () => {
+      const source = 'if A then\n  null;\nend -- trailing comment\nif;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'if');
+    });
+  });
+
   generateCommonTests(config);
 });
