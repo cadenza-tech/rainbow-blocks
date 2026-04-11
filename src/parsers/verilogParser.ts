@@ -802,9 +802,10 @@ export class VerilogBlockParser extends BaseBlockParser {
         return this.skipParenGroup(source, i, excludedRegions);
       }
       while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
-      if (i < source.length && /[+\-*/%]/.test(source[i])) {
-        i++;
-        return this.skipDelayExpression(source, i, excludedRegions);
+      let op = i;
+      while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
+      if (op < source.length && /[+\-*/%]/.test(source[op])) {
+        return this.skipDelayExpression(source, op + 1, excludedRegions);
       }
       return i;
     }
