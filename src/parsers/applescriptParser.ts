@@ -428,15 +428,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       const type = this.getTokenType(keyword);
 
-      // 'to', 'on', and 'script' are block openers only at line start
-      if (type === 'block_open' && (keyword === 'to' || keyword === 'on' || keyword === 'script')) {
-        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
-          return { nextPos: endPos };
-        }
-      }
-
-      // 'considering' and 'ignoring' are block openers only at logical line start
-      if (type === 'block_open' && (keyword === 'considering' || keyword === 'ignoring')) {
+      // 'to', 'on', 'script', 'considering', 'ignoring', and 'try' are only block
+      // openers at logical line start. 'tell'/'if'/'repeat' are allowed mid-line
+      // because they can follow 'if <expr>' or similar condition contexts.
+      if (
+        type === 'block_open' &&
+        (keyword === 'to' || keyword === 'on' || keyword === 'script' || keyword === 'considering' || keyword === 'ignoring' || keyword === 'try')
+      ) {
         if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
           return { nextPos: endPos };
         }

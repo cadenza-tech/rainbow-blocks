@@ -28,12 +28,77 @@ export class PascalBlockParser extends BaseBlockParser {
       }
     }
 
+    // 'asm' must be at statement position (not used as identifier/field/parameter).
+    if (keyword === 'asm') {
+      // Reject when followed by ':' (type annotation like 'asm: Integer') or
+      // ':=' (assignment), or '.' (field access), or '(' (function call), or ','.
+      {
+        let fp = position + 3;
+        while (fp < source.length) {
+          if (this.isInExcludedRegion(fp, excludedRegions)) {
+            const region = this.findExcludedRegionAt(fp, excludedRegions);
+            if (region) {
+              fp = region.end;
+              continue;
+            }
+          }
+          if (source[fp] === ' ' || source[fp] === '\t') {
+            fp++;
+            continue;
+          }
+          break;
+        }
+        if (fp < source.length) {
+          const next = source[fp];
+          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=') {
+            return false;
+          }
+        }
+      }
+      // Scan backward on the same physical line; reject expression/declaration context.
+      let bp = position - 1;
+      while (bp >= 0 && source[bp] !== '\n' && source[bp] !== '\r') {
+        if (this.isInExcludedRegion(bp, excludedRegions)) {
+          const region = this.findExcludedRegionAt(bp, excludedRegions);
+          if (region) {
+            bp = region.start - 1;
+            continue;
+          }
+        }
+        if (source[bp] === ' ' || source[bp] === '\t') {
+          bp--;
+          continue;
+        }
+        break;
+      }
+      if (bp >= 0 && source[bp] !== '\n' && source[bp] !== '\r') {
+        const prev = source[bp];
+        if (prev === ';') {
+          return true;
+        }
+        if (prev === '.' || prev === ':' || prev === ',' || prev === '(' || prev === '=') {
+          return false;
+        }
+        if (/[a-zA-Z0-9_]/.test(prev)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
     // 'interface', 'class', 'object' are only block opens after '=' (type definitions)
     // e.g. TMyClass = class(TObject) ... end;
     // Not: class function Create, class procedure Destroy (modifiers)
     // Not: procedure of object (method pointer syntax)
     if (keyword !== 'interface' && keyword !== 'class' && keyword !== 'object') {
       return true;
+    }
+
+    // Type declarations never appear inside parentheses. If the keyword is inside
+    // unbalanced '(', it is a comparison expression like 'if (x = class)' and
+    // must not be treated as a block opener.
+    if (this.isInsideParens(source, position, excludedRegions)) {
+      return false;
     }
 
     // 'class of' is a class reference type, not a block (same line only)
@@ -303,6 +368,49 @@ export class PascalBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip asm used as an identifier (variable, field, parameter, etc.).
+      // Forward check: reject when followed by ':' (type annotation like 'asm: Integer'),
+      // ':=' (assignment), '.', ',', ')', '='.
+      {
+        let fp = asmStart + 3;
+        while (fp < source.length && (source[fp] === ' ' || source[fp] === '\t')) fp++;
+        if (fp < source.length) {
+          const next = source[fp];
+          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=') {
+            continue;
+          }
+        }
+      }
+      // Backward check on the same physical line: reject expression/declaration context.
+      {
+        let bp = asmStart - 1;
+        while (bp >= 0 && source[bp] !== '\n' && source[bp] !== '\r') {
+          if (this.isInExcludedRegion(bp, regions)) {
+            const region = this.findExcludedRegionAt(bp, regions);
+            if (region) {
+              bp = region.start - 1;
+              continue;
+            }
+          }
+          if (source[bp] === ' ' || source[bp] === '\t') {
+            bp--;
+            continue;
+          }
+          break;
+        }
+        if (bp >= 0 && source[bp] !== '\n' && source[bp] !== '\r') {
+          const prev = source[bp];
+          if (prev !== ';') {
+            if (prev === '.' || prev === ':' || prev === ',' || prev === '(' || prev === '=') {
+              continue;
+            }
+            if (/[a-zA-Z0-9_]/.test(prev)) {
+              continue;
+            }
+          }
+        }
+      }
+
       // Search for matching 'end' after asm
       const contentStart = asmStart + 3;
       const endPattern = /\bend\b/gi;
@@ -393,6 +501,28 @@ export class PascalBlockParser extends BaseBlockParser {
 
   // Checks if 'case' at position is a variant record case (tagged or tagless)
   // Skips excluded regions (comments) between 'case' and the identifier
+  // Checks if a position sits inside unbalanced parentheses (e.g. 'if (x = class)')
+  // Stops at ';' (statement terminator) or start of file.
+  private isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let parenDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === ')') {
+        parenDepth++;
+      } else if (ch === '(') {
+        if (parenDepth > 0) {
+          parenDepth--;
+        } else {
+          return true;
+        }
+      } else if (ch === ';' && parenDepth === 0) {
+        return false;
+      }
+    }
+    return false;
+  }
+
   private isVariantRecordCase(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (!this.isInsideRecord(source, position, excludedRegions)) {
       return false;

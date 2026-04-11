@@ -101,6 +101,17 @@ export function isValidProcedureOpen(
       j++;
     }
   }
+  // Reject bare 'procedure NAME' inside a generic interface block.
+  // Generic interfaces list referenced procedures with lines like:
+  //   interface op
+  //     procedure op1
+  //     procedure op2
+  //   end interface op
+  // These 'procedure' lines are NOT block openers - they reference existing
+  // procedures and have no matching 'end procedure'.
+  if (isInsideInterfaceBlock(source, position, isInExcludedRegion, excludedRegions)) {
+    return false;
+  }
   return true;
 }
 
