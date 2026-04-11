@@ -34,7 +34,8 @@ const COMPOUND_END_TYPES = [
   'configuration',
   'protected',
   'for',
-  'units'
+  'units',
+  'context'
 ];
 
 // Pattern to match compound end keywords (case insensitive)
@@ -65,7 +66,8 @@ export class VhdlBlockParser extends BaseBlockParser {
       'record',
       'configuration',
       'protected',
-      'units'
+      'units',
+      'context'
     ],
     blockClose: ['end'],
     blockMiddle: ['else', 'elsif', 'when', 'then', 'is', 'begin']
