@@ -28,7 +28,13 @@ suite('VhdlBlockParser Test Suite', () => {
     commentBlockClose: 'end if',
     doubleQuotedStringSource: 'signal msg : string := "if then end if";\nif condition then\nend if;',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end if'
+    stringBlockClose: 'end if',
+    commentAtEndOfLineSource: 'if condition then -- end if here\n  action;\nend if;',
+    commentAtEndOfLineBlockOpen: 'if',
+    commentAtEndOfLineBlockClose: 'end if',
+    escapedQuoteStringSource: 'signal msg : string := "say ""if""";\nif condition then\nend if;',
+    escapedQuoteStringBlockOpen: 'if',
+    escapedQuoteStringBlockClose: 'end if'
   };
 
   suite('Simple blocks', () => {
@@ -243,24 +249,6 @@ entity real is
 end entity;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'entity', 'end entity');
-    });
-
-    test('should handle comment at end of line', () => {
-      const source = `if condition then -- end if here
-  action;
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-  });
-
-  suite('Excluded regions - Strings', () => {
-    test('should handle escaped quotes in strings', () => {
-      const source = `signal msg : string := "say ""if""";
-if condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
     });
   });
 

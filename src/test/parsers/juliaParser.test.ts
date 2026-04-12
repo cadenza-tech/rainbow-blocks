@@ -32,7 +32,13 @@ suite('JuliaBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'x = "if this is a string end"\nfunction foo()\nend',
     stringBlockOpen: 'function',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    commentAtEndOfLineSource: 'function foo() # if this were a block\n  x = 1\nend',
+    commentAtEndOfLineBlockOpen: 'function',
+    commentAtEndOfLineBlockClose: 'end',
+    escapedQuoteStringSource: 'x = "say \\"if\\" or \\"end\\""\nfunction foo()\nend',
+    escapedQuoteStringBlockOpen: 'function',
+    escapedQuoteStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -429,14 +435,6 @@ end`;
       assertSingleBlock(pairs, 'begin', 'end');
     });
 
-    test('should handle comment at end of line', () => {
-      const source = `function foo() # if this were a block
-  x = 1
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end');
-    });
-
     test('should handle multiple single-line comments', () => {
       const source = `# comment 1 with if
 # comment 2 with for end
@@ -459,14 +457,6 @@ if this is a multiline string
   end
 end
 """
-function foo()
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'function', 'end');
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `x = "say \\"if\\" or \\"end\\""
 function foo()
 end`;
       const pairs = parser.parse(source);

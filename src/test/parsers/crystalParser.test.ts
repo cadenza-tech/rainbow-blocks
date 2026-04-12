@@ -2,7 +2,13 @@ import * as assert from 'node:assert';
 import { CrystalBlockParser } from '../../parsers/crystalParser';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import {
+  generateCommonTests,
+  generateEdgeCaseTests,
+  generateExcludedRegionTests,
+  generateRegexInterpolationTests,
+  generateStringInterpolationTests
+} from '../helpers/sharedTestGenerators';
 
 suite('CrystalBlockParser Test Suite', () => {
   let parser: CrystalBlockParser;
@@ -24,7 +30,10 @@ suite('CrystalBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'x = "if end while"\nif true\nend',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    escapedQuoteStringSource: 'msg = "he said \\"if\\" and \\"end\\""\nif condition\nend',
+    escapedQuoteStringBlockOpen: 'if',
+    escapedQuoteStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -218,14 +227,6 @@ if true
 end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `msg = "he said \\"if\\" and \\"end\\""
-if condition
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
     });
 
     test('should handle hex escape in char literal', () => {
@@ -423,73 +424,11 @@ end`;
   });
 
   suite('Excluded regions - String interpolation', () => {
-    test('should handle #{} interpolation with nested double quotes', () => {
-      const source = 'x = "#{if true then "yes" else "no" end}"';
-      const result = parser.parse(source);
-      assertNoBlocks(result);
-    });
-
-    test('should handle nested #{} interpolation', () => {
-      const source = 'x = "outer #{a + "inner #{b}" + c}"';
-      const result = parser.parse(source);
-      assertNoBlocks(result);
-    });
-
-    test('should handle #{} with block keywords inside', () => {
-      const source = '"result: #{if x\n  y\nend}"';
-      const result = parser.parse(source);
-      assertNoBlocks(result);
-    });
-
-    test('should handle empty interpolation', () => {
-      const source = 'x = "value: #{}"';
-      const result = parser.parse(source);
-      assertNoBlocks(result);
-    });
-
-    test('should handle interpolation with braces', () => {
-      const source = 'x = "#{hash = {a: 1}}"';
-      const result = parser.parse(source);
-      assertNoBlocks(result);
-    });
-
-    test('should still parse blocks outside interpolated strings', () => {
-      const source = '"#{x}"\nif true\nend';
-      const result = parser.parse(source);
-      assertSingleBlock(result, 'if', 'end');
-    });
+    generateStringInterpolationTests(config);
   });
 
   suite('Excluded regions - Regex interpolation', () => {
-    test('should handle #{} interpolation inside regex', () => {
-      const source = 'x = /start_#{var}_end/\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
-    test('should handle #{} with slash inside regex interpolation', () => {
-      const source = 'x = /start_#{get_pattern("/")}_end/\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
-    test('should handle #{} with nested braces inside regex', () => {
-      const source = 'x = /prefix_#{hash = {a: 1}}_suffix/\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
-    test('should handle multiple #{} interpolations in regex', () => {
-      const source = 'x = /#{a}_#{b}_#{c}/\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
-    test('should handle empty #{} interpolation in regex', () => {
-      const source = 'x = /pattern_#{}end/\ndef foo\nend';
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
+    generateRegexInterpolationTests(config);
   });
 
   suite('Excluded regions - Interpolation with regex inside', () => {

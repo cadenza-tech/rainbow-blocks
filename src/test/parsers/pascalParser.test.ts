@@ -29,7 +29,10 @@ suite('PascalBlockParser Test Suite', () => {
     twoLineSource: 'begin\nend',
     singleLineCommentSource: '// begin end repeat until case\nbegin\n  X := 1;\nend',
     commentBlockOpen: 'begin',
-    commentBlockClose: 'end'
+    commentBlockClose: 'end',
+    commentAtEndOfLineSource: 'begin\n  X := 1; // this is not end\nend',
+    commentAtEndOfLineBlockOpen: 'begin',
+    commentAtEndOfLineBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -347,14 +350,6 @@ end`;
     test('should skip keywords in strings', () => {
       const source = `begin
   S := 'begin end repeat until case';
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
-    });
-
-    test('should handle comment at end of line', () => {
-      const source = `begin
-  X := 1; // this is not end
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');

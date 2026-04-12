@@ -28,7 +28,10 @@ suite('OctaveBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'msg = "if for while end";\nif true\nend',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    singleQuotedStringSource: "msg = 'if for while end';\nif true\nend",
+    singleQuotedStringBlockOpen: 'if',
+    singleQuotedStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -302,14 +305,6 @@ end`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in single-quoted strings', () => {
-      const source = `msg = 'if for while end';
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
     test('should handle escaped quotes in single-quoted strings', () => {
       const source = `msg = 'it''s an if statement';
 if true

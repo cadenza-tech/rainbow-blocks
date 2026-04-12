@@ -29,7 +29,16 @@ suite('FortranBlockParser Test Suite', () => {
     commentBlockClose: 'end if',
     doubleQuotedStringSource: 'print *, "if then end if do"\nif (condition) then\nend if',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end if'
+    stringBlockClose: 'end if',
+    singleQuotedStringSource: "print *, 'if then end if do'\nif (condition) then\nend if",
+    singleQuotedStringBlockOpen: 'if',
+    singleQuotedStringBlockClose: 'end if',
+    commentAtEndOfLineSource: 'if (condition) then ! end if here\n  action\nend if',
+    commentAtEndOfLineBlockOpen: 'if',
+    commentAtEndOfLineBlockClose: 'end if',
+    escapedQuoteStringSource: "print *, 'it''s an if statement'\nif (condition) then\nend if",
+    escapedQuoteStringBlockOpen: 'if',
+    escapedQuoteStringBlockClose: 'end if'
   };
 
   suite('Simple blocks', () => {
@@ -253,33 +262,9 @@ end if`;
 
   suite('Excluded regions - Comments', () => {
     generateExcludedRegionTests(config);
-
-    test('should handle comment at end of line', () => {
-      const source = `if (condition) then ! end if here
-  action
-end if`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
   });
 
-  suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in single-quoted strings', () => {
-      const source = `print *, 'if then end if do'
-if (condition) then
-end if`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `print *, 'it''s an if statement'
-if (condition) then
-end if`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-  });
+  suite('Excluded regions - Strings', () => {});
 
   suite('Case insensitivity', () => {
     test('should handle uppercase keywords', () => {

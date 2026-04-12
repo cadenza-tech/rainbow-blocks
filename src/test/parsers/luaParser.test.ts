@@ -24,7 +24,13 @@ suite('LuaBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'x = "if then end while"\nif true then\nend',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    singleQuotedStringSource: "x = 'if then end while'\nif true then\nend",
+    singleQuotedStringBlockOpen: 'if',
+    singleQuotedStringBlockClose: 'end',
+    escapedQuoteStringSource: 'msg = "he said \\"if\\" and \\"end\\""\nif condition then\nend',
+    escapedQuoteStringBlockOpen: 'if',
+    escapedQuoteStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -236,24 +242,6 @@ if real then
 end`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
-    });
-  });
-
-  suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in single-quoted strings', () => {
-      const source = `x = 'if then end while'
-if true then
-end`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 1);
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `msg = "he said \\"if\\" and \\"end\\""
-if condition then
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 

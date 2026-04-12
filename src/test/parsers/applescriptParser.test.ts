@@ -24,7 +24,13 @@ suite('ApplescriptBlockParser Test Suite', () => {
     commentBlockClose: 'end if',
     doubleQuotedStringSource: 'set x to "if then end if"\nif true then\nend if',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end if'
+    stringBlockClose: 'end if',
+    commentAtEndOfLineSource: 'tell application "Finder"\n  activate -- this is not end tell\nend tell',
+    commentAtEndOfLineBlockOpen: 'tell',
+    commentAtEndOfLineBlockClose: 'end tell',
+    escapedQuoteStringSource: 'tell application "Finder"\n  set x to "end \\"tell\\""\n  activate\nend tell',
+    escapedQuoteStringBlockOpen: 'tell',
+    escapedQuoteStringBlockClose: 'end tell'
   };
 
   suite('Simple blocks', () => {
@@ -335,25 +341,8 @@ end tell`;
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
 
-    test('should handle escaped quotes in strings', () => {
-      const source = `tell application "Finder"
-  set x to "end \\"tell\\""
-  activate
-end tell`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'tell', 'end tell');
-    });
-
     test('should handle doubled-quote escaping in strings', () => {
       const pairs = parser.parse('tell application "Finder"\n  display dialog ""end tell""\nend tell');
-      assertSingleBlock(pairs, 'tell', 'end tell');
-    });
-
-    test('should handle comment at end of line', () => {
-      const source = `tell application "Finder"
-  activate -- this is not end tell
-end tell`;
-      const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'tell', 'end tell');
     });
 

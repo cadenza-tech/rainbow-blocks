@@ -32,7 +32,13 @@ suite('BashBlockParser Test Suite', () => {
     commentBlockClose: '}',
     doubleQuotedStringSource: 'echo "if this is a string fi"\n{\n  echo "test"\n}',
     stringBlockOpen: '{',
-    stringBlockClose: '}'
+    stringBlockClose: '}',
+    singleQuotedStringSource: 'echo \'if this is a string fi\'\n{\n  echo "test"\n}',
+    singleQuotedStringBlockOpen: '{',
+    singleQuotedStringBlockClose: '}',
+    commentAtEndOfLineSource: '{\n  echo "test" # if then else fi\n}',
+    commentAtEndOfLineBlockOpen: '{',
+    commentAtEndOfLineBlockClose: '}'
   };
 
   suite('Simple blocks', () => {
@@ -263,14 +269,6 @@ fi`;
   suite('Excluded regions - Comments', () => {
     generateExcludedRegionTests(config);
 
-    test('should handle comment at end of line', () => {
-      const source = `{
-  echo "test" # if then else fi
-}`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, '{', '}');
-    });
-
     test('should handle multiple comments', () => {
       const source = `# comment 1 with if
 # comment 2 with for done
@@ -314,15 +312,6 @@ fi`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in single-quoted strings', () => {
-      const source = `echo 'if this is a string fi'
-{
-  echo "test"
-}`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, '{', '}');
-    });
-
     test('should handle escaped quotes in double-quoted strings', () => {
       const source = `echo "say \\"if\\" or \\"fi\\""
 {

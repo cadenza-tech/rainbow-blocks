@@ -29,7 +29,13 @@ suite('AdaBlockParser Test Suite', () => {
     commentBlockClose: 'end if',
     doubleQuotedStringSource: 'Put("if then end if loop");\nif Condition then\nend if;',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end if'
+    stringBlockClose: 'end if',
+    commentAtEndOfLineSource: 'if Condition then -- end if here\n   Action;\nend if;',
+    commentAtEndOfLineBlockOpen: 'if',
+    commentAtEndOfLineBlockClose: 'end if',
+    escapedQuoteStringSource: 'Put("say ""if""");\nif Condition then\nend if;',
+    escapedQuoteStringBlockOpen: 'if',
+    escapedQuoteStringBlockClose: 'end if'
   };
 
   suite('Simple blocks', () => {
@@ -257,25 +263,9 @@ end if;`;
 
   suite('Excluded regions - Comments', () => {
     generateExcludedRegionTests(config);
-
-    test('should handle comment at end of line', () => {
-      const source = `if Condition then -- end if here
-   Action;
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
   });
 
-  suite('Excluded regions - Strings', () => {
-    test('should handle escaped quotes in strings', () => {
-      const source = `Put("say ""if""");
-if Condition then
-end if;`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end if');
-    });
-  });
+  suite('Excluded regions - Strings', () => {});
 
   suite('Excluded regions - Character literals', () => {
     test('should handle character literals', () => {

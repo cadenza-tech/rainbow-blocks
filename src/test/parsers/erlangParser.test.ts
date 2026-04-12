@@ -31,7 +31,10 @@ suite('ErlangBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'begin\n  "if end"\nend',
     stringBlockOpen: 'begin',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    escapedQuoteStringSource: 'begin\n  S = "end \\"end\\" more end",\n  ok\nend',
+    escapedQuoteStringBlockOpen: 'begin',
+    escapedQuoteStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -232,21 +235,12 @@ end`;
     });
   });
 
-  suite('Excluded regions', () => {
+  suite('Excluded regions - Comments', () => {
     generateExcludedRegionTests(config);
 
     test('should skip keywords in single-quoted atoms', () => {
       const source = `begin
   A = 'if case receive end',
-  ok
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `begin
-  S = "end \\"end\\" more end",
   ok
 end`;
       const pairs = parser.parse(source);

@@ -24,7 +24,10 @@ suite('ElixirBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'x = "if end def"\ndef foo do\nend',
     stringBlockOpen: 'def',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    escapedQuoteStringSource: 'x = "say \\"if\\" end"\ndef foo do\nend',
+    escapedQuoteStringBlockOpen: 'def',
+    escapedQuoteStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -373,14 +376,6 @@ end`;
   suite('Excluded regions - Strings', () => {
     test('should ignore keywords in single-quoted charlists', () => {
       const source = `x = 'if end def'
-def foo do
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'def', 'end');
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `x = "say \\"if\\" end"
 def foo do
 end`;
       const pairs = parser.parse(source);

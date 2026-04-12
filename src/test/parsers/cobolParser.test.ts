@@ -28,7 +28,16 @@ suite('CobolBlockParser Test Suite', () => {
     commentBlockClose: 'END-IF',
     doubleQuotedStringSource: 'IF CONDITION\n  "IF PERFORM END-IF"\nEND-IF',
     stringBlockOpen: 'IF',
-    stringBlockClose: 'END-IF'
+    stringBlockClose: 'END-IF',
+    singleQuotedStringSource: "MOVE 'IF PERFORM END-IF END-PERFORM' TO A\nIF CONDITION\nEND-IF",
+    singleQuotedStringBlockOpen: 'IF',
+    singleQuotedStringBlockClose: 'END-IF',
+    commentAtEndOfLineSource: 'IF CONDITION *> END-IF here\n  DISPLAY "Test"\nEND-IF',
+    commentAtEndOfLineBlockOpen: 'IF',
+    commentAtEndOfLineBlockClose: 'END-IF',
+    escapedQuoteStringSource: "MOVE 'It''s an IF statement' TO A\nIF CONDITION\nEND-IF",
+    escapedQuoteStringBlockOpen: 'IF',
+    escapedQuoteStringBlockClose: 'END-IF'
   };
 
   suite('Simple blocks', () => {
@@ -241,33 +250,9 @@ END-IF`;
 
   suite('Excluded regions - Comments', () => {
     generateExcludedRegionTests(config);
-
-    test('should handle comment at end of line', () => {
-      const source = `IF CONDITION *> END-IF here
-  DISPLAY "Test"
-END-IF`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
-    });
   });
 
-  suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in single-quoted strings', () => {
-      const source = `MOVE 'IF PERFORM END-IF END-PERFORM' TO A
-IF CONDITION
-END-IF`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `MOVE 'It''s an IF statement' TO A
-IF CONDITION
-END-IF`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'IF', 'END-IF');
-    });
-  });
+  suite('Excluded regions - Strings', () => {});
 
   suite('Case insensitivity', () => {
     test('should handle lowercase keywords', () => {

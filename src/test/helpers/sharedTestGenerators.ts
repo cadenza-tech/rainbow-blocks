@@ -34,6 +34,21 @@ export interface CommonTestConfig {
   doubleQuotedStringSource?: string;
   stringBlockOpen?: string;
   stringBlockClose?: string;
+
+  // Excluded regions - single-quoted strings
+  singleQuotedStringSource?: string;
+  singleQuotedStringBlockOpen?: string;
+  singleQuotedStringBlockClose?: string;
+
+  // Excluded regions - comment at end of line
+  commentAtEndOfLineSource?: string;
+  commentAtEndOfLineBlockOpen?: string;
+  commentAtEndOfLineBlockClose?: string;
+
+  // Excluded regions - escaped quotes in strings
+  escapedQuoteStringSource?: string;
+  escapedQuoteStringBlockOpen?: string;
+  escapedQuoteStringBlockClose?: string;
 }
 
 // Generate edge case tests (empty source, no blocks)
@@ -105,6 +120,97 @@ export function generateExcludedRegionTests(config: CommonTestConfig): void {
       assertSingleBlock(pairs, stringOpen, stringClose);
     });
   }
+
+  if (config.singleQuotedStringSource && config.singleQuotedStringBlockOpen && config.singleQuotedStringBlockClose) {
+    const sqSource = config.singleQuotedStringSource;
+    const sqOpen = config.singleQuotedStringBlockOpen;
+    const sqClose = config.singleQuotedStringBlockClose;
+    test('should ignore keywords in single-quoted strings', () => {
+      const pairs = config.getParser().parse(sqSource);
+      assertSingleBlock(pairs, sqOpen, sqClose);
+    });
+  }
+
+  if (config.commentAtEndOfLineSource && config.commentAtEndOfLineBlockOpen && config.commentAtEndOfLineBlockClose) {
+    const ceolSource = config.commentAtEndOfLineSource;
+    const ceolOpen = config.commentAtEndOfLineBlockOpen;
+    const ceolClose = config.commentAtEndOfLineBlockClose;
+    test('should handle comment at end of line', () => {
+      const pairs = config.getParser().parse(ceolSource);
+      assertSingleBlock(pairs, ceolOpen, ceolClose);
+    });
+  }
+
+  if (config.escapedQuoteStringSource && config.escapedQuoteStringBlockOpen && config.escapedQuoteStringBlockClose) {
+    const eqSource = config.escapedQuoteStringSource;
+    const eqOpen = config.escapedQuoteStringBlockOpen;
+    const eqClose = config.escapedQuoteStringBlockClose;
+    test('should handle escaped quotes in strings', () => {
+      const pairs = config.getParser().parse(eqSource);
+      assertSingleBlock(pairs, eqOpen, eqClose);
+    });
+  }
+}
+
+// Generate string interpolation tests (Ruby/Crystal shared)
+export function generateStringInterpolationTests(config: CommonTestConfig): void {
+  test('should handle #{} interpolation with nested double quotes', () => {
+    const pairs = config.getParser().parse('x = "#{if true then "yes" else "no" end}"');
+    assertNoBlocks(pairs);
+  });
+
+  test('should handle nested #{} interpolation', () => {
+    const pairs = config.getParser().parse('x = "outer #{a + "inner #{b}" + c}"');
+    assertNoBlocks(pairs);
+  });
+
+  test('should handle #{} with block keywords inside', () => {
+    const pairs = config.getParser().parse('"result: #{if x\n  y\nend}"');
+    assertNoBlocks(pairs);
+  });
+
+  test('should handle empty interpolation', () => {
+    const pairs = config.getParser().parse('x = "value: #{}"');
+    assertNoBlocks(pairs);
+  });
+
+  test('should handle interpolation with braces', () => {
+    const pairs = config.getParser().parse('x = "#{hash = {a: 1}}"');
+    assertNoBlocks(pairs);
+  });
+
+  test('should still parse blocks outside interpolated strings', () => {
+    const result = config.getParser().parse('"#{x}"\nif true\nend');
+    assertSingleBlock(result, 'if', 'end');
+  });
+}
+
+// Generate regex interpolation tests (Ruby/Crystal shared)
+export function generateRegexInterpolationTests(config: CommonTestConfig): void {
+  test('should handle #{} interpolation inside regex', () => {
+    const pairs = config.getParser().parse('x = /start_#{var}_end/\ndef foo\nend');
+    assertSingleBlock(pairs, 'def', 'end');
+  });
+
+  test('should handle #{} with slash inside regex interpolation', () => {
+    const pairs = config.getParser().parse('x = /start_#{get_pattern("/")}_end/\ndef foo\nend');
+    assertSingleBlock(pairs, 'def', 'end');
+  });
+
+  test('should handle #{} with nested braces inside regex', () => {
+    const pairs = config.getParser().parse('x = /prefix_#{hash = {a: 1}}_suffix/\ndef foo\nend');
+    assertSingleBlock(pairs, 'def', 'end');
+  });
+
+  test('should handle multiple #{} interpolations in regex', () => {
+    const pairs = config.getParser().parse('x = /#{a}_#{b}_#{c}/\ndef foo\nend');
+    assertSingleBlock(pairs, 'def', 'end');
+  });
+
+  test('should handle empty #{} interpolation in regex', () => {
+    const pairs = config.getParser().parse('x = /pattern_#{}end/\ndef foo\nend');
+    assertSingleBlock(pairs, 'def', 'end');
+  });
 }
 
 // Generate all common tests at once

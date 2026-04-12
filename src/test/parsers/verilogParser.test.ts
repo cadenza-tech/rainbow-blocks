@@ -28,7 +28,13 @@ suite('VerilogBlockParser Test Suite', () => {
     commentBlockClose: 'endmodule',
     doubleQuotedStringSource: 'module test;\n  initial $display("begin end module endmodule");\nendmodule',
     stringBlockOpen: 'module',
-    stringBlockClose: 'endmodule'
+    stringBlockClose: 'endmodule',
+    commentAtEndOfLineSource: 'module test; // end endmodule\n  reg a;\nendmodule',
+    commentAtEndOfLineBlockOpen: 'module',
+    commentAtEndOfLineBlockClose: 'endmodule',
+    escapedQuoteStringSource: 'module test;\n  initial $display("say \\"begin\\"");\nendmodule',
+    escapedQuoteStringBlockOpen: 'module',
+    escapedQuoteStringBlockClose: 'endmodule'
   };
 
   suite('Simple blocks', () => {
@@ -271,14 +277,6 @@ endmodule`;
       assertSingleBlock(pairs, 'module', 'endmodule');
     });
 
-    test('should handle comment at end of line', () => {
-      const source = `module test; // end endmodule
-  reg a;
-endmodule`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'module', 'endmodule');
-    });
-
     test('should handle nested block comments (not supported in Verilog)', () => {
       const source = `/* outer /* inner */ still comment */
 module test;
@@ -291,15 +289,6 @@ endmodule`;
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should handle escaped quotes in strings', () => {
-      const source = `module test;
-  initial $display("say \\"begin\\"");
-endmodule`;
-      const pairs = parser.parse(source);
-      // Only module-endmodule pair; initial has no matching end
-      assertSingleBlock(pairs, 'module', 'endmodule');
-    });
-
     test('should handle escaped characters in strings', () => {
       const source = `module test;
   initial $display("line1\\nbegin\\nend");

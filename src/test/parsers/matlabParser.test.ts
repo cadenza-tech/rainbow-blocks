@@ -28,7 +28,16 @@ suite('MatlabBlockParser Test Suite', () => {
     commentBlockClose: 'end',
     doubleQuotedStringSource: 'msg = "if for while end";\nif true\nend',
     stringBlockOpen: 'if',
-    stringBlockClose: 'end'
+    stringBlockClose: 'end',
+    singleQuotedStringSource: "msg = 'if for while end';\nif true\nend",
+    singleQuotedStringBlockOpen: 'if',
+    singleQuotedStringBlockClose: 'end',
+    commentAtEndOfLineSource: 'if true % this is a comment with end in it\n  action();\nend',
+    commentAtEndOfLineBlockOpen: 'if',
+    commentAtEndOfLineBlockClose: 'end',
+    escapedQuoteStringSource: "msg = 'it''s an if statement';\nif true\nend",
+    escapedQuoteStringBlockOpen: 'if',
+    escapedQuoteStringBlockClose: 'end'
   };
 
   suite('Simple blocks', () => {
@@ -254,33 +263,9 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
-
-    test('should handle comment at end of line', () => {
-      const source = `if true % this is a comment with end in it
-  action();
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
   });
 
   suite('Excluded regions - Strings', () => {
-    test('should ignore keywords in single-quoted strings', () => {
-      const source = `msg = 'if for while end';
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle escaped quotes in strings', () => {
-      const source = `msg = 'it''s an if statement';
-if true
-end`;
-      const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
     test('should handle escaped quotes in double-quoted strings', () => {
       const source = `msg = "say ""if"" please";
 if true
