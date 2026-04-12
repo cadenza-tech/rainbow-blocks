@@ -266,6 +266,38 @@ end`;
       assert.strictEqual(pairs[0].openKeyword.line, 5);
     });
 
+    test('should ignore keywords in <<~ squiggly heredocs', () => {
+      const source = `def process
+  result = <<~HEREDOC
+    if inside
+    end
+  HEREDOC
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle multiple <<~ heredocs on one line', () => {
+      const source = `x = <<~A + <<~B
+if in_a
+end
+A
+if in_b
+end
+B
+if real
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.line, 7);
+    });
+
+    test('should filter keyword names in <<~ heredoc openers', () => {
+      const tokens = parser.getTokens('x = <<~end\ncontent\nend\nif true\nend');
+      const tokenValues = tokens.map((t) => t.value);
+      assert.ok(!tokenValues.includes('end') || tokenValues.filter((v) => v === 'end').length === 1, 'should have at most 1 end token');
+    });
+
     test('should ignore keywords in comment on heredoc start line', () => {
       const source = `x = <<-HEREDOC # if end
   body

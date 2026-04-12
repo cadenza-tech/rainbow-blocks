@@ -669,6 +669,16 @@ end`;
   suite('Edge cases', () => {
     generateEdgeCaseTests(config);
 
+    test('should handle parenthesized block keyword if(true) do...end', () => {
+      const pairs = parser.parse('if(true) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle parenthesized defmodule(M) do...end', () => {
+      const pairs = parser.parse('defmodule(MyModule) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'defmodule', 'end');
+    });
+
     test('should handle multiple fn blocks', () => {
       const source = `list
 |> Enum.map(fn x -> x * 2 end)

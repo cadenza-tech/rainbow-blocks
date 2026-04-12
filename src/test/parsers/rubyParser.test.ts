@@ -979,6 +979,24 @@ end`;
       assertSingleBlock(pairs, 'for', 'end');
     });
 
+    test('should not include in as intermediate in for loop', () => {
+      const pairs = parser.parse('for x in collection\n  puts x\nend');
+      assertSingleBlock(pairs, 'for', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still recognize in as intermediate in case/in pattern matching', () => {
+      const source = `case value
+in Integer
+  puts "integer"
+in String
+  puts "string"
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['in', 'in']);
+    });
+
     test('should handle unless-end block', () => {
       const source = `unless condition
 do_something

@@ -2260,6 +2260,21 @@ bar() -> fun() -> ok end.`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
     });
+
+    test('should detect fun/end inside grouping parens in -define body', () => {
+      const pairs = parser.parse('-define(MACRO, (fun(X) -> X end)).');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should detect begin/end inside grouping parens in -define body', () => {
+      const pairs = parser.parse('-define(M, (begin ok end)).');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should detect try/end inside grouping parens in -define body', () => {
+      const pairs = parser.parse('-define(M, (try risky() catch _:_ -> err end)).');
+      assertSingleBlock(pairs, 'try', 'end');
+    });
   });
 
   generateCommonTests(config);

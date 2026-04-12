@@ -791,6 +791,16 @@ end if`;
       assertSingleBlock(pairs, 'do', 'end do');
     });
 
+    test('should exclude keywords in c+digit comment lines', () => {
+      const pairs = parser.parse('c123 do i = 1, 10\nend do');
+      assertNoBlocks(pairs);
+    });
+
+    test('should exclude keywords in C+digit comment lines (uppercase)', () => {
+      const pairs = parser.parse('C1 IF (X .GT. 0) THEN\n  Y = 1\nEND IF');
+      assertNoBlocks(pairs);
+    });
+
     test('should not treat c-starting keyword as comment', () => {
       const source = `critical
   shared = shared + 1

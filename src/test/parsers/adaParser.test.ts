@@ -2659,6 +2659,20 @@ end if;`;
       assertSingleBlock(pairs, 'procedure', 'end');
       assertIntermediates(pairs[0], ['is', 'begin', 'exception', 'when']);
     });
+
+    test('should not leak exception after raise as intermediate', () => {
+      const source = 'begin\n  raise Exception;\nexception\n  when others => null;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['exception', 'when']);
+    });
+
+    test('should not leak exception after new as intermediate', () => {
+      const source = 'package P is\n  type My_Error is new Exception;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
   });
 
   suite('Regression: compound end split across newlines and comments', () => {
