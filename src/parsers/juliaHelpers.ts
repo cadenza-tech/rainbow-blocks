@@ -1,5 +1,13 @@
 // Julia helper functions: pure utility functions with no parser state dependencies
 
+import type { ExcludedRegion } from '../types';
+import { isInExcludedRegion } from './parserUtils';
+
+// Callbacks for base parser methods needed by scanning functions
+export interface JuliaHelperCallbacks {
+  isAdjacentToUnicodeLetter: (source: string, startOffset: number, keywordLength: number) => boolean;
+}
+
 // Checks if single quote at position is a transpose operator (not a character literal)
 export function isTransposeOperator(source: string, pos: number): boolean {
   if (pos === 0) {
@@ -266,5 +274,183 @@ export function isSymbolStart(source: string, pos: number): boolean {
     }
   }
 
+  return true;
+}
+
+// Determines if a '[' at the given position is an indexing bracket (a[...]) vs array construction ([...])
+export function isIndexingBracket(source: string, bracketPos: number): boolean {
+  let i = bracketPos - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  if (i < 0) return false;
+  const prevChar = source[i];
+  // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing
+  if (/[a-zA-Z0-9_)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
+  // '[' before '[' means the outer bracket is indexing (e.g., a[[end]])
+  // In this context, end still means lastindex, so treat as indexing
+  if (prevChar === '[') return isIndexingBracket(source, i);
+  // Everything else (operators, (, =, comma, newline, etc.) -> array construction
+  return false;
+}
+
+// Checks if there's an unmatched block opener between two positions
+// Tracks depth by counting openers and 'end' closers to handle completed block expressions
+// e.g., "begin i^2 end" -> depth 0 (matched), "begin i^2" -> depth 1 (unmatched)
+export function hasUnmatchedBlockOpenerBetween(
+  source: string,
+  start: number,
+  end: number,
+  excludedRegions: ExcludedRegion[],
+  blockOpeners: readonly string[],
+  callbacks: JuliaHelperCallbacks
+): boolean {
+  const openers = blockOpeners.filter((kw) => kw !== 'for');
+  let depth = 0;
+  for (let i = start; i < end; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    // Check for 'end' keyword (block closer)
+    if (source[i] === 'e' && i + 3 <= end && source.slice(i, i + 3) === 'end') {
+      const before = i > 0 ? source[i - 1] : ' ';
+      const after = i + 3 < source.length ? source[i + 3] : ' ';
+      if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+        if (!callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
+          // Skip dot-preceded end (field access like obj.end, not block closer)
+          if (before !== '.') {
+            if (depth > 0) depth--;
+          }
+          i += 2;
+          continue;
+        }
+      }
+    }
+    // Check for block openers
+    for (const keyword of openers) {
+      if (i + keyword.length <= end && source[i] === keyword[0] && source.slice(i, i + keyword.length) === keyword) {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
+        if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+        if (callbacks.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+        // Skip dot-preceded keywords (field access like range.begin, not block opener)
+        if (before === '.') continue;
+        depth++;
+        i += keyword.length - 1;
+        break;
+      }
+    }
+  }
+  return depth > 0;
+}
+
+// Checks if there's ANY block-opening keyword (including if/for) between two positions
+// Used to distinguish f(end) from f(if...end)
+export function hasAnyBlockOpenerBetween(
+  source: string,
+  start: number,
+  end: number,
+  excludedRegions: ExcludedRegion[],
+  blockOpeners: readonly string[],
+  callbacks: JuliaHelperCallbacks
+): boolean {
+  for (let i = start; i < end; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    for (const keyword of blockOpeners) {
+      if (i + keyword.length <= end && source.slice(i, i + keyword.length) === keyword) {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
+        if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+        if (callbacks.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+        // Skip dot-preceded keywords (field access like range.begin, not block opener)
+        if (before === '.') continue;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Checks if there's a 'for' keyword at depth 0 between start and end positions
+export function hasForBetween(
+  source: string,
+  start: number,
+  end: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: JuliaHelperCallbacks
+): boolean {
+  let depth = 0;
+  for (let i = start; i < end; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    const ch = source[i];
+    if (ch === '(' || ch === '[') {
+      depth++;
+    } else if (ch === ')' || ch === ']') {
+      depth--;
+    } else if (depth === 0 && i + 3 <= end && source.slice(i, i + 3) === 'for') {
+      const before = i > 0 ? source[i - 1] : ' ';
+      const after = i + 3 < source.length ? source[i + 3] : ' ';
+      if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && !callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
+        // Skip dot-preceded for (field access like obj.for, not keyword)
+        if (before !== '.') return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Checks if there's an assignment '=' (not '==') between two positions at depth 0
+export function hasAssignmentBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+  let depth = 0;
+  for (let i = start; i < end; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    const ch = source[i];
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth++;
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+    } else if (depth === 0 && ch === '=') {
+      // Skip '==' (equality) and '=>' (pair): forward check
+      if (i + 1 < end && (source[i + 1] === '=' || source[i + 1] === '>')) continue;
+      // Skip second '=' of '==', '===', '!==': preceded by '='
+      if (i > start && source[i - 1] === '=') continue;
+      // Skip '!=' (not-equal): preceded by '!'
+      if (i > start && source[i - 1] === '!') continue;
+      // Skip '<=' and '>=': preceded by '<' or '>' but not compound assignments like '<<=', '>>=', '>>>='
+      if (i > start && (source[i - 1] === '<' || source[i - 1] === '>')) {
+        if (i - 2 >= start && (source[i - 2] === '>' || source[i - 2] === '<')) {
+          // Could be <<=, >>=, or >>>=, which are compound assignments
+          return true;
+        }
+        continue;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// Checks if there's a comma at depth 0 between two positions (not in excluded regions)
+// Used to distinguish generator (expr for x in 1:n) from tuple/call (a, for x in 1:n ...)
+export function hasCommaAtDepthZero(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+  let depth = 0;
+  for (let i = start; i < end; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    const ch = source[i];
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth++;
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+    } else if (depth === 0 && (ch === ',' || ch === ';')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Checks if there is only whitespace between two positions
+export function isOnlyWhitespaceBetween(source: string, start: number, end: number): boolean {
+  for (let i = start; i < end; i++) {
+    const ch = source[i];
+    if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') return false;
+  }
   return true;
 }
