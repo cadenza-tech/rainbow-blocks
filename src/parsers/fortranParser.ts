@@ -360,13 +360,13 @@ export class FortranBlockParser extends BaseBlockParser {
     if (char === '*' && this.isAtLineStart(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
-    // Fixed-form: C/c in column 1 is a comment only when followed by non-alphanumeric
-    // (space, tab, or line end). When followed by an alphanumeric character, treat as
+    // Fixed-form: C/c in column 1 is a comment only when followed by non-letter
+    // (space, tab, digit, or line end). When followed by a letter or underscore, treat as
     // free-form code (keyword or identifier) to support modern Fortran identifiers like
-    // count, compute, current, etc.
+    // count, compute, current, etc. Digits after C indicate numbered comment markers (C1, C123).
     if ((char === 'C' || char === 'c') && this.isAtLineStart(source, pos)) {
       const nextChar = pos + 1 < source.length ? source[pos + 1] : '';
-      if (!/[a-zA-Z0-9_]/.test(nextChar)) {
+      if (!/[a-zA-Z_]/.test(nextChar)) {
         return this.matchSingleLineComment(source, pos);
       }
     }

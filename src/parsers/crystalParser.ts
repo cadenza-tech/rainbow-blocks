@@ -125,13 +125,13 @@ export class CrystalBlockParser extends BaseBlockParser {
         this._lastExcludedRegion = result;
         i = result.end;
       } else {
-        // Skip past quote in failed heredoc opener (e.g., <<-"FOO without closing quote)
+        // Skip past quote in failed heredoc opener (e.g., <<-"FOO or <<~"FOO without closing quote)
         // to prevent the quote from being re-scanned as a string delimiter
         if (
           source[i] === '<' &&
           i + 3 < source.length &&
           source[i + 1] === '<' &&
-          source[i + 2] === '-' &&
+          (source[i + 2] === '-' || source[i + 2] === '~') &&
           (source[i + 3] === '"' || source[i + 3] === "'")
         ) {
           const quoteType = source[i + 3];
@@ -408,11 +408,11 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (source[token.endOffset] === ':') {
         return false;
       }
-      // Filter out keywords in heredoc openers (<<-end, <<-'do', <<-"if" etc.)
-      if (token.startOffset >= 3 && source.slice(token.startOffset - 3, token.startOffset) === '<<-') {
+      // Filter out keywords in heredoc openers (<<-end, <<~end, <<-'do', <<~'do', <<-"if", <<~"if" etc.)
+      if (token.startOffset >= 3 && /<<[-~]$/.test(source.slice(token.startOffset - 3, token.startOffset))) {
         return false;
       }
-      if (token.startOffset >= 4 && /<<-['"]$/.test(source.slice(token.startOffset - 4, token.startOffset))) {
+      if (token.startOffset >= 4 && /<<[-~]['"]$/.test(source.slice(token.startOffset - 4, token.startOffset))) {
         return false;
       }
       // Filter out keywords followed by ? or = (method names like end?, do=)

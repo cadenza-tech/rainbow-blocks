@@ -246,15 +246,15 @@ export function matchCharLiteral(source: string, pos: number): ExcludedRegion | 
   return null;
 }
 
-// Matches heredoc (Crystal doesn't have <<~ like Ruby)
+// Matches heredoc (Crystal supports <<- and <<~)
 export function matchHeredoc(source: string, pos: number): { contentStart: number; end: number } | null {
-  // Crystal requires <<- (with dash) for heredocs; <<IDENT is not valid
-  if (pos + 2 >= source.length || source[pos + 2] !== '-') {
+  // Crystal requires <<- or <<~ for heredocs; <<IDENT is not valid
+  if (pos + 2 >= source.length || (source[pos + 2] !== '-' && source[pos + 2] !== '~')) {
     return null;
   }
 
-  // Pattern requires dash: <<-'EOF', <<-"EOF", <<-EOF
-  const heredocPattern = /<<-(['"])([A-Za-z_][A-Za-z0-9_]*)\1|<<-([A-Za-z_][A-Za-z0-9_]*)/g;
+  // Pattern requires dash or tilde: <<-'EOF', <<-"EOF", <<-EOF, <<~'EOF', <<~"EOF", <<~EOF
+  const heredocPattern = /<<[-~](['"])([A-Za-z_][A-Za-z0-9_]*)\1|<<[-~]([A-Za-z_][A-Za-z0-9_]*)/g;
 
   // Find line end
   let lineEnd = pos;
@@ -264,7 +264,7 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
 
   // Collect all heredoc terminators on this line, filtering out matches inside strings/comments
   const lineContent = source.slice(pos, lineEnd);
-  const commentOrStringStarts = findLineCommentAndStringRegions(lineContent, ['-'], ['"', "'", '`']);
+  const commentOrStringStarts = findLineCommentAndStringRegions(lineContent, ['-', '~'], ['"', "'", '`']);
   const terminators: { terminator: string }[] = [];
 
   for (const match of lineContent.matchAll(heredocPattern)) {
