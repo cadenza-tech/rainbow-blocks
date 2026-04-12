@@ -732,9 +732,16 @@ export class ErlangBlockParser extends BaseBlockParser {
           parenDepth--;
         } else if (ch === '(') {
           if (!MODULE_ATTR_PAREN_PATTERN.test(this.getTextFromLineStart(source, i))) {
-            // This '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
-            // Mark that we're inside a nested call and continue scanning backward.
-            insideNestedCall = true;
+            // Check if '(' is a function call (preceded by identifier) or grouping paren (preceded by operator/comma/whitespace)
+            // Only mark as nested call if preceded by an identifier character
+            let prevIdx = i - 1;
+            while (prevIdx >= 0 && /\s/.test(source[prevIdx])) {
+              prevIdx--;
+            }
+            if (prevIdx >= 0 && /[a-zA-Z0-9_]/.test(source[prevIdx])) {
+              // This '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
+              insideNestedCall = true;
+            }
             continue;
           }
           // For -record, unmatched braces contain real expressions

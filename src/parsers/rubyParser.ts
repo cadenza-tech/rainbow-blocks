@@ -1,6 +1,6 @@
 // Ruby block parser: handles heredocs, percent literals, regex, symbols, and postfix conditionals
 
-import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import { matchHeredoc, matchMultiLineComment } from './rubyExcluded';
 import type { HeredocState, InterpolationHandlers } from './rubyFamilyHelpers';
@@ -64,6 +64,45 @@ export class RubyBlockParser extends BaseBlockParser {
   // Tracks the last excluded region found during findExcludedRegions scanning,
   // so tryMatchExcludedRegion can avoid misinterpreting characters inside prior regions
   private _lastExcludedRegion: ExcludedRegion | null = null;
+
+  // Skip 'in' intermediate when attached to 'for' (for x in collection)
+  protected matchBlocks(tokens: Token[]): BlockPair[] {
+    const pairs: BlockPair[] = [];
+    const stack: OpenBlock[] = [];
+
+    for (const token of tokens) {
+      switch (token.type) {
+        case 'block_open':
+          stack.push({ token, intermediates: [] });
+          break;
+
+        case 'block_middle':
+          if (stack.length > 0) {
+            // 'in' is a syntactic separator in 'for x in collection', not a section boundary
+            if (token.value === 'in' && stack[stack.length - 1].token.value === 'for') {
+              break;
+            }
+            stack[stack.length - 1].intermediates.push(token);
+          }
+          break;
+
+        case 'block_close': {
+          const openBlock = stack.pop();
+          if (openBlock) {
+            pairs.push({
+              openKeyword: openBlock.token,
+              closeKeyword: token,
+              intermediates: openBlock.intermediates,
+              nestLevel: stack.length
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    return pairs;
+  }
 
   // Validates block open keywords, excluding postfix conditionals
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {

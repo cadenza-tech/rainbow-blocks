@@ -243,9 +243,13 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject function call form: keyword followed by '(' (e.g., if(cond, do: val))
+    // Reject function call form with multiple args: keyword followed by '(' containing a comma
+    // e.g., if(cond, do: val) is a function call, not a block
+    // But allow parenthesized condition: if(true) do...end is a valid block
     if (afterKeyword === '(') {
-      return false;
+      if (this.hasCommaInParens(source, position + keyword.length)) {
+        return false;
+      }
     }
 
     // Check for keyword argument (e.g., if:)
@@ -556,6 +560,20 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
     }
 
+    return false;
+  }
+
+  // Checks if the parentheses starting at pos contain a comma at depth 0
+  // Used to distinguish function call form if(cond, do: val) from block form if(true)
+  private hasCommaInParens(source: string, pos: number): boolean {
+    if (pos >= source.length || source[pos] !== '(') return false;
+    let depth = 1;
+    for (let i = pos + 1; i < source.length && depth > 0; i++) {
+      const ch = source[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      else if (depth === 1 && ch === ',') return true;
+    }
     return false;
   }
 
