@@ -5,6 +5,23 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.31] - 2026-04-12
+
+### Fixed
+
+- Ada: Skip `exception` keyword after `raise` and `new` in tokenize so type references like `raise Exception;` and `type T is new Exception;` no longer leak a spurious intermediate into the enclosing block
+- Crystal: Support `<<~` squiggly heredoc syntax by extending `matchHeredoc` to accept tilde prefix alongside dash, and updating tokenize filter and failed-opener skip to handle `<<~` openers
+- Elixir: Allow parenthesized block keywords (`if(true) do...end`, `defmodule(M) do...end`) by replacing the blanket `(` rejection in `isValidBlockOpen` with a `hasCommaInParens` check that only rejects multi-arg function call form (`if(cond, do: val)`)
+- Erlang: Distinguish grouping parentheses from function call parentheses in `isInsideModuleAttributeArgs` so block expressions wrapped in grouping parens inside `-define` body (e.g., `(fun(X) -> X end)`) are no longer filtered
+- Fortran: Treat `C`/`c` followed by a digit at column 1 as a fixed-form comment by narrowing the identifier heuristic from `[a-zA-Z0-9_]` to `[a-zA-Z_]`, so numbered comment markers like `C1`, `C123` are correctly excluded
+- Ruby: Override `matchBlocks` to skip `in` as an intermediate when the enclosing block opener is `for`, since `in` in `for x in collection` is a syntactic separator, not a section boundary like `case`/`in` pattern matching
+
+### Refactored
+
+- Extract validation helpers from Pascal, Verilog, Ruby, and Bash parsers into dedicated `*Validation.ts` files using callback interface pattern
+- Extract helper functions from AppleScript, COBOL, Julia, and Erlang parsers into dedicated `*Helpers.ts` files
+- Extend shared test generators with common excluded region patterns (single-quoted strings, comment at end of line, escaped quotes) and Ruby/Crystal interpolation tests, replacing inline duplicates across 16 test files
+
 ## [1.1.30] - 2026-04-12
 
 ### Fixed
@@ -1277,6 +1294,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.31]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.30...v1.1.31
 [1.1.30]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.29...v1.1.30
 [1.1.29]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.28...v1.1.29
 [1.1.28]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.27...v1.1.28
