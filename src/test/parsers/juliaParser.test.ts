@@ -3371,5 +3371,32 @@ end`;
     });
   });
 
+  suite('Regression: abstract/primitive as variable names in indexing', () => {
+    test('should not treat abstract identifier in arr[abstract:end] as block opener', () => {
+      const source = 'function process(arr)\n  abstract = 5\n  return arr[abstract:end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The matched 'end' must be the final standalone end, not the one inside brackets
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat primitive identifier in arr[primitive:end] as block opener', () => {
+      const source = 'function process(arr)\n  primitive = 5\n  return arr[primitive:end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still detect abstract type as block opener', () => {
+      const pairs = parser.parse('abstract type MyType end');
+      assertSingleBlock(pairs, 'abstract', 'end');
+    });
+
+    test('should still detect primitive type as block opener', () => {
+      const pairs = parser.parse('primitive type MyBits 8 end');
+      assertSingleBlock(pairs, 'primitive', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

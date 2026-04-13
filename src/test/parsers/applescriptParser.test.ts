@@ -2449,5 +2449,37 @@ end try`;
     });
   });
 
+  suite('Regression: mid-line tell/if/repeat after expression terminator', () => {
+    test('should reject mid-line tell after function call with parens', () => {
+      const source = 'on outer()\n  doStuff() tell\n  more()\nend outer';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should reject mid-line repeat after function call with parens', () => {
+      const source = 'on foo()\n  doStuff() repeat\n  bar()\nend foo';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should reject mid-line if after identifier', () => {
+      const source = 'on foo()\n  x if y\n  bar()\nend foo';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should still accept tell after if condition keyword', () => {
+      const source = 'if tell\n  activate\nend tell\nend if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still accept repeat while with tell condition', () => {
+      const source = 'repeat while tell\n  doStuff()\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2516,5 +2516,34 @@ endmodule`;
     });
   });
 
+  suite('Regression: control keyword body with fork/join (par_block)', () => {
+    test('should pair initial with fork/join body', () => {
+      const pairs = parser.parse('initial fork\n  a = 1;\n  b = 2;\njoin\n');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'initial' && p.closeKeyword.value === 'join'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fork' && p.closeKeyword.value === 'join'));
+    });
+
+    test('should pair always with fork/join_any body', () => {
+      const pairs = parser.parse('always @(posedge clk) fork\n  a = 1;\njoin_any\n');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'always'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fork' && p.closeKeyword.value === 'join_any'));
+    });
+
+    test('should pair always_ff with fork/join_none body', () => {
+      const pairs = parser.parse('always_ff @(posedge clk) fork\n  a = 1;\njoin_none\n');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'always_ff'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fork' && p.closeKeyword.value === 'join_none'));
+    });
+
+    test('should still pair control keyword with begin/end body', () => {
+      const pairs = parser.parse('initial begin\n  a = 1;\nend\n');
+      assert.strictEqual(pairs.length, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'initial' && p.closeKeyword.value === 'end'));
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -1488,5 +1488,25 @@ end`;
     });
   });
 
+  suite('Regression: shell escape after statement terminator', () => {
+    test('should recognize shell escape after semicolon', () => {
+      const source = 'x = 1; !ls if for end\nfor i=1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should recognize shell escape after comma', () => {
+      const source = 'x = 1, !ls if for end\nfor i=1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should still recognize shell escape at line start', () => {
+      const source = '!ls if for end\nfor i=1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

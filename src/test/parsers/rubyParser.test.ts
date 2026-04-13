@@ -3423,5 +3423,25 @@ end`;
     });
   });
 
+  suite('Regression: heredoc after bare method call (no parens)', () => {
+    test('should accept <<EOF after identifier with space as heredoc', () => {
+      const source = 'puts <<DONE\nif true\nend\nDONE\ndef foo\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should exclude heredoc body for bare method call form', () => {
+      const source = 'puts <<EOF\nhello world\nEOF\n';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0, 'expected heredoc region');
+    });
+
+    test('should still reject <<keyword as shift (not heredoc)', () => {
+      const source = '1 <<if true\n  2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

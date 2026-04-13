@@ -1696,5 +1696,31 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: PERFORM paragraph call with iteration count', () => {
+    test('should reject PERFORM paragraph N TIMES as block', () => {
+      const source = 'PERFORM PARA-A 5 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject PERFORM paragraph VAR TIMES as block', () => {
+      const source = 'PERFORM PARA-A WS-COUNT TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still accept PERFORM N TIMES (inline count) as block', () => {
+      const source = 'PERFORM 5 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still accept PERFORM UNTIL as block', () => {
+      const source = 'PERFORM UNTIL X > 5\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
   generateCommonTests(config);
 });
