@@ -278,7 +278,49 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject keyword used as a variable for a preceding block (e.g., "if cond do" - cond is a value, do belongs to if)
+    if (this.isValueForPrecedingBlockKeyword(source, position, keyword, excludedRegions)) {
+      return false;
+    }
+
     return true;
+  }
+
+  // Checks if this keyword is being used as a variable/value for a preceding block keyword.
+  // Pattern: "<outer_block_kw> <this_kw> do" - this_kw is a variable, do belongs to outer.
+  private isValueForPrecedingBlockKeyword(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
+    // Must be immediately followed by 'do' (only whitespace between)
+    let k = position + keyword.length;
+    while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+    if (source.slice(k, k + 2) !== 'do') return false;
+    const afterDo = k + 2 < source.length ? source[k + 2] : ' ';
+    if (/[a-zA-Z0-9_]/.test(afterDo)) return false;
+
+    // Scan backward for a preceding block keyword on the current statement
+    let j = position - 1;
+    while (j >= 0) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[j];
+      if (ch === ';' || ch === '\n' || ch === '\r') break;
+      if (/[a-zA-Z_]/.test(ch)) {
+        let wordStart = j;
+        while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
+        const word = source.slice(wordStart, j + 1);
+        if ((ElixirBlockParser.DO_BLOCK_KEYWORDS as readonly string[]).includes(word)) {
+          return true;
+        }
+        j = wordStart - 1;
+        continue;
+      }
+      j--;
+    }
+    return false;
   }
 
   // Filter out middle keywords followed by colon, preceded by dot, or preceded by @ (module attributes)
@@ -475,8 +517,18 @@ export class ElixirBlockParser extends BaseBlockParser {
         // Track inner block keywords (their do/do: will be handled above)
         // Skip function call pattern: keyword followed by '(' (e.g., if(cond, do: val))
         // because do: inside parens won't be seen at depth 0 to decrement innerBlockDepth
+        // Skip value form: "if cond do" where cond is a variable name that happens to be a keyword
         if (this.isBlockKeywordAt(source, i) && !this.isBlockKeywordFunctionCall(source, i)) {
-          innerBlockDepth++;
+          let kwLen = 0;
+          for (const kw of ElixirBlockParser.DO_BLOCK_KEYWORDS) {
+            if (source.startsWith(kw, i)) {
+              kwLen = kw.length;
+              break;
+            }
+          }
+          if (kwLen > 0 && !this.isKeywordUsedAsValue(source, i + kwLen)) {
+            innerBlockDepth++;
+          }
         }
 
         // Track fn...end nesting at depth 0
