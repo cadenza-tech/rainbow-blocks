@@ -153,8 +153,8 @@ export class CobolBlockParser extends BaseBlockParser {
               // The next word is the matching END-PERFORM closer, not a paragraph name
             } else if (word !== 'until' && word !== 'varying' && word !== 'with') {
               const afterNextWord = afterInner.slice(nextWord[0].length);
-              // Check for PERFORM <variable> TIMES pattern
-              const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
+              // Check for PERFORM <variable> TIMES pattern (accept both alpha and numeric counts)
+              const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
               if (secondWord && secondWord[1].toLowerCase() === 'times') {
                 // PERFORM <variable> TIMES → structured block, accept
               } else if (
@@ -163,9 +163,30 @@ export class CobolBlockParser extends BaseBlockParser {
                   secondWord[1].toLowerCase() === 'through' ||
                   secondWord[1].toLowerCase() === 'until' ||
                   secondWord[1].toLowerCase() === 'varying' ||
-                  secondWord[1].toLowerCase() === 'with')
+                  secondWord[1].toLowerCase() === 'with' ||
+                  secondWord[1].toLowerCase() === 'after' ||
+                  secondWord[1].toLowerCase() === 'before')
               ) {
-                // PERFORM para THRU/THROUGH/UNTIL/VARYING/WITH → paragraph call with iteration, reject
+                // PERFORM para THRU/THROUGH/UNTIL/VARYING/WITH/AFTER/BEFORE → paragraph call with iteration, reject
+                continue;
+              } else if (secondWord) {
+                // Check for PERFORM <para> <count> TIMES pattern (paragraph call with iteration count)
+                const afterSecondWord = afterNextWord.slice(secondWord[0].length);
+                const thirdWord = afterSecondWord.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
+                if (thirdWord && thirdWord[1].toLowerCase() === 'times') {
+                  // PERFORM para <count> TIMES → paragraph call with iteration, reject
+                  continue;
+                }
+                // Fall through to hasMoreContent logic below
+                const isBlockOpenerVerb = this.keywords.blockOpen.some((kw) => kw === word);
+                if (!isBlockOpenerVerb) {
+                  const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/, '');
+                  const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
+                  if (!hasMoreContent) {
+                    continue;
+                  }
+                }
+                openerPositions.push(pos);
                 continue;
               } else {
                 // Check if only whitespace/newline/period follows the first word (paragraph call)
