@@ -297,6 +297,9 @@ export function isIndexingBracket(source: string, bracketPos: number): boolean {
 // Checks if there's an unmatched block opener between two positions
 // Tracks depth by counting openers and 'end' closers to handle completed block expressions
 // e.g., "begin i^2 end" -> depth 0 (matched), "begin i^2" -> depth 1 (unmatched)
+// A 'for' at the start of the range (after whitespace/comments) is counted as a
+// block-form opener (not a generator); later 'for's are treated as generator
+// expressions and ignored.
 export function hasUnmatchedBlockOpenerBetween(
   source: string,
   start: number,
@@ -307,6 +310,28 @@ export function hasUnmatchedBlockOpenerBetween(
 ): boolean {
   const openers = blockOpeners.filter((kw) => kw !== 'for');
   let depth = 0;
+
+  // Detect leading block-form 'for' (after whitespace and excluded regions)
+  let firstNonWhite = start;
+  while (firstNonWhite < end) {
+    if (isInExcludedRegion(firstNonWhite, excludedRegions)) {
+      firstNonWhite++;
+      continue;
+    }
+    const ch = source[firstNonWhite];
+    if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') break;
+    firstNonWhite++;
+  }
+  if (firstNonWhite + 3 <= end && source.slice(firstNonWhite, firstNonWhite + 3) === 'for') {
+    const before = firstNonWhite > 0 ? source[firstNonWhite - 1] : ' ';
+    const after = firstNonWhite + 3 < source.length ? source[firstNonWhite + 3] : ' ';
+    if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+      if (!callbacks.isAdjacentToUnicodeLetter(source, firstNonWhite, 3) && before !== '.') {
+        depth++;
+      }
+    }
+  }
+
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
     // Check for 'end' keyword (block closer)
@@ -374,7 +399,10 @@ export function hasAnyBlockOpenerBetween(
   return false;
 }
 
-// Checks if there's a 'for' keyword at depth 0 between start and end positions
+// Checks if there's an unmatched generator 'for' keyword at depth 0 between positions.
+// A leading 'for' (first non-whitespace token) is considered a block-form for; it is
+// skipped and paired with its matching 'end'. Only subsequent (generator-form) 'for's
+// without matching 'end' cause this to return true.
 export function hasForBetween(
   source: string,
   start: number,
@@ -382,7 +410,33 @@ export function hasForBetween(
   excludedRegions: ExcludedRegion[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Detect a leading block-form 'for' (after whitespace/excluded regions)
+  let firstNonWhite = start;
+  while (firstNonWhite < end) {
+    if (isInExcludedRegion(firstNonWhite, excludedRegions)) {
+      firstNonWhite++;
+      continue;
+    }
+    const ch = source[firstNonWhite];
+    if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') break;
+    firstNonWhite++;
+  }
+  let leadingBlockForPos = -1;
+  if (firstNonWhite + 3 <= end && source.slice(firstNonWhite, firstNonWhite + 3) === 'for') {
+    const before = firstNonWhite > 0 ? source[firstNonWhite - 1] : ' ';
+    const after = firstNonWhite + 3 < source.length ? source[firstNonWhite + 3] : ' ';
+    if (
+      !/[a-zA-Z0-9_]/.test(before) &&
+      !/[a-zA-Z0-9_]/.test(after) &&
+      !callbacks.isAdjacentToUnicodeLetter(source, firstNonWhite, 3) &&
+      before !== '.'
+    ) {
+      leadingBlockForPos = firstNonWhite;
+    }
+  }
+
   let depth = 0;
+  let blockDepth = leadingBlockForPos >= 0 ? 1 : 0;
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
     const ch = source[i];
@@ -395,7 +449,25 @@ export function hasForBetween(
       const after = i + 3 < source.length ? source[i + 3] : ' ';
       if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && !callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
         // Skip dot-preceded for (field access like obj.for, not keyword)
-        if (before !== '.') return true;
+        if (before !== '.') {
+          if (i === leadingBlockForPos) {
+            i += 2;
+            continue;
+          }
+          // Generator 'for': only counts if not inside an unmatched block (e.g., outer for/begin)
+          if (blockDepth === 0) {
+            return true;
+          }
+        }
+      }
+    } else if (depth === 0 && i + 3 <= end && source.slice(i, i + 3) === 'end') {
+      const before = i > 0 ? source[i - 1] : ' ';
+      const after = i + 3 < source.length ? source[i + 3] : ' ';
+      if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && !callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
+        if (before !== '.') {
+          if (blockDepth > 0) blockDepth--;
+          i += 2;
+        }
       }
     }
   }

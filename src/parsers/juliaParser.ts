@@ -269,6 +269,7 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if 'if' is a comprehension filter inside brackets (for...if pattern)
   // Returns true only when there's a 'for' keyword between the unmatched '[' and position
+  // If there's an unmatched block opener in the range, 'if' is inside a block body, not a filter.
   private isComprehensionFilterInBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
@@ -279,6 +280,9 @@ export class JuliaBlockParser extends BaseBlockParser {
         bracketDepth++;
       } else if (char === '[') {
         if (bracketDepth === 0) {
+          if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
+            return false;
+          }
           return hasForBetween(source, i + 1, position, excludedRegions, this.juliaHelperCallbacks);
         }
         bracketDepth--;
@@ -293,6 +297,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Checks if 'if' is a generator filter inside parentheses (for...if pattern)
+  // If there's an unmatched block opener in the range, 'if' is inside a block body, not a filter.
   private isGeneratorFilterIf(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -302,6 +307,9 @@ export class JuliaBlockParser extends BaseBlockParser {
         parenDepth++;
       } else if (char === '(') {
         if (parenDepth === 0) {
+          if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
+            return false;
+          }
           return hasForBetween(source, i + 1, position, excludedRegions, this.juliaHelperCallbacks);
         }
         parenDepth--;
