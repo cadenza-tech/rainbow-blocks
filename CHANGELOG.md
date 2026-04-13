@@ -5,6 +5,18 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.32] - 2026-04-13
+
+### Fixed
+
+- AppleScript: Reject mid-line `tell`/`if`/`repeat` preceded by an expression terminator (`)`, `]`, `}`, or a non-control-keyword identifier) in `tryMatchSingleKeywordToken` so occurrences like `doStuff() tell` no longer open a spurious block that consumes the enclosing handler's `end`
+- COBOL: Extend `secondWord` regex in `computeValidPositions` to accept numeric-leading counts and check the third word for `TIMES` so paragraph calls with iteration counts (`PERFORM PARA-A 5 TIMES`, `PERFORM PARA-A WS-COUNT TIMES`) are no longer misclassified as block `PERFORM`, and add `after`/`before` to the rejection keyword list
+- Julia: Require ` type` to follow `abstract`/`primitive` when counting depth in `hasUnmatchedBlockOpenerBetween` so `arr[abstract:end]` and `arr[primitive:end]` no longer treat the variable reference as a block opener, which previously caused `function`/`end` to pair with the `end` inside the brackets
+- MATLAB: Recognize shell escape (`!cmd`) at statement start (after `;`, `,`, or line start) via new `isAtStatementStart` helper, so `x = 1; !ls if for end` correctly excludes the entire shell command instead of exposing keywords to tokenization
+- Pascal: Allow `\n`/`\r` when scanning past the tag identifier in `isVariantRecordCase` (`pascalValidation.ts`) so multi-line variant records like `case Tag\n: Integer of` and `case Integer\nof` correctly suppress the inner `case` as a block opener
+- Ruby: Accept bare `<<IDENT` heredoc after an identifier with whitespace (e.g., `puts <<DONE`) in `matchHeredoc` while still rejecting shift operators via a new `RUBY_KEYWORDS` set (`1 <<if`, `x << y` remain classified as shift)
+- Verilog: Accept `fork` alongside `begin` as a par_block body in `scanForBeginAfterControl`, and add `chainConsumeControlKeywords` in `matchBlocks` so control keywords paired with `fork`/`join`/`join_any`/`join_none` (e.g., `initial fork...join`, `always @(posedge clk) fork...join_any`) close the preceding `initial`/`always`/`if`/etc. together with the `join*` closer
+
 ## [1.1.31] - 2026-04-12
 
 ### Fixed
@@ -1294,6 +1306,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.32]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.31...v1.1.32
 [1.1.31]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.30...v1.1.31
 [1.1.30]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.29...v1.1.30
 [1.1.29]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.28...v1.1.29
