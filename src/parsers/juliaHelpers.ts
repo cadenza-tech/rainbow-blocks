@@ -333,6 +333,11 @@ export function hasUnmatchedBlockOpenerBetween(
         if (callbacks.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
         // Skip dot-preceded keywords (field access like range.begin, not block opener)
         if (before === '.') continue;
+        // abstract/primitive are only block openers when followed by 'type'
+        if (keyword === 'abstract' || keyword === 'primitive') {
+          const afterKeyword = source.slice(i + keyword.length);
+          if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+        }
         depth++;
         i += keyword.length - 1;
         break;
