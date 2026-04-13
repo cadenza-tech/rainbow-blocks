@@ -311,6 +311,18 @@ export class MatlabBlockParser extends BaseBlockParser {
     return i < 0 || source[i] === '\n' || source[i] === '\r';
   }
 
+  // Checks if position is at the start of a statement (line start or after ; , )
+  private isAtStatementStart(source: string, pos: number): boolean {
+    if (pos === 0) return true;
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 0) return true;
+    const ch = source[i];
+    return ch === '\n' || ch === '\r' || ch === ';' || ch === ',';
+  }
+
   // Tries to match an excluded region at the given position
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
@@ -342,8 +354,8 @@ export class MatlabBlockParser extends BaseBlockParser {
       return this.matchSingleLineComment(source, pos);
     }
 
-    // Shell escape command: ! to end of line (only at line start)
-    if (char === '!' && this.isAtLineStartWithWhitespace(source, pos)) {
+    // Shell escape command: ! to end of line (at statement start: line start or after ; ,)
+    if (char === '!' && this.isAtStatementStart(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
 
