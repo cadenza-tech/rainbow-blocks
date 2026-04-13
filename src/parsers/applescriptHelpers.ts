@@ -94,6 +94,46 @@ export function matchCompoundKeyword(source: string, pos: number, keyword: strin
         while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
           j++;
         }
+        // After the continuation's newline, consume any comments on the following line
+        // so the next word can still be matched as part of the compound keyword.
+        let changed = true;
+        while (changed) {
+          changed = false;
+          // Single-line comment -- to end of line
+          if (j + 1 < source.length && source[j] === '-' && source[j + 1] === '-') {
+            while (j < source.length && source[j] !== '\r' && source[j] !== '\n') {
+              j++;
+            }
+            changed = true;
+          }
+          // Block comment (* ... *) with nested depth
+          while (j + 1 < source.length && source[j] === '(' && source[j + 1] === '*') {
+            let commentDepth = 1;
+            j += 2;
+            while (j < source.length && commentDepth > 0) {
+              if (j + 1 < source.length && source[j] === '(' && source[j + 1] === '*') {
+                commentDepth++;
+                j += 2;
+              } else if (j + 1 < source.length && source[j] === '*' && source[j + 1] === ')') {
+                commentDepth--;
+                j += 2;
+              } else {
+                j++;
+              }
+            }
+            changed = true;
+          }
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+            j++;
+            changed = true;
+          }
+          // Consume additional trailing newlines that follow the comments
+          if (j < source.length && (source[j] === '\r' || source[j] === '\n')) {
+            if (source[j] === '\r') j++;
+            if (j < source.length && source[j] === '\n') j++;
+            changed = true;
+          }
+        }
       }
     }
   }
