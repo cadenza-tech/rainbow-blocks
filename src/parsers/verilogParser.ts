@@ -13,6 +13,7 @@ import {
 } from './verilogHelpers';
 import type { VerilogValidationCallbacks } from './verilogValidation';
 import {
+  isFollowedByWord,
   isInsideParens,
   isOnDpiLine,
   isPrecededByAssertionVerb,
@@ -275,12 +276,18 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject function/task in DPI import/export declarations (no body)
-    if ((keyword === 'function' || keyword === 'task') && isOnDpiLine(source, position)) {
+    if ((keyword === 'function' || keyword === 'task') && isOnDpiLine(source, position, excludedRegions)) {
       return false;
     }
 
     // Reject interface used as port type inside parenthesized port list
     if (keyword === 'interface' && isInsideParens(source, position, excludedRegions, this.validationCallbacks)) {
+      return false;
+    }
+
+    // Reject 'interface' that qualifies 'class' (SV-2012 interface class declaration)
+    // The block is closed by endclass, not endinterface
+    if (keyword === 'interface' && isFollowedByWord(source, position + keyword.length, 'class', excludedRegions, this.validationCallbacks)) {
       return false;
     }
 

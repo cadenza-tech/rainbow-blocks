@@ -345,14 +345,69 @@ export function isPrecededByExternThroughQualifiers(
   return false;
 }
 
+// Returns true if the position is followed (after whitespace, comments, attributes)
+// by targetWord as a complete word. Used to detect "interface class" (SV-2012+)
+// where "interface" qualifies "class" rather than opening an interface block.
+export function isFollowedByWord(
+  source: string,
+  pos: number,
+  targetWord: string,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  let j = pos;
+  while (j < source.length) {
+    const ch = source[j];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      j++;
+      continue;
+    }
+    if (callbacks.isInExcludedRegion(j, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.end;
+        continue;
+      }
+      j++;
+      continue;
+    }
+    break;
+  }
+  if (!source.startsWith(targetWord, j)) return false;
+  const after = j + targetWord.length;
+  if (after < source.length && /[a-zA-Z0-9_$]/.test(source[after])) return false;
+  return true;
+}
+
 // Returns true if function/task at position is on a DPI import/export line
 // (e.g., import "DPI-C" function void f(); or export "DPI-C" task t;)
-export function isOnDpiLine(source: string, position: number): boolean {
+// Strips leading attributes (* ... *) and block comments /* ... */ from the
+// line prefix so DPI is still detected after attribute/comment decoration.
+export function isOnDpiLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   let lineStart = position;
   while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
     lineStart--;
   }
-  const lineBeforeKeyword = source.slice(lineStart, position);
+  let i = lineStart;
+  while (i < position) {
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t') {
+      i++;
+      continue;
+    }
+    // Skip attribute (* ... *) or block comment /* ... */ starting at i
+    let skipped = false;
+    for (const region of excludedRegions) {
+      if (region.start === i && region.end <= position) {
+        i = region.end;
+        skipped = true;
+        break;
+      }
+    }
+    if (skipped) continue;
+    break;
+  }
+  const lineBeforeKeyword = source.slice(i, position);
   return /^\s*(?:import|export)\s+"DPI/.test(lineBeforeKeyword);
 }
 
