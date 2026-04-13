@@ -5,6 +5,16 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.33] - 2026-04-14
+
+### Fixed
+
+- AppleScript: Consume single-line (`--`) and block (`(* *)`) comments, whitespace, and additional newlines after the continuation character (`¬`) in `matchCompoundKeyword` so compound keywords like `end tell`, `using terms from`, `with timeout`, and `else if` still match when a comment appears on the line following the continuation
+- Elixir: Skip incrementing `innerBlockDepth` in `hasDoKeyword` when a block keyword is used as a value (immediately followed by `do`), and reject block keyword tokenization in `isValidBlockOpen` via new `isValueForPrecedingBlockKeyword` so patterns like `if cond do`, `unless case do`, and `if cond or other do` pair the outer `if`/`unless` with `end` instead of the inner variable-named keyword
+- Erlang: Recognize Erlang word operators (`div`, `rem`, `band`, `bor`, `bxor`, `bsl`, `bsr`, `not`, `and`, `or`, `xor`, `andalso`, `orelse`) preceding `catch` as expression-prefix indicators via new `CATCH_EXPR_WORD_OPERATORS` set in `isCatchExpressionPrefix`, so `try X div catch err catch _:_ -> ok end` no longer classifies the first `catch` as a clause separator and inflates the `try` block's intermediate list
+- Julia: Count a leading block-form `for` as an unmatched opener in `hasUnmatchedBlockOpenerBetween` and skip it in `hasForBetween` (adding `end` pairing to track completed blocks), and add `hasUnmatchedBlockOpenerBetween` guard to `isGeneratorFilterIf`/`isComprehensionFilterInBrackets`, so `(for i in 1:3 for j in 1:3 1 end end)`, `(for ... end; if ... end)`, and `(for ... if ... end end)` correctly pair both nested and parallel block-form blocks instead of silently dropping them as generators
+- Verilog: Strip leading `(* ... *)` attributes and block comments from the line prefix in `isOnDpiLine` (adding `excludedRegions` parameter) so DPI declarations like `(* pure *) import "DPI-C" function int foo();` no longer tokenize `function` as a block opener, and add `isFollowedByWord` helper plus a new check in `isValidBlockOpen` to reject `interface` when it qualifies `class` (SV-2012 `interface class` declarations close with `endclass`, so the outer `interface` block is no longer orphaned)
+
 ## [1.1.32] - 2026-04-13
 
 ### Fixed
@@ -1306,6 +1316,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.33]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.32...v1.1.33
 [1.1.32]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.31...v1.1.32
 [1.1.31]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.30...v1.1.31
 [1.1.30]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.29...v1.1.30
