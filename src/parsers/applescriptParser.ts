@@ -439,13 +439,25 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       // 'to', 'on', 'script', 'considering', 'ignoring', and 'try' are only block
       // openers at logical line start. 'tell'/'if'/'repeat' are allowed mid-line
-      // because they can follow 'if <expr>' or similar condition contexts.
+      // only within condition contexts (e.g., 'if tell then' or 'repeat while ...').
       if (
         type === 'block_open' &&
         (keyword === 'to' || keyword === 'on' || keyword === 'script' || keyword === 'considering' || keyword === 'ignoring' || keyword === 'try')
       ) {
         if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
           return { nextPos: endPos };
+        }
+      }
+
+      // 'tell', 'if', 'repeat' may appear mid-line in condition contexts (after 'if',
+      // 'repeat while'/'until'), but must be rejected when preceded by an expression
+      // terminator like ')', ']', '}' on the same logical line (e.g., 'doStuff() tell')
+      // which would otherwise consume outer blocks' 'end'.
+      if (type === 'block_open' && (keyword === 'tell' || keyword === 'if' || keyword === 'repeat')) {
+        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
+          if (this.isPrecededByExpressionTerminator(source, i, excludedRegions)) {
+            return { nextPos: endPos };
+          }
         }
       }
 
@@ -508,6 +520,79 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   }
 
   // Checks if a keyword is at the start of a logical line (allowing block comments before)
+  // Checks if the keyword at pos is preceded by an expression terminator (), ], }, or
+  // a word character immediately adjacent (mid-line after an expression). Used to reject
+  // tell/if/repeat appearing mid-line after a non-keyword expression (e.g., 'doStuff() tell').
+  private isPrecededByExpressionTerminator(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = pos - 1;
+    // Skip whitespace and excluded regions (e.g., comments between expression and keyword)
+    while (i >= 0) {
+      if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) return false;
+    const ch = source[i];
+    // Expression terminators: closing brackets/parens/braces
+    if (ch === ')' || ch === ']' || ch === '}') return true;
+    // String/literal value terminator: any alphanumeric/underscore that is not part of a
+    // known control keyword. We conservatively accept if preceding char is any word character
+    // and look back for the preceding token (simple heuristic: if it's a control keyword,
+    // allow; otherwise reject as mid-line after expression).
+    if (/[a-zA-Z0-9_]/.test(ch)) {
+      // Extract the preceding word token
+      const wordEnd = i + 1;
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.slice(wordStart, wordEnd).toLowerCase();
+      // Control keywords and intermediates that legitimately precede tell/if/repeat mid-line
+      // (e.g., 'if tell', 'else tell', 'repeat while tell')
+      const allowedPrecedingKeywords = new Set([
+        'if',
+        'else',
+        'repeat',
+        'while',
+        'until',
+        'when',
+        'then',
+        'and',
+        'or',
+        'not',
+        'is',
+        'of',
+        'in',
+        'to',
+        'from',
+        'by',
+        'as',
+        'with',
+        'without',
+        'where',
+        'considering',
+        'ignoring',
+        'tell',
+        'try',
+        'on',
+        'given',
+        'returning'
+      ]);
+      if (allowedPrecedingKeywords.has(word)) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
   private isAtLogicalLineStart(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     let lineStart = pos;
     while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
