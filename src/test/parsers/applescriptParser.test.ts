@@ -2481,5 +2481,25 @@ end try`;
     });
   });
 
+  suite('Regression 2026-04-14: compound keyword continuation with comment on next line', () => {
+    test('should match "end tell" split by continuation and block comment', () => {
+      const source = 'tell application "X"\n  act\nend \u00AC\n(* c *)\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should match "end tell" split by continuation and line comment', () => {
+      const source = 'tell application "X"\n  act\nend \u00AC\n-- comment\ntell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should match "using terms from" split by continuation and comment', () => {
+      const source = 'using \u00AC\n(* c *)\nterms from app "X"\n  beep\nend using terms from';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+    });
+  });
+
   generateCommonTests(config);
 });

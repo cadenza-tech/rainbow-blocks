@@ -3398,5 +3398,32 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-14: block-form for/if inside parens', () => {
+    test('should pair nested for blocks inside parentheses', () => {
+      const pairs = parser.parse('(for i in 1:3\n  for j in 1:3\n    1\n  end\nend)');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should pair if after completed for block in parens', () => {
+      const pairs = parser.parse('(for i in 1:3\n  1\nend; if x\n  2\nend)');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should pair if nested inside for block in parens', () => {
+      const pairs = parser.parse('(for i in 1:10\n  if i > 5\n    println(i)\n  end\nend)');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still treat generator for as generator', () => {
+      const pairs = parser.parse('(x for x in 1:10 if x > 5)');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat comprehension as non-block', () => {
+      const pairs = parser.parse('[x for x in 1:10 if x > 5]');
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

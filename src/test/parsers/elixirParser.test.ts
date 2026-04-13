@@ -3665,5 +3665,32 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-14: keyword-named variable before do', () => {
+    test('should pair if with end when cond is used as variable', () => {
+      const pairs = parser.parse('if cond do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair unless with end when cond is used as variable', () => {
+      const pairs = parser.parse('unless cond do\n  :ok\nend');
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+
+    test('should pair if with end when case is used as variable', () => {
+      const pairs = parser.parse('if case do :ok end');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair if with end when for is used as variable', () => {
+      const pairs = parser.parse('if for do :ok end');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not reject standalone cond block', () => {
+      const pairs = parser.parse('cond do\n  x > 0 -> :pos\nend');
+      assertSingleBlock(pairs, 'cond', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

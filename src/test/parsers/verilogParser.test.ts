@@ -2545,5 +2545,38 @@ endmodule`;
     });
   });
 
+  suite('Regression 2026-04-14: DPI declaration with leading attribute', () => {
+    test('should not treat function in DPI import with leading attribute as block opener', () => {
+      const pairs = parser.parse('(* pure *) import "DPI-C" function int foo();');
+      assert.strictEqual(pairs.length, 0);
+    });
+
+    test('should not treat function in DPI import with leading block comment as block opener', () => {
+      const pairs = parser.parse('/* attr */ import "DPI-C" function int foo();');
+      assert.strictEqual(pairs.length, 0);
+    });
+
+    test('should pair module when DPI import with attribute appears inside', () => {
+      const pairs = parser.parse('module m;\n  (* pure *) import "DPI-C" function int foo();\nendmodule');
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'module');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'endmodule');
+    });
+  });
+
+  suite('Regression 2026-04-14: interface class (SV-2012)', () => {
+    test('should not treat interface qualifying class as interface block', () => {
+      const source =
+        'interface MyIf;\n  logic clk;\n  interface class Printable;\n    pure virtual function string to_string();\n  endclass\nendinterface';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      const outer = pairs.find((p) => p.openKeyword.value === 'interface' && p.closeKeyword.value === 'endinterface');
+      assert.ok(outer, 'outer interface/endinterface pair should exist');
+      assert.strictEqual(outer.openKeyword.startOffset, 0);
+      const klass = pairs.find((p) => p.openKeyword.value === 'class' && p.closeKeyword.value === 'endclass');
+      assert.ok(klass, 'class/endclass pair should exist');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2271,5 +2271,25 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression 2026-04-14: catch after Erlang word operators', () => {
+    test('should treat catch after div as expression prefix', () => {
+      const pairs = parser.parse('try X div catch err catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after rem as expression prefix', () => {
+      const pairs = parser.parse('try X rem catch err catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch after andalso as expression prefix', () => {
+      const pairs = parser.parse('try X andalso catch err catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
   generateCommonTests(config);
 });
