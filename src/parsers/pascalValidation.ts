@@ -80,7 +80,7 @@ export function isVariantRecordCase(
         k++;
         continue;
       }
-      if (source[k] === ' ' || source[k] === '\t') {
+      if (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r') {
         k++;
         continue;
       }

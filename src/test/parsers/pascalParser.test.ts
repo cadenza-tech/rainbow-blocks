@@ -1609,16 +1609,12 @@ end`;
       assertSingleBlock(pairs, 'record', 'end');
     });
 
-    test('should detect case as block when tag colon is on the next line inside record', () => {
-      // With the old /^\s+identifier\s*:/ regex, a newline after Tag would match \s.
-      // With the fixed /^[ \t]+identifier[ \t]*:/ regex, the newline does NOT match,
-      // so case is treated as a block opener.
-      const source = 'type\n  TRec = record\n    case Tag\n      : Integer of\n    0: (IntVal: Integer);\n  end;\nend';
+    test('should suppress variant case when tag colon is on the next line inside record', () => {
+      // Variant record allows arbitrary whitespace (including newlines) between tag and colon.
+      // 'case Tag\n: Integer of' is a tagged variant and must be suppressed.
+      const source = 'type\n  TRec = record\n    case Tag\n      : Integer of\n    0: (IntVal: Integer);\n  end;';
       const pairs = parser.parse(source);
-      // case is now a block opener because the colon is on the next line
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'record');
-      findBlock(pairs, 'case');
+      assertSingleBlock(pairs, 'record', 'end');
     });
 
     test('should still suppress tagged variant case with tag and colon on same line inside record', () => {
@@ -1787,15 +1783,12 @@ end.`;
   });
 
   suite('Regression: tagless variant case with of on separate line', () => {
-    test('should detect case as block when of is on the next line after identifier', () => {
-      // Bug: tagless variant regex used \s+ between identifier and "of", which
-      // allowed cross-line matching. With [ \t]+, newline no longer matches.
-      // "case Integer\n  of" should NOT be suppressed as tagless variant.
-      const source = 'type\n  TRec = record\n    case Integer\n      of\n    0: (IntVal: Integer);\n  end;\nend';
+    test('should suppress variant case when of is on the next line after identifier', () => {
+      // Variant record allows arbitrary whitespace (including newlines) between identifier and 'of'.
+      // 'case Integer\n  of' is a tagless variant and must be suppressed.
+      const source = 'type\n  TRec = record\n    case Integer\n      of\n    0: (IntVal: Integer);\n  end;';
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'record');
-      findBlock(pairs, 'case');
+      assertSingleBlock(pairs, 'record', 'end');
     });
   });
 
@@ -2466,6 +2459,20 @@ end.`;
       const pairs = parser.parse(source);
       const asmPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'asm');
       assert.ok(asmPair, 'should find asm block');
+    });
+  });
+
+  suite('Regression: variant record with newline between tag and colon', () => {
+    test('should suppress tagged variant case when tag and colon span multiple lines', () => {
+      const source = 'type\n  TV = record\n    case Tag\n    : Integer of\n      0: (X: Integer);\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should suppress tagless variant case when identifier and of span multiple lines', () => {
+      const source = 'type\n  TV = record\n    case Integer\n    of\n      0: (X: Integer);\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
     });
   });
 
