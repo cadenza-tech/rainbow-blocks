@@ -399,6 +399,14 @@ export function scanForBeginAfterControl(
       }
     }
 
+    // Check for 'fork' (par_block body, same role as begin/end but fork/join)
+    if (source.slice(i, i + 4) === 'fork') {
+      const afterFork = source[i + 4];
+      if (afterFork === undefined || !/[a-zA-Z0-9_$]/.test(afterFork)) {
+        return true;
+      }
+    }
+
     // Check for another control keyword (e.g., "always @(...) if (...) begin")
     // Continue scanning past chained control keywords instead of early return
     let isControlKw = false;

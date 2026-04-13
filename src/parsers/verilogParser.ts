@@ -542,6 +542,12 @@ export class VerilogBlockParser extends BaseBlockParser {
                 intermediates: openBlock.intermediates,
                 nestLevel: stack.length
               });
+
+              // For fork/join*, also close preceding control keyword (like always, initial, if)
+              // Mirrors the begin/end handling above
+              if (closeValue === 'join' || closeValue === 'join_any' || closeValue === 'join_none') {
+                this.chainConsumeControlKeywords(stack, pairs, token, matchIndex, tokens, ti);
+              }
             }
           }
           break;
@@ -550,6 +556,74 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     return pairs;
+  }
+
+  // Closes preceding control keywords after a fork/join pair is matched
+  private chainConsumeControlKeywords(
+    stack: OpenBlock[],
+    pairs: BlockPair[],
+    token: Token,
+    closedIndex: number,
+    tokens: Token[],
+    currentTokenIndex: number
+  ): void {
+    let controlIndex = closedIndex - 1;
+    while (controlIndex >= 0 && stack[controlIndex].token.value.startsWith('`')) {
+      controlIndex--;
+    }
+    if (controlIndex < 0 || !CONTROL_KEYWORDS.includes(stack[controlIndex].token.value)) {
+      return;
+    }
+
+    const controlBlock = stack.splice(controlIndex, 1)[0];
+
+    let elseIndex = controlIndex - 1;
+    while (elseIndex >= 0 && stack[elseIndex].token.value.startsWith('`')) {
+      elseIndex--;
+    }
+    if (elseIndex >= 0 && stack[elseIndex].token.value === 'else') {
+      const elseBlock = stack.splice(elseIndex, 1)[0];
+      pairs.push({
+        openKeyword: elseBlock.token,
+        closeKeyword: token,
+        intermediates: [...elseBlock.intermediates, controlBlock.token, ...controlBlock.intermediates],
+        nestLevel: stack.length
+      });
+    } else {
+      pairs.push({
+        openKeyword: controlBlock.token,
+        closeKeyword: token,
+        intermediates: controlBlock.intermediates,
+        nestLevel: stack.length
+      });
+    }
+
+    let hasElseNext = false;
+    for (let ni = currentTokenIndex + 1; ni < tokens.length; ni++) {
+      const candidateToken = tokens[ni];
+      if (candidateToken.value.startsWith('`')) continue;
+      hasElseNext = candidateToken.type === 'block_open' && candidateToken.value === 'else';
+      break;
+    }
+    if (!hasElseNext) {
+      let nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
+      while (nextCheckIndex >= 0 && stack[nextCheckIndex].token.value.startsWith('`')) {
+        nextCheckIndex--;
+      }
+      while (nextCheckIndex >= 0 && CONTROL_KEYWORDS.includes(stack[nextCheckIndex].token.value)) {
+        const chainedBlock = stack.splice(nextCheckIndex, 1)[0];
+        pairs.push({
+          openKeyword: chainedBlock.token,
+          closeKeyword: token,
+          intermediates: chainedBlock.intermediates,
+          nestLevel: stack.length
+        });
+        nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
+        while (nextCheckIndex >= 0 && stack[nextCheckIndex].token.value.startsWith('`')) {
+          nextCheckIndex--;
+        }
+      }
+    }
   }
 
   // Finds the index of the last opener that matches any of the valid openers
