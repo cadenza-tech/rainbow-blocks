@@ -3,6 +3,51 @@
 import type { ExcludedRegion } from '../types';
 import { findLineCommentAndStringRegions, isInsideRegion } from './parserUtils';
 
+// Ruby reserved words that cannot be heredoc terminators
+const RUBY_KEYWORDS: ReadonlySet<string> = new Set([
+  '__ENCODING__',
+  '__LINE__',
+  '__FILE__',
+  'BEGIN',
+  'END',
+  'alias',
+  'and',
+  'begin',
+  'break',
+  'case',
+  'class',
+  'def',
+  'defined',
+  'do',
+  'else',
+  'elsif',
+  'end',
+  'ensure',
+  'false',
+  'for',
+  'if',
+  'in',
+  'module',
+  'next',
+  'nil',
+  'not',
+  'or',
+  'redo',
+  'rescue',
+  'retry',
+  'return',
+  'self',
+  'super',
+  'then',
+  'true',
+  'undef',
+  'unless',
+  'until',
+  'when',
+  'while',
+  'yield'
+]);
+
 // Matches multi-line comment: =begin ... =end
 // Both =begin and =end must be at line start and followed by whitespace/newline/EOF
 export function matchMultiLineComment(source: string, pos: number): ExcludedRegion | null {
@@ -41,16 +86,24 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
   // Reject bare <<IDENT when preceded by identifier/number/closing bracket (likely shift operator)
   if (pos > 0) {
     let i = pos - 1;
+    let skippedSpace = false;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
       i--;
+      skippedSpace = true;
     }
     if (i >= 0 && /[a-zA-Z0-9_)\]}]/.test(source[i])) {
-      // After identifier/number, only allow heredoc with flag (- or ~)
-      // Rejects ambiguous cases like x <<"EOF" (could be shift + string)
-      // But after ), ], } allow bare heredoc (e.g., method() <<HEREDOC)
+      // After ), ], } always allow bare heredoc (e.g., method() <<HEREDOC)
+      // After identifier/number with space before <<, allow heredoc if the following
+      // word is not a Ruby keyword (method call: puts <<EOF, but not 1 <<if)
+      // After identifier/number with NO space (shift pattern: x<<y), reject unless flag
       if (!/[)\]}]/.test(source[i])) {
         const afterLtLt = source.slice(pos + 2);
-        if (!/^[~-]/.test(afterLtLt)) {
+        const isFlaggedHeredoc = /^[~-]/.test(afterLtLt);
+        // Check if the following word is a Ruby keyword (shift operator, not heredoc)
+        const followingWordMatch = afterLtLt.match(/^(['"`]?)([A-Za-z_][A-Za-z0-9_]*)/);
+        const followingWord = followingWordMatch ? followingWordMatch[2] : '';
+        const isRubyKeyword = RUBY_KEYWORDS.has(followingWord);
+        if (!isFlaggedHeredoc && (!skippedSpace || isRubyKeyword)) {
           // Exception: if the rest of the line contains ', <<' pattern, this is a
           // multi-heredoc list (e.g. `raise <<A, <<A`), not a shift operator. Accept.
           let lineEnd = pos;
