@@ -5,6 +5,14 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.34] - 2026-04-15
+
+### Fixed
+
+- AppleScript: Restrict `else` and `else if` middle keywords to attach only to `if` blocks in `matchBlocks`, so they no longer produce spurious intermediates on unrelated parent blocks (e.g. `try`) where they appear as syntax errors
+- Elixir: Skip excluded regions (strings, comments, sigils) when checking for commas inside parentheses in `hasCommaInParens`, so block forms like `if("hello, world") do...end` with string arguments containing commas are no longer rejected as function-call form
+- Fortran: Skip string literals (including Fortran's doubled-quote escapes `''`/`""`) when tracking parenthesis depth in `isValidBlockOpen`'s assignment detection, so `block(")") = 5` with an unbalanced paren inside a string is correctly recognized as an assignment rather than as a block opener
+
 ## [1.1.33] - 2026-04-14
 
 ### Fixed
@@ -1316,6 +1324,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.34]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.33...v1.1.34
 [1.1.33]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.32...v1.1.33
 [1.1.32]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.31...v1.1.32
 [1.1.31]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.30...v1.1.31
