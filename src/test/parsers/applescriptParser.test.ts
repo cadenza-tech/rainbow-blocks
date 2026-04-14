@@ -2501,5 +2501,33 @@ end try`;
     });
   });
 
+  suite('Regression 2026-04-14: else/else if only attach to if block', () => {
+    test('should not attach "else if" as intermediate when parent is try block', () => {
+      // Before fix: 'else if' was unconditionally added to the top stack block
+      // (try), producing spurious intermediates on the enclosing block.
+      // After fix: 'else if' is ignored when the parent is not an 'if' block.
+      const source = 'try\n  beep\nelse if x > 0 then\n  log x\nend try';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const tryBlock = findBlock(pairs, 'try');
+      assert.ok(!tryBlock.intermediates.some((t) => t.value === 'else if'), 'else if must not attach to try block');
+    });
+
+    test('should not attach "else" to a tell block', () => {
+      const source = 'tell application "Finder"\n  beep\nelse\n  log "x"\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const tellBlock = findBlock(pairs, 'tell');
+      assert.ok(!tellBlock.intermediates.some((t) => t.value === 'else'), 'else must not attach to tell block');
+    });
+
+    test('should still attach "else if" as intermediate of if block', () => {
+      const source = 'if x > 0 then\n  log "pos"\nelse if x < 0 then\n  log "neg"\nelse\n  log "zero"\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if', 'else']);
+    });
+  });
+
   generateCommonTests(config);
 });

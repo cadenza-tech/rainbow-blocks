@@ -4553,5 +4553,27 @@ end program`;
     });
   });
 
+  suite('Regression 2026-04-14: paren depth tracking ignores strings', () => {
+    test('should not create spurious block/end-block pair when block(str) is assignment', () => {
+      // Before fix: a ')' inside a string literal closed the outer '(' early,
+      // so 'block(")") = 5' never detected the '=' and 'block' was treated as
+      // a block opener that matched a subsequent 'end block', producing a
+      // spurious pair. After fix: strings are skipped, '=' is detected, and
+      // 'block' is correctly recognized as an assignment LHS (not a block).
+      const source = 'program test\n  block(")") = 5\nend block\nend program\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'program');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end program');
+    });
+
+    test('should handle doubled-quote escape inside string with unbalanced paren', () => {
+      const source = 'program test\n  block("a""b)") = 1\nend block\nend program\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'program');
+    });
+  });
+
   generateCommonTests(config);
 });

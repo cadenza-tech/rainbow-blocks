@@ -3692,5 +3692,21 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-14: hasCommaInParens ignores excluded regions', () => {
+    test('should accept if block with string argument containing comma', () => {
+      // Before fix: commas inside string literals were treated as real commas,
+      // causing hasCommaInParens to return true and reject the block form.
+      const source = 'if("hello, world") do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should accept unless block with comment containing comma inside parens', () => {
+      const source = 'unless(# a, b\n  true) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
