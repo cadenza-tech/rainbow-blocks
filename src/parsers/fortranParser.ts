@@ -151,6 +151,23 @@ export class FortranBlockParser extends BaseBlockParser {
       let pi = 0;
       while (pi < collapsed.length) {
         const ch = collapsed[pi];
+        // Skip string literals so parentheses inside strings don't affect depth.
+        // Fortran uses doubled quotes as escape: 'it''s', "he said ""hi""".
+        if (ch === "'" || ch === '"') {
+          pi++;
+          while (pi < collapsed.length) {
+            if (collapsed[pi] === ch) {
+              if (pi + 1 < collapsed.length && collapsed[pi + 1] === ch) {
+                pi += 2;
+                continue;
+              }
+              pi++;
+              break;
+            }
+            pi++;
+          }
+          continue;
+        }
         if (ch === '(') depth++;
         else if (ch === ')') {
           depth--;
