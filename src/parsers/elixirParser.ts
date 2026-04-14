@@ -247,7 +247,7 @@ export class ElixirBlockParser extends BaseBlockParser {
     // e.g., if(cond, do: val) is a function call, not a block
     // But allow parenthesized condition: if(true) do...end is a valid block
     if (afterKeyword === '(') {
-      if (this.hasCommaInParens(source, position + keyword.length)) {
+      if (this.hasCommaInParens(source, position + keyword.length, excludedRegions)) {
         return false;
       }
     }
@@ -617,14 +617,23 @@ export class ElixirBlockParser extends BaseBlockParser {
 
   // Checks if the parentheses starting at pos contain a comma at depth 0
   // Used to distinguish function call form if(cond, do: val) from block form if(true)
-  private hasCommaInParens(source: string, pos: number): boolean {
+  // Skips excluded regions (strings, comments, sigils) so commas inside them don't
+  // mislead the check (e.g. if("a, b") do...end).
+  private hasCommaInParens(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     if (pos >= source.length || source[pos] !== '(') return false;
     let depth = 1;
-    for (let i = pos + 1; i < source.length && depth > 0; i++) {
+    let i = pos + 1;
+    while (i < source.length && depth > 0) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
       const ch = source[i];
       if (ch === '(') depth++;
       else if (ch === ')') depth--;
       else if (depth === 1 && ch === ',') return true;
+      i++;
     }
     return false;
   }
