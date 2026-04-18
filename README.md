@@ -65,4 +65,4 @@ Everyone interacting in the Rainbow Blocks project's codebases, issue trackers, 
 
 ## Sponsor
 
-You can sponsor this project on [Patreon](https://patreon.com/CadenzaTech).
+You can sponsor this project on [GitHub Sponsors](https://github.com/sponsors/cadenza-tech).
