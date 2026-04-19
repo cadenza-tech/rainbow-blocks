@@ -57,13 +57,39 @@ export function matchAttribute(source: string, pos: number): ExcludedRegion {
   }
   let i = pos + 2;
   while (i < source.length) {
-    // Skip string literals inside attributes (terminate at newlines like Verilog strings)
+    // Skip string literals inside attributes. If a backslash-newline is encountered,
+    // probe forward for a closing `"` before the attribute closer `*)`: if one exists,
+    // treat `\<LF>` as a line continuation and consume both; otherwise treat it as a
+    // string terminator (matching matchVerilogString's defensive behavior).
     if (source[i] === '"') {
       i++;
       while (i < source.length && source[i] !== '"' && source[i] !== '\n' && source[i] !== '\r') {
         if (source[i] === '\\' && i + 1 < source.length) {
           const nextChar = source[i + 1];
-          if (nextChar === '\n' || nextChar === '\r') break;
+          if (nextChar === '\n' || nextChar === '\r') {
+            const newlineLen = nextChar === '\r' && source[i + 2] === '\n' ? 2 : 1;
+            const afterNewline = i + 1 + newlineLen;
+            // Look ahead for a closing `"` before the attribute closer `*)` or EOF
+            let probe = afterNewline;
+            let foundQuote = false;
+            while (probe < source.length) {
+              const pch = source[probe];
+              if (pch === '"') {
+                foundQuote = true;
+                break;
+              }
+              if (pch === '*' && probe + 1 < source.length && source[probe + 1] === ')') {
+                break;
+              }
+              probe++;
+            }
+            if (foundQuote) {
+              i = afterNewline;
+              continue;
+            }
+            // No closing quote on continuation: treat `\<LF>` as terminator
+            break;
+          }
           i += 2;
           continue;
         }
@@ -72,7 +98,7 @@ export function matchAttribute(source: string, pos: number): ExcludedRegion {
       if (i < source.length && source[i] === '"') {
         i++;
       } else if (i < source.length && (source[i] === '\n' || source[i] === '\r')) {
-        // String terminated by newline: skip newline and any stray closing quote
+        // String terminated by bare newline: skip newline and any stray closing quote
         if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
           i += 2;
         } else {
@@ -238,6 +264,16 @@ export function matchDefineDirective(source: string, pos: number): ExcludedRegio
 // Matches `undef directive to end of line (always single-line, no continuation)
 export function matchUndefDirective(source: string, pos: number): ExcludedRegion {
   let i = pos + 6;
+  while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+    i++;
+  }
+  return { start: pos, end: i };
+}
+
+// Excludes `pragma directive contents to end of line. Pragma arguments may contain
+// keyword-like tokens (e.g. `pragma protect begin / end) that must not be tokenized.
+export function matchPragmaDirective(source: string, pos: number): ExcludedRegion {
+  let i = pos + 7;
   while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
     i++;
   }

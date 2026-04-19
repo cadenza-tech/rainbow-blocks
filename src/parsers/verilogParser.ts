@@ -8,6 +8,7 @@ import {
   matchBlockComment,
   matchDefineDirective,
   matchEscapedIdentifier,
+  matchPragmaDirective,
   matchUndefDirective,
   matchVerilogString
 } from './verilogHelpers';
@@ -375,6 +376,12 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Word boundary check prevents matching `undefine, `undef_FOO, etc.
     if (char === '`' && source.slice(pos, pos + 6) === '`undef' && (pos + 6 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 6]))) {
       return matchUndefDirective(source, pos);
+    }
+
+    // `pragma directive: exclude to end of line. Arguments may contain keyword-like
+    // tokens (e.g. `pragma protect begin / end) that must not open/close blocks.
+    if (char === '`' && source.slice(pos, pos + 7) === '`pragma' && (pos + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 7]))) {
+      return matchPragmaDirective(source, pos);
     }
 
     // SystemVerilog escaped identifier: \<chars> terminated by whitespace
