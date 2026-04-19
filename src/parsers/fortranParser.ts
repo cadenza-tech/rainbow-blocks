@@ -186,6 +186,30 @@ export class FortranBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // Detects construct labels: 'name: if/do/block/...' where 'name' is any identifier,
+  // here specifically when the identifier happens to match a keyword
+  // (e.g., 'program: if ...', 'block: do i=1,10'). The keyword is followed by ':' (not '::').
+  private isFortranConstructLabel(source: string, position: number, keyword: string): boolean {
+    let i = position + keyword.length;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    if (source[i] !== ':') return false;
+    // '::' is a type declaration separator, not a label colon
+    if (source[i + 1] === ':') return false;
+    return true;
+  }
+
+  // Detects construct names following 'end <type>' (e.g., 'end if program', 'end do block').
+  // The name identifier is on the same line after 'end <type>' and may match a keyword.
+  private isFortranEndConstructName(source: string, position: number): boolean {
+    const lineStart = findLineStart(source, position);
+    const before = source.slice(lineStart, position);
+    // Match 'end <compound-type> ' at the tail of `before`
+    const pattern = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})[ \\t]+$`, 'i');
+    return pattern.test(before);
+  }
+
   // Validates 'type': rejects select type guards, type specifiers, continuation patterns
   private isValidTypeOpen(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
     const typeLineStart = findLineStart(source, position);
@@ -483,6 +507,13 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Skip keywords on variable declaration lines (after ::)
       if (isAfterDoubleColon(source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Skip identifiers used as construct labels or construct names, independent of token type.
+      // Examples: 'program: if (...)' - 'program' is the label; 'end if program' - 'program'
+      // is the construct name. Both should not be treated as keywords.
+      if (this.isFortranConstructLabel(source, startOffset, keyword) || this.isFortranEndConstructName(source, startOffset)) {
         continue;
       }
 

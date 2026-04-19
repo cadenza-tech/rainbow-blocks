@@ -543,6 +543,12 @@ export class AdaBlockParser extends BaseBlockParser {
         if (afterIsPos < source.length && source[afterIsPos] === '<' && afterIsPos + 1 < source.length && source[afterIsPos + 1] === '>') {
           continue;
         }
+        // Skip 'is' that starts an Ada 2012 expression function body: `is (expression);`
+        // The corresponding function/procedure was already rejected as a block opener
+        // by isValidSubprogramOpen, so this 'is' should not leak as an intermediate.
+        if (afterIsPos < source.length && source[afterIsPos] === '(') {
+          continue;
+        }
       }
 
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
