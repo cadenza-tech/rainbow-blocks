@@ -86,6 +86,18 @@ export class PascalBlockParser extends BaseBlockParser {
           return false;
         }
         if (/[a-zA-Z0-9_]/.test(prev)) {
+          // Extract the preceding word; if it is a statement-introducing reserved
+          // word (begin/then/do/else/of/try/finally/except/repeat/label),
+          // 'asm' following it is a valid statement start.
+          let ws = bp;
+          while (ws >= 0 && /[a-zA-Z0-9_]/.test(source[ws])) {
+            ws--;
+          }
+          const word = source.slice(ws + 1, bp + 1).toLowerCase();
+          const STATEMENT_START_KEYWORDS = new Set(['begin', 'then', 'do', 'else', 'of', 'try', 'finally', 'except', 'repeat', 'label']);
+          if (STATEMENT_START_KEYWORDS.has(word)) {
+            return true;
+          }
           return false;
         }
       }
@@ -274,49 +286,30 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     // Check if '=' is in a comparison context (not a type definition)
-    // e.g. 'if x = class' should not treat class as block opener
+    // e.g. 'if x = class', 'if Self.X = class', 'if a + b = class', 'while foo() = class'
+    // Scan backward to the start of the statement and look for any comparison-context
+    // keyword along the way. Stop at statement boundaries (';' and start-of-source).
     {
       let ci = i - 1;
       while (ci >= 0) {
         if (this.isInExcludedRegion(ci, excludedRegions)) {
-          ci--;
-          continue;
-        }
-        if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') {
-          ci--;
-          continue;
-        }
-        break;
-      }
-      // Extract the word ending at ci
-      if (ci >= 0 && /[a-zA-Z0-9_]/.test(source[ci])) {
-        const wordEnd = ci;
-        while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
-        const word = source.slice(ci, wordEnd + 1).toLowerCase();
-        if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
-          return false;
-        }
-        // Also check one more word back (e.g. 'if x = class' where x is an identifier)
-        let ci2 = ci - 1;
-        while (ci2 >= 0) {
-          if (this.isInExcludedRegion(ci2, excludedRegions)) {
-            ci2--;
+          const region = this.findExcludedRegionAt(ci, excludedRegions);
+          if (region) {
+            ci = region.start - 1;
             continue;
           }
-          if (source[ci2] === ' ' || source[ci2] === '\t' || source[ci2] === '\n' || source[ci2] === '\r') {
-            ci2--;
-            continue;
-          }
-          break;
         }
-        if (ci2 >= 0 && /[a-zA-Z0-9_]/.test(source[ci2])) {
-          const wordEnd2 = ci2;
-          while (ci2 > 0 && /[a-zA-Z0-9_]/.test(source[ci2 - 1])) ci2--;
-          const word2 = source.slice(ci2, wordEnd2 + 1).toLowerCase();
-          if (COMPARISON_CONTEXT_KEYWORDS.has(word2)) {
+        const ch = source[ci];
+        if (ch === ';') break;
+        if (/[a-zA-Z_]/.test(ch)) {
+          const wordEnd = ci;
+          while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
+          const word = source.slice(ci, wordEnd + 1).toLowerCase();
+          if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
             return false;
           }
         }
+        ci--;
       }
     }
 
@@ -411,7 +404,15 @@ export class PascalBlockParser extends BaseBlockParser {
               continue;
             }
             if (/[a-zA-Z0-9_]/.test(prev)) {
-              continue;
+              let ws = bp;
+              while (ws >= 0 && /[a-zA-Z0-9_]/.test(source[ws])) {
+                ws--;
+              }
+              const word = source.slice(ws + 1, bp + 1).toLowerCase();
+              const STATEMENT_START_KEYWORDS = new Set(['begin', 'then', 'do', 'else', 'of', 'try', 'finally', 'except', 'repeat', 'label']);
+              if (!STATEMENT_START_KEYWORDS.has(word)) {
+                continue;
+              }
             }
           }
         }
