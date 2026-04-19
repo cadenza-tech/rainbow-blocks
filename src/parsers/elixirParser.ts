@@ -616,23 +616,30 @@ export class ElixirBlockParser extends BaseBlockParser {
   }
 
   // Checks if the parentheses starting at pos contain a comma at depth 0
-  // Used to distinguish function call form if(cond, do: val) from block form if(true)
-  // Skips excluded regions (strings, comments, sigils) so commas inside them don't
-  // mislead the check (e.g. if("a, b") do...end).
+  // Used to distinguish function call form if(cond, do: val) from block form if(true).
+  // Tracks (), {}, and [] depths independently so commas inside map/list/tuple
+  // literals inside the condition (e.g. if(%{a: 1, b: 2}) do) are not mistaken
+  // for argument separators. Skips excluded regions (strings, comments, sigils).
   private hasCommaInParens(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     if (pos >= source.length || source[pos] !== '(') return false;
-    let depth = 1;
+    let parenDepth = 1;
+    let braceDepth = 0;
+    let bracketDepth = 0;
     let i = pos + 1;
-    while (i < source.length && depth > 0) {
+    while (i < source.length && parenDepth > 0) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
       if (region) {
         i = region.end;
         continue;
       }
       const ch = source[i];
-      if (ch === '(') depth++;
-      else if (ch === ')') depth--;
-      else if (depth === 1 && ch === ',') return true;
+      if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+      else if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth--;
+      else if (ch === '[') bracketDepth++;
+      else if (ch === ']') bracketDepth--;
+      else if (parenDepth === 1 && braceDepth === 0 && bracketDepth === 0 && ch === ',') return true;
       i++;
     }
     return false;

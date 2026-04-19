@@ -199,15 +199,23 @@ export class JuliaBlockParser extends BaseBlockParser {
         bracketDepth++;
       } else if (char === '[') {
         if (bracketDepth === 0) {
+          const isIndexing = isIndexingBracket(source, i);
           if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
-            return false;
+            // In indexing brackets, `begin` immediately followed by `:` is the firstindex
+            // keyword (not a block opener). If every unmatched opener is such a `begin:`
+            // then treat the `end` as lastindex.
+            if (isIndexing && this.allUnmatchedBeginsAreFirstindex(source, i + 1, position, excludedRegions)) {
+              // fall through to return isIndexing
+            } else {
+              return false;
+            }
           }
           // Unmatched '[' (no closing ']') means the bracket is unclosed (likely during editing)
           // Keywords after it should still be valid block keywords
           if (!this.hasMatchingCloseBracket(source, position + 3, excludedRegions)) {
             return false;
           }
-          return isIndexingBracket(source, i);
+          return isIndexing;
         }
         bracketDepth--;
       } else if (char === ')') {
@@ -233,6 +241,63 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
     }
     return false;
+  }
+
+  // Checks whether every unmatched `begin` in [start, end) is the firstindex keyword
+  // (i.e., followed by `:`). Used to accept `arr[begin:end]` where `begin` is firstindex
+  // rather than a block opener. Scans with the full blockOpen list for openers and
+  // returns true only when the depth imbalance is entirely due to `begin:` occurrences.
+  private allUnmatchedBeginsAreFirstindex(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Walk range; for each `begin` not followed by `:`, fail. Also count ends so that a
+    // genuine block (`begin ... end`) cancels out. If no unmatched non-firstindex begin
+    // remains, return true.
+    const blockOpen = this.keywords.blockOpen;
+    let depth = 0;
+    let nonFirstindexBegins = 0;
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      if (source[i] === 'e' && i + 3 <= end && source.slice(i, i + 3) === 'end') {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + 3 < source.length ? source[i + 3] : ' ';
+        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && before !== '.') {
+          if (!this.isAdjacentToUnicodeLetter(source, i, 3)) {
+            if (depth > 0) {
+              depth--;
+            } else if (nonFirstindexBegins > 0) {
+              nonFirstindexBegins--;
+            }
+            i += 2;
+            continue;
+          }
+        }
+      }
+      for (const kw of blockOpen) {
+        if (i + kw.length <= end && source[i] === kw[0] && source.slice(i, i + kw.length) === kw) {
+          const before = i > 0 ? source[i - 1] : ' ';
+          const after = i + kw.length < source.length ? source[i + kw.length] : ' ';
+          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+          if (before === '.') continue;
+          if (this.isAdjacentToUnicodeLetter(source, i, kw.length)) continue;
+          if (kw === 'begin') {
+            // Check if followed by `:` (firstindex syntax). Skip whitespace in between.
+            let k = i + kw.length;
+            while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+            if (k < source.length && source[k] === ':' && source[k + 1] !== ':') {
+              // firstindex; does not open a block
+              i += kw.length - 1;
+              break;
+            }
+            nonFirstindexBegins++;
+            i += kw.length - 1;
+            break;
+          }
+          depth++;
+          i += kw.length - 1;
+          break;
+        }
+      }
+    }
+    return depth === 0 && nonFirstindexBegins === 0;
   }
 
   // Checks if there is a matching ']' that closes the current bracket group after 'from'
