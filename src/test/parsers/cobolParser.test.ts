@@ -1722,5 +1722,21 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: pseudo-text detection with intervening comments/directives', () => {
+    test('should detect pseudo-text after inline *> comment between REPLACING and ==', () => {
+      // Before fix: the *> inline comment broke backward scan, leaving ==IF==/==END-IF== unexcluded.
+      const source = 'COPY X REPLACING *> comment\n==IF== BY ==END-IF==.\nIF Y\nEND-IF';
+      const pairs = parser.parse(source);
+      // Only the real IF Y / END-IF should be a pair; the ones inside ==...== must be excluded.
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should detect pseudo-text with >> directive on its own line between REPLACING and ==', () => {
+      const source = 'COPY X REPLACING\n>>SOURCE FORMAT FREE\n==IF== BY ==END-IF==.\nIF Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2686,5 +2686,26 @@ end if;`;
     });
   });
 
+  suite('Regression: Ada 2012 expression function is should not leak as intermediate', () => {
+    test('should not include is from expression function in enclosing package intermediates', () => {
+      const source = 'package P is\n  function Square(X : Integer) return Integer is (X * X);\nend P;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      // Only the package's own 'is' should appear as an intermediate
+      const isCount = intermediates.filter((v) => v === 'is').length;
+      assert.strictEqual(isCount, 1, `expected exactly 1 'is' intermediate, got ${isCount}`);
+    });
+
+    test('should not leak expression function is through enclosing procedure body', () => {
+      const source = 'procedure Main is\n  function Square(X : Integer) return Integer is (X * X);\nbegin\n  null;\nend Main;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      const isCount = intermediates.filter((v) => v === 'is').length;
+      assert.strictEqual(isCount, 1, `expected exactly 1 'is' intermediate, got ${isCount}`);
+    });
+  });
+
   generateCommonTests(config);
 });

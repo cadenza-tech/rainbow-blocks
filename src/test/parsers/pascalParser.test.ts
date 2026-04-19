@@ -2476,5 +2476,49 @@ end.`;
     });
   });
 
+  suite('Regression: asm after statement-introducing keywords on same line', () => {
+    test('should detect asm after then on same line', () => {
+      const source = 'begin if x then asm nop end; end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const asmBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.ok(asmBlock, 'asm block should be detected after then');
+    });
+
+    test('should detect asm after do on same line', () => {
+      const source = 'begin while x do asm nop end; end';
+      const pairs = parser.parse(source);
+      const asmBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.ok(asmBlock, 'asm block should be detected after do');
+    });
+
+    test('should detect asm after begin on same line', () => {
+      const source = 'begin asm nop end end';
+      const pairs = parser.parse(source);
+      const asmBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.ok(asmBlock, 'asm block should be detected after begin');
+    });
+  });
+
+  suite('Regression: qualified/complex expressions before = class', () => {
+    test('should not treat class as type def after qualified identifier comparison', () => {
+      const source = 'begin if foo.bar = class then y := 1; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class as type def after arithmetic expression comparison', () => {
+      const source = 'begin if a + b = class then y := 1; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class as type def after function call comparison', () => {
+      const source = 'begin if Foo() = class then y := 1; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

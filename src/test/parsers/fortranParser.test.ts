@@ -4575,5 +4575,31 @@ end program`;
     });
   });
 
+  suite('Regression: construct labels and end-construct names', () => {
+    test('should not treat construct label program: as a block opener', () => {
+      const source = 'program outer\n  program: if (a) then\n    x = 1\n  end if program\nend program\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // The outer program should pair with the final end program (not a label/name token).
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outer, 'outer program should be paired');
+      assert.strictEqual(outer.openKeyword.value.toLowerCase(), 'program');
+      assert.strictEqual(outer.closeKeyword.value.toLowerCase(), 'end program');
+    });
+
+    test('should not treat labeled do loop name as block opener', () => {
+      const source = 'program p\n  block: do i = 1, 10\n    x = i\n  end do block\nend program\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat module name matching keyword as intermediate', () => {
+      // module whose name is 'contains' (matches a Fortran keyword)
+      const source = 'module something\n  integer :: x\nend module something\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

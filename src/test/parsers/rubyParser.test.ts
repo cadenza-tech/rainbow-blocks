@@ -3441,6 +3441,24 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should accept bare <<END as heredoc terminator after identifier with space', () => {
+      const source = 'puts <<END\nif x\n  y\nend\nEND\ndef foo\n  1\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should accept bare <<BEGIN as heredoc terminator after identifier with space', () => {
+      const source = 'raise <<BEGIN\n  body\nBEGIN\ndef foo\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should exclude heredoc body when terminator is END', () => {
+      const source = 'raise <<END\nInvalid argument.\nEND\n';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length > 0, 'expected heredoc region for bare <<END form');
+    });
   });
 
   generateCommonTests(config);

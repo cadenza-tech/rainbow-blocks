@@ -3210,6 +3210,18 @@ end`;
       const pairs = parser.parse('[begin 42 end]');
       assertSingleBlock(pairs, 'begin', 'end');
     });
+
+    test('should pair outer end (not arr[begin:end]) with outer function', () => {
+      const source = 'function slice(arr)\n  return arr[begin:end]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const block = pairs[0];
+      assert.strictEqual(block.openKeyword.value, 'function');
+      assert.strictEqual(block.closeKeyword.value, 'end');
+      // outer 'end' is at the start of last line, not inside arr[begin:end]
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(block.closeKeyword.startOffset, outerEndOffset);
+    });
   });
 
   suite('Regression: generator for after block expression', () => {

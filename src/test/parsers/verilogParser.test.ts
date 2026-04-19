@@ -2578,5 +2578,25 @@ endmodule`;
     });
   });
 
+  suite('Regression: `pragma directive arguments should not be tokenized', () => {
+    test('should exclude `pragma protect begin/end from block keyword detection', () => {
+      const source = '`pragma protect begin\nmodule m;\nendmodule\n`pragma protect end\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'module');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'endmodule');
+    });
+  });
+
+  suite('Regression: attribute with backslash-newline inside closed string', () => {
+    test('should not swallow source past attribute when string contains \\<LF>', () => {
+      const source = '(* attr = "a\\\nb" *) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'module');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });

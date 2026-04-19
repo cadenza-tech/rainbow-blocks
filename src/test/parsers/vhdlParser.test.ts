@@ -2823,5 +2823,36 @@ end package;`;
     });
   });
 
+  suite('Regression: VHDL-2008 subprogram/package instantiation (is new)', () => {
+    test('should not treat package X is new Y as block opener', () => {
+      const source = 'package outer_pkg is\n  package inner_pkg is new work.generic_pkg generic map (WIDTH => 8);\nend package;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'package');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+
+    test('should not treat top-level package X is new Y as block opener', () => {
+      const source = 'package my_pkg is new work.generic_pkg generic map (WIDTH => 8);\nentity E is\nend entity;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'entity');
+    });
+
+    test('should not treat procedure X is new Y as block opener', () => {
+      const source = 'architecture rtl of E is\n  procedure p is new generic_proc generic map (T => integer);\nbegin\n  null;\nend architecture;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'architecture');
+    });
+
+    test('should not treat function X is new Y as block opener', () => {
+      const source = 'architecture rtl of E is\n  function f is new generic_func generic map (T => integer);\nbegin\n  null;\nend architecture;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'architecture');
+    });
+  });
+
   generateCommonTests(config);
 });

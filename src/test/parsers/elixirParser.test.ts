@@ -3708,5 +3708,31 @@ end`;
     });
   });
 
+  suite('Regression: hasCommaInParens tracks {} and [] depth', () => {
+    test('should accept if with map literal condition containing comma', () => {
+      const source = 'if(%{a: 1, b: 2}) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should accept unless with list literal condition containing comma', () => {
+      const source = 'unless([1, 2, 3]) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+
+    test('should accept case with tuple condition containing comma', () => {
+      const source = 'case({a, b}) do\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should accept if x in [1, 2, 3] do form', () => {
+      const source = 'if(x in [1, 2, 3]) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
