@@ -388,8 +388,9 @@ export function isValidFuncProcOpen(
       if (source[j] === ';') return false;
       const twoChars = source.slice(j, j + 2).toLowerCase();
       if (twoChars === 'is' && (j === 0 || !/[a-zA-Z0-9_]/.test(source[j - 1])) && (j + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 2]))) {
-        // Check if this is a 'null procedure' declaration (`is null;`) or a VHDL-2019
-        // expression function (`is (expression);`) - neither opens a block.
+        // Check if this is a 'null procedure' declaration (`is null;`), a VHDL-2019
+        // expression function (`is (expression);`), or a VHDL-2008 subprogram
+        // instantiation (`is new <generic_subprogram>;`) - none open a block.
         let k = j + 2;
         while (k < source.length && (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r')) {
           k++;
@@ -399,6 +400,10 @@ export function isValidFuncProcOpen(
         }
         const nullWord = source.slice(k, k + 4).toLowerCase();
         if (nullWord === 'null' && (k + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[k + 4]))) {
+          return false;
+        }
+        const newWord = source.slice(k, k + 3).toLowerCase();
+        if (newWord === 'new' && (k + 3 >= source.length || !/[a-zA-Z0-9_]/.test(source[k + 3]))) {
           return false;
         }
         return true;

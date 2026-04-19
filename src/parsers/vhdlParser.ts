@@ -128,7 +128,56 @@ export class VhdlBlockParser extends BaseBlockParser {
       return isValidComponentOpen(source, position, excludedRegions, cb);
     }
 
+    // Reject 'package X is new Y generic map(...)' (VHDL-2008 package instantiation).
+    // Unlike a real package declaration, an instantiation ends with ';' and has no body.
+    if (lowerKeyword === 'package') {
+      return this.isValidPackageOpen(source, position, excludedRegions);
+    }
+
     return true;
+  }
+
+  // Rejects VHDL-2008 package instantiations: `package X is new Y generic map(...);`
+  // Scans forward skipping whitespace/comments to locate 'is new' after 'package <name>'.
+  private isValidPackageOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step past 'package' keyword (length 7) and the package name identifier.
+    let i = position + 7;
+    const skipWs = (p: number): number => {
+      let q = p;
+      while (q < source.length) {
+        if (this.isInExcludedRegion(q, excludedRegions)) {
+          const region = this.findExcludedRegionAt(q, excludedRegions);
+          if (region) {
+            q = region.end;
+            continue;
+          }
+        }
+        if (source[q] === ' ' || source[q] === '\t' || source[q] === '\n' || source[q] === '\r') {
+          q++;
+          continue;
+        }
+        break;
+      }
+      return q;
+    };
+    i = skipWs(i);
+    // Skip the package name (identifier or \extended_identifier\)
+    if (i < source.length && source[i] === '\\') {
+      i++;
+      while (i < source.length && source[i] !== '\\') i++;
+      if (i < source.length) i++;
+    } else {
+      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+    }
+    i = skipWs(i);
+    // Expect 'is'
+    if (i + 2 > source.length || !/is/i.test(source.slice(i, i + 2))) return true;
+    if (i + 2 < source.length && /[a-zA-Z0-9_]/.test(source[i + 2])) return true;
+    i = skipWs(i + 2);
+    // Expect 'new'
+    if (i + 3 > source.length || !/new/i.test(source.slice(i, i + 3))) return true;
+    if (i + 3 < source.length && /[a-zA-Z0-9_]/.test(source[i + 3])) return true;
+    return false;
   }
 
   protected isValidBlockClose(_keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
