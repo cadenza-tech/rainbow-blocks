@@ -3,13 +3,11 @@
 import type { ExcludedRegion } from '../types';
 import { findLineCommentAndStringRegions, isInsideRegion } from './parserUtils';
 
-// Ruby reserved words that cannot be heredoc terminators
+// Ruby reserved words that cannot be heredoc terminators.
+// Uppercase identifiers (BEGIN, END, __ENCODING__, __LINE__, __FILE__) are
+// excluded because they are canonical heredoc terminator names in real-world
+// Ruby code (e.g. `raise <<END ... END`).
 const RUBY_KEYWORDS: ReadonlySet<string> = new Set([
-  '__ENCODING__',
-  '__LINE__',
-  '__FILE__',
-  'BEGIN',
-  'END',
   'alias',
   'and',
   'begin',

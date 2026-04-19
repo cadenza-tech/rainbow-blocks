@@ -31,6 +31,40 @@ function isOnExcludedLine(source: string, pos: number, callbacks: CobolHelperCal
   return false;
 }
 
+// Advances j backward past whitespace, fixed-format comment lines, >> directive lines,
+// and *> inline comments so the backward scan lands on real statement content.
+// Used by pseudo-text context detection where COPY REPLACING ... ==X== may have
+// intervening comments or directives.
+function skipBackwardWhitespaceAndComments(source: string, startPos: number, callbacks: CobolHelperCallbacks): number {
+  let j = startPos;
+  while (j >= 0) {
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
+      j--;
+    }
+    if (j < 0) return -1;
+
+    let lineStart = j;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+
+    if (isOnExcludedLine(source, j, callbacks)) {
+      j = lineStart - 1;
+      continue;
+    }
+
+    const line = source.slice(lineStart, j + 1);
+    const commentIdx = line.indexOf('*>');
+    if (commentIdx !== -1) {
+      j = lineStart + commentIdx - 1;
+      continue;
+    }
+
+    break;
+  }
+  return j;
+}
+
 // Match pseudo-text delimiters ==...==
 export function matchPseudoText(source: string, pos: number): ExcludedRegion {
   // Look for closing ==
@@ -184,13 +218,10 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
 }
 
 // Scans backward from position i to check if the preceding word matches target keyword
-// Skips whitespace, pseudo-text (==...==), and BY keywords between replacement pairs
-export function isPrecededByKeyword(source: string, i: number, target: string): boolean {
-  let j = i;
-  // Skip whitespace
-  while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-    j--;
-  }
+// Skips whitespace, pseudo-text (==...==), BY keywords, inline *> comments,
+// fixed-format comment lines, and >> directive lines.
+export function isPrecededByKeyword(source: string, i: number, target: string, callbacks: CobolHelperCallbacks): boolean {
+  let j = skipBackwardWhitespaceAndComments(source, i, callbacks);
   if (j < 0) {
     return false;
   }
@@ -206,10 +237,7 @@ export function isPrecededByKeyword(source: string, i: number, target: string): 
       }
       j--;
     }
-    // Skip whitespace
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-      j--;
-    }
+    j = skipBackwardWhitespaceAndComments(source, j, callbacks);
     if (j < 0) {
       return false;
     }
@@ -227,11 +255,7 @@ export function isPrecededByKeyword(source: string, i: number, target: string): 
     if (byWord !== 'BY') {
       break;
     }
-    // Skip past BY and whitespace, then continue to next pseudo-text block
-    j = byStart;
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-      j--;
-    }
+    j = skipBackwardWhitespaceAndComments(source, byStart, callbacks);
     if (j < 0) {
       return false;
     }
@@ -251,12 +275,8 @@ export function isPrecededByKeyword(source: string, i: number, target: string): 
 
 // Like isPrecededByKeyword but returns the position before the found keyword (for context verification)
 // Returns -1 if the target keyword is not found
-export function findPrecedingKeywordPosition(source: string, i: number, target: string): number {
-  let j = i;
-  // Skip whitespace
-  while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-    j--;
-  }
+export function findPrecedingKeywordPosition(source: string, i: number, target: string, callbacks: CobolHelperCallbacks): number {
+  let j = skipBackwardWhitespaceAndComments(source, i, callbacks);
   if (j < 0) {
     return -1;
   }
@@ -271,10 +291,7 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
       }
       j--;
     }
-    // Skip whitespace
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-      j--;
-    }
+    j = skipBackwardWhitespaceAndComments(source, j, callbacks);
     if (j < 0) {
       return -1;
     }
@@ -292,11 +309,7 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
     if (byWord !== 'BY') {
       break;
     }
-    // Skip past BY and whitespace, then continue to next pseudo-text block
-    j = byStart;
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
-      j--;
-    }
+    j = skipBackwardWhitespaceAndComments(source, byStart, callbacks);
     if (j < 0) {
       return -1;
     }
@@ -424,24 +437,22 @@ export function isInCopyStatement(source: string, posBeforeKeyword: number, call
 // Scans backward through pseudo-text blocks and BY keywords to find REPLACING or REPLACE
 // For REPLACING, additionally verifies it is part of a COPY statement
 export function isPrecededByReplacingOrReplace(source: string, posEnd: number, callbacks: CobolHelperCallbacks): boolean {
-  const replacingPos = findPrecedingKeywordPosition(source, posEnd, 'REPLACING');
+  const replacingPos = findPrecedingKeywordPosition(source, posEnd, 'REPLACING', callbacks);
   if (replacingPos >= 0) {
     return isInCopyStatement(source, replacingPos, callbacks);
   }
-  if (isPrecededByKeyword(source, posEnd, 'REPLACE')) {
+  if (isPrecededByKeyword(source, posEnd, 'REPLACE', callbacks)) {
     return true;
   }
-  return isPrecededByKeyword(source, posEnd, 'ALSO');
+  return isPrecededByKeyword(source, posEnd, 'ALSO', callbacks);
 }
 
 // Checks if == at pos is in a COPY REPLACING or REPLACE statement context
 // Scans backward for REPLACING, REPLACE, or BY keywords (preceded by another ==...==)
 export function isInPseudoTextContext(source: string, pos: number, callbacks: CobolHelperCallbacks): boolean {
-  // Scan backward from pos, skipping whitespace and newlines, looking for context keywords
-  let i = pos - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
-    i--;
-  }
+  // Scan backward from pos, skipping whitespace, newlines, and comments
+  let i = skipBackwardWhitespaceAndComments(source, pos - 1, callbacks);
+  if (i < 0) return false;
   // If preceded by closing == of another pseudo-text, scan backward through the == chain
   // to find the actual context keyword (REPLACING/REPLACE) and verify COPY context
   if (i >= 1 && source[i] === '=' && source[i - 1] === '=') {
@@ -467,7 +478,7 @@ export function isInPseudoTextContext(source: string, pos: number, callbacks: Co
   }
   // ALSO (in REPLACE ALSO ==old== BY ==new==) - must be preceded by REPLACE, not EVALUATE
   if (word === 'ALSO') {
-    return isPrecededByKeyword(source, i, 'REPLACE');
+    return isPrecededByKeyword(source, i, 'REPLACE', callbacks);
   }
   // BY (in ==old== BY ==new==) - must be preceded by REPLACING (in COPY context), REPLACE, or ALSO
   if (word === 'BY') {
