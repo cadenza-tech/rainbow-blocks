@@ -5,6 +5,23 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.35] - 2026-04-19
+
+### Fixed
+
+- Ada: Skip Ada 2012 expression function's `is` when followed by `(` in `tokenize` so `function X ... is (expr);` declarations no longer leak an extra `is` token into the enclosing package/procedure's intermediates list
+- COBOL: Skip `*>` inline comments, `>>` compiler directive lines, and fixed-format column-7 comment lines when scanning backward in `isPrecededByKeyword`/`findPrecedingKeywordPosition`/`isInPseudoTextContext` (via new `skipBackwardWhitespaceAndComments` helper), so `COPY X REPLACING *> comment\n==IF== BY ==END-IF==` correctly detects the pseudo-text context and excludes `IF`/`END-IF` inside delimiters instead of producing a phantom block pair
+- Elixir: Track `{}` and `[]` depth alongside `()` depth in `hasCommaInParens` so block forms with map, list, or tuple literal conditions (e.g., `if(%{a: 1, b: 2}) do...end`, `unless([1, 2, 3]) do...end`, `case({a, b}) do _ -> :ok end`) are no longer misclassified as function-call form and correctly open a block
+- Fortran: Skip construct labels (e.g., `program: if`, `block: do`) and construct names following `end <type>` (e.g., `end if program`) in `tokenize` via new `isFortranConstructLabel` and `isFortranEndConstructName` helpers, so keyword-matching identifiers in labeled constructs no longer open spurious blocks or orphan the real outer `program`/`do`/`block`
+- Julia: Treat `begin` followed by `:` inside indexing brackets as the firstindex keyword (not a block opener) in `isInsideIndexingBrackets` via new `allUnmatchedBeginsAreFirstindex` helper, so `arr[begin:end]` correctly pairs the outer `function`/`end` instead of letting the inner `end` inside the brackets steal the close
+- Pascal: Detect `asm` after statement-introducing reserved words (`begin`/`then`/`do`/`else`/`of`/`try`/`finally`/`except`/`repeat`/`label`) on the same line in both `isValidBlockOpen` and `addAsmExcludedRegions` so constructs like `begin if x then asm nop end; end` correctly open the assembly block instead of rejecting `asm` because the preceding keyword ends in an identifier character
+- Pascal: Scan backward to the start of the statement when checking whether `=` precedes `class`/`interface`/`object` in a comparison context, so qualified identifiers (`if foo.bar = class then`), arithmetic expressions (`if a + b = class then`), and function calls (`if Foo() = class then`) no longer mis-detect the comparison as a type definition and mispair the outer `begin`/`end`
+- Ruby: Remove uppercase identifiers (`BEGIN`, `END`, `__ENCODING__`, `__LINE__`, `__FILE__`) from the heredoc terminator rejection list `RUBY_KEYWORDS`, so canonical heredoc forms like `raise <<END ... END` and `puts <<END ... END` are no longer incorrectly rejected after a bare method call
+- Verilog: Add `matchPragmaDirective` and wire it through `tryMatchExcludedRegionWithContext` so `` `pragma protect begin `` / `` `pragma protect end `` directives no longer tokenize their `begin`/`end` arguments as block keywords
+- Verilog: Look ahead for a closing `"` before `*)` when a string inside an attribute encounters `\<LF>` in `matchAttribute`, treating it as a line continuation when a later closing quote exists and as a terminator otherwise, so valid multi-line strings like `(* attr = "a\<LF>b" *)` no longer extend the attribute region to EOF
+- VHDL: Add `isValidPackageOpen` to reject VHDL-2008 package instantiations (`package X is new Y generic map(...)`) as block openers in `isValidBlockOpen`, so the outer `package` is no longer orphaned when an inner instantiation is present
+- VHDL: Recognize `is new` after `function`/`procedure` in `isValidFuncProcOpen` and reject VHDL-2008 subprogram instantiations as block openers, so enclosing `architecture` blocks correctly keep their `begin` intermediate instead of having it absorbed by the instantiation
+
 ## [1.1.34] - 2026-04-15
 
 ### Fixed
@@ -1324,6 +1341,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.35]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.34...v1.1.35
 [1.1.34]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.33...v1.1.34
 [1.1.33]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.32...v1.1.33
 [1.1.32]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.31...v1.1.32
