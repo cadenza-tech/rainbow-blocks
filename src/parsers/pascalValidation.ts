@@ -206,43 +206,24 @@ export function isInsideRecord(source: string, position: number, excludedRegions
         continue;
       }
       // Skip 'class of' (class reference type, no matching end)
-      // Also skips excluded regions (comments) between 'class' and 'of'
-      // Stop at newlines: 'class\n  of' is NOT a reference type (consistent with isValidBlockOpen)
+      // Newlines and comments between 'class' and 'of' do not change the meaning per Pascal grammar.
       {
         let ck = i + 1;
-        let hasNewline = false;
         while (ck < source.length) {
-          if (source[ck] === '\n' || source[ck] === '\r') {
-            hasNewline = true;
-            break;
-          }
-          if (source[ck] === ' ' || source[ck] === '\t') {
+          if (source[ck] === ' ' || source[ck] === '\t' || source[ck] === '\n' || source[ck] === '\r') {
             ck++;
             continue;
           }
           if (callbacks.isInExcludedRegion(ck, excludedRegions)) {
             const rgn = callbacks.findExcludedRegionAt(ck, excludedRegions);
             if (rgn) {
-              // Track newlines inside excluded regions (multi-line comments)
-              for (let ri = rgn.start; ri < rgn.end; ri++) {
-                if (source[ri] === '\n' || source[ri] === '\r') {
-                  hasNewline = true;
-                  break;
-                }
-              }
-              if (hasNewline) break;
               ck = rgn.end;
               continue;
             }
           }
           break;
         }
-        if (
-          !hasNewline &&
-          ck + 1 < source.length &&
-          lowerSource.slice(ck, ck + 2) === 'of' &&
-          (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))
-        ) {
+        if (ck + 1 < source.length && lowerSource.slice(ck, ck + 2) === 'of' && (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))) {
           i -= 5;
           continue;
         }
@@ -515,28 +496,58 @@ export function isTypeDeclarationOf(
   callbacks: PascalValidationCallbacks
 ): boolean {
   let i = position - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
-    i--;
-  }
-  if (i < 0) return false;
-  // Skip over one or more consecutive comment regions with interleaving whitespace
-  while (i >= 0 && callbacks.isInExcludedRegion(i, excludedRegions)) {
-    const region = callbacks.findExcludedRegionAt(i, excludedRegions);
-    if (region) {
-      i = region.start - 1;
-    } else {
-      i--;
-    }
+  const skipWsAndComments = () => {
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
       i--;
     }
+    while (i >= 0 && callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+      } else {
+        i--;
+      }
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+        i--;
+      }
+    }
+  };
+  skipWsAndComments();
+  if (i < 0) return false;
+  // Skip a bracketed dimension list: `array [0..N] of`, `array [TKind] of`
+  if (source[i] === ']') {
+    let depth = 1;
+    i--;
+    while (i >= 0 && depth > 0) {
+      if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      if (source[i] === ']') depth++;
+      else if (source[i] === '[') depth--;
+      i--;
+    }
+    skipWsAndComments();
   }
   if (i < 0 || !/[a-zA-Z]/i.test(source[i])) return false;
-  const wordEnd = i;
+  let wordEnd = i;
   while (i >= 0 && /[a-zA-Z0-9_]/i.test(source[i])) {
     i--;
   }
-  const word = source.slice(i + 1, wordEnd + 1).toLowerCase();
+  let word = source.slice(i + 1, wordEnd + 1).toLowerCase();
+  // `array packed of` (FreePascal): skip past `packed` to find `array`
+  if (word === 'packed') {
+    skipWsAndComments();
+    if (i < 0 || !/[a-zA-Z]/i.test(source[i])) return false;
+    wordEnd = i;
+    while (i >= 0 && /[a-zA-Z0-9_]/i.test(source[i])) {
+      i--;
+    }
+    word = source.slice(i + 1, wordEnd + 1).toLowerCase();
+  }
   return word === 'array' || word === 'set' || word === 'file';
 }
 

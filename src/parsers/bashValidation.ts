@@ -16,6 +16,47 @@ export function isAtCommandPosition(
   excludedRegions: ExcludedRegion[],
   callbacks: BashValidationCallbacks
 ): boolean {
+  // Check if the keyword sits inside an unclosed array literal `var=(...)` / `var+=(...)`.
+  // Inside array literals, keywords are values rather than block tokens.
+  {
+    let depth = 0;
+    let scan = position - 1;
+    while (scan >= 0) {
+      if (callbacks.isInExcludedRegion(scan, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(scan, excludedRegions);
+        if (region) {
+          scan = region.start - 1;
+          continue;
+        }
+      }
+      const c = source[scan];
+      if (c === ')') {
+        depth++;
+      } else if (c === '(') {
+        if (depth === 0) {
+          // Unmatched `(` — check if it opens an array literal
+          if (scan > 0 && source[scan - 1] === '=') {
+            let varEnd = scan - 1;
+            if (varEnd > 0 && source[varEnd - 1] === '+') {
+              varEnd--;
+            }
+            let varPos = varEnd - 1;
+            while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
+              varPos--;
+            }
+            const varStart = varPos + 1;
+            if (varStart < varEnd && /[a-zA-Z_]/.test(source[varStart])) {
+              return false;
+            }
+          }
+          break;
+        }
+        depth--;
+      }
+      scan--;
+    }
+  }
+
   let i = position - 1;
   // Skip whitespace (spaces, tabs) but not line endings
   while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
@@ -101,7 +142,26 @@ export function isAtCommandPosition(
   }
 
   // After command separators: ; | & ( )
-  if (';|&()'.includes(source[i])) {
+  // Note: `(` may also start an array literal `arr=(...)` or `arr+=(...)` — treat that as not command position
+  if (';|&)'.includes(source[i])) {
+    return true;
+  }
+  if (source[i] === '(') {
+    // Detect array literal opener: `var=(` or `var+=(` with no whitespace between `=` and `(`
+    if (i > 0 && source[i - 1] === '=') {
+      let varEnd = i - 1;
+      if (varEnd > 0 && source[varEnd - 1] === '+') {
+        varEnd--;
+      }
+      let varPos = varEnd - 1;
+      while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
+        varPos--;
+      }
+      const varStart = varPos + 1;
+      if (varStart < varEnd && /[a-zA-Z_]/.test(source[varStart])) {
+        return false;
+      }
+    }
     return true;
   }
 

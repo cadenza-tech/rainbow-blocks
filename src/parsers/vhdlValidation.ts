@@ -325,7 +325,7 @@ export function isValidEntityOrConfigOpen(
       break;
     }
   }
-  if (lowerKeyword === 'entity') {
+  if (lowerKeyword === 'entity' || lowerKeyword === 'configuration') {
     const colonMatch = lineBeforeNoComment.match(/:[ \t]*$/);
     if (colonMatch) {
       const colonOffset = lastNl + 1 + trimOffset + (lineBeforeNoComment.length - colonMatch[0].length);

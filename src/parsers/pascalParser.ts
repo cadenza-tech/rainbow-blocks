@@ -56,7 +56,7 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         if (fp < source.length) {
           const next = source[fp];
-          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=') {
+          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';') {
             return false;
           }
         }
@@ -119,25 +119,22 @@ export class PascalBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // 'class of' is a class reference type, not a block (same line only)
+    // 'class of' is a class reference type, not a block.
+    // Newlines and comments between `class` and `of` do not change the meaning per Pascal grammar.
     if (keyword === 'class') {
       let j = position + keyword.length;
-      let hasNewline = false;
       while (j < source.length) {
         if (this.isInExcludedRegion(j, excludedRegions)) {
-          // Track newlines inside excluded regions (multi-line comments)
-          if (source[j] === '\n' || source[j] === '\r') hasNewline = true;
           j++;
           continue;
         }
-        if (source[j] === '\n' || source[j] === '\r') break;
-        if (source[j] === ' ' || source[j] === '\t') {
+        if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
           j++;
           continue;
         }
         break;
       }
-      if (!hasNewline && j + 2 <= source.length && /^of\b/i.test(source.slice(j, j + 3))) {
+      if (j + 2 <= source.length && /^of\b/i.test(source.slice(j, j + 3))) {
         return false;
       }
     }
@@ -316,6 +313,33 @@ export class PascalBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // `end` immediately after `.` is a field/property access (e.g. `Foo.End`), not a block close.
+  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (keyword.toLowerCase() !== 'end') return true;
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i >= 0 && source[i] === '.') {
+      // Distinguish field access (`Foo.End`) from a range operator (`..end`)
+      if (i === 0 || source[i - 1] !== '.') {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Extends base to add ASM block excluded regions
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions = super.findExcludedRegions(source);
@@ -375,7 +399,7 @@ export class PascalBlockParser extends BaseBlockParser {
         while (fp < source.length && (source[fp] === ' ' || source[fp] === '\t')) fp++;
         if (fp < source.length) {
           const next = source[fp];
-          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=') {
+          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';') {
             continue;
           }
         }

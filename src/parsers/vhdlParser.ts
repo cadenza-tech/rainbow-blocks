@@ -387,6 +387,54 @@ export class VhdlBlockParser extends BaseBlockParser {
             continue;
           }
         }
+        // VHDL-2008: subprogram/package declarations that have no body and thus no matching `end`:
+        //   - `function f is new generic_f generic map (...);` (instantiation)
+        //   - `procedure p is null;` (null procedure)
+        //   - `function f(...) return T is (expr);` (expression function)
+        // The `is` token here is part of a declaration, not a block intermediate, so skip it.
+        {
+          let afterIs = startOffset + 2;
+          while (afterIs < source.length) {
+            if (source[afterIs] === ' ' || source[afterIs] === '\t' || source[afterIs] === '\n' || source[afterIs] === '\r') {
+              afterIs++;
+              continue;
+            }
+            if (this.isInExcludedRegion(afterIs, excludedRegions)) {
+              const region = this.findExcludedRegionAt(afterIs, excludedRegions);
+              if (region) {
+                afterIs = region.end;
+                continue;
+              }
+            }
+            break;
+          }
+          if (afterIs < source.length) {
+            // is new <name> (instantiation)
+            if (
+              afterIs + 3 <= source.length &&
+              source.slice(afterIs, afterIs + 3).toLowerCase() === 'new' &&
+              (afterIs + 3 >= source.length || !/[a-zA-Z0-9_]/.test(source[afterIs + 3]))
+            ) {
+              continue;
+            }
+            // is null; (null procedure)
+            if (
+              afterIs + 4 <= source.length &&
+              source.slice(afterIs, afterIs + 4).toLowerCase() === 'null' &&
+              (afterIs + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[afterIs + 4]))
+            ) {
+              let afterNull = afterIs + 4;
+              while (afterNull < source.length && (source[afterNull] === ' ' || source[afterNull] === '\t')) afterNull++;
+              if (afterNull < source.length && source[afterNull] === ';') {
+                continue;
+              }
+            }
+            // is (expr); (expression function)
+            if (source[afterIs] === '(') {
+              continue;
+            }
+          }
+        }
       }
 
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
