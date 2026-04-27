@@ -5,6 +5,38 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.36] - 2026-04-28
+
+### Fixed
+
+- Ada: Strip excluded regions before matching trailing `task`/`protected` in `tokenize`'s `is` filter (`adaParser.ts`) via new `stripExcludedRegions` helper, so the keywords appearing only inside a comment no longer disable the type-declaration `is` filter and produce extra `is` intermediates on the enclosing package or procedure
+- Ada: Treat non-ASCII Unicode letters as word characters in `isAdaWordAt` (`adaHelpers.ts`) so identifiers using Unicode letters (e.g., `αseparate`) are no longer incorrectly word-matched against keywords like `separate`/`abstract`/`new`/`null`
+- AppleScript: Remove `tell` and `repeat` from `allowedPrecedingKeywords` in `tryMatchSingleKeywordToken` (`applescriptParser.ts`) so patterns like `end tell tell ...` and `end repeat repeat ...` no longer let the trailing word qualify the next mid-line `tell`/`repeat` as a new block opener
+- Bash: Detect `var=(` / `var+=(` array literal openers at the start of `isAtCommandPosition` (`bashValidation.ts`) so block keywords inside multi-line array literals (e.g., `BASH_KEYWORDS=(\n  if\n  then\n  fi\n)`) are no longer detected as command-position block tokens
+- Bash: Add `isFollowedByExcludedRegion` check to the block_middle filter in `tokenize` (`bashParser.ts`) so fused words like `then"foo"` are no longer recognised as `then` middle keywords
+- COBOL: Special-case `PERFORM TEST BEFORE/AFTER` in `computeValidPositions` (`cobolParser.ts`) to recognise the `WITH`-omitted structured form per the COBOL standard, so `PERFORM TEST BEFORE UNTIL ... END-PERFORM` is now correctly paired
+- COBOL: Extend the preceding word boundary in `matchExecBlock` to non-ASCII Unicode letters and capture the full sublanguage identifier including digits/`_`/`-` (`cobolHelpers.ts`) so `caféEXEC SQL` and `EXEC SQL1` no longer falsely open an EXEC excluded region
+- Crystal: Allow backslash line continuation (`\<LF>`/`\<CRLF>`/`\<CR>`) between `abstract` and `def` in `isValidBlockOpen`'s `abstract def` regex (`crystalParser.ts`) so abstract method declarations split across lines are no longer treated as regular `def` block openers
+- Elixir: Treat only LF and CRLF as heredoc-mode markers in `matchTripleQuotedString`, `skipNestedTripleQuotedString`, `matchSigil`, and `skipNestedSigil` (`elixirHelpers.ts`) so a single embedded CR in `"""abc<CR>def"""` no longer flips the string into multi-line heredoc mode
+- Fortran: Skip whitespace-only blank lines between `&` continuation and the next content line in `collapseContinuationLines` (`fortranHelpers.ts`) so `module &<blank>procedure`, `select &<blank>case`, and similar patterns no longer break the enclosing submodule/select pairing
+- Fortran: Accept `;` (Fortran 2008+ statement separator) after `then` in `isValidIfOpen` (`fortranParser.ts`) so single-line constructs like `if (cond) then; y = 1; end if` are recognised as if blocks
+- Fortran: Make the intermediate-line content optional in `CONTINUATION_COMPOUND_END_PATTERN` (`fortranParser.ts`) so `end &<blank-line>if` and similar compound-end continuations now match consistently with `where`/`forall`
+- Julia: Pass `excludedRegions` to `isOnlyWhitespaceBetween` calls in `isInsideBrackets`/`isInsideParentheses` (`juliaParser.ts` + `juliaHelpers.ts`) so block-form `for` after a leading comment (e.g., `[# comment\nfor i in 1:10\n  i\nend]`) is no longer reclassified as a generator/comprehension
+- Julia: Add `hasMatchingEndBeforeBracketClose` helper in `isInsideSquareBrackets` (`juliaParser.ts`) and keep `begin` inside indexing brackets as the firstindex keyword, so block expressions like `a[quote x = 1 end]`, `a[try ... end]`, and `a[let x = 1; x end]` are now correctly paired
+- Julia: Reject `:` immediately following `<` or `>` as a symbol-literal start in `isSymbolStart` (`juliaHelpers.ts`) so `T<:Number` and `T>:Number` no longer tokenise the operand as a `:Number` symbol literal
+- Octave: Skip a leading UTF-8/UTF-16 BOM (U+FEFF) when checking line-start in `isAtLineStartWithWhitespace` (`matlabParser.ts`, inherited by Octave) so block comments (`%{`/`#{`) and shell escapes at the start of BOM-prefixed files are recognised correctly
+- Pascal: Detect `array [...] of` and `array packed of` patterns in `isTypeDeclarationOf` (`pascalValidation.ts`) by skipping over a bracketed dimension list and an optional `packed` modifier, so the type-declaration `of` is no longer attached as a `case` intermediate
+- Pascal: Add `;` to the rejection set after `asm` in both `isValidBlockOpen` and `addAsmExcludedRegions` (`pascalParser.ts`) so empty `asm;` statements no longer consume the surrounding `begin..end` block
+- Pascal: Detect `class of` as a class-reference type regardless of intervening newlines or comments in `isValidBlockOpen` and `isInsideRecord` (`pascalParser.ts` + `pascalValidation.ts`) so `class\n  of TBase` and `class { comment\n} of TBase` no longer break the surrounding `record`/`begin..end` pairing
+- Pascal: Override `isValidBlockClose` for Pascal to reject `end` immediately preceded by `.` (field/property access like `Foo.End`) in `pascalParser.ts`, while still allowing the range operator `..end`
+- Ruby: Treat trailing binary operators (`==`, `+`, `<`, `=`, etc.) as line-continuation markers in `endsWithContinuationOperator` (`rubyValidation.ts`) so `while a ==\n  b do\n  body\nend` and similar headers correctly attach `do` to the loop and pair with the outer `end`
+- Ruby: Detect trailing whitespace after `/` to distinguish division from a new regex literal in `isRegexStart` (`rubyFamilyHelpers.ts`) so `x = /a/ / 2` is no longer parsed as two regex literals that swallow the rest of the source
+- Ruby: Extend the `?\M-\C-` character literal handling in `tryMatchExcludedRegion` (`rubyParser.ts`) to cover the EOF-truncated 7-character case, so the excluded region now reaches the end of the source rather than stopping at five characters
+- Verilog: Allow whitespace and comments between `#` and the digits in `isPrecededByAssertionVerb`'s `#<digits>` qualifier skip (`verilogValidation.ts`) so `assert # 5 property p1; ...` is no longer misclassified as a property declaration
+- Verilog: Add `macromodule: ['extern']` to `MODIFIER_MAP` (`verilogValidation.ts`) so `extern macromodule m1();` forward declarations are no longer tokenised as block openers
+- VHDL: Skip the `is` token in `tokenize` when the next non-whitespace content is `new`, `null;`, or `(` (`vhdlParser.ts`) so VHDL-2008 `function/procedure/package ... is new`, `procedure ... is null;`, and `function ... return T is (expr);` declarations no longer leak an extra `is` intermediate into the enclosing block
+- VHDL: Apply the colon-prefix rejection in `isValidEntityOrConfigOpen` to `configuration` as well as `entity` (`vhdlValidation.ts`) so `inst: configuration work.cfg;` is no longer detected as a block opener
+
 ## [1.1.35] - 2026-04-19
 
 ### Fixed
@@ -1341,6 +1373,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.36]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.35...v1.1.36
 [1.1.35]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.34...v1.1.35
 [1.1.34]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.33...v1.1.34
 [1.1.33]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.32...v1.1.33
