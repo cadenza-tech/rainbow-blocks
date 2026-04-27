@@ -342,10 +342,13 @@ export class RubyBlockParser extends BaseBlockParser {
               pos + 5 < source.length &&
               source[pos + 5] === 'C' &&
               pos + 6 < source.length &&
-              source[pos + 6] === '-' &&
-              pos + 7 < source.length
+              source[pos + 6] === '-'
             ) {
-              return { start: pos, end: pos + 8 };
+              // Full \M-\C-x (8 chars) or unterminated \M-\C- at EOF (7 chars)
+              if (pos + 7 < source.length) {
+                return { start: pos, end: pos + 8 };
+              }
+              return { start: pos, end: pos + 7 };
             }
             if (pos + 4 < source.length) {
               return { start: pos, end: pos + 5 };

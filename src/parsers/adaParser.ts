@@ -80,6 +80,17 @@ export class AdaBlockParser extends BaseBlockParser {
     };
   }
 
+  // Returns a slice of `source` from [start, end) with excluded-region characters replaced by spaces.
+  // Used to safely match keywords (e.g., `protected`/`task`) at line ends without picking up
+  // matches that occur inside comments or strings.
+  private stripExcludedRegions(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): string {
+    let result = '';
+    for (let i = start; i < end; i++) {
+      result += this.isInExcludedRegion(i, excludedRegions) ? ' ' : source[i];
+    }
+    return result;
+  }
+
   // Validates if keyword is a valid block opener
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lowerKeyword = keyword.toLowerCase();
@@ -307,7 +318,7 @@ export class AdaBlockParser extends BaseBlockParser {
           if (scanPos >= 0) {
             const prevEnd = scanPos + 1;
             const prevLineStart = findLineStart(source, prevEnd);
-            const prevToken = source.slice(prevLineStart, prevEnd).toLowerCase().trimEnd();
+            const prevToken = this.stripExcludedRegions(source, prevLineStart, prevEnd, excludedRegions).toLowerCase().trimEnd();
             if (/\b(?:protected|task)$/.test(prevToken)) {
               isTypeDeclLine = false;
             }
@@ -332,7 +343,7 @@ export class AdaBlockParser extends BaseBlockParser {
             if (parenDepthAtMatch > 0) continue;
             // Skip 'type' when preceded by 'protected' or 'task' (these are block, not type decl)
             if (m[1].toLowerCase() === 'type') {
-              const beforeType = source.slice(lineStart, absPos).toLowerCase().trimEnd();
+              const beforeType = this.stripExcludedRegions(source, lineStart, absPos, excludedRegions).toLowerCase().trimEnd();
               if (/\b(?:protected|task)$/.test(beforeType)) continue;
               // When 'type' is at the start of the line, check previous lines
               if (beforeType.length === 0) {
@@ -343,7 +354,7 @@ export class AdaBlockParser extends BaseBlockParser {
                 if (sp >= 0) {
                   const pe = sp + 1;
                   const ps = findLineStart(source, pe);
-                  const pt = source.slice(ps, pe).toLowerCase().trimEnd();
+                  const pt = this.stripExcludedRegions(source, ps, pe, excludedRegions).toLowerCase().trimEnd();
                   if (/\b(?:protected|task)$/.test(pt)) continue;
                 }
               }
@@ -464,7 +475,7 @@ export class AdaBlockParser extends BaseBlockParser {
                   if (checkPos >= 0) {
                     const checkEnd = checkPos + 1;
                     const checkLineStart = findLineStart(source, checkEnd);
-                    const checkToken = source.slice(checkLineStart, checkEnd).toLowerCase().trimEnd();
+                    const checkToken = this.stripExcludedRegions(source, checkLineStart, checkEnd, excludedRegions).toLowerCase().trimEnd();
                     if (/\b(?:protected|task)$/.test(checkToken)) {
                       scanPos = prevStart - 1;
                       if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;

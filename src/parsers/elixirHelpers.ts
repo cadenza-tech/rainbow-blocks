@@ -173,10 +173,14 @@ function isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
 export function matchTripleQuotedString(source: string, pos: number, delimiter: string, skipInterpolation: SkipInterpolationFn): ExcludedRegion {
   // Both """ and ''' support interpolation in Elixir
   let i = pos + 3;
-  // Track whether we've passed a newline (heredoc mode vs single-line triple quote)
+  // Track whether we've passed a newline (heredoc mode vs single-line triple quote).
+  // Treat LF and CRLF as newlines; an isolated CR (rare) is left as content so that
+  // `"""abc<CR>def"""` is correctly recognised as a single-line triple-quoted string.
   let isHeredoc = false;
   while (i < source.length) {
-    if (source[i] === '\n' || source[i] === '\r') {
+    if (source[i] === '\n') {
+      isHeredoc = true;
+    } else if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
       isHeredoc = true;
     }
     if (source[i] === '\\' && i + 1 < source.length) {
@@ -201,7 +205,9 @@ export function skipNestedTripleQuotedString(source: string, pos: number, delimi
   let i = pos + 3;
   let isHeredoc = false;
   while (i < source.length) {
-    if (source[i] === '\n' || source[i] === '\r') {
+    if (source[i] === '\n') {
+      isHeredoc = true;
+    } else if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
       isHeredoc = true;
     }
     if (source[i] === '\\' && i + 1 < source.length) {
@@ -278,7 +284,9 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
     let j = delimiterPos + 3;
     let isHeredoc = false;
     while (j < source.length) {
-      if (source[j] === '\n' || source[j] === '\r') {
+      if (source[j] === '\n') {
+        isHeredoc = true;
+      } else if (source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
         isHeredoc = true;
       }
       if (source[j] === '\\' && j + 1 < source.length) {
@@ -372,7 +380,9 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
     let i = delimiterPos + 3;
     let isSigilHeredoc = false;
     while (i < source.length) {
-      if (source[i] === '\n' || source[i] === '\r') {
+      if (source[i] === '\n') {
+        isSigilHeredoc = true;
+      } else if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
         isSigilHeredoc = true;
       }
       // Handle escape sequences (lowercase: all escapes; uppercase: only escaped closing delimiter)

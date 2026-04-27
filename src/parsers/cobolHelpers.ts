@@ -91,15 +91,27 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
     return null;
   }
 
-  // Check word boundary before
-  if (pos > 0 && /[a-zA-Z0-9_-]/.test(source[pos - 1])) {
-    return null;
+  // Check word boundary before (ASCII identifier chars + non-ASCII Unicode letters)
+  if (pos > 0) {
+    const prev = source[pos - 1];
+    if (/[a-zA-Z0-9_-]/.test(prev) || prev.charCodeAt(0) > 127) {
+      return null;
+    }
   }
 
-  // Verify a recognized sub-language keyword follows
+  // Verify a recognized sub-language keyword follows.
+  // Capture the full identifier (incl. digits/_/-) so `EXEC SQL1` does not match `SQL`.
   const startWord = isExecute ? 'EXECUTE' : 'EXEC';
-  const afterExec = source.slice(pos + startWord.length).match(/^[ \t]+([a-zA-Z]+)/);
-  if (!afterExec || !/^(SQL|CICS|DLI|SQLIMS|HTML|XML|JAVA|ADO|ADABAS|DB2|IMS|IDMS|ORACLE|DATACOM)$/i.test(afterExec[1])) {
+  const afterExec = source.slice(pos + startWord.length).match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/);
+  if (!afterExec) {
+    return null;
+  }
+  // Reject if the captured word is followed by a non-ASCII Unicode letter (e.g. `EXEC SQLé`)
+  const afterWordPos = pos + startWord.length + afterExec[0].length;
+  if (afterWordPos < source.length && source[afterWordPos].charCodeAt(0) > 127) {
+    return null;
+  }
+  if (!/^(SQL|CICS|DLI|SQLIMS|HTML|XML|JAVA|ADO|ADABAS|DB2|IMS|IDMS|ORACLE|DATACOM)$/i.test(afterExec[1])) {
     return null;
   }
 
