@@ -59,8 +59,13 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
       if (i < 0) return true;
       // Fall through to normal checks below
     } else {
-      // Regex literal closing /: the next / is a regex start (e.g., /regex1/ /regex2/)
+      // Regex literal closing /: the next / may be either a new regex (`/r1/ /r2/`)
+      // or a division operator (`/a/ / 2`). If our `/` is immediately followed by whitespace,
+      // it is more likely division than the start of a new regex literal.
       if (source[lastExcludedRegion.start] === '/') {
+        if (pos + 1 < source.length && (source[pos + 1] === ' ' || source[pos + 1] === '\t')) {
+          return false;
+        }
         i = lastExcludedRegion.start - 1;
         while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
           i--;

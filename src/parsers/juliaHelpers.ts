@@ -267,9 +267,13 @@ export function isSymbolStart(source: string, pos: number): boolean {
 
   // Colon after identifier/number/bracket is ternary, not symbol
   // :: (type annotation) second colon is not a symbol start
+  // <: and >: (subtype/supertype operators) are single tokens; the colon does not start a symbol
   if (pos > 0) {
     const prevChar = source[pos - 1];
     if (prevChar === ':' || /[\w)\]}]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
+      return false;
+    }
+    if (prevChar === '<' || prevChar === '>') {
       return false;
     }
   }
@@ -523,9 +527,12 @@ export function hasCommaAtDepthZero(source: string, start: number, end: number, 
   return false;
 }
 
-// Checks if there is only whitespace between two positions
-export function isOnlyWhitespaceBetween(source: string, start: number, end: number): boolean {
+// Checks if there is only whitespace (or excluded regions like comments) between two positions
+export function isOnlyWhitespaceBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[] = []): boolean {
   for (let i = start; i < end; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) {
+      continue;
+    }
     const ch = source[i];
     if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') return false;
   }

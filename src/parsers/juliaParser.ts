@@ -123,7 +123,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // Other block keywords inside parentheses are block expressions
     // Only exclude them inside square brackets
     if (keyword !== 'for' && keyword !== 'if') {
-      if (this.isInsideSquareBrackets(source, position, excludedRegions)) {
+      if (this.isInsideSquareBrackets(source, position, keyword, excludedRegions)) {
         return false;
       }
     }
@@ -166,7 +166,7 @@ export class JuliaBlockParser extends BaseBlockParser {
             return false;
           }
           // for at start of brackets is a block, not a generator (generators need expr before for)
-          if (isOnlyWhitespaceBetween(source, i + 1, position)) {
+          if (isOnlyWhitespaceBetween(source, i + 1, position, excludedRegions)) {
             return false;
           }
           return true;
@@ -407,7 +407,7 @@ export class JuliaBlockParser extends BaseBlockParser {
             return false;
           }
           // for at start of parentheses is a block, not a generator (generators need expr before for)
-          if (isOnlyWhitespaceBetween(source, i + 1, position)) {
+          if (isOnlyWhitespaceBetween(source, i + 1, position, excludedRegions)) {
             return false;
           }
           // Check for named tuple context: (name = for ...)
@@ -426,7 +426,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Checks if position is inside square brackets only (for other block keywords)
   // Julia allows block expressions inside parentheses, so only [] excludes them
   // Keywords inside parentheses within brackets are valid (e.g., a[map(1:3) do x ... end])
-  private isInsideSquareBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  private isInsideSquareBrackets(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
     let bracketDepth = 0;
     let parenDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -445,7 +445,20 @@ export class JuliaBlockParser extends BaseBlockParser {
             return false;
           }
           // Only indexing brackets exclude block keywords, not array construction
-          return isIndexingBracket(source, i);
+          if (!isIndexingBracket(source, i)) {
+            return false;
+          }
+          // `begin` inside indexing brackets is the firstindex keyword, never a block opener
+          if (keyword === 'begin') {
+            return true;
+          }
+          // Other block keywords inside indexing brackets may form a block expression
+          // if a matching `end` exists before the bracket closes
+          // (e.g., a[quote x = 1 end] — the `quote/end` block evaluates to a value used as the index)
+          if (this.hasMatchingEndBeforeBracketClose(source, position + keyword.length, excludedRegions)) {
+            return false;
+          }
+          return true;
         }
         bracketDepth--;
       } else if (char === ')') {
@@ -454,6 +467,63 @@ export class JuliaBlockParser extends BaseBlockParser {
         if (parenDepth === 0) return false;
         parenDepth--;
       }
+    }
+    return false;
+  }
+
+  // Forward-scan from `from` looking for the `end` that matches the current opener.
+  // Returns true if a matching `end` is found before the enclosing indexing `]` closes.
+  private hasMatchingEndBeforeBracketClose(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
+    let bracketDepth = 0;
+    let blockDepth = 1;
+    let i = from;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        i++;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '[') {
+        bracketDepth++;
+        i++;
+        continue;
+      }
+      if (ch === ']') {
+        if (bracketDepth === 0) {
+          return false;
+        }
+        bracketDepth--;
+        i++;
+        continue;
+      }
+      if (ch === 'e' && i + 3 <= source.length && source.slice(i, i + 3) === 'end') {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + 3 < source.length ? source[i + 3] : ' ';
+        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && before !== '.' && !this.isAdjacentToUnicodeLetter(source, i, 3)) {
+          blockDepth--;
+          if (blockDepth === 0) {
+            return true;
+          }
+          i += 3;
+          continue;
+        }
+      }
+      let matchedOpener = false;
+      for (const kw of this.keywords.blockOpen) {
+        if (i + kw.length <= source.length && source[i] === kw[0] && source.slice(i, i + kw.length) === kw) {
+          const before = i > 0 ? source[i - 1] : ' ';
+          const after = i + kw.length < source.length ? source[i + kw.length] : ' ';
+          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+          if (before === '.') continue;
+          if (this.isAdjacentToUnicodeLetter(source, i, kw.length)) continue;
+          blockDepth++;
+          i += kw.length;
+          matchedOpener = true;
+          break;
+        }
+      }
+      if (matchedOpener) continue;
+      i++;
     }
     return false;
   }

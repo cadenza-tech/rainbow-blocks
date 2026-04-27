@@ -168,8 +168,13 @@ export function endsWithContinuationOperator(
   if (ch === '&' && i > 0 && source[i - 1] === '&') return true;
   if (ch === '|' && i > 0 && source[i - 1] === '|') return true;
 
-  // Single-character binary operators: |, &
-  if (ch === '|' || ch === '&') return true;
+  // Binary arithmetic/comparison/bitwise operators that imply line continuation when at line end
+  // Includes: |, &, +, -, *, %, ^, <, >, =, ~
+  // (covers `==`, `!=`, `<=`, `>=`, `<=>`, `=~`, `!~`, assignments, `**`, `<<`, `>>`, etc. since
+  // we only need to look at the trailing character)
+  // `/` is intentionally excluded because it is context-sensitive (division vs regex literal
+  // vs global variable `$/`). Trailing `/` rarely indicates line continuation in practice.
+  if ('|&+-*%^<>=~'.includes(ch)) return true;
 
   return false;
 }
