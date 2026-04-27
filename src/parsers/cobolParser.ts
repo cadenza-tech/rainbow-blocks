@@ -155,6 +155,14 @@ export class CobolBlockParser extends BaseBlockParser {
               const afterNextWord = afterInner.slice(nextWord[0].length);
               // Check for PERFORM <variable> TIMES pattern (accept both alpha and numeric counts)
               const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
+              // PERFORM TEST BEFORE/AFTER ... is a structured form (WITH is optional per COBOL standard)
+              if (word === 'test' && secondWord) {
+                const sw = secondWord[1].toLowerCase();
+                if (sw === 'before' || sw === 'after') {
+                  openerPositions.push(pos);
+                  continue;
+                }
+              }
               if (secondWord && secondWord[1].toLowerCase() === 'times') {
                 // PERFORM <variable> TIMES → structured block, accept
               } else if (

@@ -46,9 +46,9 @@ const COMPOUND_END_TYPES = [
 const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
 
 // Pattern to match compound end keywords with continuation line: end &\n[&]keyword
-// Also handles comment-only lines and bare continuation-only lines between end & and keyword
+// Also handles comment-only lines, blank lines, and bare continuation-only lines between end & and keyword
 const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
-  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*(?:![^\\r\\n]*|&[ \\t]*(?:![^\\r\\n]*)?)(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*(?:![^\\r\\n]*|&[ \\t]*(?:![^\\r\\n]*)?)?(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
 
@@ -307,8 +307,9 @@ export class FortranBlockParser extends BaseBlockParser {
           i += 4;
           continue;
         }
-        // Verify 'then' is at end-of-line (only whitespace, comments, or & follow)
-        // If other content follows, 'then' is a variable name, not a block keyword
+        // Verify 'then' ends the if-construct header (whitespace, comments, &, ; or line break follow).
+        // `;` is allowed because Fortran 2008+ accepts statement separators after `then`
+        // (e.g., `if (x > 0) then; y = 1; end if`).
         let k = i + 4;
         let isBlockThen = true;
         while (k < source.length) {
@@ -321,7 +322,7 @@ export class FortranBlockParser extends BaseBlockParser {
             k++;
             continue;
           }
-          if (source[k] === '\n' || source[k] === '\r' || source[k] === '&') break;
+          if (source[k] === '\n' || source[k] === '\r' || source[k] === '&' || source[k] === ';') break;
           isBlockThen = false;
           break;
         }

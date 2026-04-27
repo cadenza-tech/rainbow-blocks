@@ -163,12 +163,25 @@ export function collapseContinuationLines(text: string): string {
     } else {
       j++;
     }
-    // Skip intermediate comment-only lines and continuation-only lines
+    // Skip intermediate comment-only lines, blank lines, and continuation-only lines
     while (j < text.length) {
       // Skip leading whitespace
       let lineContentStart = j;
       while (lineContentStart < text.length && (text[lineContentStart] === ' ' || text[lineContentStart] === '\t')) {
         lineContentStart++;
+      }
+      // Blank line: only whitespace followed by line break (or EOF)
+      if (lineContentStart >= text.length) {
+        j = lineContentStart;
+        continue;
+      }
+      if (text[lineContentStart] === '\n' || text[lineContentStart] === '\r') {
+        if (text[lineContentStart] === '\r' && lineContentStart + 1 < text.length && text[lineContentStart + 1] === '\n') {
+          j = lineContentStart + 2;
+        } else {
+          j = lineContentStart + 1;
+        }
+        continue;
       }
       // Comment-only line: starts with !
       if (lineContentStart < text.length && text[lineContentStart] === '!') {
