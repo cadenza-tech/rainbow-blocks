@@ -556,10 +556,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const word = source.slice(wordStart, wordEnd).toLowerCase();
       // Control keywords and intermediates that legitimately precede tell/if/repeat mid-line
       // (e.g., 'if tell', 'else tell', 'repeat while tell')
+      // Note: `tell` and `repeat` are intentionally excluded so that constructs like
+      // `end tell tell ...` or `end repeat repeat ...` do not let the trailing tell/repeat
+      // be detected as a new mid-line block opener. Condition contexts (`if tell then`,
+      // `repeat while tell`) are still handled by the dedicated isInsideIfCondition check.
       const allowedPrecedingKeywords = new Set([
         'if',
         'else',
-        'repeat',
         'while',
         'until',
         'when',
@@ -579,7 +582,6 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         'where',
         'considering',
         'ignoring',
-        'tell',
         'try',
         'on',
         'given',

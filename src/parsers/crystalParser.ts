@@ -579,10 +579,11 @@ export class CrystalBlockParser extends BaseBlockParser {
       return !isLoopDo(source, position, excludedRegions);
     }
 
-    // 'abstract def' has no body and no 'end'
+    // 'abstract def' has no body and no 'end'.
+    // Allow backslash line continuation (\<LF>, \<CRLF>, \<CR>) between `abstract` and `def`.
     if (keyword === 'def') {
       const textBefore = source.slice(0, position);
-      if (/\babstract[ \t]+$/.test(textBefore)) {
+      if (/\babstract(?:[ \t]+|[ \t]*\\(?:\r\n|\r|\n)[ \t]*)+$/.test(textBefore)) {
         return false;
       }
     }

@@ -413,6 +413,8 @@ export class BashBlockParser extends BaseBlockParser {
     tokens = tokens.filter((token) => {
       if (token.type !== 'block_middle') return true;
       if (this.isFollowedByHyphen(source, token.startOffset, token.value)) return false;
+      // `then"foo"` etc.: keyword fused with adjacent quoted string is a single word, not a reserved keyword
+      if (this.isFollowedByExcludedRegion(token.startOffset, token.value, excludedRegions)) return false;
       if (this.isInsideExtglob(source, token.startOffset, excludedRegions)) return false;
       if (this.isInsideDoubleBracket(source, token.startOffset, excludedRegions)) return false;
       if (!this.isAtCommandPosition(source, token.startOffset, excludedRegions)) return false;

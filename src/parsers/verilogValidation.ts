@@ -22,6 +22,7 @@ const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
   function: ['extern'],
   task: ['extern'],
   module: ['extern'],
+  macromodule: ['extern'],
   program: ['extern']
 };
 
@@ -90,14 +91,16 @@ export function isPrecededByAssertionVerb(
         continue;
       }
     }
-    // Skip '#<digits>' delay qualifier (e.g., #0)
+    // Skip '#<digits>' delay qualifier (e.g., #0, # 5 with optional whitespace/comments)
     if (j >= 0 && /[0-9]/.test(source[j])) {
       let k = j;
       while (k >= 0 && /[0-9]/.test(source[k])) {
         k--;
       }
-      if (k >= 0 && source[k] === '#') {
-        j = skipBackwardWhitespaceAndComments(source, k - 1, excludedRegions, callbacks);
+      // Allow whitespace/comments between `#` and the digits
+      const beforeDigits = skipBackwardWhitespaceAndComments(source, k, excludedRegions, callbacks);
+      if (beforeDigits >= 0 && source[beforeDigits] === '#') {
+        j = skipBackwardWhitespaceAndComments(source, beforeDigits - 1, excludedRegions, callbacks);
         skipped = true;
       }
     }

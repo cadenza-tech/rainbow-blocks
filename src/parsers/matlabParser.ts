@@ -301,11 +301,13 @@ export class MatlabBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if position is at line start allowing leading whitespace
+  // Checks if position is at line start allowing leading whitespace.
+  // Also skips a leading UTF-8/UTF-16 BOM (U+FEFF) so files saved with a byte-order mark
+  // still recognise block comments (`%{`/`#{`) and shell escapes (`!`) at the file start.
   protected isAtLineStartWithWhitespace(source: string, pos: number): boolean {
     if (pos === 0) return true;
     let i = pos - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '﻿')) {
       i--;
     }
     return i < 0 || source[i] === '\n' || source[i] === '\r';
