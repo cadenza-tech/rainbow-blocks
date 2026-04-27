@@ -2707,5 +2707,26 @@ end if;`;
     });
   });
 
+  suite('Regression: comment-ending task/protected does not break is filter', () => {
+    test('should not leak type-decl is when previous line ends with task in a comment', () => {
+      const source =
+        'package body Pkg is\n  -- This is a workhorse task\n  type Worker_Type\n    is record\n      ID : Integer;\n    end record;\nend Pkg;';
+      const pairs = parser.parse(source);
+      const pkgPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'package');
+      assert.ok(pkgPair, 'package body should be paired');
+      const isCount = pkgPair.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, 'package body should have exactly one is intermediate');
+    });
+
+    test('should not leak type-decl is when previous line ends with protected in a comment', () => {
+      const source = 'package body Pkg is\n  -- protected\n  type T is range 1..10;\nend Pkg;';
+      const pairs = parser.parse(source);
+      const pkgPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'package');
+      assert.ok(pkgPair, 'package body should be paired');
+      const isCount = pkgPair.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, 'package body should have exactly one is intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });

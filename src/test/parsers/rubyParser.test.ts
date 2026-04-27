@@ -3461,5 +3461,50 @@ end`;
     });
   });
 
+  suite('Regression: binary operators imply line continuation', () => {
+    test('should treat trailing == as line continuation in while header', () => {
+      const source = 'while a ==\n  b do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat trailing + as line continuation in while header', () => {
+      const source = 'while x +\n  y do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat trailing = as line continuation in while header', () => {
+      const source = 'while x =\n  y do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
+  suite('Regression: regex literal followed by space-/-space division', () => {
+    test('should treat /a/ / 2 as regex followed by division', () => {
+      // After a closing regex literal, `/` followed by whitespace should be treated as division.
+      const source = 'x = /a/ / 2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still treat /a/ /b/ as two regex literals (no division)', () => {
+      const source = 'x = /a/ /b/\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression: ?\\M-\\C- character literal at EOF without trailing char', () => {
+    test('should exclude full ?\\M-\\C- (7 chars) when truncated at EOF', () => {
+      const source = 'x = ?\\M-\\C-';
+      const regions = parser.getExcludedRegions(source);
+      const litRegion = regions.find((r) => source.slice(r.start, r.start + 1) === '?');
+      assert.ok(litRegion, 'character-literal excluded region should be present');
+      assert.strictEqual(litRegion.end, source.length, 'excluded region should extend to source end');
+    });
+  });
+
   generateCommonTests(config);
 });

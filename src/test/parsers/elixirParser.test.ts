@@ -3734,5 +3734,14 @@ end`;
     });
   });
 
+  suite('Regression: triple-quoted single-line containing standalone CR', () => {
+    test('should not flag standalone CR inside single-line triple-quoted string as heredoc', () => {
+      // Embedded CR (without LF) is rare, but should not flip the string into heredoc mode
+      const source = 'x = """abc\rdef"""\nif true do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

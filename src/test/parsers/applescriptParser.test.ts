@@ -2529,5 +2529,19 @@ end try`;
     });
   });
 
+  suite('Regression: end <kw> <kw> mid-line patterns must not start a second block', () => {
+    test('should not detect mid-line tell after end tell as a new tell block', () => {
+      const source = 'tell application "Y"\n  beep\nend tell tell application "X"\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should not detect mid-line repeat after end repeat as a new repeat block', () => {
+      const source = 'repeat 3 times\n  beep\nend repeat repeat 3 times\n  log "x"\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+  });
+
   generateCommonTests(config);
 });

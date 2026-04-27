@@ -2854,5 +2854,40 @@ end package;`;
     });
   });
 
+  suite('Regression: VHDL-2008 is new/is null/is (expr) declarations leave no leaked is intermediate', () => {
+    test('should not include extra is intermediate for null procedure declaration', () => {
+      const source = 'architecture rtl of test is\n  procedure noop is null;\nbegin\n  null;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const arch = pairs[0];
+      // architecture has its own `is` and `begin`, but the inner `is null` should not leak as a third intermediate
+      assertIntermediates(arch, ['is', 'begin']);
+    });
+
+    test('should not include extra is intermediate for expression function declaration', () => {
+      const source = 'architecture rtl of test is\n  function mul(x : integer) return integer is (x * 2);\nbegin\n  null;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should not include extra is intermediates for nested package instantiations', () => {
+      const source =
+        'package outer_pkg is\n  package inner_pkg is new work.generic_pkg generic map (WIDTH => 8);\n  package other_pkg is new work.other_generic generic map (W => 16);\nend package;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
+  suite('Regression: labeled configuration instantiation is not a block opener', () => {
+    test('should not treat label: configuration name; as block opener', () => {
+      const source = 'architecture rtl of test is\nbegin\n  inst: configuration work.cfg;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'architecture');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2598,5 +2598,21 @@ endmodule`;
     });
   });
 
+  suite('Regression: assertion #<digits> qualifier and extern macromodule modifier', () => {
+    test('should reject property block when assert # <space> N property is used', () => {
+      // `assert # 5 property p1;` is an assertion statement, not a property declaration.
+      const source = 'assert # 5 property p1;\n  a |-> b;\nendproperty';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+    });
+
+    test('should not treat extern macromodule m1(); as a block opener', () => {
+      const source = 'extern macromodule m1();\nendmodule\nmacromodule m2;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'macromodule');
+    });
+  });
+
   generateCommonTests(config);
 });

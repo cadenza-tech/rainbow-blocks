@@ -3437,5 +3437,59 @@ end`;
     });
   });
 
+  suite('Regression: block-form for after comment in brackets', () => {
+    test('should detect block-form for in [] preceded by single-line comment', () => {
+      const pairs = parser.parse('[# comment\nfor i in 1:10\n  i\nend]');
+      assertBlockCount(pairs, 1);
+      const pair = pairs[0];
+      assert.strictEqual(pair.openKeyword.value, 'for');
+    });
+
+    test('should detect block-form for in () preceded by single-line comment', () => {
+      const pairs = parser.parse('(# comment\nfor i in 1:10\n  i\nend)');
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should detect block-form for in [] preceded by multi-line comment', () => {
+      const pairs = parser.parse('[#= multi-line =#\nfor x in 1:10\n  x\nend]');
+      assertBlockCount(pairs, 1);
+    });
+  });
+
+  suite('Regression: block keywords as block expressions inside indexing brackets', () => {
+    test('should accept quote/end as block expression in indexing brackets', () => {
+      const pairs = parser.parse('a[quote x = 1 end]');
+      assertBlockCount(pairs, 1);
+      const pair = pairs[0];
+      assert.strictEqual(pair.openKeyword.value, 'quote');
+    });
+
+    test('should accept try/catch/end as block expression in indexing brackets', () => {
+      const pairs = parser.parse('a[try 1 catch e 0 end]');
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should accept let/end as block expression in indexing brackets', () => {
+      const pairs = parser.parse('a[let x = 1; x end]');
+      assertBlockCount(pairs, 1);
+    });
+
+    test('should still treat begin in indexing brackets as firstindex (not a block opener)', () => {
+      const pairs = parser.parse('a[begin:end]');
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: subtype operators <:, >: are not symbol-literal markers', () => {
+    test('should not turn :Number into a symbol literal in T<:Number', () => {
+      const source = 'function add(x::T, y::T) where T<:Number\n  x + y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      const hasNumberSymbol = regions.some((r) => source.slice(r.start, r.end).startsWith(':Number'));
+      assert.ok(!hasNumberSymbol, ':Number should not be tokenised as a symbol literal');
+    });
+  });
+
   generateCommonTests(config);
 });

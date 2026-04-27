@@ -1481,5 +1481,13 @@ end`;
     });
   });
 
+  suite('Regression: BOM at file start does not block %{ recognition', () => {
+    test('should still recognise %{ as block comment opener after a leading BOM', () => {
+      const source = '\u{FEFF}%{\nif keyword inside\n%}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

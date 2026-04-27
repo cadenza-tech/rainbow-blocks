@@ -4601,5 +4601,43 @@ end program`;
     });
   });
 
+  suite('Regression: continuation across blank lines for module/select/if-then validation', () => {
+    test('should treat module &<blank>procedure as module instantiation, not module block', () => {
+      // Submodule body: `module &\n\n  procedure my_proc` is a module procedure (no module block).
+      // Before fix, the blank line broke continuation handling and `module` was wrongly treated as a block opener
+      // that stole the trailing `end` from `submodule`.
+      const source = 'submodule (m) sub\ncontains\n  module &\n\n  procedure my_proc\n    x = 1\n  end procedure\nend';
+      const pairs = parser.parse(source);
+      // Two pairs expected: outer submodule and inner procedure
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'submodule');
+      assert.ok(outer, 'submodule should be paired');
+    });
+
+    test('should treat select &<blank>case as select case block', () => {
+      const source = 'select &\n\n  case (x)\n  case (1)\n    y = 1\nend select';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const block = pairs[0];
+      assert.strictEqual(block.openKeyword.value.toLowerCase(), 'select');
+    });
+  });
+
+  suite('Regression: if-then with semicolon and end with blank-line continuation', () => {
+    test('should accept if (cond) then; statement; end if as a single if block', () => {
+      const source = 'if (x > 0) then; y = 1; end if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'if');
+    });
+
+    test('should accept compound end with blank-line continuation', () => {
+      const source = 'if (.true.) then\n  y = 1\nend &\n\n  if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end if');
+    });
+  });
+
   generateCommonTests(config);
 });

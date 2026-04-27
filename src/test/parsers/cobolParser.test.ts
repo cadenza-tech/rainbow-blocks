@@ -1738,5 +1738,50 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: PERFORM TEST BEFORE/AFTER without WITH', () => {
+    test('should accept PERFORM TEST BEFORE UNTIL as structured form', () => {
+      const source = 'PERFORM TEST BEFORE UNTIL X > 5\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should accept PERFORM TEST AFTER UNTIL as structured form', () => {
+      const source = 'PERFORM TEST AFTER UNTIL X > 5\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should accept PERFORM TEST BEFORE VARYING as structured form', () => {
+      const source = 'PERFORM TEST BEFORE VARYING I FROM 1 BY 1 UNTIL I > 10\n  DISPLAY I\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still accept PERFORM WITH TEST BEFORE UNTIL', () => {
+      const source = 'PERFORM WITH TEST BEFORE UNTIL X > 5\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
+  suite('Regression: matchExecBlock word boundary handling', () => {
+    test('should not start an EXEC block when preceded by a Unicode letter', () => {
+      // `caféEXEC SQL ... END-EXEC` should not be recognised as EXEC SQL
+      const source = 'caféEXEC SQL\n  IF X > 0\n  END-IF\nEND-EXEC';
+      const pairs = parser.parse(source);
+      // The IF/END-IF inside should be recognised because the EXEC block is rejected
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'IF');
+      assert.ok(ifPair, 'IF/END-IF should be detected when EXEC is rejected by Unicode boundary');
+    });
+
+    test('should not match EXEC SQL1 as EXEC SQL block', () => {
+      // `EXEC SQL1` is not a recognised sublanguage; the block should not be excluded
+      const source = 'EXEC SQL1\n  IF X > 0\n  END-IF\nEND-EXEC';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'IF');
+      assert.ok(ifPair, 'IF/END-IF should be detected when EXEC SQL1 is rejected');
+    });
+  });
+
   generateCommonTests(config);
 });

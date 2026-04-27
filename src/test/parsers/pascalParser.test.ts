@@ -1624,17 +1624,12 @@ end`;
       assertSingleBlock(pairs, 'record', 'end');
     });
 
-    test('should detect class as block when of is on the next line', () => {
-      // 'class of' check changed from /^\s+of\b/ to /^[ \t]+of\b/
-      // A newline between 'class' and 'of' no longer matches the class-reference-type pattern
-      // Provide an extra 'end' so the class block can be matched (class...end and begin...end)
-      const source = 'type\n  TRef = class\n  of TBase;\nend;\nbegin\nend';
+    test('should treat class with newline before of as reference type', () => {
+      // Per Pascal grammar, newline and comments between 'class' and 'of' do not change the meaning:
+      // 'class\n  of TBase;' is a class-reference type, not a block opener.
+      const source = 'type\n  TRef = class\n  of TBase;\nbegin\nend';
       const pairs = parser.parse(source);
-      // 'class' is followed by newline then 'of', so it is NOT treated as 'class of' reference type
-      // It is treated as a class block opener, matching the first 'end'
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'class');
-      findBlock(pairs, 'begin');
+      assertSingleBlock(pairs, 'begin', 'end');
     });
 
     test('should still suppress class of on the same line as class reference type', () => {
@@ -1971,21 +1966,19 @@ end.`;
     });
   });
 
-  suite('Bug: multi-line comment bypasses newline check in class-of detection', () => {
-    test('should not treat class-of as reference type when newline is inside comment', () => {
-      // Forward scan from 'class': excluded region skips the comment (including newline)
-      // After comment, finds 'of' -> falsely treated as 'class of' reference type
-      // But the newline between class and of should prevent this detection
-      const source = 'type\n  TRef = class { comment\n  } of TBase;\nend';
+  suite('class-of reference type with comments and newlines', () => {
+    test('should treat class-of as reference type when newline is inside comment', () => {
+      // Per Pascal grammar, newline/comment between 'class' and 'of' does not change the meaning:
+      // 'class { ... } of TBase' is a class-reference type, not a block opener.
+      const source = 'type\n  TRef = class { comment\n  } of TBase;\nbegin\nend';
       const pairs = parser.parse(source);
-      // Expected: 1 block (class...end), 'class of' should NOT be detected as reference type
-      assertSingleBlock(pairs, 'class', 'end');
+      assertSingleBlock(pairs, 'begin', 'end');
     });
 
-    test('should not treat class-of as reference type with paren-star multi-line comment', () => {
-      const source = 'type\n  TRef = class (* comment\n  *) of TBase;\nend';
+    test('should treat class-of as reference type with paren-star multi-line comment', () => {
+      const source = 'type\n  TRef = class (* comment\n  *) of TBase;\nbegin\nend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'class', 'end');
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 
@@ -2192,33 +2185,24 @@ end.`;
     });
   });
 
-  suite('Bug: isInsideRecord class-of check inconsistent with isValidBlockOpen newline guard', () => {
-    test('should treat class as block opener when of is after newline in isInsideRecord', () => {
-      // isInsideRecord backward scan: class followed by newline then of
-      // Should NOT be treated as 'class of' reference type (newline breaks the detection)
-      // class is a block opener -> depth-- at depth 0 -> returns false (not inside record)
-      const source = 'TRef = class\n  of TBase;\nend;\ncase X of\n  1: DoOne;\nend';
+  suite('class-of reference type detection across newlines and comments', () => {
+    test('should treat class with newline before of as reference type in isInsideRecord context', () => {
+      // Per Pascal grammar, newline between 'class' and 'of' does not change the meaning.
+      const source = 'TRef = class\n  of TBase;\ncase X of\n  1: DoOne;\nend';
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'class');
-      findBlock(pairs, 'case');
+      assertSingleBlock(pairs, 'case', 'end');
     });
 
     test('should still treat class of on same line as reference type in isInsideRecord', () => {
-      // class of on same line should still be skipped (not a block opener)
       const source = 'TRec = record\n  TRef = class of TBase;\n  case Integer of\n    0: (IntVal: Integer);\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'record', 'end');
     });
 
-    test('should treat class as block opener when multi-line comment with newline before of in isInsideRecord', () => {
-      // class followed by multi-line comment containing newline, then of
-      // Should NOT be treated as 'class of' reference type
-      const source = 'TRef = class { comment\n} of TBase;\nend;\ncase X of\n  1: DoOne;\nend';
+    test('should treat class with multi-line comment before of as reference type', () => {
+      const source = 'TRef = class { comment\n} of TBase;\ncase X of\n  1: DoOne;\nend';
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'class');
-      findBlock(pairs, 'case');
+      assertSingleBlock(pairs, 'case', 'end');
     });
   });
 
@@ -2515,6 +2499,55 @@ end.`;
 
     test('should not treat class as type def after function call comparison', () => {
       const source = 'begin if Foo() = class then y := 1; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: array [...] of in case branch', () => {
+    test('should not treat array [..] of as case intermediate', () => {
+      // The `of` in `array [0..N] of Byte` is part of the array type,
+      // not the case statement's `of` intermediate.
+      const source = 'case X of A: array [0..N] of Byte; end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const block = pairs[0];
+      assert.strictEqual(block.openKeyword.value.toLowerCase(), 'case');
+      assertIntermediates(block, ['of']);
+    });
+
+    test('should not treat array [TKind] of as case intermediate', () => {
+      const source = 'case X of A: array [TKind] of Byte; end';
+      const pairs = parser.parse(source);
+      const block = pairs[0];
+      assertIntermediates(block, ['of']);
+    });
+
+    test('should not treat array packed of (FreePascal) as case intermediate', () => {
+      const source = 'case X of A: array packed of Byte; end';
+      const pairs = parser.parse(source);
+      const block = pairs[0];
+      assertIntermediates(block, ['of']);
+    });
+  });
+
+  suite('Regression: empty asm; statement preserves outer begin..end', () => {
+    test('should not consume outer begin..end with empty asm; statement', () => {
+      const source = 'begin asm; X := 1; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression: end as field/property access (Foo.End) is not a block close', () => {
+    test('should not pair Foo.End with begin', () => {
+      const source = 'begin for I := 0 to A.End do X := A[I]; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not pair lowercase Foo.end with begin', () => {
+      const source = 'begin x := obj.end; end';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
     });

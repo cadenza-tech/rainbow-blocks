@@ -3697,5 +3697,19 @@ end`;
     });
   });
 
+  suite('Regression: abstract def with backslash line continuation', () => {
+    test('should treat abstract \\<newline> def as abstract method (no end pairing)', () => {
+      const source = 'class Animal\n  abstract \\\n    def speak\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should treat abstract \\<CRLF> def as abstract method', () => {
+      const source = 'class Animal\n  abstract \\\r\n    def speak\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

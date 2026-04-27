@@ -3045,11 +3045,11 @@ fi`;
       assertSingleBlock(pairs, 'for', 'done');
     });
 
-    test('should not treat keyword after non-whitespace ( as case pattern', () => {
-      // "x=(if" — the ( is after "x=" which is not whitespace or ;;
+    test('should treat keywords inside array literal not as block keywords', () => {
+      // `var=(...)` is a bash array literal; keywords inside are values, not block keywords
       const source = 'x=(if true; then echo ok; fi)';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'fi');
+      assertNoBlocks(pairs);
     });
 
     test('should return false from backward scan when ( preceded by non-separator text', () => {
@@ -5378,6 +5378,42 @@ fi`;
       const source = 'case $x in\n  for) echo ;;\nesac';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
+  suite('Regression: array literal vs subshell command position', () => {
+    test('should not detect block keywords inside single-line array literal', () => {
+      const source = 'arr=(if then)\nfi';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect block keywords inside multi-line array literal', () => {
+      const source = 'BASH_KEYWORDS=(\n  if\n  then\n  fi\n  for\n  done\n)\nif x; then y; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not detect block keywords inside compound array assignment', () => {
+      const source = 'arr+=(if for done)\nif true; then x; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still detect block keywords inside real subshell', () => {
+      const source = '(if true; then echo ok; fi)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: block_middle keyword fused with adjacent quoted string', () => {
+    test('should not detect then"foo" as a block middle keyword', () => {
+      // `then"foo"` is a single fused word in Bash, not a `then` block-middle
+      const source = 'if x; then"foo"; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], []);
     });
   });
 });
