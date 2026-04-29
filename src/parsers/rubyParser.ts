@@ -211,6 +211,10 @@ export class RubyBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && (source[token.startOffset - 1] === '$' || source[token.startOffset - 1] === '@')) {
         return false;
       }
+      // Filter out =end / =begin (multi-line comment markers without their pair, or non-line-start =begin)
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '=' && (token.value === 'end' || token.value === 'begin')) {
+        return false;
+      }
       // Filter out tokens immediately followed by colon (hash key syntax)
       // But not :: (scope resolution operator)
       if (source[token.endOffset] === ':' && source[token.endOffset + 1] !== ':') {
@@ -456,10 +460,30 @@ export class RubyBlockParser extends BaseBlockParser {
 
     // Backtick string (command) with #{} interpolation support
     if (char === '`') {
+      // Backtick can also be a method name: `def ` (cmd) ... end`, `obj.\`(...)`, `::\``
+      if (this.isBacktickMethodName(source, pos)) return null;
       return this.matchBacktickString(source, pos);
     }
 
     return null;
+  }
+
+  // Checks if backtick at pos is being used as a method name rather than a string opener
+  private isBacktickMethodName(source: string, pos: number): boolean {
+    let i = pos - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0) return false;
+    // Method call: obj.`, obj&.`
+    if (source[i] === '.') return true;
+    // Scope resolution: ClassName::`
+    if (source[i] === ':' && i > 0 && source[i - 1] === ':') return true;
+    // Method definition: def `
+    if (i >= 2 && source.slice(i - 2, i + 1) === 'def') {
+      if (i === 2 || !/[a-zA-Z0-9_]/.test(source[i - 3])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Checks if colon starts a symbol (not ternary, hash key, or scope resolution)
