@@ -362,11 +362,17 @@ export class AdaBlockParser extends BaseBlockParser {
             lastTypeDeclPos = absPos;
           }
           if (lastTypeDeclPos >= 0) {
-            // Ensure no semicolon between type/subtype keyword and this 'is'
+            // Ensure no top-level semicolon between type/subtype keyword and this 'is'
+            // (track paren depth so discriminant separators like `(D : Integer; B : Boolean)`
+            // are not misinterpreted as statement terminators)
             let hasSemiBetween = false;
+            let parenDepth = 0;
             for (let si = lastTypeDeclPos; si < startOffset; si++) {
               if (this.isInExcludedRegion(si, excludedRegions)) continue;
-              if (source[si] === ';') {
+              const ch = source[si];
+              if (ch === '(') parenDepth++;
+              else if (ch === ')') parenDepth--;
+              else if (ch === ';' && parenDepth === 0) {
                 hasSemiBetween = true;
                 break;
               }
@@ -616,6 +622,42 @@ export class AdaBlockParser extends BaseBlockParser {
         }
       }
 
+      // Boolean 'or' filter: a bare 'or' is only a select-block intermediate when it
+      // appears at a select alternative boundary (preceded by ';' or by the `select`
+      // keyword itself). Otherwise it is a boolean operator (e.g., `Z := A or B;`,
+      // `when A or B =>`) and must not be tracked as an intermediate token.
+      // The 'or else' short-circuit is handled by the dedicated branch above; skip
+      // bare-'or' filtering when the next token is 'else'.
+      if (lowerValue === 'or') {
+        const nextToken = result[i + 1];
+        const nextIsElse = nextToken !== undefined && nextToken.value.toLowerCase() === 'else';
+        if (!nextIsElse) {
+          let prevPos = token.startOffset - 1;
+          while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+            prevPos--;
+          }
+          while (prevPos >= 0 && this.isInExcludedRegion(prevPos, excludedRegions)) {
+            const region = this.findExcludedRegionAt(prevPos, excludedRegions);
+            if (region) {
+              prevPos = region.start - 1;
+              while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+                prevPos--;
+              }
+            } else {
+              prevPos--;
+            }
+          }
+          const selectStart = prevPos - 5;
+          const atSelectKeyword =
+            prevPos >= 5 &&
+            source.slice(selectStart, prevPos + 1).toLowerCase() === 'select' &&
+            (selectStart === 0 || !/[a-zA-Z0-9_]/.test(source[selectStart - 1]));
+          if (!(prevPos >= 0 && (source[prevPos] === ';' || atSelectKeyword))) {
+            continue;
+          }
+        }
+      }
+
       // 'and then' short-circuit: 'and' is not a keyword, so scan backward from 'then'
       // skipping whitespace and excluded regions (comments between 'and' and 'then')
       if (lowerValue === 'then') {
@@ -701,8 +743,9 @@ export class AdaBlockParser extends BaseBlockParser {
         case 'block_close': {
           const closeValue = token.value.toLowerCase();
 
-          // Check if it's a compound end
-          const compoundMatch = closeValue.match(/^end[ \t]+(\S+)/);
+          // Check if it's a compound end (allow newlines/CR within the gap so that
+          // `end\n  if` and `end --comment\n if` are treated as compound `end if`)
+          const compoundMatch = closeValue.match(/^end[\s]+(\S+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
             let matchIndex = -1;
