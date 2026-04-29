@@ -850,8 +850,9 @@ end`;
       assertIntermediates(pairs[0], ['else']);
     });
 
-    test('should accept else as intermediate for if block', () => {
-      // Erlang if with else (OTP 25+)
+    test('should NOT treat else as intermediate for if block (Erlang spec: if has guards only, no else)', () => {
+      // Per Erlang Reference Manual, `if` blocks accept guard clauses only — `else` is
+      // not valid syntax for `if`. The parser should not record it as an intermediate.
       const source = `if
   X > 0 -> ok
 else
@@ -859,10 +860,12 @@ else
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
-      assertIntermediates(pairs[0], ['else']);
+      assertIntermediates(pairs[0], []);
     });
 
-    test('should accept else as intermediate for try block', () => {
+    test('should NOT treat else as intermediate for try block (Erlang spec: try has of/catch/after only)', () => {
+      // Per Erlang Reference Manual, `try` blocks accept `of`/`catch`/`after` only —
+      // `else` is not valid syntax for `try`. The parser should not record it as an intermediate.
       const source = `try
   risky()
 else
@@ -870,7 +873,7 @@ else
 end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'try', 'end');
-      assertIntermediates(pairs[0], ['else']);
+      assertIntermediates(pairs[0], []);
     });
   });
 
@@ -1798,20 +1801,21 @@ bar() -> fun() -> ok end.`;
     });
   });
 
-  suite('Branch coverage: atom with backslash-newline terminates', () => {
-    test('should terminate atom at backslash followed by LF', () => {
-      // Covers erlangParser.ts lines 452-453: backslash before \n in quoted atom
-      // Atom 'abc\ terminates at the backslash-newline, then begin/end detected
+  suite('Branch coverage: atom with backslash-newline as line continuation', () => {
+    // Per Erlang spec, `\<LF>` (and `\<CR>`/`\<CRLF>`) inside a quoted atom is a
+    // line continuation (matching string literal behavior). The atom continues
+    // past the newline; if no closing `'` is found, it remains unterminated.
+    test('should treat backslash-LF as line continuation in atom', () => {
       const source = "'abc\\\nbegin\nend";
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
+      // Unterminated atom swallows begin/end → no pair
+      assertBlockCount(pairs, 0);
     });
 
-    test('should terminate atom at backslash followed by CR', () => {
-      // Covers erlangParser.ts lines 452-453: backslash before \r in quoted atom
+    test('should treat backslash-CR as line continuation in atom', () => {
       const source = "'abc\\\rbegin\rend";
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'begin', 'end');
+      assertBlockCount(pairs, 0);
     });
   });
 

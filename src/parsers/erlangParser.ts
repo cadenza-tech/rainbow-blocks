@@ -79,12 +79,13 @@ export class ErlangBlockParser extends BaseBlockParser {
     // fun Module:Function/Arity or fun Function/Arity
     // Module can be a quoted atom: fun 'my.module':func/N
     // Module/Function can be a macro: fun ?MODULE:handler/N, fun ?MY_FUNC/N
-    const atomOrIdent = "(?:\\??[a-zA-Z_][a-zA-Z0-9_]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
-    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*\\d`);
+    // OTP 19+ allows Unicode characters in atoms/identifiers (\p{L}/\p{N})
+    const atomOrIdent = "(?:\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
+    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*\\d`, 'u');
     if (funRefModPattern.test(afterFun)) {
       return false;
     }
-    if (/^\s+\??[a-zA-Z_][a-zA-Z0-9_]*\s*\/\s*\d/.test(afterFun)) {
+    if (/^\s+\??[a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}]*\s*\/\s*\d/u.test(afterFun)) {
       return false;
     }
     // fun 'quoted-atom'/Arity or fun ?'quoted-atom'/Arity (function reference without module prefix)
@@ -549,8 +550,10 @@ export class ErlangBlockParser extends BaseBlockParser {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else if (token.value === 'else') {
-              // 'else' is only valid for 'if', 'try', and 'maybe' blocks
-              if (topOpener === 'if' || topOpener === 'try' || topOpener === 'maybe') {
+              // Per Erlang Reference Manual, `else` is only valid as an intermediate
+              // for `maybe` blocks (OTP 25+). `if` only allows guard clauses (no else),
+              // and `try` allows `of`/`catch`/`after` (no else).
+              if (topOpener === 'maybe') {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else {
@@ -705,9 +708,17 @@ export class ErlangBlockParser extends BaseBlockParser {
           continue;
         }
 
-        // Atoms cannot span lines - backslash before newline terminates
-        if (escChar === '\n' || escChar === '\r') {
-          return { start: pos, end: i };
+        // Per Erlang spec, `\<LF>` (and `\<CR>`/`\<CRLF>`) inside a quoted atom is a
+        // line continuation: the backslash and newline are consumed and the atom
+        // continues on the next line.
+        if (escChar === '\n') {
+          i += 2;
+          continue;
+        }
+        if (escChar === '\r') {
+          const skip = i + 2 < source.length && source[i + 2] === '\n' ? 3 : 2;
+          i += skip;
+          continue;
         }
         // Basic escape: \n, \t, \\, \', etc
         i += 2;
