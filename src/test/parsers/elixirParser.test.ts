@@ -3734,12 +3734,15 @@ end`;
     });
   });
 
-  suite('Regression: triple-quoted single-line containing standalone CR', () => {
-    test('should not flag standalone CR inside single-line triple-quoted string as heredoc', () => {
-      // Embedded CR (without LF) is rare, but should not flip the string into heredoc mode
+  suite('Regression: triple-quoted heredoc with CR-only line ending', () => {
+    test('should treat standalone CR as newline (heredoc mode) per CLAUDE.md line ending rules', () => {
+      // Per CLAUDE.md, CR (lone \r) is treated as a newline like LF. A bare CR inside
+      // a triple-quoted string flips it into heredoc mode, so the closing `"""` on the
+      // same line is no longer a valid terminator (heredoc terminator must be on its own line).
+      // The unterminated heredoc swallows the rest, so no if/end pair forms.
       const source = 'x = """abc\rdef"""\nif true do\n  :ok\nend';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'if', 'end');
+      assertBlockCount(pairs, 0);
     });
   });
 

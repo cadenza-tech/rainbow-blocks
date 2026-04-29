@@ -178,9 +178,7 @@ export function matchTripleQuotedString(source: string, pos: number, delimiter: 
   // `"""abc<CR>def"""` is correctly recognised as a single-line triple-quoted string.
   let isHeredoc = false;
   while (i < source.length) {
-    if (source[i] === '\n') {
-      isHeredoc = true;
-    } else if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+    if (source[i] === '\n' || source[i] === '\r') {
       isHeredoc = true;
     }
     if (source[i] === '\\' && i + 1 < source.length) {
@@ -205,9 +203,7 @@ export function skipNestedTripleQuotedString(source: string, pos: number, delimi
   let i = pos + 3;
   let isHeredoc = false;
   while (i < source.length) {
-    if (source[i] === '\n') {
-      isHeredoc = true;
-    } else if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+    if (source[i] === '\n' || source[i] === '\r') {
       isHeredoc = true;
     }
     if (source[i] === '\\' && i + 1 < source.length) {
@@ -253,10 +249,11 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
   const sigilChar = source[pos + 1];
   const isLowercase = /[a-z]/.test(sigilChar);
 
-  // Skip past sigil letter(s) to find delimiter
-  // Only uppercase sigils (custom sigils) allow multi-character names
+  // Skip past sigil letter(s) to find delimiter.
+  // Elixir 1.18+ allows multi-letter lowercase sigils (e.g., ~html, ~json) in addition
+  // to multi-letter uppercase custom sigils.
   let delimiterPos = pos + 2;
-  if (/[A-Z]/.test(sigilChar)) {
+  if (/[a-zA-Z]/.test(sigilChar)) {
     while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
       delimiterPos++;
     }
@@ -284,9 +281,7 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
     let j = delimiterPos + 3;
     let isHeredoc = false;
     while (j < source.length) {
-      if (source[j] === '\n') {
-        isHeredoc = true;
-      } else if (source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') {
+      if (source[j] === '\n' || source[j] === '\r') {
         isHeredoc = true;
       }
       if (source[j] === '\\' && j + 1 < source.length) {
@@ -353,10 +348,10 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
     return null;
   }
 
-  // Find delimiter position (skip additional letters only for uppercase/custom sigils)
-  // Lowercase sigils are always single-letter (r, s, w, c, etc.)
+  // Find delimiter position. Elixir 1.18+ allows multi-letter lowercase sigils
+  // (e.g., ~html, ~json) in addition to uppercase custom sigils.
   let delimiterPos = pos + 2;
-  if (/[A-Z]/.test(nextChar)) {
+  if (/[a-zA-Z]/.test(nextChar)) {
     while (delimiterPos < source.length && /[a-zA-Z]/.test(source[delimiterPos])) {
       delimiterPos++;
     }
