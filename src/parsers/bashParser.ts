@@ -175,16 +175,19 @@ export class BashBlockParser extends BaseBlockParser {
 
     // Single-quoted string (no escape sequences)
     if (char === "'") {
+      if (this.isEscapedByBackslash(source, pos)) return null;
       return matchSingleQuotedString(source, pos);
     }
 
     // Double-quoted string (Bash-specific: handles $(), ${}, backticks inside)
     if (char === '"') {
+      if (this.isEscapedByBackslash(source, pos)) return null;
       return matchBashDoubleQuote(source, pos);
     }
 
     // Backtick command substitution
     if (char === '`') {
+      if (this.isEscapedByBackslash(source, pos)) return null;
       return matchBacktickCommand(source, pos);
     }
 
@@ -206,6 +209,17 @@ export class BashBlockParser extends BaseBlockParser {
     }
 
     return null;
+  }
+
+  // Checks if quote at position is escaped by an odd number of preceding backslashes
+  private isEscapedByBackslash(source: string, pos: number): boolean {
+    let count = 0;
+    let i = pos - 1;
+    while (i >= 0 && source[i] === '\\') {
+      count++;
+      i--;
+    }
+    return count % 2 === 1;
   }
 
   // Checks if # at position is part of parameter expansion (${#var})

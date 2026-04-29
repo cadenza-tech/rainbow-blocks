@@ -58,8 +58,8 @@ export function isAtCommandPosition(
   }
 
   let i = position - 1;
-  // Skip whitespace (spaces, tabs) but not line endings
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+  // Skip whitespace (spaces, tabs, BOM U+FEFF) but not line endings
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '﻿')) {
     i--;
   }
 
@@ -292,7 +292,14 @@ export function isAtCommandPosition(
 
   // Environment variable prefix: VAR=value before a command keyword
   // Handles: FOO=bar if, A=1 B=2 if, FOO="quoted" if, FOO= if
+  // Requires whitespace between value and command keyword (e.g., `a=if` is `VAR=value`, not a command)
   if (i >= 0) {
+    if (position > 0) {
+      const charBeforeKeyword = source[position - 1];
+      if (charBeforeKeyword !== ' ' && charBeforeKeyword !== '\t' && charBeforeKeyword !== '\n' && charBeforeKeyword !== '\r') {
+        return false;
+      }
+    }
     let eqScan = i;
     if (source[eqScan] !== '=') {
       while (eqScan > 0 && source[eqScan - 1] !== '=' && /[^\s;|&(){}`]/.test(source[eqScan - 1])) {

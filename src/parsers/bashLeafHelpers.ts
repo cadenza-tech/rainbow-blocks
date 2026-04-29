@@ -40,12 +40,13 @@ export function matchesWord(source: string, pos: number, word: string): boolean 
 // Parses a heredoc operator (<<, <<-) and extracts the delimiter
 export function parseHeredocOperator(source: string, pos: number): { stripTabs: boolean; terminator: string; matchLength: number } | null {
   // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, and numeric-only
-  const heredocPattern = /^<<(-)?[\t ]*\\?(?:(['"])(.*?)\2|([A-Za-z_0-9][A-Za-z0-9_\-.]*))/;
+  // Backslash-quoted: delimiter is the contiguous non-special run after `\` (e.g., <<\}, <<\EOF)
+  const heredocPattern = /^<<(-)?[\t ]*(?:(['"])(.*?)\2|\\([^\s'"]+)|([A-Za-z_0-9][A-Za-z0-9_\-.]*))/;
   const match = source.slice(pos).match(heredocPattern);
   if (!match) return null;
   return {
     stripTabs: match[1] === '-',
-    terminator: match[3] ?? match[4],
+    terminator: match[3] ?? match[4] ?? match[5],
     matchLength: match[0].length
   };
 }
