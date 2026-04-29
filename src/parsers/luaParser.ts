@@ -195,10 +195,11 @@ export class LuaBlockParser extends BaseBlockParser {
     });
   }
 
-  // Detects whether the keyword at position is the target of a `goto` statement
+  // Detects whether the keyword at position is the target of a `goto` statement.
+  // Lua spec allows whitespace (including newlines) between `goto` and its label name.
   private isAfterGoto(source: string, position: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
       i--;
     }
     if (i < 3) return false;
@@ -209,13 +210,17 @@ export class LuaBlockParser extends BaseBlockParser {
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
-    // Shebang line (only at file start, e.g., `#!/usr/bin/env lua`)
-    if (pos === 0 && char === '#' && pos + 1 < source.length && source[pos + 1] === '!') {
-      let end = pos;
-      while (end < source.length && source[end] !== '\n' && source[end] !== '\r') {
-        end++;
+    // Shebang line (at file start or directly after a UTF-8/UTF-16 BOM, e.g.,
+    // `#!/usr/bin/env lua`). Lua 5.3+ accepts a leading BOM (U+FEFF) before the shebang.
+    if (char === '#' && pos + 1 < source.length && source[pos + 1] === '!') {
+      const isFileStart = pos === 0 || (pos === 1 && source[0] === '﻿');
+      if (isFileStart) {
+        let end = pos;
+        while (end < source.length && source[end] !== '\n' && source[end] !== '\r') {
+          end++;
+        }
+        return { start: pos, end };
       }
-      return { start: pos, end };
     }
 
     // Comment (-- single line or --[[ multi-line)
