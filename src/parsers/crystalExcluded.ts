@@ -169,7 +169,8 @@ function skipRegexLiteral(source: string, pos: number): number {
       inCharClass = false;
     } else if (c === '/' && !inCharClass) {
       i++;
-      while (i < source.length && /[imxs]/.test(source[i])) i++;
+      // Crystal regex flags are i/m/x only; consume them after the closing `/`.
+      while (i < source.length && /[imx]/.test(source[i])) i++;
       return i;
     }
     i++;
