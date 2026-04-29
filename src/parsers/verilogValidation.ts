@@ -383,19 +383,32 @@ export function isFollowedByWord(
   return true;
 }
 
-// Returns true if function/task at position is on a DPI import/export line
-// (e.g., import "DPI-C" function void f(); or export "DPI-C" task t;)
-// Strips leading attributes (* ... *) and block comments /* ... */ from the
-// line prefix so DPI is still detected after attribute/comment decoration.
+// Returns true if function/task at position is on a DPI import/export statement
+// (e.g., import "DPI-C" function void f(); or export "DPI-C" task t;).
+// Looks back to the start of the current statement (after the last unquoted semicolon)
+// so that multi-line DPI declarations (`import "DPI-C"\n  function void f();`) are
+// recognised. Strips leading attributes/block comments from the statement prefix.
 export function isOnDpiLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-  let lineStart = position;
-  while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-    lineStart--;
+  // Find statement start: position after the most recent unquoted semicolon.
+  let stmtStart = 0;
+  for (let i = position - 1; i >= 0; i--) {
+    let inExcluded = false;
+    for (const region of excludedRegions) {
+      if (i >= region.start && i < region.end) {
+        inExcluded = true;
+        break;
+      }
+    }
+    if (inExcluded) continue;
+    if (source[i] === ';') {
+      stmtStart = i + 1;
+      break;
+    }
   }
-  let i = lineStart;
+  let i = stmtStart;
   while (i < position) {
     const ch = source[i];
-    if (ch === ' ' || ch === '\t') {
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
       i++;
       continue;
     }
@@ -412,7 +425,7 @@ export function isOnDpiLine(source: string, position: number, excludedRegions: E
     break;
   }
   const lineBeforeKeyword = source.slice(i, position);
-  return /^\s*(?:import|export)\s+"DPI/.test(lineBeforeKeyword);
+  return /^(?:import|export)\s+"DPI[^"]*"/.test(lineBeforeKeyword);
 }
 
 // Returns true if position is inside unmatched parentheses (e.g., port list)

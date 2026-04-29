@@ -70,6 +70,58 @@ const CONTROL_KEYWORDS = [
   'forever'
 ];
 
+// SystemVerilog data type and qualifier keywords. When one of these immediately precedes
+// a block-keyword identifier (e.g., `int function`, `input module`), the block keyword is
+// being used as a parameter or variable name rather than introducing a block.
+const DATA_TYPE_KEYWORDS: ReadonlySet<string> = new Set([
+  // Integer types
+  'bit',
+  'byte',
+  'shortint',
+  'int',
+  'longint',
+  'integer',
+  'time',
+  // Real types
+  'real',
+  'realtime',
+  'shortreal',
+  // Other primitive types
+  'string',
+  'chandle',
+  'event',
+  'void',
+  // Logic/net types
+  'logic',
+  'reg',
+  'wire',
+  'wand',
+  'wor',
+  'tri',
+  'triand',
+  'trior',
+  'trireg',
+  'tri0',
+  'tri1',
+  'uwire',
+  'supply0',
+  'supply1',
+  // Sign/storage qualifiers
+  'signed',
+  'unsigned',
+  'static',
+  'automatic',
+  'const',
+  'var',
+  'ref',
+  'rand',
+  'randc',
+  // Port directions
+  'input',
+  'output',
+  'inout'
+]);
+
 export class VerilogBlockParser extends BaseBlockParser {
   private get validationCallbacks(): VerilogValidationCallbacks {
     return {
@@ -239,6 +291,42 @@ export class VerilogBlockParser extends BaseBlockParser {
     return filtered;
   }
 
+  // Returns true when `function` appears in covergroup `with function sample(...)` syntax.
+  // The `function` keyword is preceded by the word `with` on the same line, and is
+  // followed by `sample` (after whitespace).
+  private isCovergroupWithFunctionSample(source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    // Check preceding word is `with`
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 3) return false;
+    if (!(source.slice(i - 3, i + 1).toLowerCase() === 'with' && (i - 4 < 0 || !/[a-zA-Z0-9_$]/.test(source[i - 4])))) {
+      return false;
+    }
+    // Check following word is `sample`
+    let j = position + 'function'.length;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j + 6 > source.length) return false;
+    if (source.slice(j, j + 6).toLowerCase() !== 'sample') return false;
+    if (j + 6 < source.length && /[a-zA-Z0-9_$]/.test(source[j + 6])) return false;
+    return true;
+  }
+
+  // Returns true when the immediately preceding word on the same line is a SystemVerilog
+  // data-type or qualifier keyword. Used to filter cases like `int function` where the
+  // block keyword is being used as a parameter/variable name.
+  private isPrecededByDataTypeKeyword(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_$]/.test(source[i])) i--;
+    const wordStart = i + 1;
+    // Reject if the word boundary touches `$` (system tasks) or `\` (escaped identifier)
+    if (i >= 0 && (source[i] === '$' || source[i] === '\\')) return false;
+    const word = source.slice(wordStart, wordEnd);
+    return DATA_TYPE_KEYWORDS.has(word);
+  }
+
   // Detects whether position is inside a SystemVerilog assignment pattern: `'{...}`
   // Walks back tracking brace depth; returns true when the innermost unmatched `{` is preceded by `'`
   private isInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -283,6 +371,12 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject keywords used as identifiers after a data type/qualifier keyword
+    // (e.g., `int function`, `input module`, `bit task`)
+    if (this.isPrecededByDataTypeKeyword(source, position)) {
+      return false;
+    }
+
     if (keyword === 'fork') {
       if (!isValidForkOpen(source, position, excludedRegions)) {
         return false;
@@ -309,6 +403,12 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject function/task in DPI import/export declarations (no body)
     if ((keyword === 'function' || keyword === 'task') && isOnDpiLine(source, position, excludedRegions)) {
+      return false;
+    }
+
+    // Reject `function` in covergroup `with function sample(...)` syntax (LRM §19.8.1):
+    // it is a covergroup option specifier, not a function declaration.
+    if (keyword === 'function' && this.isCovergroupWithFunctionSample(source, position, excludedRegions)) {
       return false;
     }
 

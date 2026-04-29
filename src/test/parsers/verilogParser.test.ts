@@ -1685,17 +1685,22 @@ endmodule`;
     });
   });
 
-  suite('Regression: matchVerilogString backslash-newline excluded region', () => {
-    test('should include backslash in excluded region when followed by newline', () => {
+  suite('Regression: matchVerilogString backslash-newline as line continuation', () => {
+    // Per IEEE 1800-2017 §5.9, `\<LF>` (and `\<CR>`/`\<CRLF>`) inside a string is a line
+    // continuation: the backslash and line break are consumed and the string continues.
+    test('should treat backslash-LF as line continuation, not string terminator', () => {
       const source = '"test\\\nmodule m;\nendmodule';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'module', 'endmodule');
+      // String continues from `\<LF>`; bare newline after `module m;` terminates the
+      // unterminated string, leaving only `endmodule` outside any string region.
+      // No `module`/`endmodule` pair is formed.
+      assertBlockCount(pairs, 0);
     });
 
-    test('should include backslash in excluded region when followed by CR-LF', () => {
+    test('should treat backslash-CRLF as line continuation, not string terminator', () => {
       const source = '"test\\\r\nmodule m;\nendmodule';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'module', 'endmodule');
+      assertBlockCount(pairs, 0);
     });
   });
 

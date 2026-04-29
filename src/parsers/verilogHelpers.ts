@@ -15,15 +15,23 @@ export function hasDollarAdjacent(source: string, position: number, keyword: str
   return false;
 }
 
-// Matches Verilog string (cannot span multiple lines)
+// Matches Verilog/SystemVerilog string. Per IEEE 1800-2017 §5.9, `\<LF>` (and `\<CR>`,
+// `\<CRLF>`) inside a string is a line continuation: the backslash and the line break are
+// consumed and the string continues on the next line. A bare unescaped newline still
+// terminates the string.
 export function matchVerilogString(source: string, pos: number): ExcludedRegion {
   let i = pos + 1;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
-      // Don't skip newline - Verilog strings can't span lines
-      // Include the backslash in the excluded region since it's part of the string content
-      if (source[i + 1] === '\n' || source[i + 1] === '\r') {
-        return { start: pos, end: i + 1 };
+      const nextChar = source[i + 1];
+      if (nextChar === '\n') {
+        i += 2;
+        continue;
+      }
+      if (nextChar === '\r') {
+        const skip = i + 2 < source.length && source[i + 2] === '\n' ? 3 : 2;
+        i += skip;
+        continue;
       }
       i += 2;
       continue;
@@ -31,7 +39,7 @@ export function matchVerilogString(source: string, pos: number): ExcludedRegion 
     if (source[i] === '"') {
       return { start: pos, end: i + 1 };
     }
-    // String cannot span multiple lines in Verilog
+    // Bare newline terminates an unfinished string in Verilog
     if (source[i] === '\n' || source[i] === '\r') {
       return { start: pos, end: i };
     }
