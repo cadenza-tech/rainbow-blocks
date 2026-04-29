@@ -22,6 +22,11 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         i = skipMacroString(source, i, char);
         continue;
       }
+      // Skip regex literals (/.../) when at expression start position
+      if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
+        i = skipRegexLiteral(source, i);
+        continue;
+      }
       if (source.slice(i, i + 2) === '%}') {
         return { start: pos, end: i + 2 };
       }
@@ -47,6 +52,11 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
       // Skip strings and backtick command literals inside macro template
       if (char === '"' || char === "'" || char === '`') {
         i = skipMacroString(source, i, char);
+        continue;
+      }
+      // Skip regex literals (/.../) when at expression start position
+      if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
+        i = skipRegexLiteral(source, i);
         continue;
       }
       if (source.slice(i, i + 2) === '{{') {
@@ -98,6 +108,73 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
   }
 
   return null;
+}
+
+// Heuristic: is `/` at pos a regex literal start (vs division)?
+// Inside a macro template, `/` is regex when preceded by an operator/separator/keyword
+function isMacroRegexStart(source: string, pos: number, macroBodyStart: number): boolean {
+  let i = pos - 1;
+  while (i >= macroBodyStart && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    i--;
+  }
+  if (i < macroBodyStart) return true;
+  const c = source[i];
+  if ('=,(;[{<>+-*/%&|!^~?:'.includes(c)) return true;
+  // Common keyword endings (then/in/and/or/not/if/unless/while/until/case/return/yield)
+  if (/[a-z]/.test(c)) {
+    const wordEnd = i + 1;
+    let wordStart = i;
+    while (wordStart > macroBodyStart && /[a-zA-Z_0-9?!]/.test(source[wordStart - 1])) {
+      wordStart--;
+    }
+    const word = source.slice(wordStart, wordEnd);
+    const keywords = [
+      'if',
+      'unless',
+      'while',
+      'until',
+      'case',
+      'when',
+      'then',
+      'else',
+      'elsif',
+      'and',
+      'or',
+      'not',
+      'in',
+      'return',
+      'yield',
+      'break',
+      'next'
+    ];
+    if (keywords.includes(word)) return true;
+  }
+  return false;
+}
+
+// Skips a regex literal /.../[flags], handling escapes and character classes
+function skipRegexLiteral(source: string, pos: number): number {
+  let i = pos + 1;
+  let inCharClass = false;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+    if (c === '\n' || c === '\r') break;
+    if (c === '[') {
+      inCharClass = true;
+    } else if (c === ']') {
+      inCharClass = false;
+    } else if (c === '/' && !inCharClass) {
+      i++;
+      while (i < source.length && /[imxs]/.test(source[i])) i++;
+      return i;
+    }
+    i++;
+  }
+  return i;
 }
 
 // Skips a string inside macro template, returning position after closing quote

@@ -586,6 +586,10 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (/\babstract(?:[ \t]+|[ \t]*\\(?:\r\n|\r|\n)[ \t]*)+$/.test(textBefore)) {
         return false;
       }
+      // Crystal 1.0+ shorthand: `def name [(args)] [: type] = expr` — no body, no end
+      if (this.hasShorthandDefAssignment(source, position + 3, excludedRegions)) {
+        return false;
+      }
     }
 
     // if, unless, while, until can be postfix conditionals in Crystal
@@ -594,5 +598,42 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
 
     return !isPostfixConditional(source, position, excludedRegions);
+  }
+
+  // Detect Crystal shorthand method definition: `def name = expr` (no end keyword needed)
+  // Looks for a standalone `=` (preceded by whitespace) outside of parens, on the def line
+  private hasShorthandDefAssignment(source: string, startPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = startPos;
+    let parenDepth = 0;
+    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const c = source[i];
+      if (c === '#') {
+        return false;
+      }
+      if (c === '(' || c === '[' || c === '{') {
+        parenDepth++;
+      } else if (c === ')' || c === ']' || c === '}') {
+        parenDepth--;
+      } else if (c === '=' && parenDepth === 0) {
+        const next = i + 1 < source.length ? source[i + 1] : '';
+        if (next === '=' || next === '~' || next === '>') {
+          i += 2;
+          continue;
+        }
+        const prev = i > 0 ? source[i - 1] : '';
+        if (prev === ' ' || prev === '\t') {
+          return true;
+        }
+      }
+      i++;
+    }
+    return false;
   }
 }
