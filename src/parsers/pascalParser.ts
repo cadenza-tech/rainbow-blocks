@@ -26,6 +26,10 @@ export class PascalBlockParser extends BaseBlockParser {
   // Validates block open: 'interface' is only valid after '=' (type definition)
   // The unit-level 'interface' section keyword is not a block opener
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Reject keywords used as field-access (Foo.begin, Foo.case, Foo.try, Foo.asm, etc.)
+    if (this.isPrecededByFieldDot(source, position, excludedRegions)) {
+      return false;
+    }
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
@@ -313,9 +317,14 @@ export class PascalBlockParser extends BaseBlockParser {
     return true;
   }
 
-  // `end` immediately after `.` is a field/property access (e.g. `Foo.End`), not a block close.
-  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    if (keyword.toLowerCase() !== 'end') return true;
+  // Reject any close keyword (end/until) immediately after `.` (field/property access).
+  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    return !this.isPrecededByFieldDot(source, position, excludedRegions);
+  }
+
+  // Returns true when the position is preceded by `.` field-access dot, distinguishing
+  // it from the `..` range operator (which is not field access).
+  private isPrecededByFieldDot(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -334,10 +343,10 @@ export class PascalBlockParser extends BaseBlockParser {
     if (i >= 0 && source[i] === '.') {
       // Distinguish field access (`Foo.End`) from a range operator (`..end`)
       if (i === 0 || source[i - 1] !== '.') {
-        return false;
+        return true;
       }
     }
-    return true;
+    return false;
   }
 
   // Extends base to add ASM block excluded regions
@@ -457,6 +466,27 @@ export class PascalBlockParser extends BaseBlockParser {
           continue;
         }
 
+        // Skip end preceded by `.` (field access like `foo.end` inside asm body)
+        if (endPos > 0 && source[endPos - 1] === '.') {
+          continue;
+        }
+
+        // Skip end preceded by `;` on the same line. In asm bodies (Intel/AT&T syntax),
+        // `;` introduces a line comment, so an `end` keyword after `;` on the same line
+        // is comment text and must not terminate the asm body.
+        {
+          let k = endPos - 1;
+          while (k >= contentStart && source[k] !== '\n' && source[k] !== '\r') {
+            if (source[k] === ';') {
+              break;
+            }
+            k--;
+          }
+          if (k >= contentStart && source[k] === ';') {
+            continue;
+          }
+        }
+
         // Skip end: (assembly label) - check if followed by colon
         // Skip whitespace and excluded regions (comments) between 'end' and ':'
         let checkPos = endPos + 3;
@@ -567,6 +597,11 @@ export class PascalBlockParser extends BaseBlockParser {
 
       // Validate block close keywords
       if (type === 'block_close' && !this.isValidBlockClose(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Reject block_middle keywords (of/else/except/finally) used as field-access dot
+      if (type === 'block_middle' && this.isPrecededByFieldDot(source, startOffset, excludedRegions)) {
         continue;
       }
 
