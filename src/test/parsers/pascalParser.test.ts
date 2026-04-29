@@ -2553,5 +2553,30 @@ end.`;
     });
   });
 
+  suite('Regression 2026-04-30: nested asm word inside asm body must not produce overlapping regions', () => {
+    test('should not generate overlapping excluded regions when asm body contains the asm word', () => {
+      // The outer asm/end pair must produce exactly one excluded region; an inner `asm`
+      // inside the asm body (interpreted as an opcode/identifier within the assembly
+      // text) must not register a second region with the same closing `end`.
+      const source = 'begin\n  asm\n    asm\n  end;\nend.';
+      const regions = parser.getExcludedRegions(source);
+      for (let i = 1; i < regions.length; i++) {
+        assert.ok(
+          regions[i - 1].end <= regions[i].start,
+          `Excluded regions must not overlap: region[${i - 1}]=[${regions[i - 1].start},${regions[i - 1].end}) overlaps region[${i}]=[${regions[i].start},${regions[i].end})`
+        );
+      }
+    });
+
+    test('should produce independent excluded regions for two consecutive asm blocks', () => {
+      // Two sequential asm/end pairs must each produce a distinct excluded region with
+      // no overlap; the second `asm` keyword must not be skipped because of the first.
+      const source = 'begin\n  asm\n    nop\n  end;\n  asm\n    nop\n  end;\nend.';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 2, 'two asm blocks must produce two distinct regions');
+      assert.ok(regions[0].end <= regions[1].start, 'consecutive asm regions must not overlap');
+    });
+  });
+
   generateCommonTests(config);
 });

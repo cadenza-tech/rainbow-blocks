@@ -507,13 +507,17 @@ export class PascalBlockParser extends BaseBlockParser {
 
         // This is the real closing 'end' - exclude from asm keyword end to end keyword start
         asmRegions.push({ start: contentStart, end: endPos });
+        // Advance the outer asm scanner past this end so `asm` words inside the
+        // just-confirmed asm body do not produce overlapping/duplicate regions
+        asmPattern.lastIndex = endPos + 3;
         foundEnd = true;
         break;
       }
 
-      // Unterminated asm - exclude to end of source
+      // Unterminated asm - exclude to end of source and stop scanning
       if (!foundEnd) {
         asmRegions.push({ start: contentStart, end: source.length });
+        asmPattern.lastIndex = source.length;
       }
     }
 
