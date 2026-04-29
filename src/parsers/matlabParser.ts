@@ -23,8 +23,12 @@ export class MatlabBlockParser extends BaseBlockParser {
 
   // Reject struct field access for block openers (s.if, s.for, s . if, etc)
   // Reject classdef section keywords used as function calls (properties(obj))
+  // Reject keywords used as function handles (@if, @while, @function)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isPrecededByDot(source, position, excludedRegions)) {
+      return false;
+    }
+    if (this.isPrecededByAtSign(source, position)) {
       return false;
     }
     if (MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(keyword)) {
@@ -161,6 +165,15 @@ export class MatlabBlockParser extends BaseBlockParser {
     for (const token of tokens) {
       switch (token.type) {
         case 'block_open':
+          // Classdef section keywords (properties/methods/events/enumeration/arguments)
+          // are valid block openers only inside a classdef block.
+          // Outside classdef they are function calls (e.g., properties(obj)) — skip them.
+          if (MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(token.value.toLowerCase())) {
+            const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
+            if (!hasClassdef) {
+              break;
+            }
+          }
           stack.push({ token, intermediates: [] });
           break;
 
@@ -259,10 +272,17 @@ export class MatlabBlockParser extends BaseBlockParser {
           return true;
         }
         // Pure digits, hex literals (0x...), binary literals (0b...), or digits with suffixes
+        // followed by `.keyword` form invalid syntax (e.g., `10.end`, `0xFF.if`).
+        // When keyword directly abuts the dot (no whitespace/continuation), treat as filtered
+        // to avoid breaking outer block highlighting. When separated, the dot is a decimal
+        // point and the keyword is a separate statement opener.
         if (
           (/^[0-9][0-9a-fA-F_]*$/.test(numPart) || /^0[xX][0-9a-fA-F_]+$/.test(numPart) || /^0[bB][01_]+$/.test(numPart)) &&
           (j < 0 || !(/[a-zA-Z_]/.test(source[j]) || /\p{L}/u.test(source[j])))
         ) {
+          if (i + 1 === position) {
+            return true;
+          }
           return false;
         }
       }
@@ -356,6 +376,13 @@ export class MatlabBlockParser extends BaseBlockParser {
     blockClose: ['end'],
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch']
   };
+
+  // Checks if position is preceded by `@` (function handle prefix: @keyword)
+  // Allows whitespace between `@` and keyword position is NOT allowed in MATLAB —
+  // function handles must be `@name` with no space, so we only check the immediate prior char
+  protected isPrecededByAtSign(source: string, position: number): boolean {
+    return position > 0 && source[position - 1] === '@';
+  }
 
   // Checks if keyword is followed by = (but not ==) indicating variable assignment
   protected isFollowedBySimpleAssignment(source: string, afterPos: number): boolean {

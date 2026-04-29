@@ -998,19 +998,21 @@ end`;
     });
   });
 
-  suite('Coverage: isKeywordUsedAsFunctionCall at file start', () => {
-    test('should not treat properties(obj) at file start as function call', () => {
-      // Line 70: beforePos < 0 (keyword at very start of file)
+  suite('Coverage: classdef section keywords require enclosing classdef', () => {
+    test('should not treat properties at file start as block open without classdef', () => {
+      // Line 70: properties at very start is ambiguous; without classdef it is treated as
+      // function call/identifier and skipped from block matching
       const source = 'properties(Access = public)\n  Value\nend';
       const pairs = parser.parse(source);
-      // At file start, properties with ( is ambiguous but treated as block keyword
-      assertSingleBlock(pairs, 'properties', 'end');
+      assertBlockCount(pairs, 0);
     });
 
-    test('should not treat methods(obj) at very start of file as function call', () => {
+    test('should not treat methods at very start of file as block open without classdef', () => {
       const source = 'methods\n  function f()\n  end\nend';
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 2);
+      // Only function/end pair survives; methods is skipped (no enclosing classdef)
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'function');
     });
   });
 
@@ -1448,24 +1450,25 @@ end`;
     });
   });
 
-  suite('Regression: isPrecededByDot with hex literal prefix', () => {
-    test('should not filter end after 0xFF. as struct field access', () => {
-      // 0xFF.end: the dot follows a hex literal, not a struct; end should not be filtered
+  suite('Regression: isPrecededByDot with numeric and hex literal prefix', () => {
+    test('should filter end after 0xFF. (invalid syntax, avoid breaking outer block)', () => {
+      // 0xFF.end: invalid syntax (numeric literal + keyword); filtering avoids breaking
+      // the outer block when this appears mid-expression
       const tokens = parser.getTokens('0xFF.end');
       const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 1, 'end after hex literal dot should not be filtered');
+      assert.strictEqual(endTokens.length, 0, 'end immediately after hex literal dot should be filtered');
     });
 
-    test('should not filter end after 0xAB. as struct field access', () => {
+    test('should filter end after 0xAB. (invalid syntax)', () => {
       const tokens = parser.getTokens('0xAB.end');
       const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 1, 'end after hex literal dot should not be filtered');
+      assert.strictEqual(endTokens.length, 0, 'end immediately after hex literal dot should be filtered');
     });
 
-    test('should not filter end after 0b1010. as struct field access', () => {
+    test('should filter end after 0b1010. (invalid syntax)', () => {
       const tokens = parser.getTokens('0b1010.end');
       const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 1, 'end after binary literal dot should not be filtered');
+      assert.strictEqual(endTokens.length, 0, 'end immediately after binary literal dot should be filtered');
     });
 
     test('should still filter end after obj. as struct field access', () => {
@@ -1474,10 +1477,19 @@ end`;
       assert.strictEqual(endTokens.length, 0, 'end after struct dot should be filtered');
     });
 
-    test('should still treat end after 10. as numeric decimal point (not struct access)', () => {
+    test('should filter end after 10. (invalid 10.end syntax)', () => {
       const tokens = parser.getTokens('10.end');
       const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 1, 'end after numeric dot should not be filtered');
+      assert.strictEqual(endTokens.length, 0, 'end immediately after numeric dot should be filtered');
+    });
+
+    test('should NOT filter keyword separated from numeric dot by whitespace/continuation', () => {
+      // 1. ... <newline> if : decimal point with line continuation followed by separate statement
+      const tokens = parser.getTokens('x = 1. ...\nif true\nend');
+      assert.ok(
+        tokens.some((t) => t.value === 'if'),
+        'if after dot+continuation should be tokenized'
+      );
     });
   });
 
