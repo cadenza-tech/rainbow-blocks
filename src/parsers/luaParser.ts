@@ -180,18 +180,43 @@ export class LuaBlockParser extends BaseBlockParser {
   }
 
   // Filters out middle keywords preceded by '.' or ':' (table field/method access)
+  // Also filters out reserved keywords used as goto labels (`goto end`, `goto do`, etc.)
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       if (token.type === 'block_middle' && this.isPrecededByDotOrColon(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Reject keywords used as the target of `goto <label>`
+      if (this.isAfterGoto(source, token.startOffset)) {
+        return false;
+      }
       return true;
     });
   }
 
+  // Detects whether the keyword at position is the target of a `goto` statement
+  private isAfterGoto(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 3) return false;
+    if (source.slice(i - 3, i + 1).toLowerCase() !== 'goto') return false;
+    return i - 3 === 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]);
+  }
+
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
+
+    // Shebang line (only at file start, e.g., `#!/usr/bin/env lua`)
+    if (pos === 0 && char === '#' && pos + 1 < source.length && source[pos + 1] === '!') {
+      let end = pos;
+      while (end < source.length && source[end] !== '\n' && source[end] !== '\r') {
+        end++;
+      }
+      return { start: pos, end };
+    }
 
     // Comment (-- single line or --[[ multi-line)
     if (char === '-' && pos + 1 < source.length && source[pos + 1] === '-') {
