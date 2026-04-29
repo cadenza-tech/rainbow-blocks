@@ -137,6 +137,9 @@ export function isValidForOpen(source: string, position: number, excludedRegions
 // (configuration blocks have 'use entity' on a separate indented line)
 // Checks if 'end' keyword appears after current position on the same line
 // Used to detect compact configuration blocks: for ... use entity ...; end for;
+// Returns true when an `end` keyword appears within the next ~10 lines after `pos`.
+// Used to detect block-form `for label: comp use entity ...; end for;` even when the
+// `end for;` appears on a separate line from the `use entity` clause.
 function hasEndKeywordOnSameLine(
   source: string,
   pos: number,
@@ -145,13 +148,25 @@ function hasEndKeywordOnSameLine(
   callbacks: VhdlValidationCallbacks
 ): boolean {
   let j = pos;
-  while (j < len) {
+  let lineCount = 0;
+  const maxLines = 10;
+  while (j < len && lineCount <= maxLines) {
     if (callbacks.isInExcludedRegion(j, excludedRegions)) {
       j++;
       continue;
     }
     const ch = source[j];
-    if (ch === '\n' || ch === '\r') return false;
+    if (ch === '\n') {
+      lineCount++;
+      j++;
+      continue;
+    }
+    if (ch === '\r') {
+      lineCount++;
+      j++;
+      if (j < len && source[j] === '\n') j++;
+      continue;
+    }
     if (/[a-zA-Z_]/.test(ch)) {
       const ws = j;
       while (j < len && /[a-zA-Z0-9_]/.test(source[j])) j++;

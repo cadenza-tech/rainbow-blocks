@@ -522,10 +522,18 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     const { tokens: result } = mergeCompoundEndTokens(tokens, compoundEndPositions);
 
-    // Filter out block_middle tokens inside parenthesized expressions and
-    // when/else in conditional signal assignments (sig <= val when cond else val)
+    // Filter out block_middle and block_close tokens inside parenthesized expressions
+    // (e.g., `if func(end record) > 0 then`), and when/else in conditional signal
+    // assignments (sig <= val when cond else val)
     const cb = this.validationCallbacks;
     return result.filter((token) => {
+      // Reject block_close keywords inside parenthesized expressions
+      if (token.type === 'block_close') {
+        if (isInsideParens(source, token.startOffset, excludedRegions, cb)) {
+          return false;
+        }
+        return true;
+      }
       if (token.type !== 'block_middle') return true;
       // Reject block_middle keywords inside parenthesized expressions (port maps, generic maps, function calls)
       if (isInsideParens(source, token.startOffset, excludedRegions, cb)) {
