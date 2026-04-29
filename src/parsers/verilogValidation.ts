@@ -152,14 +152,15 @@ export function isPrecededByLabelColon(
   callbacks: VerilogValidationCallbacks
 ): boolean {
   let j = position - 1;
-  while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
+  // Skip whitespace including newlines (label name and `:` may span lines)
+  while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
     j--;
   }
   if (j < 0 || source[j] !== ':') return false;
   if (j > 0 && source[j - 1] === ':') return false;
   if (callbacks.isInExcludedRegion(j, excludedRegions)) return false;
   let k = j - 1;
-  while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+  while (k >= 0 && (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r')) {
     k--;
   }
   while (k >= 0 && callbacks.isInExcludedRegion(k, excludedRegions)) {

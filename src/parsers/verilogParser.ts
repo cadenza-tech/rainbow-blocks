@@ -178,6 +178,10 @@ export class VerilogBlockParser extends BaseBlockParser {
 
       const directive = match[1];
       const fullValue = match[0];
+      // Skip directives adjacent to Unicode letters (e.g., ``endifα` is an identifier)
+      if (this.isAdjacentToUnicodeLetter(source, startOffset, fullValue.length)) {
+        continue;
+      }
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
       let type: 'block_open' | 'block_close' | 'block_middle';
@@ -200,10 +204,15 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Filter out 'default' when not followed by ':' (non-case context) or preceded by backtick
+    // Also reject default inside SystemVerilog assignment patterns: `'{default: 0}` (LRM §10.9.2/10.9.3)
     const filtered = tokens.filter((token) => {
       if (token.value === 'default' && token.type === 'block_middle') {
         // Reject backtick-prefixed `default (preprocessor directive)
         if (token.startOffset > 0 && source[token.startOffset - 1] === '`') {
+          return false;
+        }
+        // Reject default inside `'{...}` assignment pattern
+        if (this.isInsideAssignmentPattern(source, token.startOffset, excludedRegions)) {
           return false;
         }
         let j = token.endOffset;
@@ -228,6 +237,28 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Re-sort tokens by position
     filtered.sort((a, b) => a.startOffset - b.startOffset);
     return filtered;
+  }
+
+  // Detects whether position is inside a SystemVerilog assignment pattern: `'{...}`
+  // Walks back tracking brace depth; returns true when the innermost unmatched `{` is preceded by `'`
+  private isInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let braceDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '}') {
+        braceDepth++;
+      } else if (ch === '{') {
+        if (braceDepth === 0) {
+          // Innermost unmatched `{` — check for preceding `'`
+          return i > 0 && source[i - 1] === "'";
+        }
+        braceDepth--;
+      }
+    }
+    return false;
   }
 
   // Validates block open: control keywords need a following 'begin' to be valid
@@ -367,20 +398,35 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // `define directive: exclude from keyword scanning (may contain keywords in macro body)
-    // Word boundary check prevents matching `defined, `define_WIDTH, etc.
-    if (char === '`' && source.slice(pos, pos + 7) === '`define' && (pos + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 7]))) {
+    // Word boundary check prevents matching `defined, `define_WIDTH, `defineα, etc.
+    if (
+      char === '`' &&
+      source.slice(pos, pos + 7) === '`define' &&
+      (pos + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 7])) &&
+      !this.isAdjacentToUnicodeLetter(source, pos, 7)
+    ) {
       return matchDefineDirective(source, pos);
     }
 
     // `undef directive: exclude to end of line (may contain keyword names)
-    // Word boundary check prevents matching `undefine, `undef_FOO, etc.
-    if (char === '`' && source.slice(pos, pos + 6) === '`undef' && (pos + 6 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 6]))) {
+    // Word boundary check prevents matching `undefine, `undef_FOO, `undefα, etc.
+    if (
+      char === '`' &&
+      source.slice(pos, pos + 6) === '`undef' &&
+      (pos + 6 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 6])) &&
+      !this.isAdjacentToUnicodeLetter(source, pos, 6)
+    ) {
       return matchUndefDirective(source, pos);
     }
 
     // `pragma directive: exclude to end of line. Arguments may contain keyword-like
     // tokens (e.g. `pragma protect begin / end) that must not open/close blocks.
-    if (char === '`' && source.slice(pos, pos + 7) === '`pragma' && (pos + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 7]))) {
+    if (
+      char === '`' &&
+      source.slice(pos, pos + 7) === '`pragma' &&
+      (pos + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[pos + 7])) &&
+      !this.isAdjacentToUnicodeLetter(source, pos, 7)
+    ) {
       return matchPragmaDirective(source, pos);
     }
 
