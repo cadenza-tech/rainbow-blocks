@@ -87,7 +87,26 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
       return false;
     }
+    // Reject typed-end keywords (endif/endfor/endwhile/etc.) used as identifiers in
+    // expression context (e.g., `if endif == 5`). When the keyword does not appear at
+    // the start of a statement, it is being used as a variable/identifier rather than
+    // closing a block.
+    const lowerKw = keyword.toLowerCase();
+    if (lowerKw !== 'end' && lowerKw.startsWith('end') && !this.isAtStatementLeadingPosition(source, position)) {
+      return false;
+    }
     return super.isValidBlockClose(keyword, source, position, excludedRegions);
+  }
+
+  // Returns true when the position is at the start of a statement (line start, after
+  // a `;`/`,`/`\` continuation, or at the beginning of the source).
+  private isAtStatementLeadingPosition(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0) return true;
+    const ch = source[i];
+    if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') return true;
+    return false;
   }
 
   // Filter out middle keywords used as variable names (else = 5, case += 1, etc.)
