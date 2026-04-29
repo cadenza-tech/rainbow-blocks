@@ -461,6 +461,36 @@ export function isPrecededByOperator(source: string, position: number): boolean 
   return false;
 }
 
+// Detects block_middle keyword in expression context (used as variable, not as block intermediate)
+// Stricter than isPrecededByOperator: excludes ')' since it is a valid predecessor for `then` after `if (...)`
+export function isMiddleInExpressionContext(source: string, position: number): boolean {
+  let i = position - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  if (i < 0) return false;
+  const char = source[i];
+  if (char === '+' || char === '-' || char === '/' || char === '*' || char === '%') {
+    return true;
+  }
+  if (char === '>' || char === '<') {
+    return true;
+  }
+  if (char === ',') {
+    let c = i - 1;
+    while (c >= 0 && (source[c] === ' ' || source[c] === '\t')) {
+      c--;
+    }
+    if (c >= 0 && source[c] !== '\n' && source[c] !== '\r') {
+      return true;
+    }
+  }
+  if (char === '=') {
+    return true;
+  }
+  return false;
+}
+
 // Validates block close keywords
 // Rejects 'end' used as variable name (followed by = but not ==) or component access (% before end)
 export function isValidFortranBlockClose(keyword: string, source: string, position: number): boolean {

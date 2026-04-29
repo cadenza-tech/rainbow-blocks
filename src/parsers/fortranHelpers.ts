@@ -639,10 +639,19 @@ export function isPrecedingContinuationKeyword(source: string, position: number,
 }
 
 // Checks if a keyword position is after :: (type declaration context)
+// Honors `;` statement separators (Fortran 2008+): only :: in the same statement counts
 export function isAfterDoubleColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   const lineStart = findLineStart(source, position);
   const lineBefore = source.slice(lineStart, position);
-  let searchFrom = 0;
+  // Find the last `;` before position that is not inside an excluded region — statement boundary
+  let stmtStart = 0;
+  for (let i = lineBefore.length - 1; i >= 0; i--) {
+    if (lineBefore[i] === ';' && !isInExcludedRegion(lineStart + i, excludedRegions)) {
+      stmtStart = i + 1;
+      break;
+    }
+  }
+  let searchFrom = stmtStart;
   while (searchFrom < lineBefore.length) {
     const idx = lineBefore.indexOf('::', searchFrom);
     if (idx < 0) break;
@@ -650,6 +659,10 @@ export function isAfterDoubleColon(source: string, position: number, excludedReg
       return true;
     }
     searchFrom = idx + 2;
+  }
+  // If a statement boundary was found within this line, do not extend the search to continuation lines
+  if (stmtStart > 0) {
+    return false;
   }
 
   // Check preceding continuation lines connected by &

@@ -15,6 +15,7 @@ import {
 import {
   isAtLineStartAllowingWhitespace,
   isInsideParentheses,
+  isMiddleInExpressionContext,
   isPrecededByOperator,
   isValidFortranBlockClose,
   isValidProcedureOpen
@@ -86,6 +87,10 @@ export class FortranBlockParser extends BaseBlockParser {
     const lowerKeyword = keyword.toLowerCase();
 
     if (lowerKeyword === 'type') {
+      // type in expression context (e.g., `call type(x)`) is a function call, not a block
+      if (isPrecededByOperator(source, position)) {
+        return false;
+      }
       return this.isValidTypeOpen(keyword, source, position, excludedRegions);
     }
 
@@ -114,6 +119,10 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // Single-line where/forall: has (condition) followed by statement on same line
     if (lowerKeyword === 'where' || lowerKeyword === 'forall') {
+      // where/forall in expression context (e.g., `call where(x)`, `b = where(...)`) is a function call, not a block
+      if (isPrecededByOperator(source, position)) {
+        return false;
+      }
       return isBlockWhereOrForall(source, position, keyword);
     }
 
@@ -540,6 +549,12 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Skip block_middle keywords used as variable names in assignment LHS (e.g., else = 1)
       if (type === 'block_middle' && this.isFollowedByAssignmentOp(source, startOffset + keyword.length)) {
+        continue;
+      }
+
+      // Skip block_middle keywords used in expression context (e.g., `print *, then`, `x = then + 1`)
+      // Exception: ')' is a valid predecessor (e.g., `if (cond) then`, `select case (x)`)
+      if (type === 'block_middle' && isMiddleInExpressionContext(source, startOffset)) {
         continue;
       }
 
