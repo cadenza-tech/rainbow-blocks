@@ -347,8 +347,8 @@ export class ErlangBlockParser extends BaseBlockParser {
     // Also handles triple-quoted sigils: ~""", ~'''
     if (char === '~' && pos + 1 < source.length) {
       let offset = pos + 1;
-      // Skip optional sigil modifier letter (e.g., ~S, ~B)
-      if (/[a-zA-Z]/.test(source[offset]) && offset + 1 < source.length) {
+      // Skip optional sigil modifier letter (OTP 27+: only s, S, b, B are valid)
+      if (/[sSbB]/.test(source[offset]) && offset + 1 < source.length) {
         offset++;
       }
       if (source[offset] === '"') {
