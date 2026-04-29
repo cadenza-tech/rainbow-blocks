@@ -66,7 +66,18 @@ export class MatlabBlockParser extends BaseBlockParser {
           // Accept if inside a comment (%), line continuation (...), or shell escape (!)
         } else {
           const nextChar = source[nextPos];
-          if (nextChar !== '\n' && nextChar !== '\r' && nextChar !== '(' && nextChar !== '%' && !this.isCommentChar(nextChar)) {
+          // Allowed: newline, EOF, '(' (attribute list), '%' (comment), language-specific comment chars,
+          // and statement-empty markers ';', ',', ':' (e.g., `properties;` is a valid empty section)
+          if (
+            nextChar !== '\n' &&
+            nextChar !== '\r' &&
+            nextChar !== '(' &&
+            nextChar !== '%' &&
+            nextChar !== ';' &&
+            nextChar !== ',' &&
+            nextChar !== ':' &&
+            !this.isCommentChar(nextChar)
+          ) {
             return false;
           }
         }
@@ -80,6 +91,16 @@ export class MatlabBlockParser extends BaseBlockParser {
     }
     // Reject any block opener inside parentheses or brackets
     if (this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+      return false;
+    }
+    // Reject keyword followed immediately by `.` (struct field access, e.g., `do.x = 1`)
+    if (source[position + keyword.length] === '.' && source[position + keyword.length + 1] !== '.') {
+      return false;
+    }
+    // Reject reserved keywords used as function calls in expression context
+    // (e.g., `x = classdef()`, `x = parfor(...)`, `x = if(...)`)
+    // `function f()` is unaffected since `f` (not `function`) is followed by `(`
+    if (this.isKeywordUsedAsFunctionCall(source, position, keyword)) {
       return false;
     }
     return true;
@@ -226,6 +247,17 @@ export class MatlabBlockParser extends BaseBlockParser {
       // hex prefix (0xFF), binary prefix (0b1010)
       if (j < i - 1) {
         const numPart = source.slice(j + 1, i);
+        // Reject when the run is preceded by another `.` — this means
+        // the digits are part of a larger expression like `1.5.end`, not a clean numeric literal
+        const beforeNum = j >= 0 ? source[j] : '';
+        if (beforeNum === '.') {
+          return true;
+        }
+        // Reject scientific notation followed by `.` (e.g., `1e5.end`):
+        // `1e5.` is not a valid number suffix, so `.end` is struct field access
+        if (/[eE]/.test(numPart)) {
+          return true;
+        }
         // Pure digits, hex literals (0x...), binary literals (0b...), or digits with suffixes
         if (
           (/^[0-9][0-9a-fA-F_]*$/.test(numPart) || /^0[xX][0-9a-fA-F_]+$/.test(numPart) || /^0[bB][01_]+$/.test(numPart)) &&
@@ -240,6 +272,8 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Checks if position is inside parentheses, square brackets, or curly braces
+  // Verifies that the opening bracket has a matching close ahead (in-progress edits
+  // with unterminated brackets should not silently swallow all subsequent `end` tokens)
   protected isInsideParensOrBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
     let bracketDepth = 0;
@@ -251,17 +285,53 @@ export class MatlabBlockParser extends BaseBlockParser {
       const char = source[i];
       if (char === ')') parenDepth++;
       else if (char === '(') {
-        if (parenDepth === 0) return true;
+        if (parenDepth === 0) {
+          return this.hasMatchingCloseAhead(source, i, ')', '(', position, excludedRegions);
+        }
         parenDepth--;
       } else if (char === ']') bracketDepth++;
       else if (char === '[') {
-        if (bracketDepth === 0) return true;
+        if (bracketDepth === 0) {
+          return this.hasMatchingCloseAhead(source, i, ']', '[', position, excludedRegions);
+        }
         bracketDepth--;
       } else if (char === '}') braceDepth++;
       else if (char === '{') {
-        if (braceDepth === 0) return true;
+        if (braceDepth === 0) {
+          return this.hasMatchingCloseAhead(source, i, '}', '{', position, excludedRegions);
+        }
         braceDepth--;
       }
+    }
+    return false;
+  }
+
+  // Scans forward from openPos+1 looking for a matching close bracket, tracking nested brackets
+  private hasMatchingCloseAhead(
+    source: string,
+    openPos: number,
+    closeCh: string,
+    openCh: string,
+    keywordPos: number,
+    excludedRegions: ExcludedRegion[]
+  ): boolean {
+    let depth = 1;
+    let i = openPos + 1;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === openCh) depth++;
+      else if (ch === closeCh) {
+        depth--;
+        if (depth === 0) return i > keywordPos;
+      }
+      i++;
     }
     return false;
   }
@@ -314,10 +384,12 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Checks if position is at the start of a statement (line start or after ; , )
+  // Also skips a leading UTF-8/UTF-16 BOM (U+FEFF) so files saved with a byte-order mark
+  // still recognise the leading shell escape (`!`) at the file start.
   private isAtStatementStart(source: string, pos: number): boolean {
     if (pos === 0) return true;
     let i = pos - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '﻿')) {
       i--;
     }
     if (i < 0) return true;
