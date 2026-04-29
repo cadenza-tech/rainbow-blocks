@@ -1793,5 +1793,39 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-04-30: fixed-format string literal continuation (column-7 hyphen)', () => {
+    test('should not pair IF in continuation prep area with the trailing END-IF', () => {
+      // An unterminated literal on line 1 is continued on the next line whose column-7 is
+      // `-`. The text between `-` (exclusive) and the continuation opening quote is part
+      // of the continuation processing per COBOL spec — keywords appearing there must not
+      // be tokenised. Without continuation support, the parser would treat `IF` at column
+      // 12 of line 2 as a real block opener and the trailing `END-IF.` would form a fake
+      // IF/END-IF pair.
+      const source = '           DISPLAY "AAA\n      -    IF X "BBB" END-IF.\n           STOP RUN.';
+      const pairs = parser.parse(source);
+      const ifPairs = pairs.filter((p) => p.openKeyword.value.toUpperCase() === 'IF');
+      assert.strictEqual(ifPairs.length, 0, 'IF inside continuation prep area must not pair with the trailing END-IF');
+    });
+
+    test('should produce a single excluded region spanning both literal halves', () => {
+      // The continuation indicator `-` joins the two literal halves into one logical
+      // literal. The excluded-region representation should reflect this: a single region
+      // covering from the original opening quote through to the closing quote on the
+      // continuation line.
+      const source = '           DISPLAY "AAA\n      -    "BBB".';
+      const regions = parser.getExcludedRegions(source);
+      const continuationRegion = regions.find((r) => source[r.start] === '"');
+      assert.ok(continuationRegion, 'expected an excluded region starting at the opening quote');
+      assert.ok(continuationRegion.end > source.indexOf('"BBB"'), 'continuation literal region must extend past the second quote on the next line');
+    });
+
+    test('should pair real IF/END-IF after a continued string literal', () => {
+      // After the continued literal closes, the trailing IF/END-IF must still pair.
+      const source = '           DISPLAY "AAA\n      -    "BBB".\n           IF X > 0\n               DISPLAY "OK"\n           END-IF.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });

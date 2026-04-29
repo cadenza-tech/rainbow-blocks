@@ -479,7 +479,10 @@ export class CobolBlockParser extends BaseBlockParser {
     return true;
   }
 
-  // Matches COBOL string with specified quote character
+  // Matches COBOL string with specified quote character. Supports fixed-format continuation
+  // lines (column-7 `-`): when the literal hits a newline unterminated, the next non-blank,
+  // non-comment line beginning with `-` in column 7 followed by a matching opening quote
+  // continues the literal.
   private matchCobolString(source: string, pos: number, quote: string): ExcludedRegion {
     let i = pos + 1;
     while (i < source.length) {
@@ -491,14 +494,97 @@ export class CobolBlockParser extends BaseBlockParser {
         }
         return { start: pos, end: i + 1 };
       }
-      // String cannot span multiple lines in COBOL
+      // String hit a newline - check for fixed-format continuation
       if (source[i] === '\n' || source[i] === '\r') {
-        return { start: pos, end: i };
+        const continuation = this.findFixedFormStringContinuation(source, i, quote);
+        if (continuation === null) {
+          return { start: pos, end: i };
+        }
+        i = continuation;
+        continue;
       }
       i++;
     }
 
     return { start: pos, end: source.length };
+  }
+
+  // Locates a fixed-format string-literal continuation starting at or after `newlinePos`.
+  // Skips blank and column-7 comment lines before looking for a continuation indicator.
+  // Returns the position immediately after the opening quote on the continuation line, or
+  // null when no valid continuation is present.
+  private findFixedFormStringContinuation(source: string, newlinePos: number, quote: string): number | null {
+    let i = newlinePos;
+    while (i < source.length) {
+      // Advance past the newline character(s) (CRLF, LF, or CR-only)
+      if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+        i += 2;
+      } else if (source[i] === '\n' || source[i] === '\r') {
+        i += 1;
+      } else {
+        return null;
+      }
+      if (i >= source.length) return null;
+
+      const lineStart = i;
+
+      // Walk to visual column 6 (i.e., column 7 in 1-indexed COBOL columns)
+      let visualCol = 0;
+      let j = i;
+      while (j < source.length && source[j] !== '\n' && source[j] !== '\r' && visualCol < 6) {
+        if (source[j] === '\t') {
+          visualCol = Math.floor(visualCol / 8 + 1) * 8;
+        } else {
+          visualCol++;
+        }
+        j++;
+      }
+
+      // Line shorter than 7 columns: blank line is allowed (skip), otherwise no continuation
+      if (visualCol !== 6 || j >= source.length || source[j] === '\n' || source[j] === '\r') {
+        const lineContent = source.slice(lineStart, j);
+        if (/^[ \t]*$/.test(lineContent)) {
+          i = j;
+          continue;
+        }
+        return null;
+      }
+
+      // Sequence area (columns 1-6) must be digits/whitespace
+      const sequenceArea = source.slice(lineStart, j);
+      if (!/^[\d \t]*$/.test(sequenceArea)) {
+        return null;
+      }
+
+      const indicator = source[j];
+
+      // Comment lines (`*`, `/`, `D`, `d` at column 7): skip
+      if (indicator === '*' || indicator === '/' || indicator === 'D' || indicator === 'd') {
+        while (j < source.length && source[j] !== '\n' && source[j] !== '\r') j++;
+        i = j;
+        continue;
+      }
+
+      // Continuation indicator must be `-`
+      if (indicator !== '-') {
+        return null;
+      }
+
+      // Past the `-`, scan area B for a matching opening quote. Per COBOL spec the gap
+      // between the indicator and the continuation quote is typically blank, but any
+      // non-blank text there is part of continuation processing — include it in the
+      // excluded region so that COBOL keywords appearing as padding text are not
+      // tokenised as block keywords.
+      j++;
+      while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
+        if (source[j] === quote) {
+          return j + 1;
+        }
+        j++;
+      }
+      return null;
+    }
+    return null;
   }
 
   // Custom block matching for COBOL-specific pairing rules
