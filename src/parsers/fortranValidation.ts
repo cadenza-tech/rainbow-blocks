@@ -570,6 +570,16 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
   while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
     i++;
   }
+  // Reject I/O statements that begin with a bare END followed by an I/O keyword:
+  //   END FILE [unit], END RECORD, END STREAM (Fortran 77/90+ I/O statements).
+  // The compound forms ENDFILE, ENDRECORD, ENDSTREAM (no space) are not affected
+  // because they don't match `\bend\b` boundary.
+  if (i < source.length) {
+    const remaining = source.slice(i);
+    if (/^(?:file|record|stream)\b/i.test(remaining)) {
+      return false;
+    }
+  }
   // end%component is derived type component access, not block close
   if (i < source.length && source[i] === '%') {
     return false;
