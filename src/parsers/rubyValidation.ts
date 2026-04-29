@@ -154,6 +154,11 @@ export function endsWithContinuationOperator(
   // Opening brackets always cause continuation
   if (ch === '(' || ch === '[' || ch === '{') return true;
 
+  // Special global variables ($&, $|, $+, $~, $<, $>, $=, $*, $%, $^, $-, $., $,, etc.)
+  // end with what looks like an operator character but are values, not operators.
+  // They never imply line continuation.
+  if (i > 0 && source[i - 1] === '$') return false;
+
   // Comma causes continuation
   if (ch === ',') return true;
 

@@ -211,9 +211,15 @@ export class RubyBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && (source[token.startOffset - 1] === '$' || source[token.startOffset - 1] === '@')) {
         return false;
       }
-      // Filter out =end / =begin (multi-line comment markers without their pair, or non-line-start =begin)
+      // Filter out =end / =begin only when `=` is at the start of a line. The `=begin`/
+      // `=end` multi-line comment markers must appear at column 0 per Ruby spec.
+      // Inline `x=begin\n...\nend` is a valid begin-block assignment and must not be filtered.
       if (token.startOffset > 0 && source[token.startOffset - 1] === '=' && (token.value === 'end' || token.value === 'begin')) {
-        return false;
+        const eqPos = token.startOffset - 1;
+        const isLineStart = eqPos === 0 || source[eqPos - 1] === '\n' || source[eqPos - 1] === '\r';
+        if (isLineStart) {
+          return false;
+        }
       }
       // Filter out tokens immediately followed by colon (hash key syntax)
       // But not :: (scope resolution operator)
