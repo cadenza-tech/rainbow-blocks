@@ -458,6 +458,21 @@ interface SubshellScanConfig {
 }
 
 // Checks if a position in a subshell is at a command start (after separator, newline, or start)
+// Returns true when the word at `pos` of length `wordLen` is being used as a
+// variable name (`name=val`, `name+=val`, `name[i]=val`) or function definition
+// (`name() { ... }`) rather than as a shell keyword.
+function isWordUsedAsAssignmentOrFunction(source: string, pos: number, wordLen: number): boolean {
+  const after = pos + wordLen;
+  if (after >= source.length) return false;
+  const ch = source[after];
+  if (ch === '=' || ch === '[') return true;
+  if (ch === '+' && after + 1 < source.length && source[after + 1] === '=') return true;
+  // Function definition: `name()` (allow whitespace before `(`)
+  let p = after;
+  while (p < source.length && (source[p] === ' ' || source[p] === '\t')) p++;
+  return p < source.length && source[p] === '(';
+}
+
 function isAtSubshellCommandPosition(source: string, pos: number): boolean {
   let j = pos - 1;
   while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
@@ -579,12 +594,24 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
 
     // Track case/esac nesting to avoid `)` in case patterns closing the substitution
     // Only match case at command position (not as argument like `echo case`)
-    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'case') && isAtSubshellCommandPosition(source, i)) {
+    // Reject when used as a variable name (case=val), array (case[i]=val), augmented
+    // assignment (case+=val), or function definition (case() {...}).
+    if (
+      !(i > 0 && source[i - 1] === '$') &&
+      matchesWord(source, i, 'case') &&
+      !isWordUsedAsAssignmentOrFunction(source, i, 4) &&
+      isAtSubshellCommandPosition(source, i)
+    ) {
       caseDepth++;
       i += 4;
       continue;
     }
-    if (!(i > 0 && source[i - 1] === '$') && matchesWord(source, i, 'esac') && isAtSubshellCommandPosition(source, i)) {
+    if (
+      !(i > 0 && source[i - 1] === '$') &&
+      matchesWord(source, i, 'esac') &&
+      !isWordUsedAsAssignmentOrFunction(source, i, 4) &&
+      isAtSubshellCommandPosition(source, i)
+    ) {
       if (caseDepth > 0) caseDepth--;
       i += 4;
       continue;

@@ -395,9 +395,17 @@ export class BashBlockParser extends BaseBlockParser {
       if (char === ']' && k > 0 && source[k - 1] === ']') {
         return false;
       }
-      // Found [[ -> check if it's at command position
+      // Found [[ -> check if it's at command position AND has a matching `]]` ahead.
+      // An unclosed `[[` should not poison the rest of the source.
       if (char === '[' && k > 0 && source[k - 1] === '[') {
-        return this.isDoubleBracketCommand(source, k - 1);
+        if (!this.isDoubleBracketCommand(source, k - 1)) return false;
+        for (let m = position; m < source.length - 1; m++) {
+          if (this.isInExcludedRegion(m, excludedRegions)) continue;
+          if (source[m] === ']' && source[m + 1] === ']') {
+            return true;
+          }
+        }
+        return false;
       }
     }
     return false;

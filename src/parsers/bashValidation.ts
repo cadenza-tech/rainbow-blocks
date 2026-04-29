@@ -92,6 +92,18 @@ export function isAtCommandPosition(
       beforeNewline--;
     }
     if (beforeNewline >= 0 && source[beforeNewline] === '\\') {
+      // Reject backslash inside excluded regions (e.g., trailing `\` inside a comment
+      // is literal text, not a line continuation per POSIX shell semantics)
+      let backslashInExcluded = false;
+      for (const region of excludedRegions) {
+        if (beforeNewline >= region.start && beforeNewline < region.end) {
+          backslashInExcluded = true;
+          break;
+        }
+      }
+      if (backslashInExcluded) {
+        return true;
+      }
       // Count consecutive backslashes before newline
       let bsCount = 0;
       let bsPos = beforeNewline;
