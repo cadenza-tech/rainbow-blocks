@@ -1489,5 +1489,18 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: keyword used as struct field / function call', () => {
+    test('should not treat do.x as block opener', () => {
+      const source = 'function f\n  do.x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should not treat classdef() as block opener', () => {
+      const source = 'function f\n  x = classdef();\n  if true\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2543,5 +2543,31 @@ end try`;
     });
   });
 
+  suite('Regression 2026-04-29: keyword as function call / expression operand', () => {
+    test('should not treat tell() as block opener', () => {
+      const source = 'on run\n  tell()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+    test('should not treat (tell) as block opener', () => {
+      const source = 'tell application "Finder"\n  set x to (tell)\nend tell';
+      const pairs = parser.parse(source);
+      const outerTell = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outerTell, 'outer tell at offset 0 should be paired');
+    });
+    test('should not treat tell after is as block opener', () => {
+      const source = 'tell application "X"\n  set y to items whose name is tell\nend tell';
+      const pairs = parser.parse(source);
+      const outerTell = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outerTell, 'outer tell at offset 0 should be paired');
+    });
+    test('should pair on tell() handler with end tell via fallback', () => {
+      const source = 'on tell()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+    });
+  });
+
   generateCommonTests(config);
 });

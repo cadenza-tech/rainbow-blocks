@@ -1148,5 +1148,18 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: shebang and goto label', () => {
+    test('should treat shebang line as excluded region', () => {
+      const pairs = parser.parse('#!/path/to/do/lua\nend');
+      assertNoBlocks(pairs);
+    });
+    test('should treat goto end as label, not as block close', () => {
+      const pairs = parser.parse('function f()\n  if condition then\n    goto end\n  end\nend');
+      assertBlockCount(pairs, 2);
+      const fnPair = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.ok(fnPair, 'function should pair with the outer end');
+    });
+  });
+
   generateCommonTests(config);
 });

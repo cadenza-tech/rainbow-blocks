@@ -2614,5 +2614,16 @@ endmodule`;
     });
   });
 
+  suite("Regression 2026-04-29: assignment pattern '{default: ...}", () => {
+    test('should not register default inside assignment pattern as case label', () => {
+      const source =
+        "case (sel)\n  0: my_struct = '{default: 0};\n  1: my_struct = '{default: 1, b: 2};\n  default: my_struct = '{default: 0};\nendcase";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const defaultCount = pairs[0].intermediates.filter((i) => i.value === 'default').length;
+      assert.strictEqual(defaultCount, 1, 'only the case label default should register as intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });

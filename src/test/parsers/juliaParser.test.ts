@@ -3491,5 +3491,22 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: underscore-prefixed string macro', () => {
+    test('should recognize _macro"..."end as string macro suffix', () => {
+      const source = 'function foo()\n  x = _macro"text"end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the line-2 end');
+    });
+  });
+
+  suite('Regression 2026-04-29: end!= operator preserves end token', () => {
+    test('should preserve end inside indexing brackets when followed by !=', () => {
+      const source = 'function foo(arr)\n  return arr[1:end!=2]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

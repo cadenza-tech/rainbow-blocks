@@ -1508,5 +1508,33 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: BOM + shell escape, struct-field-style numeric', () => {
+    test('should recognize !cmd after BOM at file start', () => {
+      const source = '﻿!if for end\nfor i=1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+    test('should treat 1.5.end as field access not block close', () => {
+      const source = 'function f\n  if true\n    x = 1.5.end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should treat 1e5.end as field access not block close', () => {
+      const source = 'function f\n  if true\n    x = 1e5.end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should accept properties; as empty section', () => {
+      const source = 'classdef Foo\n  properties;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should still detect end blocks when ( is unterminated', () => {
+      const source = 'function f\n  x = foo(\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

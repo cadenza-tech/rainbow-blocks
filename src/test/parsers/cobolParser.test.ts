@@ -1783,5 +1783,14 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-04-29: COPY statement with end-keyword filename', () => {
+    test('should not treat COPY END-IF. END-IF as block close', () => {
+      const source = 'IF X\nCOPY END-IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'IF should pair with the line-2 END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });

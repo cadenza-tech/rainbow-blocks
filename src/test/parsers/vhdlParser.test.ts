@@ -2889,5 +2889,35 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-04-29: attribute_specification entity_class keywords', () => {
+    test('should not treat attribute spec package keyword as block opener', () => {
+      const source = 'package outer_pkg is\n  attribute keep of foo : package is true;\nend package outer_pkg;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer package should be the opener');
+    });
+    test('should not treat attribute spec configuration keyword as block opener', () => {
+      const source = 'configuration cfg of e is\n  attribute keep of foo : configuration is true;\nend configuration cfg;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+    test('should not treat attribute spec architecture keyword as block opener', () => {
+      const source = 'architecture rtl of test is\n  attribute keep of foo : architecture is true;\nbegin\nend architecture rtl;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+    test('should not consume begin into attribute spec procedure keyword', () => {
+      const source =
+        'architecture rtl of test is\n  attribute keep of foo : procedure is true;\nbegin\n  process\n  begin\n    null;\n  end process;\nend architecture rtl;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should have one begin intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });

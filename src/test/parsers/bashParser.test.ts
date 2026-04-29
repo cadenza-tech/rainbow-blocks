@@ -5416,4 +5416,46 @@ fi`;
       assertIntermediates(pairs[0], []);
     });
   });
+
+  suite('Regression 2026-04-29: var=keyword direct assignment', () => {
+    test('should not generate ghost pair for a=if b=fi', () => {
+      const source = 'a=if\nb=fi\nif true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression 2026-04-29: backslash-escaped quotes outside strings', () => {
+    test('should not treat \\" as string opener', () => {
+      const source = 'echo \\"foo\\"\nif true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test("should not treat \\' as string opener", () => {
+      const source = "echo \\'foo\\'\nif true; then\n  echo hi\nfi";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should not treat \\` as backtick opener', () => {
+      const source = 'echo \\`foo\\`\nif true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression 2026-04-29: BOM at file start', () => {
+    test('should recognize keyword after leading UTF-8 BOM', () => {
+      const source = '﻿if true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression 2026-04-29: heredoc with backslash-escaped delimiter', () => {
+    test('should recognize <<\\} as heredoc with } delimiter', () => {
+      const source = 'cat <<\\}\nbody\n}\nif true; then\necho hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });

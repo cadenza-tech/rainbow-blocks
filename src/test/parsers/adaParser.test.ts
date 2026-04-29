@@ -2728,5 +2728,20 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-04-29: unterminated paren before if block', () => {
+    test('should still detect if block when ( is unterminated with terminated string after', () => {
+      const source = 'procedure Main is\nbegin\n   F("hello"\n   if X > 0 then\n      null;\n   end if;\nend Main;';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifPair, 'if block should be detected');
+    });
+    test('should still detect if block when ( is unterminated with newline after', () => {
+      const source = 'F(\nif True then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifPair, 'if block should be detected');
+    });
+  });
+
   generateCommonTests(config);
 });

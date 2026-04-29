@@ -3743,5 +3743,28 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: keyword-named variable across newlines and operators', () => {
+    test('should treat cond as value when do is on next line', () => {
+      const source = 'if cond\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should treat cond + 1 as expression when do follows', () => {
+      const source = 'case cond + 1 do\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+    test('should treat cond.field as expression when do follows', () => {
+      const source = 'case cond.field do\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+    test('should treat cond and other as expression when do follows', () => {
+      const source = 'if cond and other do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

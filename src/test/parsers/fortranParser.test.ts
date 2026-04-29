@@ -4639,5 +4639,45 @@ end program`;
     });
   });
 
+  suite('Regression 2026-04-29: ; statement separator with :: declarations', () => {
+    test('should detect end subroutine when separated from :: by ;', () => {
+      const source = 'subroutine foo; integer :: x; end subroutine';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'subroutine');
+    });
+    test('should detect do open keyword when separated from :: by ;', () => {
+      const source = 'subroutine foo\n  integer :: x = 1; do i = 1, 10\n  end do\nend subroutine';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression 2026-04-29: where/forall/type in expression context', () => {
+    test('should not treat call where(x) as block opener', () => {
+      const source = 'subroutine foo\n  where (a > 0)\n    b = 1\n    call where(x)\n  end where\nend subroutine';
+      const pairs = parser.parse(source);
+      const wherePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'where');
+      assert.ok(wherePair, 'where block should pair correctly');
+      assert.strictEqual(wherePair.openKeyword.line, 1, 'opener should be the line-1 where');
+    });
+    test('should not treat call type(x) as block opener', () => {
+      const source = 'subroutine foo\n  type :: t\n    integer :: x\n    call type(x)\n  end type\nend subroutine';
+      const pairs = parser.parse(source);
+      const typePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'type');
+      assert.ok(typePair, 'type block should pair correctly');
+    });
+  });
+
+  suite('Regression 2026-04-29: block_middle in expression context', () => {
+    test('should not register print *, then as intermediate', () => {
+      const source = 'if (cond) then\n  integer :: then = 1\n  print *, then\n  x = then + 1\nend if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const thenIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'then');
+      assert.strictEqual(thenIntermediates.length, 1, 'only the if-then should register as intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });

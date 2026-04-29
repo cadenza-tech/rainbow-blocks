@@ -3506,5 +3506,29 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: backtick operator overload', () => {
+    test('should recognize def ` as method definition, not backtick string', () => {
+      const source = 'class Sh\n  def `(cmd)\n    system(cmd)\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classPair = findBlock(pairs, 'class');
+      assert.strictEqual(classPair.closeKeyword.value, 'end');
+    });
+  });
+
+  suite('Regression 2026-04-29: =end / =begin without proper context', () => {
+    test('should not treat bare =end as block_close', () => {
+      const source = 'def foo\n=end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+    test('should not treat indented =begin as block_open', () => {
+      const source = '  =begin\n=end';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 0);
+    });
+  });
+
   generateCommonTests(config);
 });

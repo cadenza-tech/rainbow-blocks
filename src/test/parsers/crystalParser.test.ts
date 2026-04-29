@@ -3711,5 +3711,28 @@ end`;
     });
   });
 
+  suite('Regression 2026-04-29: shorthand def name = expr', () => {
+    test('should not pair shorthand def with end', () => {
+      const source = 'class Vector\n  def magnitude = Math.sqrt(x*x + y*y)\n  def to_s(io : IO) : Nil\n    io << "value"\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classPair = findBlock(pairs, 'class');
+      assert.strictEqual(classPair.closeKeyword.value, 'end');
+    });
+  });
+
+  suite('Regression 2026-04-29: regex literal inside macro template', () => {
+    test('should skip regex /pat/ inside {% %} so %} in regex does not close macro', () => {
+      const source = 'class MyClass\n  {% pattern = /hello%}world/ ; if true %}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+    test('should skip regex /pat/ inside {{ }} so }} in regex does not close macro', () => {
+      const source = 'class Foo\n  {{ /pat}}/ ; if y }}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
