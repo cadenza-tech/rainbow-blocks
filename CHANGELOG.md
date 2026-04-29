@@ -5,6 +5,45 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.37] - 2026-04-29
+
+### Fixed
+
+- Ada: Detect unterminated `(` ahead in `isInsideParens` (`adaValidation.ts`) via new `hasMatchingCloseParen` so editing-in-progress code like `F("hello"\n   if X > 0 then ... end if;` no longer suppresses the inner `if` block
+- Ada: Raise the `for/while` header backward-scan limit from 20 to 200 lines in `isValidLoopOpen` (`adaValidation.ts`) so multi-line `for` loops with extensive comments are still paired with `end loop`
+- AppleScript: Reject `tell()`/`repeat()`/`if(`/etc. function-call form, `(tell)`/`{tell, repeat}` operand contexts, and modifier-keyword (`is`/`as`/`with`/`where`/`given`/`returning`/`on`) precedences in `isValidBlockOpen` and `isPrecededByExpressionTerminator` (`applescriptParser.ts`) so reserved words as values, list elements, or handler names no longer steal the surrounding block's `end`
+- AppleScript: Add an on-handler fallback in `matchBlocks` (`applescriptParser.ts`) so `on tell()` ... `end tell` correctly pairs with the `on` handler when no `tell` opener is on the stack
+- AppleScript: Skip backslash-escaped `\|` inside pipe-delimited identifiers in `tryMatchExcludedRegion` (`applescriptParser.ts`) so `|name\|with-pipe|` is treated as one excluded identifier
+- Bash: Reject backslash-escaped quotes (`\"`, `\'`, `` \` ``) as string openers via new `isEscapedByBackslash` in `tryMatchExcludedRegion` (`bashParser.ts`) so `echo \"foo\"` no longer swallows the rest of the source as a double-quoted string
+- Bash: Require whitespace between `=` and the keyword in env-var prefix detection in `isAtCommandPosition` (`bashValidation.ts`) so `a=if` and `b=fi` no longer generate ghost `if`/`fi` pairs
+- Bash: Skip a leading UTF-8/UTF-16 BOM (U+FEFF) when scanning whitespace in `isAtCommandPosition` (`bashValidation.ts`) so BOM-prefixed bash scripts recognise the first keyword as a command
+- Bash: Allow non-alphanumeric `<<\X` heredoc delimiters (e.g., `<<\}`) in `matchHeredoc` and `parseHeredocOperator` (`bashStringHelpers.ts` + `bashLeafHelpers.ts`) so the heredoc body is correctly excluded
+- COBOL: Add `isInCopyStatement` to `tokenize` (`cobolParser.ts`) so end-keyword identifiers used as `COPY` copybook filenames (e.g., `COPY END-IF.`) no longer close the surrounding `IF` block
+- Crystal: Add `isMacroRegexStart` and `skipRegexLiteral` in `matchMacroTemplate` (`crystalExcluded.ts`) so `{% x = /pat%}/ %}` and `{{ /pat}}/ }}` no longer close the macro at the regex's `%}`/`}}`
+- Crystal: Detect `def name = expr` shorthand in `isValidBlockOpen` via new `hasShorthandDefAssignment` (`crystalParser.ts`) so Crystal 1.0+ shorthand methods are not treated as `def`/`end` blocks
+- Elixir: Extend `isKeywordUsedAsValue` to follow newlines/comments and recognize binary operators, method/field access, and word operators (`and`/`or`/`not`/`in`/`when`) in `elixirParser.ts` so `if cond\ndo`, `case cond + 1 do`, and `if cond and other do` keep the outer block as opener
+- Elixir: Replace duplicate immediate-`do` check in `isValueForPrecedingBlockKeyword` with a delegated `isKeywordUsedAsValue` call (`elixirParser.ts`) so the value-form detection stays consistent across both `hasDoKeyword` and `isValidBlockOpen`
+- Erlang: Restrict tilde-sigil modifier set in `tryMatchExcludedRegion` to `s/S/b/B` per OTP 27 (`erlangParser.ts`) so invalid letters no longer extend the sigil region
+- Fortran: Honor `;` statement separators when scanning for `::` in `isAfterDoubleColon` (`fortranHelpers.ts`) so `subroutine foo; integer :: x; end subroutine` and `do i = 1, 10` after a separator-`::` no longer have their close/open keywords skipped
+- Fortran: Add `isPrecededByOperator` early-return guards before `isValidTypeOpen` and `isBlockWhereOrForall` in `isValidBlockOpen` (`fortranParser.ts`) so `call where(x)`, `call type(x)`, and `b = where(...)` are no longer detected as block openers and the real `where`/`type` headers stay paired
+- Fortran: Add new `isMiddleInExpressionContext` in `fortranValidation.ts` and apply it during `tokenize` (`fortranParser.ts`) so `print *, then` and `x = then + 1` no longer register the trailing `then` as an extra `if` intermediate
+- Julia: Allow `_` as a string-macro prefix start in both `tryMatchExcludedRegion` (`juliaParser.ts`) and `skipJuliaInterpolation` (`juliaHelpers.ts`) so user-defined macros like `_my_macro"text"end` are correctly recognised as a single string-macro region
+- Julia: Preserve `end` followed by `!=` in the tokenize `!`-filter (`juliaParser.ts`) so `arr[1:end!=2]` no longer drops the `end` token
+- Lua: Treat shebang lines (`#!` at offset 0) as excluded regions in `tryMatchExcludedRegion` (`luaParser.ts`) so paths like `#!/path/to/do/lua` no longer surface a `do` block opener
+- Lua: Add `isAfterGoto` to `tokenize` filter (`luaParser.ts`) so reserved keywords used as `goto <label>` targets are no longer detected as block_close tokens
+- MATLAB: Skip a leading UTF-8/UTF-16 BOM (U+FEFF) in `isAtStatementStart` (`matlabParser.ts`) so the first-line `!cmd` shell escape after a BOM is recognised correctly
+- MATLAB: Reject numeric-followed-by-`.end` when the preceding run is itself preceded by `.` or contains an exponent (`isPrecededByDot` in `matlabParser.ts`) so `1.5.end` and `1e5.end` are treated as struct-field access and no longer steal the outer block's `end`
+- MATLAB: Allow `;`/`,`/`:` after classdef section keywords in `isValidBlockOpen` (`matlabParser.ts`) so empty `properties;`/`methods,`/etc. sections are still recognised as block openers
+- MATLAB: Verify a matching close bracket exists ahead in `isInsideParensOrBrackets` via new `hasMatchingCloseAhead` (`matlabParser.ts`) so editing-in-progress code with an unterminated `(` no longer filters out every subsequent `end` token
+- MATLAB: Reject reserved keywords followed immediately by `.` (struct field access) and detect `isKeywordUsedAsFunctionCall` for non-section keywords in `isValidBlockOpen` (`matlabParser.ts`) so `do.x = 1` and `x = classdef()` no longer steal the surrounding block's `end`
+- Octave: Inherits the MATLAB fixes for struct-field access, function-call form, and `properties;` (`matlabParser.ts`)
+- Ruby: Recognise backtick as a method name when preceded by `def `, `.`, or `::` in new `isBacktickMethodName` (`rubyParser.ts`) so `def \`(cmd) ... end` and `obj.\`(...)` no longer consume the rest of the file as a backtick string
+- Ruby: Filter out `=end` and `=begin` keywords in `tokenize` (`rubyParser.ts`) so an isolated `=end` or non-line-start `=begin` no longer registers as a block close/open token
+- Verilog: Reject `default` inside SystemVerilog assignment patterns (`'{default: 0}`) via new `isInsideAssignmentPattern` in `tokenize` (`verilogParser.ts`) so the case-label `default` count is no longer inflated by struct/array initializers
+- Verilog: Allow newlines between the label `:` and identifier in `isPrecededByLabelColon` (`verilogValidation.ts`) so multi-line labels like `begin :\nmodule` no longer let the label name be tokenised as a block opener
+- Verilog: Reject backtick directives (`` `endif ``, `` `pragma ``, `` `define ``, `` `undef ``) when adjacent to a Unicode letter in `tokenize` and `tryMatchExcludedRegion` (`verilogParser.ts`) so identifiers like `` `endifα `` are not parsed as preprocessor directives
+- VHDL: Reject `package`/`architecture`/`configuration`/`procedure`/`function`/`units`/`component`/`entity` keywords inside an `attribute_specification` slot (e.g., `attribute keep of foo : package is true;`) via new `isInAttributeSpecification` in `isValidBlockOpen` (`vhdlParser.ts`) so the outer block's pair is no longer stolen by the entity_class identifier
+
 ## [1.1.36] - 2026-04-28
 
 ### Fixed
@@ -1373,6 +1412,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.37]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.36...v1.1.37
 [1.1.36]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.35...v1.1.36
 [1.1.35]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.34...v1.1.35
 [1.1.34]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.33...v1.1.34
