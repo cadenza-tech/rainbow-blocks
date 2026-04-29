@@ -102,6 +102,14 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject entity_class keywords inside attribute_specification (LRM 7.2):
+    //   `attribute X of Y : <package|architecture|configuration|procedure|function|units|...> is <expr>;`
+    // The keyword is the entity_class, not a block opener.
+    const entityClassKeywords = new Set(['package', 'architecture', 'configuration', 'procedure', 'function', 'units', 'component', 'entity']);
+    if (entityClassKeywords.has(lowerKeyword) && this.isInAttributeSpecification(source, position, excludedRegions)) {
+      return false;
+    }
+
     if (lowerKeyword === 'for') {
       return isValidForOpen(source, position, excludedRegions, cb);
     }
@@ -135,6 +143,69 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
 
     return true;
+  }
+
+  // Detects whether the keyword position appears inside an attribute_specification entity_class slot:
+  //   `attribute <designator> of <entity_specification> : <ENTITY_CLASS> is <expr>;`
+  // We scan backward (skipping excluded regions) for `:` then `of` then `attribute` keyword on the same statement.
+  private isInAttributeSpecification(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Walk back through whitespace and comments to find the preceding `:`
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0 || source[i] !== ':') return false;
+    // Found `:`; now scan further back, skipping a contiguous run of identifier/whitespace/dot chars,
+    // looking for the `of` keyword followed eventually by `attribute`
+    i--;
+    let foundOf = false;
+    let foundAttribute = false;
+    let scanned = 0;
+    const SCAN_LIMIT = 4096;
+    while (i >= 0 && scanned < SCAN_LIMIT) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          scanned++;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ';') break;
+      if (/[a-zA-Z_]/.test(ch)) {
+        const wordEnd = i + 1;
+        let wordStart = i;
+        while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+          wordStart--;
+        }
+        const word = source.slice(wordStart, wordEnd).toLowerCase();
+        if (!foundOf && word === 'of') {
+          foundOf = true;
+        } else if (foundOf && word === 'attribute') {
+          foundAttribute = true;
+          break;
+        }
+        i = wordStart - 1;
+        scanned++;
+        continue;
+      }
+      i--;
+      scanned++;
+    }
+    return foundAttribute;
   }
 
   // Rejects VHDL-2008 package instantiations: `package X is new Y generic map(...);`
