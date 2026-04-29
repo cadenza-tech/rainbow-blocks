@@ -163,9 +163,10 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
             return false;
           }
-          // Comma at depth 0 means multiple elements, not a comprehension
+          // Comma at depth 0 may indicate trailing generator: [a, b for b in iter]
+          // If `for` is preceded by a value expression, treat as generator
           if (hasCommaAtDepthZero(source, i + 1, position, excludedRegions)) {
-            return false;
+            return this.isPrecededByValueExpression(source, position, excludedRegions);
           }
           // for at start of brackets is a block, not a generator (generators need expr before for)
           if (isOnlyWhitespaceBetween(source, i + 1, position, excludedRegions)) {
@@ -183,6 +184,41 @@ export class JuliaBlockParser extends BaseBlockParser {
         }
         parenDepth--;
       }
+    }
+    return false;
+  }
+
+  // Checks if `for` (or `if`) keyword is preceded by a value expression (identifier, digit,
+  // closing bracket/paren, string, etc). Used to detect trailing generators like
+  // `f(x, y for y in iter)` where `for` follows a value-bearing expression after a comma.
+  private isPrecededByValueExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          // Strings and char literals are value expressions
+          const startCh = source[region.start];
+          if (startCh === '"' || startCh === '`' || startCh === "'") {
+            return true;
+          }
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const c = source[i];
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+        i--;
+        continue;
+      }
+      // Value-ending characters indicate a value expression
+      if (/[a-zA-Z0-9_)\]}]/.test(c)) {
+        return true;
+      }
+      if (c.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(c)) {
+        return true;
+      }
+      return false;
     }
     return false;
   }
@@ -404,9 +440,10 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
             return false;
           }
-          // Comma at depth 0 means multiple expressions (tuple/call), not a generator
+          // Comma at depth 0 may indicate trailing generator: f(x, y for y in iter)
+          // If `for` is preceded by a value expression, treat as generator
           if (hasCommaAtDepthZero(source, i + 1, position, excludedRegions)) {
-            return false;
+            return this.isPrecededByValueExpression(source, position, excludedRegions);
           }
           // for at start of parentheses is a block, not a generator (generators need expr before for)
           if (isOnlyWhitespaceBetween(source, i + 1, position, excludedRegions)) {
