@@ -289,12 +289,10 @@ export class ElixirBlockParser extends BaseBlockParser {
   // Checks if this keyword is being used as a variable/value for a preceding block keyword.
   // Pattern: "<outer_block_kw> <this_kw> do" - this_kw is a variable, do belongs to outer.
   private isValueForPrecedingBlockKeyword(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
-    // Must be immediately followed by 'do' (only whitespace between)
-    let k = position + keyword.length;
-    while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
-    if (source.slice(k, k + 2) !== 'do') return false;
-    const afterDo = k + 2 < source.length ? source[k + 2] : ' ';
-    if (/[a-zA-Z0-9_]/.test(afterDo)) return false;
+    // The keyword position must function as a value. Use the same broad detection as isKeywordUsedAsValue.
+    if (!this.isKeywordUsedAsValue(source, position + keyword.length)) {
+      return false;
+    }
 
     // Scan backward for a preceding block keyword on the current statement
     let j = position - 1;
@@ -656,21 +654,68 @@ export class ElixirBlockParser extends BaseBlockParser {
   }
 
   // Checks if a block keyword is used as a bare value rather than starting a nested block
-  // Detects two patterns:
+  // Detects multiple patterns:
   //   1. Followed by comma: "if cond, do: v" - cond is a value
   //   2. Followed by "do" keyword: "if cond do" - cond is a variable, do belongs to outer if
+  //   3. Followed by newline then do: "if cond\ndo" - cond is a value across newlines
+  //   4. Followed by binary operator: "if cond + 1 do" - cond is part of an expression
+  //   5. Followed by method/field access: "if cond.field do" - cond is a value
+  //   6. Followed by word operator (and/or/not/in/when): "if cond and other do" - cond is a value
   private isKeywordUsedAsValue(source: string, afterPos: number): boolean {
     let j = afterPos;
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
       j++;
     }
-    if (j < source.length && source[j] === ',') {
+    if (j >= source.length) return false;
+    const c = source[j];
+    if (c === ',') {
       return true;
     }
     // Check if directly followed by "do" with word boundary
     if (source.slice(j, j + 2) === 'do') {
       const afterDo = source[j + 2];
       if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+        return true;
+      }
+    }
+    // Followed by newline: skip newlines and comments, then check for `do`
+    if (c === '\n' || c === '\r') {
+      let k = j;
+      while (k < source.length) {
+        const ch = source[k];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+          k++;
+          continue;
+        }
+        if (ch === '#') {
+          while (k < source.length && source[k] !== '\n' && source[k] !== '\r') k++;
+          continue;
+        }
+        break;
+      }
+      if (source.slice(k, k + 2) === 'do') {
+        const afterDo = source[k + 2];
+        if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+          return true;
+        }
+      }
+    }
+    // Followed by binary operator (part of an expression)
+    if ('+-*/<>=!^&|'.includes(c)) {
+      return true;
+    }
+    // Followed by `.` (method/field access) — but not `..` range terminator at end of expr
+    if (c === '.' && j + 1 < source.length && source[j + 1] !== '.') {
+      return true;
+    }
+    // Note: `(` (function call) is intentionally NOT treated as value here, since
+    // isBlockKeywordFunctionCall in callers handles function-call form separately.
+    // Followed by word-based operator: and/or/not/in/when
+    if (/[a-z]/.test(c)) {
+      let wordEnd = j;
+      while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) wordEnd++;
+      const word = source.slice(j, wordEnd);
+      if (['and', 'or', 'not', 'in', 'when'].includes(word)) {
         return true;
       }
     }
