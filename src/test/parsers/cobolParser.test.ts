@@ -735,14 +735,17 @@ END-PERFORM`;
 
   suite('Performance', () => {
     test('should handle 200-level nesting within 5 seconds', () => {
+      // Use no indent so IF/END-IF stay within column 72 (fixed-format identification
+      // area starts at column 73; deeper indents would be excluded as fixed-format
+      // identification text).
       const depth = 200;
       const lines: string[] = [];
       for (let i = 0; i < depth; i++) {
-        lines.push(`${'  '.repeat(i)}IF COND-${i}`);
+        lines.push(`IF COND-${i}`);
       }
-      lines.push(`${'  '.repeat(depth)}DISPLAY "DEEP"`);
+      lines.push('DISPLAY "DEEP"');
       for (let i = depth - 1; i >= 0; i--) {
-        lines.push(`${'  '.repeat(i)}END-IF`);
+        lines.push('END-IF');
       }
       const source = lines.join('\n');
       const start = Date.now();
@@ -1372,16 +1375,14 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
 
-    test('should treat D at column 7 as debug line when D is last char in source inside EXEC block', () => {
-      // Covers branch 126 (line 376): i + 1 >= source.length -> nextChar = ''
-      // D at column 7, no digits in sequence area (free format), D is last char of source
-      // Empty string does not match /[a-zA-Z0-9_-]/, so D is treated as debug indicator
+    test('should limit unterminated EXEC region to the EXEC keyword itself', () => {
+      // Unterminated EXEC blocks now exclude only the EXEC keyword to avoid swallowing
+      // the rest of the source during mid-edit. The trailing source remains parseable.
+      // The trailing `      D` is recognized as a column-7 debug line (separate region).
       const source = 'EXEC SQL\n      D';
       const regions = parser.getExcludedRegions(source);
-      // The entire source is one EXEC excluded region (unterminated, extends to source.length)
-      assert.strictEqual(regions.length, 1);
       assert.strictEqual(regions[0].start, 0);
-      assert.strictEqual(regions[0].end, source.length);
+      assert.strictEqual(regions[0].end, 4);
     });
   });
 

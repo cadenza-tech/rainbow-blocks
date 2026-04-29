@@ -334,6 +334,19 @@ export class CobolBlockParser extends BaseBlockParser {
 
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
+      // Skip keywords in the fixed-format identification area (columns 73-80, 0-based 72+).
+      // Detect fixed format by checking the 6-char sequence area (cols 1-6) on the same line:
+      // it must consist of digits and whitespace only.
+      if (column >= 72) {
+        const lineStart = startOffset - column;
+        if (lineStart + 6 <= source.length) {
+          const sequenceArea = source.slice(lineStart, lineStart + 6);
+          if (/^[ \t\d]{6}$/.test(sequenceArea)) {
+            continue;
+          }
+        }
+      }
+
       tokens.push({
         type,
         value: keyword,

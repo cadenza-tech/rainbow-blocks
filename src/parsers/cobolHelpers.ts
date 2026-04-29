@@ -226,7 +226,10 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
     i++;
   }
 
-  return { start: pos, end: source.length };
+  // Unterminated EXEC block: only exclude the EXEC keyword itself, not the entire
+  // remaining source. This allows mid-edit code with a missing END-EXEC to still
+  // detect blocks in the trailing content.
+  return { start: pos, end: pos + startWord.length };
 }
 
 // Scans backward from position i to check if the preceding word matches target keyword
