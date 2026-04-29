@@ -239,7 +239,7 @@ export function skipJuliaInterpolation(source: string, pos: number): number {
           prefixStart--;
         }
         prefixStart++;
-        if (prefixStart < i && /[a-zA-Z]/.test(source[prefixStart])) {
+        if (prefixStart < i && /[a-zA-Z_]/.test(source[prefixStart])) {
           const prefixText = source.slice(prefixStart, i);
           i = skipPrefixedStringInInterpolation(source, i, prefixText === 'b');
           continue;

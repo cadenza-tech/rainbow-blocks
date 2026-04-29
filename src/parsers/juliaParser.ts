@@ -72,7 +72,9 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (afterPos < source.length) {
         const after = source[afterPos];
         // Skip keywords followed by '!' (Julia naming convention for mutating functions: end!, push!, etc.)
-        if (after === '!') {
+        // But preserve when followed by `!=` (inequality operator) since Julia reserves keywords —
+        // `end!=2` is `end` followed by `!=`, not a `end!` identifier.
+        if (after === '!' && source[afterPos + 1] !== '=') {
           return false;
         }
         if (after >= '\uD800' && after <= '\uDBFF' && afterPos + 1 < source.length) {
@@ -671,7 +673,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     }
 
     // Match any identifier prefix followed by " (Julia string macro syntax)
-    if (/[a-zA-Z]/.test(char)) {
+    if (/[a-zA-Z_]/.test(char)) {
       let prefixEnd = pos + 1;
       while (prefixEnd < source.length && /[a-zA-Z0-9_]/.test(source[prefixEnd])) {
         prefixEnd++;
