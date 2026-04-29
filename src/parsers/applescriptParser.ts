@@ -89,6 +89,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
     // 'tell ... to action' on one line is a one-liner, not a block
     if (keyword === 'tell') {
+      // Reject `tell(` function-call form (e.g., `set x to tell()`)
+      if (source[position + keyword.length] === '(') {
+        return false;
+      }
       if (this.isTellToOneLiner(source, position, excludedRegions)) {
         return false;
       }
@@ -102,6 +106,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // Reject block keywords used as condition values in 'if ... then' pattern
     // (repeat, try, considering, ignoring are affected; script/on/to are already protected by isAtLogicalLineStart)
     if (keyword === 'repeat' || keyword === 'try' || keyword === 'considering' || keyword === 'ignoring') {
+      // Reject function-call form (e.g., `repeat()`)
+      if (source[position + keyword.length] === '(') {
+        return false;
+      }
       if (isInsideIfCondition(source, position, keyword.length, excludedRegions, this.helperCallbacks)) {
         return false;
       }
@@ -213,10 +221,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return { start: pos, end: j };
     }
 
-    // Pipe-delimited identifier: |identifier|
+    // Pipe-delimited identifier: |identifier| (with backslash escape support: |a\|b|)
     if (char === '|') {
       let j = pos + 1;
-      while (j < source.length && source[j] !== '|' && source[j] !== '\n' && source[j] !== '\r') {
+      while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
+        if (source[j] === '\\' && j + 1 < source.length) {
+          j += 2;
+          continue;
+        }
+        if (source[j] === '|') break;
         j++;
       }
       if (j < source.length && source[j] === '|') {
@@ -542,6 +555,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     const ch = source[i];
     // Expression terminators: closing brackets/parens/braces
     if (ch === ')' || ch === ']' || ch === '}') return true;
+    // Expression operands: opening brackets/parens/braces or commas (e.g., (tell), {tell, repeat})
+    // The keyword is being used as a value inside a literal/grouping, not as a block opener
+    if (ch === '(' || ch === '[' || ch === '{' || ch === ',') return true;
     // String/literal value terminator: any alphanumeric/underscore that is not part of a
     // known control keyword. We conservatively accept if preceding char is any word character
     // and look back for the preceding token (simple heuristic: if it's a control keyword,
@@ -560,6 +576,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // `end tell tell ...` or `end repeat repeat ...` do not let the trailing tell/repeat
       // be detected as a new mid-line block opener. Condition contexts (`if tell then`,
       // `repeat while tell`) are still handled by the dedicated isInsideIfCondition check.
+      // Control flow keywords that can legitimately be followed by another block keyword
+      // (e.g., `if tell then`, `else if`, `repeat while ...`).
+      // Note: modifier-style keywords (is/as/with/where/given/returning/in/of/by/from/to/without)
+      // are intentionally excluded — after these, the next word is a value (e.g., `whose name is tell`).
+      // 'on' is excluded because handler definitions like `on tell()` use the next word as the handler name.
       const allowedPrecedingKeywords = new Set([
         'if',
         'else',
@@ -570,22 +591,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         'and',
         'or',
         'not',
-        'is',
-        'of',
-        'in',
-        'to',
-        'from',
-        'by',
-        'as',
-        'with',
-        'without',
-        'where',
         'considering',
         'ignoring',
-        'try',
-        'on',
-        'given',
-        'returning'
+        'try'
       ]);
       if (allowedPrecedingKeywords.has(word)) {
         return false;
@@ -688,6 +696,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           const expectedOpener = END_KEYWORD_MAP[closeValue];
           if (expectedOpener) {
             matchIndex = findLastOpenerByType(stack, expectedOpener);
+            // Fall back to topmost opener when the expected one is missing
+            // (handles handler definitions whose name happens to be a control keyword,
+            // e.g., `on tell()` ... `end tell` should pair with `on`)
+            if (matchIndex < 0 && stack.length > 0 && stack[stack.length - 1].token.value === 'on') {
+              matchIndex = stack.length - 1;
+            }
           } else {
             // Generic "end" closes any block
             matchIndex = stack.length > 0 ? stack.length - 1 : -1;
