@@ -244,6 +244,36 @@ export class CobolBlockParser extends BaseBlockParser {
     return validPositions;
   }
 
+  // Checks if keyword position is part of a COPY statement (e.g., `COPY END-IF.`)
+  // where the keyword is being used as a copybook/filename, not as a block close
+  private isInCopyStatement(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === '\n' || ch === '\r' || ch === '.') {
+        break;
+      }
+      i--;
+    }
+    let j = i + 1;
+    while (j < position && (source[j] === ' ' || source[j] === '\t')) {
+      j++;
+    }
+    if (j + 4 > position) return false;
+    const candidate = source.slice(j, j + 4).toUpperCase();
+    if (candidate !== 'COPY') return false;
+    const afterCopy = source[j + 4];
+    if (afterCopy && afterCopy !== ' ' && afterCopy !== '\t') return false;
+    return true;
+  }
+
   // Override tokenize for case-insensitive keyword matching
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     this.validOpenPositions.clear();
@@ -294,6 +324,11 @@ export class CobolBlockParser extends BaseBlockParser {
 
       // Validate block close keywords
       if (type === 'block_close' && !this.isValidBlockClose(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Skip keywords used as filename in COPY statements (e.g., COPY END-IF.)
+      if (type === 'block_close' && this.isInCopyStatement(source, startOffset, excludedRegions)) {
         continue;
       }
 
