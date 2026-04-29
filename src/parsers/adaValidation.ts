@@ -230,7 +230,8 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
   const textBefore = source.slice(0, position);
   // Split on \r\n, \r, or \n to handle all line ending types
   const lineParts = textBefore.split(/\r\n|\r|\n/);
-  const maxLines = Math.min(lineParts.length, 20);
+  // Extended limit (was 20) to handle long for/while headers with many comment/continuation lines
+  const maxLines = Math.min(lineParts.length, 200);
 
   // Calculate absolute offset for the start of each line by scanning backward
   let lineStartOffset = textBefore.length;
@@ -327,10 +328,39 @@ export function isInsideParens(source: string, position: number, excludedRegions
         if (crossedNewline && hasUnterminatedStringAfterParen(source, i, excludedRegions, callbacks)) {
           return false;
         }
+        // When ( is on a different line, also check if the ( itself is unterminated
+        // (no matching ) anywhere ahead) — typical of in-progress edits or typos
+        if (crossedNewline && !hasMatchingCloseParen(source, i, excludedRegions, callbacks)) {
+          return false;
+        }
         return true;
       }
       parenDepth--;
     }
+  }
+  return false;
+}
+
+// Scans forward from ( looking for a matching ), tracking nested parens and skipping excluded regions
+function hasMatchingCloseParen(source: string, parenPos: number, excludedRegions: ExcludedRegion[], callbacks: AdaValidationCallbacks): boolean {
+  let depth = 1;
+  let i = parenPos + 1;
+  while (i < source.length) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+    }
+    const ch = source[i];
+    if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+      if (depth === 0) return true;
+    }
+    i++;
   }
   return false;
 }
