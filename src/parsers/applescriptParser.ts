@@ -221,6 +221,19 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return { start: pos, end: j };
     }
 
+    // Smart double quotes (U+201C left, U+201D right). Script Editor auto-converts
+    // ASCII `"` to these in source files, and they are valid string delimiters.
+    if (char === '“') {
+      let j = pos + 1;
+      while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
+        if (source[j] === '”') {
+          return { start: pos, end: j + 1 };
+        }
+        j++;
+      }
+      return { start: pos, end: j };
+    }
+
     // Pipe-delimited identifier: |identifier| (with backslash escape support: |a\|b|)
     if (char === '|') {
       let j = pos + 1;
@@ -345,6 +358,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       const type = this.getTokenType(keyword);
 
+      // Reject compound block openers immediately followed by `(` — these are function
+      // call forms (e.g., `with timeout(5)`) rather than block openers.
+      if (type === 'block_open' && flexMatch < source.length && source[flexMatch] === '(') {
+        return { nextPos: flexMatch };
+      }
+
       // Reject compound block closers not at physical line start (covers mid-line
       // occurrences of `end tell`, `end if`, etc. inside expressions). Continuation
       // lines from a previous physical line are still allowed.
@@ -422,9 +441,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
 
       const { line, column } = this.getLineAndColumn(i, newlinePositions);
+      // endOffset is `startOffset + value.length`, not `flexMatch`. flexMatch may extend
+      // past whitespace/comments/continuations between compound-keyword words; using it
+      // would over-decorate that intervening content.
       return {
         nextPos: flexMatch,
-        token: { type, value: keyword, startOffset: i, endOffset: flexMatch, line, column }
+        token: { type, value: keyword, startOffset: i, endOffset: i + keyword.length, line, column }
       };
     }
 
@@ -464,13 +486,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       // 'tell', 'if', 'repeat' may appear mid-line in condition contexts (after 'if',
       // 'repeat while'/'until'), but must be rejected when preceded by an expression
-      // terminator like ')', ']', '}' on the same logical line (e.g., 'doStuff() tell')
-      // which would otherwise consume outer blocks' 'end'.
+      // terminator like ')', ']', '}', a binary operator (& + - * / = < > etc.), or
+      // a value across line continuations (e.g., 'set x to ¬\ntell ...' where tell is
+      // the right operand of `to`).
       if (type === 'block_open' && (keyword === 'tell' || keyword === 'if' || keyword === 'repeat')) {
-        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
-          if (this.isPrecededByExpressionTerminator(source, i, excludedRegions)) {
-            return { nextPos: endPos };
-          }
+        if (this.isPrecededByExpressionTerminator(source, i, excludedRegions)) {
+          return { nextPos: endPos };
         }
       }
 
@@ -538,9 +559,26 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   // tell/if/repeat appearing mid-line after a non-keyword expression (e.g., 'doStuff() tell').
   private isPrecededByExpressionTerminator(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = pos - 1;
-    // Skip whitespace and excluded regions (e.g., comments between expression and keyword)
+    // Skip whitespace, excluded regions, and `¬<newline>` line continuations (so the
+    // preceding logical token across continuations is examined).
     while (i >= 0) {
       if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      if (source[i] === '\n' || source[i] === '\r') {
+        // Probe for `¬` before the newline (with optional intermediate whitespace)
+        let probe = i;
+        if (source[probe] === '\n' && probe > 0 && source[probe - 1] === '\r') probe--;
+        probe--;
+        while (probe >= 0 && (source[probe] === ' ' || source[probe] === '\t')) probe--;
+        if (probe >= 0 && source[probe] === '¬') {
+          i = probe - 1;
+          continue;
+        }
+        break;
+      }
+      if (source[i] === '¬') {
         i--;
         continue;
       }
@@ -558,6 +596,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // Expression operands: opening brackets/parens/braces or commas (e.g., (tell), {tell, repeat})
     // The keyword is being used as a value inside a literal/grouping, not as a block opener
     if (ch === '(' || ch === '[' || ch === '{' || ch === ',') return true;
+    // AppleScript binary operators: keyword used as right operand
+    // (e.g., `set x to 1 & tell`, `set x to 1 + tell`, `if x = tell ...`)
+    // Includes ASCII operator chars and Unicode comparison operators (≤ ≥ ≠ ÷ ×).
+    if ('&+\\-*/=<>'.includes(ch)) return true;
+    if (ch === '≤' || ch === '≥' || ch === '≠' || ch === '÷' || ch === '×') return true;
     // String/literal value terminator: any alphanumeric/underscore that is not part of a
     // known control keyword. We conservatively accept if preceding char is any word character
     // and look back for the preceding token (simple heuristic: if it's a control keyword,

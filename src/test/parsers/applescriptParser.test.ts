@@ -1624,11 +1624,12 @@ end try`;
     });
 
     test('should handle continuation with trailing whitespace in isAtLogicalLineStart (lines 359-361)', () => {
-      // Previous line ends with continuation character followed by spaces before newline
+      // Previous line ends with `to \u00AC<spaces><newline>`. The continuation extends `set x to`
+      // to the next line, so `repeat` is the right operand of `to` (used as an identifier),
+      // not a block opener. The trailing `end repeat` then has no matching opener.
       const source = 'set x to \u00AC   \n  repeat 3 times\n  display dialog "X"\nend repeat';
       const pairs = parser.parse(source);
-      // 'repeat' is not at logical line start because previous line ends with continuation
-      assertBlockCount(pairs, 1);
+      assertBlockCount(pairs, 0);
     });
 
     test('should handle continuation with trailing whitespace in findLogicalLineEnd (lines 448-450)', () => {
