@@ -112,6 +112,46 @@ export function isValidProcedureOpen(
   if (isInsideInterfaceBlock(source, position, isInExcludedRegion, excludedRegions)) {
     return false;
   }
+  // Reject assignment forms: 'procedure = expr' and 'procedure(N) = expr'
+  // (variable name / array element assignment, e.g., when 'procedure' is used as identifier).
+  const after = source.slice(position + keyword.length);
+  if (/^[ \t]*=[^=]/.test(after) || /^[ \t]*=[ \t]*$/.test(after)) {
+    return false;
+  }
+  if (/^[ \t]*\(/.test(after)) {
+    let pdepth = 0;
+    let pi = 0;
+    while (pi < after.length) {
+      const ch = after[pi];
+      if (ch === "'" || ch === '"') {
+        pi++;
+        while (pi < after.length) {
+          if (after[pi] === ch) {
+            if (pi + 1 < after.length && after[pi + 1] === ch) {
+              pi += 2;
+              continue;
+            }
+            pi++;
+            break;
+          }
+          pi++;
+        }
+        continue;
+      }
+      if (ch === '(') pdepth++;
+      else if (ch === ')') {
+        pdepth--;
+        if (pdepth === 0) {
+          const rest = after.slice(pi + 1);
+          if (/^[ \t]*=[^=]/.test(rest) || /^[ \t]*=[ \t]*$/.test(rest)) {
+            return false;
+          }
+          break;
+        }
+      }
+      pi++;
+    }
+  }
   return true;
 }
 

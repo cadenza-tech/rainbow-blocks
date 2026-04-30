@@ -219,6 +219,25 @@ export class FortranBlockParser extends BaseBlockParser {
     return pattern.test(before);
   }
 
+  // Detects construct names immediately following a procedure-introducing keyword
+  // (subroutine/function/program/module/submodule/'module procedure'). Such names are
+  // identifiers (not block keywords) even when they happen to match a Fortran block
+  // keyword like `block`, `do`, `where`, `type`, `forall`, `interface`, `enum`,
+  // `associate`, `critical`. Without this filter, e.g. `subroutine block(arg)` would
+  // produce a spurious `block` opener that steals a later bare `end`.
+  private isFortranOpenConstructName(source: string, position: number): boolean {
+    const lineStart = findLineStart(source, position);
+    const before = source.slice(lineStart, position);
+    // Match a procedure-introducer at the tail of `before` (allow trailing whitespace).
+    // Covers: program, module, submodule (with optional parent in parens), subroutine,
+    // function, 'module procedure'. Note: rejecting `module ` (without a procedure suffix)
+    // is fine because actual `module <name>` headers don't have <name> matching a block
+    // keyword in practice; but `module procedure <name>` is the common compound form.
+    const pattern =
+      /(?:^|[^a-zA-Z0-9_])(?:program|module(?:[ \t]+procedure)?|submodule[ \t]*\([^)]*\)|subroutine|function|recursive[ \t]+(?:subroutine|function)|pure[ \t]+(?:subroutine|function)|elemental[ \t]+(?:subroutine|function))[ \t]+$/i;
+    return pattern.test(before);
+  }
+
   // Validates 'type': rejects select type guards, type specifiers, continuation patterns
   private isValidTypeOpen(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
     const typeLineStart = findLineStart(source, position);
@@ -236,6 +255,44 @@ export class FortranBlockParser extends BaseBlockParser {
     afterKeyword = collapseContinuationLines(afterKeyword);
     if (/^[ \t]+is[ \t]*\(/i.test(afterKeyword)) {
       return false;
+    }
+    // Reject assignment forms: 'type = expr' and 'type(N) = expr' (variable / array element)
+    if (/^[ \t]*=[^=]/.test(afterKeyword) || /^[ \t]*=[ \t]*$/.test(afterKeyword)) {
+      return false;
+    }
+    if (/^[ \t]*\(/.test(afterKeyword)) {
+      let pdepth = 0;
+      let pi = 0;
+      while (pi < afterKeyword.length) {
+        const ch = afterKeyword[pi];
+        if (ch === "'" || ch === '"') {
+          pi++;
+          while (pi < afterKeyword.length) {
+            if (afterKeyword[pi] === ch) {
+              if (pi + 1 < afterKeyword.length && afterKeyword[pi + 1] === ch) {
+                pi += 2;
+                continue;
+              }
+              pi++;
+              break;
+            }
+            pi++;
+          }
+          continue;
+        }
+        if (ch === '(') pdepth++;
+        else if (ch === ')') {
+          pdepth--;
+          if (pdepth === 0) {
+            const rest = afterKeyword.slice(pi + 1);
+            if (/^[ \t]*=[^=]/.test(rest) || /^[ \t]*=[ \t]*$/.test(rest)) {
+              return false;
+            }
+            break;
+          }
+        }
+        pi++;
+      }
     }
     // type(name) as type specifier: type(identifier) followed by :: or ,
     // Use collapsed text to handle continuation lines between type and (
@@ -522,8 +579,13 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Skip identifiers used as construct labels or construct names, independent of token type.
       // Examples: 'program: if (...)' - 'program' is the label; 'end if program' - 'program'
-      // is the construct name. Both should not be treated as keywords.
-      if (this.isFortranConstructLabel(source, startOffset, keyword) || this.isFortranEndConstructName(source, startOffset)) {
+      // is the construct name; 'subroutine block(arg)' - 'block' is the procedure name.
+      // None of these should be treated as keywords.
+      if (
+        this.isFortranConstructLabel(source, startOffset, keyword) ||
+        this.isFortranEndConstructName(source, startOffset) ||
+        this.isFortranOpenConstructName(source, startOffset)
+      ) {
         continue;
       }
 
