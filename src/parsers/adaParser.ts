@@ -230,8 +230,11 @@ export class AdaBlockParser extends BaseBlockParser {
           continue;
         }
         const endType = match[1].toLowerCase();
+        // Normalize keyword to canonical 'end <type>' so embedded comments / CR / LF
+        // between 'end' and the type keyword don't break later re-extraction in matchBlocks.
+        // The original source span (pos..pos+length) is still preserved via length.
         compoundEndPositions.set(pos, {
-          keyword: fullMatch, // Preserve original case
+          keyword: `end ${match[1]}`,
           length: fullMatch.length,
           endType
         });
@@ -725,8 +728,16 @@ export class AdaBlockParser extends BaseBlockParser {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else if (middleKw === 'when') {
-              // 'when' is valid for 'case', 'select', 'begin' (exception), 'entry' (guard), and 'accept' (guard)
-              if (topOpener === 'case' || topOpener === 'select' || topOpener === 'begin' || topOpener === 'entry' || topOpener === 'accept') {
+              // 'when' is valid for 'case', 'select', 'begin' (exception), 'entry' (guard),
+              // 'accept' (guard), and 'return' (Ada 2012 extended-return exception handler).
+              if (
+                topOpener === 'case' ||
+                topOpener === 'select' ||
+                topOpener === 'begin' ||
+                topOpener === 'entry' ||
+                topOpener === 'accept' ||
+                topOpener === 'return'
+              ) {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else if (middleKw === 'then') {

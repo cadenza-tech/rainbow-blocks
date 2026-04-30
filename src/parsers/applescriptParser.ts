@@ -593,13 +593,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     const ch = source[i];
     // Expression terminators: closing brackets/parens/braces
     if (ch === ')' || ch === ']' || ch === '}') return true;
-    // Expression operands: opening brackets/parens/braces or commas (e.g., (tell), {tell, repeat})
-    // The keyword is being used as a value inside a literal/grouping, not as a block opener
-    if (ch === '(' || ch === '[' || ch === '{' || ch === ',') return true;
+    // Expression operands: opening brackets/parens/braces, commas, or record key separator
+    // (e.g., (tell), {tell, repeat}, {key: tell}). The keyword is being used as a value
+    // inside a literal/grouping, not as a block opener.
+    if (ch === '(' || ch === '[' || ch === '{' || ch === ',' || ch === ':') return true;
     // AppleScript binary operators: keyword used as right operand
-    // (e.g., `set x to 1 & tell`, `set x to 1 + tell`, `if x = tell ...`)
+    // (e.g., `set x to 1 & tell`, `set x to 1 + tell`, `if x = tell ...`, `set x to 2 ^ tell`)
     // Includes ASCII operator chars and Unicode comparison operators (≤ ≥ ≠ ÷ ×).
-    if ('&+\\-*/=<>'.includes(ch)) return true;
+    if ('&+\\-*/=<>^'.includes(ch)) return true;
     if (ch === '≤' || ch === '≥' || ch === '≠' || ch === '÷' || ch === '×') return true;
     // String/literal value terminator: any alphanumeric/underscore that is not part of a
     // known control keyword. We conservatively accept if preceding char is any word character
@@ -741,9 +742,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
             matchIndex = findLastOpenerByType(stack, expectedOpener);
             // Fall back to topmost opener when the expected one is missing
             // (handles handler definitions whose name happens to be a control keyword,
-            // e.g., `on tell()` ... `end tell` should pair with `on`)
-            if (matchIndex < 0 && stack.length > 0 && stack[stack.length - 1].token.value === 'on') {
-              matchIndex = stack.length - 1;
+            // e.g., `on tell()` ... `end tell` should pair with `on`; same for `to tell()`)
+            if (matchIndex < 0 && stack.length > 0) {
+              const topValue = stack[stack.length - 1].token.value;
+              if (topValue === 'on' || topValue === 'to') {
+                matchIndex = stack.length - 1;
+              }
             }
           } else {
             // Generic "end" closes any block
