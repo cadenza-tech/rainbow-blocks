@@ -5,6 +5,50 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.38] - 2026-04-30
+
+### Fixed
+
+- Ada: Allow newlines/CR between `end` and the type keyword in compound end matching (`/^end[\s]+/` instead of `[ \t]+`) (`adaParser.ts`) so `end\n  if` and `end --comment\n  if` are recognised as compound `end if`
+- Ada: Track paren depth in the `is`-filter when scanning between a type/subtype keyword and `is` (`adaParser.ts`) so discriminant lists like `(D : Integer; B : Boolean)` no longer let the inner `;` disable the type-declaration filter
+- Ada: Filter bare `or` to a select-intermediate only at select alternative boundaries (preceded by `;` or `select`) and skip when the next token is `else` (`adaParser.ts`) so boolean `or` in expressions and `or else` short-circuits no longer add ghost intermediates to enclosing select blocks
+- AppleScript: Recognise smart double quotes (U+201C/U+201D) as string delimiters in `tryMatchExcludedRegion` (`applescriptParser.ts`) so Script Editor auto-converted strings no longer leak block keywords from inside the literal
+- AppleScript: Reject compound block openers immediately followed by `(` (function-call form like `with timeout(5)`) in `tryMatchCompoundKeywordToken` (`applescriptParser.ts`) so the trailing word is no longer treated as a block opener
+- AppleScript: Set compound keyword `endOffset` to `startOffset + value.length` instead of `flexMatch` (`applescriptParser.ts`) so whitespace/comments/continuations between compound-keyword words are no longer over-decorated
+- AppleScript: Add binary operators (`&+-*/=<>` and Unicode `≤≥≠÷×`) to `isPrecededByExpressionTerminator` (`applescriptParser.ts`) so `set x to 1 & tell` and `if x = tell` no longer treat the keyword as a block opener
+- AppleScript: Skip `¬<newline>` line continuations when scanning back from `tell`/`if`/`repeat` in `isPrecededByExpressionTerminator` (`applescriptParser.ts`) so `set x to ¬\nrepeat` correctly treats `repeat` as the right operand of `to`, not a block opener
+- Bash: Reject `case`/`esac` used as variable assignment (`case=val`), array (`case[i]=val`), augmented assignment (`case+=val`), or function definition (`case() {...}`) inside subshells via new `isWordUsedAsAssignmentOrFunction` in `scanSubshellBody` (`bashStringHelpers.ts`)
+- Bash: Treat trailing `\` inside excluded regions (e.g., `\` at end of a comment) as literal text rather than line continuation in `isAtCommandPosition` (`bashValidation.ts`) so the next line is still recognised as command-leading
+- Bash: Verify a matching `]]` exists ahead before treating `[[` as a double-bracket command in `isInsideDoubleBracket` (`bashParser.ts`) so an unclosed `[[` no longer poisons subsequent blocks
+- COBOL: Limit unterminated EXEC region to the EXEC keyword itself in `matchExecBlock` (`cobolHelpers.ts`) so mid-edit code with a missing `END-EXEC` still detects blocks in the trailing content
+- COBOL: Skip keywords in the fixed-format identification area (columns 73-80) in `tokenize` (`cobolParser.ts`) when the 6-char sequence area consists of digits/whitespace, so identification text no longer registers as block keywords
+- COBOL: Support fixed-format string literal continuation lines via new `findFixedFormStringContinuation` in `matchCobolString` (`cobolParser.ts`) so unterminated literals continued by a column-7 `-` indicator on the next non-blank, non-comment line are recognised as a single excluded region — preventing COBOL keywords like `IF` appearing in the continuation prep area or inside the continued literal from being tokenised as block keywords
+- Crystal: Restrict regex modifier set to `i/m/x` (was `i/m/x/s`) in `skipRegexLiteral` (`crystalExcluded.ts`) per Crystal language spec
+- Elixir: Recognise multi-letter lowercase sigils like `~html`/`~json` (Elixir 1.18+) alongside uppercase custom sigils in `matchSigil` and `skipNestedSigil` (`elixirHelpers.ts`)
+- Elixir: Treat standalone CR as a newline (heredoc-mode marker) alongside LF in `matchTripleQuotedString`, `skipNestedTripleQuotedString`, and `skipNestedSigil` (`elixirHelpers.ts`) per CLAUDE.md line ending rules
+- Erlang: Allow Unicode letters/numbers (`\p{L}\p{N}`) in atoms/identifiers within function reference patterns in `isValidBlockOpen` (`erlangParser.ts`) per OTP 19+
+- Erlang: Treat `\<LF>`, `\<CR>`, and `\<CRLF>` inside a quoted atom as line continuation in `tryMatchExcludedRegion` (`erlangParser.ts`) so the atom continues on the next line per Erlang spec
+- Erlang: Restrict `else` intermediate tracking to `maybe` blocks only (`erlangParser.ts`) per Erlang Reference Manual — `if` only allows guard clauses and `try` only allows `of`/`catch`/`after`
+- Fortran: Reject `END` followed by `FILE`/`RECORD`/`STREAM` as block close in `isValidFortranBlockClose` (`fortranValidation.ts`) so Fortran 77/90+ I/O statements (`END FILE [unit]`) are no longer misinterpreted as block closes
+- Julia: Detect trailing generator expressions inside brackets/parens via new `isPrecededByValueExpression` in `isInsideBrackets`/`isInsideParentheses` (`juliaParser.ts`) so `f(x, y for y in iter)` and `[a, b for b in iter]` correctly treat `for` as a generator rather than a block opener
+- Lua: Accept shebang at offset 0 or directly after a leading UTF-8 BOM (U+FEFF) in `tryMatchExcludedRegion` (`luaParser.ts`) per Lua 5.3+ spec
+- Lua: Allow whitespace including newlines between `goto` and its label name in `isAfterGoto` (`luaParser.ts`) so `goto\n  end_label` correctly skips reserved keywords used as goto targets
+- MATLAB: Reject `@keyword` function handles (e.g., `@if`, `@while`, `@function`) via new `isPrecededByAtSign` in `isValidBlockOpen` (`matlabParser.ts`) so reserved keywords used as function handle names no longer steal the surrounding block's `end`
+- MATLAB: Filter `end` immediately abutting numeric/hex/binary literal dots (`10.end`, `0xFF.end`, `0b1010.end`) in `isPrecededByDot` (`matlabParser.ts`) to avoid invalid syntax breaking outer block highlighting
+- MATLAB: Restrict classdef section keywords (properties/methods/events/enumeration/arguments) to `block_open` only when an enclosing `classdef` is on the stack in `matchBlocks` (`matlabParser.ts`) so `properties(obj)`-style function calls outside classdef no longer open phantom blocks
+- Octave: Reject typed-end keywords (`endif`/`endfor`/`endwhile`/etc.) used as identifiers in expression context via new `isAtStatementLeadingPosition` in `isValidBlockClose` (`octaveParser.ts`) so `if endif == 5` no longer treats the rhs `endif` as a block closer
+- Pascal: Apply field-access dot rejection to all block keywords (open/middle/close) via shared `isPrecededByFieldDot` helper in `isValidBlockOpen`, `isValidBlockClose`, and `tokenize` (`pascalParser.ts`) so `Foo.begin`, `Foo.case`, `Foo.try`, `Foo.asm`, etc. no longer steal the surrounding block's pair
+- Pascal: Skip `end` preceded by `.` (field access like `foo.end`) and `end` after `;` line comment in `addAsmExcludedRegions` (`pascalParser.ts`) so asm bodies containing dotted identifiers or trailing `;` line comments no longer terminate prematurely
+- Pascal: Advance `asmPattern.lastIndex` past the matched `end` (or to `source.length` when unterminated) in `addAsmExcludedRegions` (`pascalParser.ts`) so `asm` words appearing inside an asm body (e.g., as opcodes or identifiers) no longer generate overlapping excluded regions — preserving the sorted/non-overlapping invariant of `regions`
+- Ruby: Skip `$`-prefixed special global variables (`$&`, `$|`, `$+`, `$~`, etc.) in `endsWithContinuationOperator` (`rubyValidation.ts`) so the global variable suffix no longer triggers false postfix conditional detection
+- Ruby: Require `=begin`/`=end` markers to appear at column 0 (after `\n`/`\r` or at file start) in the `=`-prefix tokenize filter (`rubyParser.ts`) so inline `x=begin\n...\nend` is preserved as a valid begin-block assignment
+- Verilog: Treat `\<LF>`, `\<CR>`, and `\<CRLF>` inside Verilog strings as line continuation in `matchVerilogString` (`verilogHelpers.ts`) per IEEE 1800-2017 §5.9
+- Verilog: Reject block keywords (function/task/module/etc.) preceded by data type or qualifier keywords (`int`, `bit`, `logic`, `wire`, `input`, `output`, `signed`, `static`, etc.) via new `isPrecededByDataTypeKeyword` and `DATA_TYPE_KEYWORDS` set in `isValidBlockOpen` (`verilogParser.ts`) so `int function` and `input module` are recognised as parameter/variable names
+- Verilog: Reject `function` in covergroup `with function sample(...)` syntax via new `isCovergroupWithFunctionSample` in `isValidBlockOpen` (`verilogParser.ts`) per LRM §19.8.1, so the covergroup option specifier is no longer treated as a function declaration
+- Verilog: Recognise multi-line DPI import/export by scanning back to the last unquoted semicolon in `isOnDpiLine` (`verilogValidation.ts`) so `import "DPI-C"\n  function void f();` correctly identifies the DPI declaration
+- VHDL: Reject `end <type>` close keywords inside parenthesized expressions (e.g., `if func(end record) > 0 then`) via `block_close` filter in `tokenize` (`vhdlParser.ts`)
+- VHDL: Extend `hasEndKeywordOnSameLine` to scan up to 10 lines forward in `isValidEntityOrConfigOpen` (`vhdlValidation.ts`) so block-form `for label: comp use entity ...; end for;` is recognised even when `end for;` appears on a separate line from the `use entity` clause
+
 ## [1.1.37] - 2026-04-29
 
 ### Fixed
@@ -1412,6 +1456,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.38]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.36...v1.1.37
 [1.1.36]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.35...v1.1.36
 [1.1.35]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.34...v1.1.35
