@@ -105,6 +105,11 @@ export function findLogicalLineStart(
       if (bsCount % 2 === 0) {
         break;
       }
+      // Ruby's $\ global variable: a single backslash preceded by `$` is the global
+      // output record separator value, NOT a line continuation marker.
+      if (bsCount === 1 && bsPos >= 0 && source[bsPos] === '$') {
+        break;
+      }
       // Skip if the backslash is inside an excluded region (e.g., comment ending with \)
       if (excludedRegions && callbacks.isInExcludedRegion(checkPos - 1, excludedRegions)) {
         break;
@@ -463,6 +468,11 @@ export function isDotPreceded(source: string, position: number, excludedRegions:
   }
   // Check for range operator (..) -- if the character before the dot is also a dot, it's a range
   if (i > 0 && source[i - 1] === '.') {
+    return false;
+  }
+  // Ruby's $. global variable (current line number): a `.` preceded by `$` is part of a
+  // special global, not a method-call dot.
+  if (i > 0 && source[i - 1] === '$') {
     return false;
   }
   return true;
