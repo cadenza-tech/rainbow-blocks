@@ -255,12 +255,17 @@ export class VerilogBlockParser extends BaseBlockParser {
       });
     }
 
-    // Filter out 'default' when not followed by ':' (non-case context) or preceded by backtick
-    // Also reject default inside SystemVerilog assignment patterns: `'{default: 0}` (LRM §10.9.2/10.9.3)
+    // Filter out 'default' when not followed by ':' (non-case context) or preceded by backtick.
+    // Also reject any block keyword used as a field name inside SystemVerilog assignment
+    // patterns: `'{key: value, ...}` (LRM §10.9.2/10.9.3). e.g. `'{begin: 0, end: 100}`.
     const filtered = tokens.filter((token) => {
       if (token.value === 'default' && token.type === 'block_middle') {
         // Reject backtick-prefixed `default (preprocessor directive)
         if (token.startOffset > 0 && source[token.startOffset - 1] === '`') {
+          return false;
+        }
+        // Reject scope-resolved `pkg::default` (it's a qualified identifier, not a case label)
+        if (token.startOffset >= 2 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
           return false;
         }
         // Reject default inside `'{...}` assignment pattern
@@ -282,6 +287,27 @@ export class VerilogBlockParser extends BaseBlockParser {
           break;
         }
         return j < source.length && source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== ':');
+      }
+      // Reject block_open/block_close keywords used as field names in `'{key: value}`
+      if (token.type === 'block_open' || token.type === 'block_close') {
+        if (this.isInsideAssignmentPattern(source, token.startOffset, excludedRegions)) {
+          let j = token.endOffset;
+          while (j < source.length) {
+            if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+              j++;
+              continue;
+            }
+            const region = this.findExcludedRegionAt(j, excludedRegions);
+            if (region) {
+              j = region.end;
+              continue;
+            }
+            break;
+          }
+          if (j < source.length && source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== ':')) {
+            return false;
+          }
+        }
       }
       return true;
     });
@@ -454,6 +480,12 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject keywords used as block labels (e.g., end : end, endmodule : module_name)
     if (isPrecededByLabelColon(source, position, excludedRegions, this.keywords, this.validationCallbacks)) {
+      return false;
+    }
+
+    // Reject keywords used as identifiers after a data type/qualifier keyword
+    // (e.g., `int endmodule;` — endmodule is an illegal variable name preceded by `int`).
+    if (this.isPrecededByDataTypeKeyword(source, position)) {
       return false;
     }
 

@@ -545,8 +545,10 @@ export function scanForBeginAfterControl(
       if (j > i + 1) {
         const directive = source.slice(i + 1, j);
         // Directives with arguments (`ifdef, `ifndef, `elsif):
-        // skip whitespace + one identifier argument
-        if (/^(ifdef|ifndef|elsif)$/i.test(directive)) {
+        // skip whitespace + one identifier argument.
+        // Per IEEE 1800-2017 §22, preprocessor directives are case-sensitive (lowercase only),
+        // so uppercase macro names like `IFDEF must NOT be treated as directives.
+        if (/^(ifdef|ifndef|elsif)$/.test(directive)) {
           while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
             j++;
           }
