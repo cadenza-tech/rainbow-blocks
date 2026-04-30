@@ -15,7 +15,22 @@ const CATCH_EXPR_PRECEDING_KEYWORDS = new Set(['begin', 'case', 'receive', 'if',
 const CATCH_AMBIGUOUS_KEYWORDS = new Set(['try', 'of', 'after']);
 
 // Word operators that imply catch is an expression prefix (e.g., X div catch throw(e))
-const CATCH_EXPR_WORD_OPERATORS = new Set(['div', 'rem', 'band', 'bor', 'bxor', 'bsl', 'bsr', 'not', 'and', 'or', 'xor', 'andalso', 'orelse']);
+const CATCH_EXPR_WORD_OPERATORS = new Set([
+  'div',
+  'rem',
+  'bnot',
+  'band',
+  'bor',
+  'bxor',
+  'bsl',
+  'bsr',
+  'not',
+  'and',
+  'or',
+  'xor',
+  'andalso',
+  'orelse'
+]);
 
 // Checks if 'catch' at position is an expression prefix (e.g., X = catch throw(hello))
 // rather than a try-catch clause separator
@@ -103,7 +118,7 @@ export function isCatchExpressionPrefix(
     if (CATCH_AMBIGUOUS_KEYWORDS.has(word)) {
       return !isCatchFollowedByClausePattern(source, position + 5, excludedRegions);
     }
-    // Word operators (div/rem/band/bor/bxor/bsl/bsr/not/and/or/xor/andalso/orelse) -> expression prefix
+    // Word operators (div/rem/bnot/band/bor/bxor/bsl/bsr/not/and/or/xor/andalso/orelse) -> expression prefix
     if (CATCH_EXPR_WORD_OPERATORS.has(word)) {
       return true;
     }

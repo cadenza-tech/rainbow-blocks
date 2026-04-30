@@ -36,7 +36,7 @@ export class LuaBlockParser extends BaseBlockParser {
   private isPrecededByDotOrColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
-      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\f' || source[i] === '\v') {
         i--;
         continue;
       }
@@ -199,11 +199,14 @@ export class LuaBlockParser extends BaseBlockParser {
   // Lua spec allows whitespace (including newlines) between `goto` and its label name.
   private isAfterGoto(source: string, position: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    while (
+      i >= 0 &&
+      (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\f' || source[i] === '\v')
+    ) {
       i--;
     }
     if (i < 3) return false;
-    if (source.slice(i - 3, i + 1).toLowerCase() !== 'goto') return false;
+    if (source.slice(i - 3, i + 1) !== 'goto') return false;
     return i - 3 === 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]);
   }
 
@@ -406,7 +409,10 @@ export class LuaBlockParser extends BaseBlockParser {
   private matchGotoLabel(source: string, pos: number): ExcludedRegion | null {
     let i = pos + 2;
     // Skip whitespace (including newlines) after ::
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    while (
+      i < source.length &&
+      (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\f' || source[i] === '\v')
+    ) {
       i++;
     }
     // Match identifier
@@ -417,7 +423,10 @@ export class LuaBlockParser extends BaseBlockParser {
       i++;
     }
     // Skip whitespace (including newlines) before closing ::
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    while (
+      i < source.length &&
+      (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\f' || source[i] === '\v')
+    ) {
       i++;
     }
     // Check closing ::
