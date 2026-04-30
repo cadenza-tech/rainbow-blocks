@@ -5,6 +5,46 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.39] - 2026-05-01
+
+### Fixed
+
+- Ada: Normalize compound-end token value to canonical `end <type>` in `compoundEndPositions` (`adaParser.ts`) so embedded `--comment`, CR, or LF between `end` and the type keyword no longer breaks `endType` re-extraction in `matchBlocks` (`for ... loop ... end -- comment\nloop;` now pairs the `for` with `end loop` instead of stealing the inner `if`'s `end`)
+- Ada: Add `return` to the whitelist of openers that accept a `when` intermediate (`adaParser.ts`) so the Ada 2012 extended-return statement's exception handler (`return R : T do ... exception when others => ...; end return;`) records the `when` clauses as intermediates of the `return` block
+- AppleScript: Add `:` (record key separator) and `^` (exponent operator) to the operator/punctuation list in `isPrecededByExpressionTerminator` (`applescriptParser.ts`) so `{action: tell, target: ...}` and `set x to 2 ^ tell` no longer treat the trailing keyword as a block opener
+- AppleScript: Extend the `block_close` fallback in `matchBlocks` to accept `to` handler definitions in addition to `on` (`applescriptParser.ts`) so `to handler() ... end tell` correctly pairs with the `to` opener
+- Bash: Allow `(` as a valid character after `{` for command grouping (`bashParser.ts`) so `{(echo hi);}` is recognised as a brace block containing a subshell instead of being silently dropped
+- Bash: Expand the unquoted heredoc delimiter character class to include `.`, `+`, `:`, `%`, `,`, `=` (`bashLeafHelpers.ts`, `bashStringHelpers.ts`) so `<<.`, `<<+`, `<<:`, `<<%` are recognised as valid heredoc operators per Bash spec
+- Bash: Skip the `}` block-close validation when the predecessor character is inside an excluded region (`bashParser.ts`) so `{ echo ${arr[@]} }` and `{ x=$(cmd) }` are no longer falsely detected as brace blocks (the trailing `}`/`)` of `${...}`/`$(...)` is not a structural separator)
+- COBOL: Apply the same column ≥ 72 fixed-format identification-area exclusion in `computeValidPositions` that `tokenize` already applies (`cobolParser.ts`) so a stray keyword in the identification area no longer pairs with a real closer at column < 72, leaving the actual opener unmatched
+- COBOL: Treat pseudo-text content (`==..==`) inside an EXEC block as opaque in `matchExecBlock` (`cobolHelpers.ts`) — `END-EXEC` appearing inside `==X END-EXEC Y==` is now data, not an early termination, so the EXEC block extends through the real `END-EXEC`
+- COBOL: Filter `WHEN`/`ELSE` tokens immediately preceded by a COBOL data-name verb (`MOVE`, `ADD`, `SET`, `DISPLAY`, `INTO`, `TO`, etc.) in `tokenize` (`cobolParser.ts`) so `MOVE ELSE TO Y` no longer attaches `ELSE` as an intermediate of the enclosing `IF`
+- Crystal: Treat literal-only expressions as content in `isPostfixConditional` (`crystalExcluded.ts`) — string, regex, symbol, char, percent, backtick, and macro-template excluded regions are now counted as content, so `"hello" if @flag` is recognised as a postfix conditional instead of opening a stray `if` block
+- Elixir: Reject `end` inside an unmatched `(`, `[`, or `{` in `isValidBlockClose` (`elixirParser.ts`) so `def foo(end) do ... end` pairs `def` with the outer `end` rather than the parameter-list `end`
+- Erlang: Add `bnot` (bitwise NOT) to `CATCH_EXPR_WORD_OPERATORS` (`erlangHelpers.ts`) so `try X = bnot catch err catch _:_ -> ok end` recognises the first `catch` as an expression prefix instead of a clause separator
+- Fortran: Reject `type = expr` and `type(N) = expr` assignment forms in `isValidTypeOpen` (`fortranParser.ts`) so `integer :: type` followed by `type = 5` no longer opens a spurious `type` block
+- Fortran: Reject `procedure = expr` and `procedure(N) = expr` assignment forms in `isValidProcedureOpen` (`fortranValidation.ts`) so `integer :: procedure` followed by `procedure = 5` no longer opens a spurious `procedure` block
+- Fortran: Add `isFortranOpenConstructName` filter for procedure names following `subroutine`, `function`, `program`, `module`, `submodule(...)`, or `module procedure` (`fortranParser.ts`) so `subroutine block(arg)` and `function do() result(r)` no longer tokenise the procedure name as a block keyword that steals a later bare `end`
+- Julia: Track bracket depth in `isInsideParentheses` (`juliaParser.ts`) so block-form `for` at the start of `[...]` inside `(...)` (e.g., `f([for i in 1:3; i; end])`) is correctly recognised as a block opener rather than misclassified as a generator expression
+- Julia: Skip keywords preceded by `@` (e.g., `@if`, `@end`, `@for`) in `tokenize` (`juliaParser.ts`) so macro-prefixed reserved words no longer leak as block tokens
+- Lua: Make `isAfterGoto` case-sensitive (`luaParser.ts`) — only literal lowercase `goto` is the keyword per Lua spec, so `Goto` / `GOTO` identifiers no longer cause subsequent block keywords to be filtered as goto label targets
+- Lua: Include form-feed (`\f`) and vertical-tab (`\v`) in the whitespace skip predicates of `isPrecededByDotOrColon`, `isAfterGoto`, and `matchGotoLabel` (`luaParser.ts`) for consistency with `\z` escape handling
+- MATLAB: Accept `arguments` as a `block_open` when the enclosing scope is `function`, `methods`, or `classdef` in `matchBlocks` (`matlabParser.ts`) so MATLAB R2019b+ argument-validation blocks inside function bodies are recognised
+- MATLAB: Reject block-opener keywords used as standalone identifiers on the RHS of an assignment (`r = for;`, `r = if;`, `x = while)`) via new `isUsedAsRhsIdentifier` in `isValidBlockOpen` (`matlabParser.ts`) so invalid expression-context usage no longer destroys outer block pairing
+- MATLAB: Reject `end` immediately after `:` on a `for`-loop header line via new `isEndInForHeaderRange` in `isValidBlockClose` (`matlabParser.ts`) so `for i = 1:end` treats the `end` as the array-index `end`, not a block close
+- MATLAB: Filter block-middle keywords (`case`, `else`, `elseif`, `otherwise`, `catch`) used as variable names (`case = 5`) in `tokenize` (`matlabParser.ts`) so the assignment no longer attaches as a stray intermediate
+- Octave: Add `until` to the typed-end keyword position check in `isValidBlockClose` (`octaveParser.ts`) so `until` in expression position (e.g., `a + until`) is no longer tokenised as a block close, matching the existing `endif`/`endfor`/etc. handling
+- Pascal: Honor excluded regions when scanning backward for `;` in the asm-body comment-skip logic of `addAsmExcludedRegions` (`pascalParser.ts`) — a `;` inside a brace `{...}` / paren-star `(*...*)` / string region is no longer mistaken for an asm-style line comment that swallows the real closing `end`
+- Pascal: Reject `asm` immediately followed by `(` (function-call form) in `isValidBlockOpen` and `addAsmExcludedRegions` (`pascalParser.ts`) — the comment said `(` rejected asm-as-call, but the rejection list omitted it; `asm(x);` is now correctly treated as a non-block usage. Also skip excluded regions in the forward whitespace check of `addAsmExcludedRegions` for consistency with `isValidBlockOpen`
+- Ruby: Reject the dot in `$.` global variable as a method-call dot in `isDotPreceded` (`rubyValidation.ts`) so `puts $.` no longer causes the next line's `end`/`elsif`/`else` to be filtered as a method call
+- Ruby: Reject the lone trailing backslash of `$\` global variable as a line-continuation marker in `findLogicalLineStart` (`rubyValidation.ts`) so `puts $\\\nif true\nend` is no longer joined into a single logical line that suppresses the `if` block
+- Verilog: Generalize the `'{...}` assignment-pattern filter in `tokenize` to all block keywords (not only `default`) (`verilogParser.ts`) so `'{begin: 0, end: 100}` no longer tokenises the field names as block opener/closer
+- Verilog: Reject `default` preceded by `::` (scope-resolved `pkg::default`) in the `default` filter of `tokenize` (`verilogParser.ts`) so the qualified identifier no longer registers as a case-label intermediate
+- Verilog: Add `isPrecededByDataTypeKeyword` check to `isValidBlockClose` (`verilogParser.ts`) so `int endmodule;` (illegal SV identifier preceded by `int`) no longer steals the surrounding `module`'s closer
+- Verilog: Make preprocessor-directive detection case-sensitive (`/^(ifdef|ifndef|elsif)$/` instead of `/i`) in `scanForBeginAfterControl` (`verilogValidation.ts`) per IEEE 1800-2017 §22 — uppercase macro names like `` `IFDEF `` are now recognised as user macros, not directives, so the next identifier (e.g., `begin`) is no longer consumed as a macro argument
+- VHDL: Add `isValidContextOpen` to distinguish a `context_declaration` (`context name is ... end`) from a `context_reference` (`context selected_name;`) (`vhdlParser.ts`) so context references inside a context-declaration body no longer steal the enclosing `end context`
+- VHDL: Extend `COMPOUND_END_PATTERN` to recognise `end package body` and `end protected body` per LRM 4.8 / 5.6.2 (`vhdlParser.ts`) and map the `body` suffix back to `package` / `protected` for `endType`-based opener matching, so the trailing `body` is no longer dropped from the close-keyword token
+
 ## [1.1.38] - 2026-04-30
 
 ### Fixed
@@ -1456,6 +1496,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.39]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.38...v1.1.39
 [1.1.38]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.36...v1.1.37
 [1.1.36]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.35...v1.1.36
