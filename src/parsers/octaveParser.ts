@@ -92,7 +92,8 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // the start of a statement, it is being used as a variable/identifier rather than
     // closing a block.
     const lowerKw = keyword.toLowerCase();
-    if (lowerKw !== 'end' && lowerKw.startsWith('end') && !this.isAtStatementLeadingPosition(source, position)) {
+    const isTypedClose = (lowerKw !== 'end' && lowerKw.startsWith('end')) || lowerKw === 'until';
+    if (isTypedClose && !this.isAtStatementLeadingPosition(source, position)) {
       return false;
     }
     return super.isValidBlockClose(keyword, source, position, excludedRegions);

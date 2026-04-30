@@ -389,7 +389,44 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject 'end' inside an unmatched `(`/`[`/`{` opener — such 'end' is a parameter
+    // / argument identifier (e.g., `def foo(end) do ... end`), not a block close.
+    if (keyword === 'end' && this.isInsideOpenBracket(source, position)) {
+      return false;
+    }
+
     return true;
+  }
+
+  // Returns true when there's an unmatched opening (/[/{ before position on the same logical line.
+  // Tracks bracket depth without crossing newlines (Elixir bracket constructs end at the closer).
+  private isInsideOpenBracket(source: string, position: number): boolean {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      const ch = source[i];
+      if (ch === '\n' || ch === '\r') {
+        // Cross newline only if balanced — if any depth is open, the unmatched bracket
+        // was on this line so we're inside it.
+        // (Elixir allows multi-line constructs but keeps tracking depth.)
+        continue;
+      }
+      if (ch === ')') parenDepth++;
+      else if (ch === '(') {
+        if (parenDepth === 0) return true;
+        parenDepth--;
+      } else if (ch === ']') bracketDepth++;
+      else if (ch === '[') {
+        if (bracketDepth === 0) return true;
+        bracketDepth--;
+      } else if (ch === '}') braceDepth++;
+      else if (ch === '{') {
+        if (braceDepth === 0) return true;
+        braceDepth--;
+      }
+    }
+    return false;
   }
 
   // Checks if position is followed by colon (keyword argument syntax)

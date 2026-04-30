@@ -54,6 +54,12 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
         return false;
       }
+      // Skip keywords preceded by '@' (macro names like @if, @end, @for).
+      // While `@<reserved-word>` is invalid Julia (reserved words can't be macro names),
+      // the keyword should not be tokenized as a block keyword in this context.
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '@') {
+        return false;
+      }
       // Skip keywords adjacent to Unicode identifier characters (e.g., αend, endβ)
       // JavaScript \b only handles ASCII word boundaries, so Unicode letters need explicit check
       // Handle surrogate pairs for characters outside the BMP (codepoints > U+FFFF)
@@ -428,12 +434,22 @@ export class JuliaBlockParser extends BaseBlockParser {
   // indicates assignment, not a generator expression
   private isInsideParentheses(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
+    let bracketDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
       }
       const char = source[i];
-      if (char === ')') {
+      if (char === ']') {
+        bracketDepth++;
+      } else if (char === '[') {
+        if (bracketDepth === 0) {
+          // The keyword is directly inside `[...]` (possibly nested in `(...)`).
+          // Bracket-form constructs like `[for ...]` handled separately by isInsideSquareBrackets.
+          return false;
+        }
+        bracketDepth--;
+      } else if (char === ')') {
         parenDepth++;
       } else if (char === '(') {
         if (parenDepth === 0) {
