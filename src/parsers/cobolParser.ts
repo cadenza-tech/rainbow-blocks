@@ -6,6 +6,31 @@ import type { CobolHelperCallbacks } from './cobolHelpers';
 import { isInPseudoTextContext, matchExecBlock, matchPseudoText } from './cobolHelpers';
 import { findLastOpenerByType } from './parserUtils';
 
+// COBOL verbs that take data-name operands. When a reserved word like WHEN/ELSE
+// immediately follows one of these on the same line, treat it as an identifier.
+const DATA_NAME_VERBS = new Set([
+  'MOVE',
+  'ADD',
+  'SUBTRACT',
+  'MULTIPLY',
+  'DIVIDE',
+  'COMPUTE',
+  'SET',
+  'DISPLAY',
+  'ACCEPT',
+  'INSPECT',
+  'STRING',
+  'UNSTRING',
+  'INITIALIZE',
+  'TO',
+  'INTO',
+  'FROM',
+  'OF',
+  'IN',
+  'USING',
+  'AT'
+]);
+
 // Mapping of close keywords to their valid openers (case insensitive comparison)
 const CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   'end-perform': 'perform',
@@ -134,6 +159,21 @@ export class CobolBlockParser extends BaseBlockParser {
       // Skip keywords adjacent to Unicode letters (consistent with tokenize)
       if (this.isAdjacentToUnicodeLetter(source, pos, match[0].length)) {
         continue;
+      }
+      // Skip keywords in the fixed-format identification area (cols 73-80, 0-based 72+).
+      // This must mirror the same exclusion in tokenize() — otherwise a fake opener at
+      // col >= 72 may pair with the real closer here, then be dropped by tokenize, leaving
+      // the real opener unmatched.
+      let lineStart = pos;
+      while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+        lineStart--;
+      }
+      const column = pos - lineStart;
+      if (column >= 72 && lineStart + 6 <= source.length) {
+        const sequenceArea = source.slice(lineStart, lineStart + 6);
+        if (/^[ \t\d]{6}$/.test(sequenceArea)) {
+          continue;
+        }
       }
       const isClose = match[0].length > lowerKeyword.length;
       if (isClose) {
@@ -357,7 +397,27 @@ export class CobolBlockParser extends BaseBlockParser {
       });
     }
 
-    return tokens;
+    // Filter WHEN/ELSE used as data names (e.g., MOVE ELSE TO Y, ADD WHEN TO Y).
+    return tokens.filter((token) => {
+      if (token.type !== 'block_middle') return true;
+      const lower = token.value.toLowerCase();
+      if (lower !== 'when' && lower !== 'else') return true;
+      return !this.isPrecedingWordDataNameVerb(source, token.startOffset);
+    });
+  }
+
+  // Returns true when the immediately preceding word on the same line is a COBOL verb
+  // that takes data names as operands (so the keyword is being used as an identifier,
+  // not as a control-flow intermediate).
+  private isPrecedingWordDataNameVerb(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0) return false;
+    const wordEnd = i + 1;
+    let wordStart = i;
+    while (wordStart > 0 && /[a-zA-Z0-9_-]/.test(source[wordStart - 1])) wordStart--;
+    const word = source.slice(wordStart, wordEnd).toUpperCase();
+    return DATA_NAME_VERBS.has(word);
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {

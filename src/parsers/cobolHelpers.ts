@@ -151,8 +151,10 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
       }
       continue;
     }
-    // Skip pseudo-text delimiters ==...== inside EXEC block
-    // Stop scanning at END-EXEC/END-EXECUTE to avoid extending past the EXEC block
+    // Skip pseudo-text delimiters ==...== inside EXEC block.
+    // Pseudo-text content is opaque (used in COPY ... REPLACING ==X== BY ==Y==), so any
+    // text inside (including what looks like END-EXEC) is data, not a real EXEC terminator.
+    // If unterminated, fall back to advancing one position to keep scanning the EXEC body.
     if (ch === '=' && i + 1 < source.length && source[i + 1] === '=') {
       const savedPos = i;
       i += 2;
@@ -162,17 +164,6 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
           i += 2;
           foundClose = true;
           break;
-        }
-        // Stop at END-EXEC or END-EXECUTE to avoid scanning past the EXEC block
-        if ((source[i] === 'E' || source[i] === 'e') && i + 7 < source.length) {
-          const upperInner = source.slice(i, i + 8).toUpperCase();
-          if (upperInner === 'END-EXEC') {
-            const beforeOk = i === 0 || !/[a-zA-Z0-9_-]/.test(source[i - 1]);
-            const afterOk = i + 8 >= source.length || !/[a-zA-Z0-9_-]/.test(source[i + 8]) || source.slice(i, i + 11).toUpperCase() === 'END-EXECUTE';
-            if (beforeOk && afterOk) {
-              break;
-            }
-          }
         }
         i++;
       }
