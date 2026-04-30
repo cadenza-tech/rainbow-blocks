@@ -60,7 +60,7 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         if (fp < source.length) {
           const next = source[fp];
-          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';') {
+          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';' || next === '(') {
             return false;
           }
         }
@@ -402,13 +402,27 @@ export class PascalBlockParser extends BaseBlockParser {
 
       // Skip asm used as an identifier (variable, field, parameter, etc.).
       // Forward check: reject when followed by ':' (type annotation like 'asm: Integer'),
-      // ':=' (assignment), '.', ',', ')', '='.
+      // ':=' (assignment), '.', ',', ')', '=', or '(' (function call).
+      // Skip excluded regions (comments) and whitespace consistent with isValidBlockOpen.
       {
         let fp = asmStart + 3;
-        while (fp < source.length && (source[fp] === ' ' || source[fp] === '\t')) fp++;
+        while (fp < source.length) {
+          if (this.isInExcludedRegion(fp, regions)) {
+            const region = this.findExcludedRegionAt(fp, regions);
+            if (region) {
+              fp = region.end;
+              continue;
+            }
+          }
+          if (source[fp] === ' ' || source[fp] === '\t') {
+            fp++;
+            continue;
+          }
+          break;
+        }
         if (fp < source.length) {
           const next = source[fp];
-          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';') {
+          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';' || next === '(') {
             continue;
           }
         }
@@ -474,15 +488,26 @@ export class PascalBlockParser extends BaseBlockParser {
         // Skip end preceded by `;` on the same line. In asm bodies (Intel/AT&T syntax),
         // `;` introduces a line comment, so an `end` keyword after `;` on the same line
         // is comment text and must not terminate the asm body.
+        // Important: skip positions inside Pascal excluded regions (brace comments, paren-star
+        // comments, strings) — a `;` inside such a region is not an asm-style line comment.
         {
           let k = endPos - 1;
+          let foundSemi = false;
           while (k >= contentStart && source[k] !== '\n' && source[k] !== '\r') {
+            if (this.isInExcludedRegion(k, regions)) {
+              const r = this.findExcludedRegionAt(k, regions);
+              if (r) {
+                k = r.start - 1;
+                continue;
+              }
+            }
             if (source[k] === ';') {
+              foundSemi = true;
               break;
             }
             k--;
           }
-          if (k >= contentStart && source[k] === ';') {
+          if (foundSemi) {
             continue;
           }
         }
