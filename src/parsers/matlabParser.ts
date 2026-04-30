@@ -14,8 +14,23 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
       return false;
     }
+    // Reject end immediately after `:` on a for-loop header line. Such `end` is part of
+    // the loop's range expression (e.g., `for i = 1:end`) — array-index `end`, not block close.
+    if (this.isEndInForHeaderRange(source, position)) {
+      return false;
+    }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
+  }
+
+  // Returns true when `end` is directly preceded by `:` on a for-loop header line.
+  private isEndInForHeaderRange(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0 || source[i] !== ':') return false;
+    const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
+    const beforeText = source.slice(lineStart, position).trimStart();
+    return /^for[\s(]/.test(beforeText);
   }
 
   // Classdef section keywords that can also be used as function calls
@@ -92,6 +107,12 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
         return false;
       }
+      // Reject block opener used as standalone identifier on the RHS of an assignment
+      // (e.g., `r = for;`, `r = if;`, `x = while)`). Such usages have no body, so the
+      // keyword cannot be a real block opener.
+      if (this.isUsedAsRhsIdentifier(source, position, keyword)) {
+        return false;
+      }
     }
     // Reject any block opener inside parentheses or brackets
     if (this.isInsideParensOrBrackets(source, position, excludedRegions)) {
@@ -108,6 +129,32 @@ export class MatlabBlockParser extends BaseBlockParser {
       return false;
     }
     return true;
+  }
+
+  // Returns true when a block-opener keyword is being used as a standalone identifier on
+  // the RHS of an assignment with no body following. Such forms (`r = for;`, `r = if,`,
+  // `x = while)`) are invalid MATLAB but should not destroy outer block pairing.
+  private isUsedAsRhsIdentifier(source: string, position: number, keyword: string): boolean {
+    const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
+    // Look for a plain `=` (not ==, <=, >=, !=, ~=) between lineStart and position
+    let hasAssignmentBefore = false;
+    for (let i = lineStart; i < position; i++) {
+      if (source[i] === '=') {
+        const prev = i > 0 ? source[i - 1] : '';
+        const next = i + 1 < source.length ? source[i + 1] : '';
+        if (next === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~' || prev === '=') {
+          continue;
+        }
+        hasAssignmentBefore = true;
+        break;
+      }
+    }
+    if (!hasAssignmentBefore) return false;
+    let i = position + keyword.length;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+    if (i >= source.length) return true;
+    const next = source[i];
+    return next === ';' || next === ',' || next === ')' || next === ']' || next === '}' || next === '\n' || next === '\r';
   }
 
   // Checks if a classdef section keyword is used as a function call
@@ -147,10 +194,14 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Filter out block_middle keywords that are struct field access (s.else, s . case)
+  // and block_middle keywords used as variable names (e.g., `case = 5`, `else = 1`).
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       if (this.isPrecededByDot(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
+      if (token.type === 'block_middle' && this.isFollowedBySimpleAssignment(source, token.startOffset + token.value.length)) {
         return false;
       }
       return true;
@@ -165,13 +216,27 @@ export class MatlabBlockParser extends BaseBlockParser {
     for (const token of tokens) {
       switch (token.type) {
         case 'block_open':
-          // Classdef section keywords (properties/methods/events/enumeration/arguments)
+          // Classdef section keywords (properties/methods/events/enumeration)
           // are valid block openers only inside a classdef block.
-          // Outside classdef they are function calls (e.g., properties(obj)) — skip them.
+          // The 'arguments' block is special: introduced in MATLAB R2019b for
+          // input/output validation, it appears inside a function body (which itself
+          // may live inside classdef→methods). Therefore it is valid when an enclosing
+          // function/methods/classdef is on the stack.
           if (MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(token.value.toLowerCase())) {
-            const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
-            if (!hasClassdef) {
-              break;
+            const isArguments = token.value.toLowerCase() === 'arguments';
+            if (isArguments) {
+              const hasFunctionOrClass = stack.some((b) => {
+                const v = b.token.value.toLowerCase();
+                return v === 'function' || v === 'methods' || v === 'classdef';
+              });
+              if (!hasFunctionOrClass) {
+                break;
+              }
+            } else {
+              const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
+              if (!hasClassdef) {
+                break;
+              }
             }
           }
           stack.push({ token, intermediates: [] });
