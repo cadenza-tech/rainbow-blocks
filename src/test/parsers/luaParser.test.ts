@@ -1161,5 +1161,28 @@ end`;
     });
   });
 
+  suite('Regression: goto detection is case-sensitive', () => {
+    test('should NOT treat keyword after Goto identifier as goto label', () => {
+      // Lua is case-sensitive; `Goto` is a regular identifier, not the goto keyword.
+      const pairs = parser.parse('x = Goto\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should NOT treat keyword after GOTO identifier as goto label', () => {
+      const pairs = parser.parse('x = GOTO\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: goto label whitespace handling for form-feed and vertical-tab', () => {
+    test('should treat goto end with form-feed whitespace as goto label', () => {
+      const pairs = parser.parse('function f()\n  goto\fend\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should treat goto end with vertical-tab whitespace as goto label', () => {
+      const pairs = parser.parse('function f()\n  goto\vend\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2743,5 +2743,26 @@ end if;`;
     });
   });
 
+  suite('Regression: compound end with embedded comment / CR', () => {
+    test('should pair for-loop with end loop when -- comment intervenes between end and loop', () => {
+      const source = 'for I in 1..10 loop\n  if A then\n    null;\n  end -- comment\nloop;';
+      const pairs = parser.parse(source);
+      const forPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'for');
+      assert.ok(forPair, 'for-loop should pair with end loop (compound) even with embedded comment');
+    });
+  });
+
+  suite('Regression: when intermediate inside Ada 2012 extended-return', () => {
+    test('should attach when as intermediate of return block when used in exception handler', () => {
+      const source =
+        'function F return Integer is\nbegin\n  return R : Integer := 0 do\n    R := 5;\n  exception\n    when others => null;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return should be paired');
+      const whenIntermediates = returnPair.intermediates.filter((i) => i.value.toLowerCase() === 'when');
+      assert.ok(whenIntermediates.length >= 1, 'when should attach to return block intermediates');
+    });
+  });
+
   generateCommonTests(config);
 });

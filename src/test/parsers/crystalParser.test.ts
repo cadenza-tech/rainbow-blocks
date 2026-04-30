@@ -3734,5 +3734,27 @@ end`;
     });
   });
 
+  suite('Regression: postfix conditional after literal-only expression', () => {
+    test('should treat string-literal followed by if as postfix, not block opener', () => {
+      const source = 'class Foo\n  def bar\n    "hello" if @flag\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classPair = pairs.find((p) => p.openKeyword.value === 'class');
+      assert.ok(classPair, 'class should pair with end');
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(defPair, 'def should pair with end');
+    });
+    test('should treat symbol-literal followed by unless as postfix', () => {
+      const source = 'class Foo\n  def bar\n    :sym unless @flag\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should treat regex-literal followed by while as postfix', () => {
+      const source = 'class Foo\n  def bar\n    /regex/ while @flag\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

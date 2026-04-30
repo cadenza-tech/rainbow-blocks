@@ -3530,5 +3530,28 @@ end`;
     });
   });
 
+  suite('Regression: Ruby global variables $. and $\\ should not affect next-line keyword detection', () => {
+    test('should detect def/end pair when method body uses $. global variable', () => {
+      const source = 'def foo\n  puts $.\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should detect if/end pair when previous line ends with $\\ global variable', () => {
+      const source = 'puts $\\\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should detect if/end pair when ?$ char literal precedes \\\\<newline>', () => {
+      const source = '?$\\\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should detect class/end pair when method uses $. global variable', () => {
+      const source = 'class Foo\n  def bar\n    x = $.\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

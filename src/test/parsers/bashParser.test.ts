@@ -5458,4 +5458,44 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: brace command grouping followed directly by paren', () => {
+    test('should recognize { followed by ( as brace block', () => {
+      const source = '{(echo hi);}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Regression: heredoc with non-alphanumeric leading delimiter character', () => {
+    test('should recognize <<. as heredoc delimiter', () => {
+      const source = 'cat <<.\nfor i in 1; do echo hi; done\n.\necho out';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+    test('should recognize <<+ as heredoc delimiter', () => {
+      const source = 'cat <<+\nfor i in 1; do echo hi; done\n+\necho out';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+    test('should recognize <<: as heredoc delimiter', () => {
+      const source = 'cat <<:\nfor i in 1; do echo hi; done\n:\necho out';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: brace block close } predecessor must not be inside excluded region', () => {
+    test('should not treat brace-block with parameter expansion as block', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash parameter expansion in test source
+      const source = '{ echo ${arr[@]} }';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+    test('should not treat brace-block with command substitution as block', () => {
+      const source = '{ x=$(cmd) }';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
 });

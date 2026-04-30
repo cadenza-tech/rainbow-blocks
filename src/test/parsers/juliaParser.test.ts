@@ -3508,5 +3508,23 @@ end`;
     });
   });
 
+  suite('Regression: block-form for at start of [] inside ()', () => {
+    test('should detect for/end pair when block-form for appears in [] inside ()', () => {
+      const source = 'f([for i in 1:3; i; end])';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'block-form for should be paired with end');
+    });
+  });
+
+  suite('Regression: @<keyword> should not tokenize the keyword', () => {
+    test('should not treat @if as block opener', () => {
+      const source = 'function foo()\n  @if x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

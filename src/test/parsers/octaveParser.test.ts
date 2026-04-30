@@ -1502,5 +1502,24 @@ end`;
     });
   });
 
+  suite('Regression: until requires statement-leading position', () => {
+    test('should not tokenize until in expression context as block_close', () => {
+      const source = 'do\n  body\nuntil x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.ok(doPair, 'do should pair with until');
+      assert.strictEqual(doPair.closeKeyword.value, 'until');
+    });
+    test('should not close do when until appears in expression position', () => {
+      // `a + until` is not valid Octave, but the until in expression position should
+      // not be tokenized as block_close (consistent with endif/endfor handling).
+      const source = 'do\n  a + until\nuntil cond';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      // The single 'until' that pairs is the leading-position one
+    });
+  });
+
   generateCommonTests(config);
 });

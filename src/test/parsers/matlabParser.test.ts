@@ -1548,5 +1548,56 @@ end`;
     });
   });
 
+  suite('Regression: arguments block inside function body (R2019b+)', () => {
+    test('should detect arguments block inside function', () => {
+      const source = 'function r = myFunc(x)\n  arguments\n    x (1,1) double\n  end\n  r = x;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const fnPair = pairs.find((p) => p.openKeyword.value === 'function');
+      const argsPair = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(fnPair, 'function should pair with end');
+      assert.ok(argsPair, 'arguments should pair with end');
+    });
+  });
+
+  suite('Regression: block opener as standalone identifier on RHS of assignment', () => {
+    test('should not treat for as block opener in r = for;', () => {
+      const source = 'function r = make\n  r = for;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should not treat if as block opener in r = if;', () => {
+      const source = 'function r = make\n  r = if;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should not treat while as block opener in r = while;', () => {
+      const source = 'function r = make\n  r = while;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression: for loop with 1:end should not have inner end as block close', () => {
+    test('should keep function/end as outer pair when for header uses 1:end', () => {
+      const source = 'function f\n  for i = 1:end\n    disp(i);\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const fnPair = pairs.find((p) => p.openKeyword.value === 'function');
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(fnPair, 'function should pair with outer end');
+      assert.ok(forPair, 'for should pair with inner end');
+    });
+  });
+
+  suite('Regression: case keyword as variable name', () => {
+    test('should not register case as intermediate when used as variable', () => {
+      const source = 'switch x\n  case = 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case = 5 should not register as intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });

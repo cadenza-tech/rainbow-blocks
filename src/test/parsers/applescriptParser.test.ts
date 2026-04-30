@@ -2570,5 +2570,26 @@ end try`;
     });
   });
 
+  suite('Regression: record key colon and exponent operator as expression terminators', () => {
+    test('should not treat tell as block opener when used as record value', () => {
+      const source = 'tell application "Finder"\n  set myRecord to {action: tell, target: "x"}\n  display dialog "test"\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+    test('should not treat tell as block opener after exponent operator', () => {
+      const source = 'tell app "X"\n  set x to 2 ^ tell\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+    test('should pair to tell() handler with end tell via fallback', () => {
+      const source = 'to tell()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'to');
+    });
+  });
+
   generateCommonTests(config);
 });

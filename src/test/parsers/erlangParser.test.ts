@@ -2293,6 +2293,12 @@ bar() -> fun() -> ok end.`;
       assertSingleBlock(pairs, 'try', 'end');
       assertIntermediates(pairs[0], ['catch']);
     });
+
+    test('should treat catch after bnot as expression prefix', () => {
+      const pairs = parser.parse('try X = bnot catch err catch _:_ -> ok end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
   });
 
   generateCommonTests(config);

@@ -3769,5 +3769,17 @@ end`;
     });
   });
 
+  suite('Regression: end inside def parameter list should not pair with def', () => {
+    test('should pair def with outer end, ignoring end inside parens', () => {
+      const source = 'def foo(end) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const defPair = pairs[0];
+      assert.strictEqual(defPair.openKeyword.value, 'def');
+      // The closing end should be the outer end (line 2), not the one inside parens (line 0)
+      assert.ok(defPair.closeKeyword.line >= 2, 'def should pair with outer end on line 2 or later');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -1827,5 +1827,39 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: fixed-format identification area exclusion in computeValidPositions', () => {
+    test('should pair real IF (col<72) when fake IF appears in identification area (col>=72)', () => {
+      // Fixed-format with sequence numbers in cols 1-6, content in cols 8-71, identification area at col 72+
+      const sequenceArea = '000010 ';
+      const filler = ' '.repeat(72 - sequenceArea.length);
+      const source = `${sequenceArea}IF X > 0\n${sequenceArea}${filler}IF\n${sequenceArea}END-IF.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
+  suite('Regression: EXEC pseudo-text content is opaque', () => {
+    test('should keep IF inside ==END-EXEC IF X END-IF== as part of EXEC region', () => {
+      const source = 'EXEC SQL\nCOPY ABC REPLACING ==END-EXEC IF X END-IF== BY ==NEW==\nEND-EXEC\nDISPLAY OK';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: WHEN/ELSE used as data names', () => {
+    test('should not register ELSE as IF intermediate when used as data name', () => {
+      const source = 'IF X\n  MOVE ELSE TO Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE should not register as intermediate');
+    });
+    test('should not register WHEN as EVALUATE intermediate when used as data name', () => {
+      const source = 'EVALUATE X\n  ADD WHEN TO Y\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN should not register as intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });

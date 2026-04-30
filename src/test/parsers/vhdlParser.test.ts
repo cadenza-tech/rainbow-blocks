@@ -2919,5 +2919,29 @@ end package;`;
     });
   });
 
+  suite('Regression: context_declaration vs context_reference', () => {
+    test('should pair outer context_declaration when body contains context_reference', () => {
+      const source = 'context my_top_ctx is\n  library ieee;\n  context work.basic_ctx;\nend context my_top_ctx;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer context at offset 0 should be paired');
+    });
+    test('should not treat context selected_name; as block opener', () => {
+      const source = 'context work.basic_ctx;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: end package body / end protected body compound forms', () => {
+    test('should pair package body with end package body', () => {
+      const source = 'package body my_pkg is\n  signal x : integer;\nend package body my_pkg;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'package');
+      assert.ok(pairs[0].closeKeyword.value.toLowerCase().includes('body'), 'closeKeyword should include body');
+    });
+  });
+
   generateCommonTests(config);
 });

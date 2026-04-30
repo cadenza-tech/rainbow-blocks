@@ -2630,5 +2630,51 @@ endmodule`;
     });
   });
 
+  suite("Regression: assignment pattern '{key: value} with block keyword as field name", () => {
+    test('should not tokenize begin/end inside assignment pattern as block keywords', () => {
+      const source = "module m;\n  initial begin\n    x = '{begin: 0, end: 100};\n    y = 1;\n  end\nendmodule";
+      const pairs = parser.parse(source);
+      // module/endmodule + initial/end + (no spurious begin/end pair from inside '{...})
+      assertBlockCount(pairs, 2);
+      const modulePair = pairs.find((p) => p.openKeyword.value === 'module');
+      assert.ok(modulePair, 'module should pair with endmodule');
+    });
+  });
+
+  suite('Regression: case-sensitive preprocessor directives', () => {
+    test('should not treat uppercase `IFDEF as preprocessor directive', () => {
+      // `IFDEF is a regular macro call (uppercase identifier), not the lowercase `ifdef directive.
+      // The 'begin' keyword should still be detected as the body marker after 'always'.
+      const source = 'always @(posedge clk) `IFDEF begin\n  x <= 1;\nend';
+      const pairs = parser.parse(source);
+      // Expect at least the always block detected (the always opener should pair with end)
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always block should be detected');
+    });
+  });
+
+  suite('Regression: pkg::default scope-resolved identifier as case label', () => {
+    test('should not register pkg::default as case intermediate', () => {
+      const source = 'case (sel)\n  pkg::default: x = 1;\n  default: y = 0;\nendcase';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const defaultCount = pairs[0].intermediates.filter((i) => i.value === 'default').length;
+      assert.strictEqual(defaultCount, 1, 'only the bare default should register');
+    });
+  });
+
+  suite('Regression: data type filter for block_close', () => {
+    test('should not treat int endmodule; identifier as block_close', () => {
+      const source = 'module m;\n  int endmodule;\n  reg [7:0] data;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      // The opening module should pair with the actual trailing endmodule (line 3),
+      // not the variable name on line 1.
+      const modulePair = pairs[0];
+      assert.strictEqual(modulePair.openKeyword.value, 'module');
+      assert.ok(modulePair.closeKeyword.line >= 3, 'module should pair with trailing endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });

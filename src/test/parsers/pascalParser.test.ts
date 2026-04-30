@@ -2578,5 +2578,26 @@ end.`;
     });
   });
 
+  suite('Regression: asm body ;-comment scan should honor excluded regions', () => {
+    test('should pair asm with first end after Pascal brace comment containing semicolon', () => {
+      const source = 'begin\n  asm\n    mov ax, 100h { ; trailing } end\n  end;\nend;';
+      const pairs = parser.parse(source);
+      // Expect: begin/end (outer), asm/end (inner)
+      assertBlockCount(pairs, 2);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      const asmPair = pairs.find((p) => p.openKeyword.value === 'asm');
+      assert.ok(beginPair, 'begin should be paired');
+      assert.ok(asmPair, 'asm should be paired');
+    });
+  });
+
+  suite('Regression: asm followed by ( should not be a block opener', () => {
+    test('should pair begin/end when asm(x) is used as identifier call', () => {
+      const source = 'begin\n  asm(x);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

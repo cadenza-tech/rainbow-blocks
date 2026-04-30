@@ -4679,5 +4679,38 @@ end program`;
     });
   });
 
+  suite('Regression: type/procedure assignment and procedure-name keyword identifiers', () => {
+    test('should not treat type = expr as type block opener', () => {
+      const source = 'subroutine foo\n  integer :: type\n  type = 5\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+    test('should not treat type(N) = expr as type block opener', () => {
+      const source = 'subroutine foo\n  integer :: type(10)\n  type(1) = 5\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+    test('should not treat procedure = expr as procedure block opener', () => {
+      const source = 'subroutine foo\n  integer :: procedure\n  procedure = 5\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+    test('should not treat subroutine block(arg) NAME as keyword', () => {
+      const source = 'subroutine block(arg)\n  integer :: arg\n  print *, arg\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+    test('should not treat function do() NAME as keyword', () => {
+      const source = 'function do() result(r)\n  integer :: r\n  r = 5\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should not treat function where() NAME as keyword', () => {
+      const source = 'function where() result(r)\n  integer :: r\n  r = 5\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
