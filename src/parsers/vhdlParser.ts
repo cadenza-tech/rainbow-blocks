@@ -40,8 +40,12 @@ const COMPOUND_END_TYPES = [
 
 // Pattern to match compound end keywords (case insensitive)
 // Only allow spaces/tabs between 'end' and the type keyword (same line only)
-// Pattern includes 'postponed process' for 'end postponed process' syntax
-const COMPOUND_END_PATTERN = new RegExp(`\\bend[ \\t]+(postponed[ \\t]+process|${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
+// Pattern includes 'postponed process' for 'end postponed process' syntax,
+// 'package body' (LRM 4.8) and 'protected body' (LRM 5.6.2) compound end forms.
+const COMPOUND_END_PATTERN = new RegExp(
+  `\\bend[ \\t]+(postponed[ \\t]+process|package[ \\t]+body|protected[ \\t]+body|${COMPOUND_END_TYPES.join('|')})\\b`,
+  'gi'
+);
 
 // Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
@@ -142,6 +146,52 @@ export class VhdlBlockParser extends BaseBlockParser {
       return this.isValidPackageOpen(source, position, excludedRegions);
     }
 
+    // Reject context_reference (`context selected_name [, ...];`) which can appear inside
+    // a context_declaration body. Only a context_declaration (`context name is ... end`)
+    // is a real block opener.
+    if (lowerKeyword === 'context') {
+      return this.isValidContextOpen(source, position, excludedRegions);
+    }
+
+    return true;
+  }
+
+  // Distinguishes context_declaration (block opener: `context name is ... end`) from
+  // context_reference (NOT a block opener: `context selected_name [, ...];`).
+  // Scans forward past the keyword and the (selected) name to inspect what follows.
+  private isValidContextOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const skipWs = (p: number): number => {
+      let q = p;
+      while (q < source.length) {
+        if (this.isInExcludedRegion(q, excludedRegions)) {
+          const region = this.findExcludedRegionAt(q, excludedRegions);
+          if (region) {
+            q = region.end;
+            continue;
+          }
+        }
+        if (source[q] === ' ' || source[q] === '\t' || source[q] === '\n' || source[q] === '\r') {
+          q++;
+          continue;
+        }
+        break;
+      }
+      return q;
+    };
+    let i = position + 'context'.length;
+    i = skipWs(i);
+    while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+    i = skipWs(i);
+    // Selected name: keep consuming `. identifier` chains
+    while (i < source.length && source[i] === '.') {
+      i++;
+      i = skipWs(i);
+      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+      i = skipWs(i);
+    }
+    if (i >= source.length) return true;
+    const next = source[i];
+    if (next === ',' || next === ';') return false;
     return true;
   }
 
@@ -323,9 +373,19 @@ export class VhdlBlockParser extends BaseBlockParser {
       // Check if in excluded region
       if (!this.isInExcludedRegion(pos, excludedRegions) && this.isValidBlockClose(match[0], source, pos, excludedRegions)) {
         const fullMatch = match[0];
-        // Use last word for multi-word matches like 'postponed process' -> 'process'
-        const endTypeParts = match[1].toLowerCase().split(/[ \t]+/);
-        const endType = endTypeParts[endTypeParts.length - 1];
+        const matchedType = match[1].toLowerCase();
+        // For 'package body' / 'protected body' compound forms, the actual opener
+        // keyword is 'package' / 'protected' (not the trailing 'body').
+        let endType: string;
+        if (/^package[ \t]+body$/.test(matchedType)) {
+          endType = 'package';
+        } else if (/^protected[ \t]+body$/.test(matchedType)) {
+          endType = 'protected';
+        } else {
+          // Use last word for multi-word matches like 'postponed process' -> 'process'
+          const endTypeParts = matchedType.split(/[ \t]+/);
+          endType = endTypeParts[endTypeParts.length - 1];
+        }
         compoundEndPositions.set(pos, {
           keyword: fullMatch, // Preserve original case
           length: fullMatch.length,
@@ -626,7 +686,15 @@ export class VhdlBlockParser extends BaseBlockParser {
           // Check if it's a compound end
           const compoundMatch = closeValue.match(/^end[ \t]+(?:\S+[ \t]+)*(\S+)/);
           if (compoundMatch) {
-            const endType = compoundMatch[1];
+            let endType = compoundMatch[1];
+            // 'package body' / 'protected body' compound forms: the actual opener
+            // keyword is the first word, not the trailing 'body'.
+            if (endType === 'body') {
+              const bodyCompound = closeValue.match(/^end[ \t]+(package|protected)[ \t]+body$/);
+              if (bodyCompound) {
+                endType = bodyCompound[1];
+              }
+            }
 
             // Special case: 'end generate' closes all 'generate' blocks in the chain
             // (for elsif/else generate chains, multiple generate blocks stack up)
