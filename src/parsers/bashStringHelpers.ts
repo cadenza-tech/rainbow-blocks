@@ -72,7 +72,7 @@ export function matchArithmeticBracket(source: string, pos: number): ExcludedReg
 export function matchHeredoc(source: string, pos: number): ExcludedRegion | null {
   // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, and numeric-only
   // Backslash-quoted: delimiter is the contiguous non-special run after `\` (e.g., <<\}, <<\EOF)
-  const heredocPattern = /^<<(-)?[\t ]*(?:(['"])(.*?)\2|\\([^\s'"]+)|([A-Za-z_0-9][A-Za-z0-9_\-.]*))(?=[^A-Za-z0-9_\-.]|$)/;
+  const heredocPattern = /^<<(-)?[\t ]*(?:(['"])(.*?)\2|\\([^\s'"]+)|([A-Za-z_0-9.+:%,=][A-Za-z0-9_\-.+:%,=]*))(?=[^A-Za-z0-9_\-.+:%,=]|$)/;
   const match = source.slice(pos).match(heredocPattern);
 
   if (!match) return null;

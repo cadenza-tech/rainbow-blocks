@@ -463,10 +463,11 @@ export class BashBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Command grouping '{' must be followed by whitespace and at valid position
+      // Command grouping '{' must be followed by whitespace, newline, or '(' (subshell starter)
+      // Bash accepts `{(echo);}` without whitespace because the lexer can disambiguate.
       if (char === '{') {
         const nextChar = source[i + 1];
-        if (nextChar !== undefined && nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r') {
+        if (nextChar !== undefined && nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r' && nextChar !== '(') {
           continue;
         }
         if (!this.isAtCommandPosition(source, i, excludedRegions)) {
@@ -507,11 +508,17 @@ export class BashBlockParser extends BaseBlockParser {
         }
       }
 
-      // Command grouping '}' must be preceded by ';', newline, or block close keyword
+      // Command grouping '}' must be preceded by ';', newline, or block close keyword.
+      // Predecessor must NOT be inside an excluded region — e.g., the closing `}` of `${...}`
+      // or the closing `)` of `$(...)` is not a structural separator even though it looks
+      // like one (those would falsely allow `{ echo ${arr[@]} }` to be treated as a block).
       if (char === '}') {
         let j = i - 1;
         while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
           j--;
+        }
+        if (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
+          continue;
         }
         if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && source[j] !== ')' && source[j] !== ']') {
           // Check if preceded by block close keywords (fi, done, esac)
@@ -520,8 +527,8 @@ export class BashBlockParser extends BaseBlockParser {
           for (const kw of blockCloseKeywords) {
             const start = j - kw.length + 1;
             if (start >= 0 && source.slice(start, j + 1) === kw) {
-              // Verify word boundary before keyword
-              if (start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) {
+              // Verify word boundary before keyword and that the keyword is NOT inside an excluded region
+              if ((start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) && !this.isInExcludedRegion(start, excludedRegions)) {
                 isAfterBlockClose = true;
                 break;
               }
