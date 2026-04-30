@@ -3,6 +3,24 @@
 import type { ExcludedRegion } from '../types';
 import { findLineCommentAndStringRegions, isInExcludedRegion, isInsideRegion } from './parserUtils';
 
+// Binary search for the excluded region containing pos, or null when none.
+function findRegionAt(pos: number, regions: readonly ExcludedRegion[]): ExcludedRegion | null {
+  let lo = 0;
+  let hi = regions.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const r = regions[mid];
+    if (pos < r.start) {
+      hi = mid - 1;
+    } else if (pos >= r.end) {
+      lo = mid + 1;
+    } else {
+      return r;
+    }
+  }
+  return null;
+}
+
 // Matches macro template {% %} or {{ }}, handling strings and comments inside
 export function matchMacroTemplate(source: string, pos: number): ExcludedRegion | null {
   // {% ... %}
@@ -489,19 +507,33 @@ export function isPostfixConditional(source: string, position: number, excludedR
     return false;
   }
 
-  // Check if all non-whitespace content before keyword is inside excluded regions
-  // (e.g., macro templates like {% x %} or {{ x }} are excluded regions)
+  // Check if there is any meaningful content (literal value or expression) before the keyword.
+  // Excluded regions other than line comments (strings, regex, percent literals, char literals,
+  // sigils, macro templates) count as content because the keyword is acting as a postfix
+  // modifier on them (e.g., `"hello" if cond`).
   let hasNonExcludedContent = false;
-  for (let ci = lineStart; ci < position; ci++) {
-    if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') continue;
-    if (!isInExcludedRegion(ci, excludedRegions)) {
-      // Check for semicolons: content after the last semicolon is what matters
-      if (source[ci] === ';') {
-        hasNonExcludedContent = false;
-        continue;
-      }
-      hasNonExcludedContent = true;
+  let ci = lineStart;
+  while (ci < position) {
+    if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') {
+      ci++;
+      continue;
     }
+    if (source[ci] === ';' && !isInExcludedRegion(ci, excludedRegions)) {
+      hasNonExcludedContent = false;
+      ci++;
+      continue;
+    }
+    const region = findRegionAt(ci, excludedRegions);
+    if (region) {
+      // Line comments (#) don't count as content; other regions (strings, literals) do.
+      if (source[region.start] !== '#') {
+        hasNonExcludedContent = true;
+      }
+      ci = region.end;
+      continue;
+    }
+    hasNonExcludedContent = true;
+    ci++;
   }
   if (!hasNonExcludedContent) {
     return false;
