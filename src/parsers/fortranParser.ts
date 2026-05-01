@@ -40,7 +40,9 @@ const COMPOUND_END_TYPES = [
   'interface',
   'type',
   'enum',
-  'procedure'
+  'procedure',
+  // Fortran 2018: change team (...) ... end team
+  'team'
 ];
 
 // Pattern to match compound end keywords (case insensitive)
@@ -72,7 +74,9 @@ export class FortranBlockParser extends BaseBlockParser {
       'where',
       'interface',
       'type',
-      'enum'
+      'enum',
+      // Fortran 2018: change team (...) ... end team
+      'team'
     ],
     blockClose: ['end'],
     blockMiddle: ['else', 'elseif', 'elsewhere', 'case', 'rank', 'then', 'contains']
@@ -94,13 +98,32 @@ export class FortranBlockParser extends BaseBlockParser {
       return this.isValidTypeOpen(keyword, source, position, excludedRegions);
     }
 
-    // 'select' must be followed by 'type' or 'case' to be a block opener
-    // Handles line continuation with &, including comment-only lines between
+    // 'team' is only a block opener as part of 'change team (...)' (Fortran 2018).
+    // A bare 'team' is a regular identifier.
+    if (lowerKeyword === 'team') {
+      const lineStart = findLineStart(source, position);
+      const before = source.slice(lineStart, position);
+      if (!/(?:^|[^a-zA-Z0-9_])change[ \t]+$/i.test(before)) {
+        return false;
+      }
+    }
+
+    // 'select' must be followed by 'type'/'case'/'rank' to be a block opener.
+    // 'select type' and 'select rank' must additionally be followed by '(...)'.
+    // Handles line continuation with &, including comment-only lines between.
     if (lowerKeyword === 'select') {
       let afterSelect = source.slice(position + keyword.length);
       afterSelect = collapseContinuationLines(afterSelect);
-      if (!/^[ \t]+(type|case|rank)\b/i.test(afterSelect)) {
+      const selectMatch = afterSelect.match(/^[ \t]+(type|case|rank)\b/i);
+      if (!selectMatch) {
         return false;
+      }
+      const subKw = selectMatch[1].toLowerCase();
+      if (subKw === 'type' || subKw === 'rank') {
+        const afterSubKw = afterSelect.slice(selectMatch[0].length);
+        if (!/^[ \t]*\(/.test(afterSubKw)) {
+          return false;
+        }
       }
     }
 
@@ -109,6 +132,16 @@ export class FortranBlockParser extends BaseBlockParser {
       let afterModule = source.slice(position + keyword.length);
       afterModule = collapseContinuationLines(afterModule);
       if (/^[ \t]+(procedure|function|subroutine)\b/i.test(afterModule)) {
+        return false;
+      }
+    }
+
+    // 'submodule' must be followed by `(parent)` clause (Fortran 2008+).
+    // Plain `submodule name` without parens is invalid.
+    if (lowerKeyword === 'submodule') {
+      let afterSub = source.slice(position + keyword.length);
+      afterSub = collapseContinuationLines(afterSub);
+      if (!/^[ \t]*\(/.test(afterSub)) {
         return false;
       }
     }
@@ -225,16 +258,23 @@ export class FortranBlockParser extends BaseBlockParser {
   // keyword like `block`, `do`, `where`, `type`, `forall`, `interface`, `enum`,
   // `associate`, `critical`. Without this filter, e.g. `subroutine block(arg)` would
   // produce a spurious `block` opener that steals a later bare `end`.
-  private isFortranOpenConstructName(source: string, position: number): boolean {
+  private isFortranOpenConstructName(source: string, position: number, keyword: string): boolean {
     const lineStart = findLineStart(source, position);
     const before = source.slice(lineStart, position);
+    const lowerKeyword = keyword.toLowerCase();
+    // 'module function/subroutine/procedure' inside a (sub)module body opens a block.
+    // Treat the keyword as a real block opener, not as a construct name following 'module '.
+    const isModuleSubprogramKeyword = lowerKeyword === 'function' || lowerKeyword === 'subroutine' || lowerKeyword === 'procedure';
     // Match a procedure-introducer at the tail of `before` (allow trailing whitespace).
     // Covers: program, module, submodule (with optional parent in parens), subroutine,
-    // function, 'module procedure'. Note: rejecting `module ` (without a procedure suffix)
-    // is fine because actual `module <name>` headers don't have <name> matching a block
-    // keyword in practice; but `module procedure <name>` is the common compound form.
-    const pattern =
-      /(?:^|[^a-zA-Z0-9_])(?:program|module(?:[ \t]+procedure)?|submodule[ \t]*\([^)]*\)|subroutine|function|recursive[ \t]+(?:subroutine|function)|pure[ \t]+(?:subroutine|function)|elemental[ \t]+(?:subroutine|function))[ \t]+$/i;
+    // function, 'module procedure'. When the keyword being tested is itself a
+    // module-subprogram keyword (function/subroutine/procedure), require the explicit
+    // 'module procedure' compound so plain 'module ' does not suppress it.
+    const moduleAlt = isModuleSubprogramKeyword ? 'module[ \\t]+procedure' : 'module(?:[ \\t]+procedure)?';
+    const pattern = new RegExp(
+      `(?:^|[^a-zA-Z0-9_])(?:program|${moduleAlt}|submodule[ \\t]*\\([^)]*\\)|subroutine|function|recursive[ \\t]+(?:subroutine|function)|pure[ \\t]+(?:subroutine|function)|elemental[ \\t]+(?:subroutine|function))[ \\t]+$`,
+      'i'
+    );
     return pattern.test(before);
   }
 
@@ -415,7 +455,7 @@ export class FortranBlockParser extends BaseBlockParser {
         }
         if (j >= 0 && source[j] === '&') {
           i++;
-          // Skip comment-only continuation lines (& ! comment \n)
+          // Skip comment-only continuation lines (& ! comment \n) and blank lines
           while (i < source.length) {
             // Skip whitespace at start of next line
             while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
@@ -436,6 +476,15 @@ export class FortranBlockParser extends BaseBlockParser {
                 } else {
                   i++;
                 }
+              }
+              continue;
+            }
+            // If line is blank (just whitespace then newline), skip it and continue
+            if (i < source.length && (source[i] === '\n' || source[i] === '\r')) {
+              if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+                i += 2;
+              } else {
+                i++;
               }
               continue;
             }
@@ -584,7 +633,7 @@ export class FortranBlockParser extends BaseBlockParser {
       if (
         this.isFortranConstructLabel(source, startOffset, keyword) ||
         this.isFortranEndConstructName(source, startOffset) ||
-        this.isFortranOpenConstructName(source, startOffset)
+        this.isFortranOpenConstructName(source, startOffset, keyword)
       ) {
         continue;
       }
