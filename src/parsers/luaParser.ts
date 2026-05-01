@@ -188,7 +188,7 @@ export class LuaBlockParser extends BaseBlockParser {
         return false;
       }
       // Reject keywords used as the target of `goto <label>`
-      if (this.isAfterGoto(source, token.startOffset)) {
+      if (this.isAfterGoto(source, token.startOffset, excludedRegions)) {
         return false;
       }
       return true;
@@ -197,15 +197,29 @@ export class LuaBlockParser extends BaseBlockParser {
 
   // Detects whether the keyword at position is the target of a `goto` statement.
   // Lua spec allows whitespace (including newlines) between `goto` and its label name.
-  private isAfterGoto(source: string, position: number): boolean {
+  // Skips excluded regions (comments, strings) so `goto` text inside them is ignored.
+  private isAfterGoto(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (
-      i >= 0 &&
-      (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\f' || source[i] === '\v')
-    ) {
-      i--;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v') {
+        i--;
+        continue;
+      }
+      break;
     }
     if (i < 3) return false;
+    // Verify the four characters at [i-3..i] are 'goto' and none lie in excluded regions
+    for (let j = i - 3; j <= i; j++) {
+      if (this.isInExcludedRegion(j, excludedRegions)) return false;
+    }
     if (source.slice(i - 3, i + 1) !== 'goto') return false;
     return i - 3 === 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]);
   }

@@ -281,6 +281,29 @@ export function isSymbolStart(source: string, pos: number): boolean {
   return true;
 }
 
+// Keywords that introduce a value expression where `[` starts an array construction,
+// not an indexing operation. e.g. `return [1, 2]`, `yield [x]`, `throw [...]`.
+const VALUE_KEYWORDS_BEFORE_BRACKET = new Set([
+  'return',
+  'yield',
+  'throw',
+  'in',
+  'if',
+  'elseif',
+  'else',
+  'while',
+  'until',
+  'for',
+  'do',
+  'begin',
+  'and',
+  'or',
+  'not',
+  'global',
+  'local',
+  'const'
+]);
+
 // Determines if a '[' at the given position is an indexing bracket (a[...]) vs array construction ([...])
 export function isIndexingBracket(source: string, bracketPos: number): boolean {
   let i = bracketPos - 1;
@@ -289,8 +312,22 @@ export function isIndexingBracket(source: string, bracketPos: number): boolean {
   }
   if (i < 0) return false;
   const prevChar = source[i];
-  // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing
-  if (/[a-zA-Z0-9_)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
+  // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing,
+  // unless the identifier is a keyword introducing a value expression (return, yield, throw, ...).
+  if (/[a-zA-Z0-9_]/.test(prevChar)) {
+    let wordStart = i;
+    while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+      wordStart--;
+    }
+    const word = source.slice(wordStart, i + 1);
+    // Reject if the candidate word is preceded by a non-identifier character (so it stands as a token).
+    const charBeforeWord = wordStart > 0 ? source[wordStart - 1] : '';
+    if (charBeforeWord !== '.' && VALUE_KEYWORDS_BEFORE_BRACKET.has(word)) {
+      return false;
+    }
+    return true;
+  }
+  if (/[)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
   // '[' before '[' means the outer bracket is indexing (e.g., a[[end]])
   // In this context, end still means lastindex, so treat as indexing
   if (prevChar === '[') return isIndexingBracket(source, i);
@@ -312,8 +349,12 @@ export function hasUnmatchedBlockOpenerBetween(
   blockOpeners: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
-  const openers = blockOpeners.filter((kw) => kw !== 'for');
+  // 'for' is excluded from openers because in comprehension context it acts as a generator
+  // (no end). 'if' is conditionally excluded once we've seen a 'for x in y' pattern, since
+  // subsequent 'if's are comprehension filters.
+  const openersWithoutFor = blockOpeners.filter((kw) => kw !== 'for');
   let depth = 0;
+  let inComprehensionContext = false;
 
   // Detect leading block-form 'for' (after whitespace and excluded regions)
   let firstNonWhite = start;
@@ -338,6 +379,24 @@ export function hasUnmatchedBlockOpenerBetween(
 
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
+    // Detect 'for x in y' or 'for x = y' pattern — entering comprehension context.
+    // Subsequent 'if's are filters, not block openers.
+    if (
+      !inComprehensionContext &&
+      source[i] === 'f' &&
+      i + 3 <= end &&
+      source.slice(i, i + 3) === 'for' &&
+      !/[a-zA-Z0-9_]/.test(i > 0 ? source[i - 1] : ' ') &&
+      !/[a-zA-Z0-9_]/.test(i + 3 < source.length ? source[i + 3] : ' ') &&
+      !callbacks.isAdjacentToUnicodeLetter(source, i, 3)
+    ) {
+      // Look ahead within range for 'in' or '=' on the same logical scan.
+      // Bare 'for' followed by 'in' or '=' indicates a generator/comprehension clause.
+      const tail = source.slice(i + 3, end);
+      if (/^[ \t]+\S+.*?(?:\bin\b|\b∈\b|=)/.test(tail)) {
+        inComprehensionContext = true;
+      }
+    }
     // Check for 'end' keyword (block closer)
     if (source[i] === 'e' && i + 3 <= end && source.slice(i, i + 3) === 'end') {
       const before = i > 0 ? source[i - 1] : ' ';
@@ -354,7 +413,7 @@ export function hasUnmatchedBlockOpenerBetween(
       }
     }
     // Check for block openers
-    for (const keyword of openers) {
+    for (const keyword of openersWithoutFor) {
       if (i + keyword.length <= end && source[i] === keyword[0] && source.slice(i, i + keyword.length) === keyword) {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
@@ -362,6 +421,8 @@ export function hasUnmatchedBlockOpenerBetween(
         if (callbacks.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
         // Skip dot-preceded keywords (field access like range.begin, not block opener)
         if (before === '.') continue;
+        // In comprehension context, 'if' is a filter rather than a block opener.
+        if (inComprehensionContext && keyword === 'if') continue;
         // abstract/primitive are only block openers when followed by 'type'
         if (keyword === 'abstract' || keyword === 'primitive') {
           const afterKeyword = source.slice(i + keyword.length);
