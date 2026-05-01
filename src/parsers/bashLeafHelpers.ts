@@ -11,6 +11,11 @@ export function isCommentStart(source: string, pos: number): boolean {
   const prev = source[pos - 1];
   // $ before # is handled separately (for $#, ${#, $$# special cases)
   if (prev === '$') return true;
+  // Extglob pattern: @(, !(, ?(, *(, +( — `#` directly after these `(` is a literal
+  // pattern character, not a comment marker.
+  if (prev === '(' && pos >= 2 && /[@!?*+]/.test(source[pos - 2])) {
+    return false;
+  }
   // Note: < and > are excluded because >#file and <#file are redirects to files starting with #
   return /[ \t\n\r;|&(]/.test(prev);
 }
@@ -37,17 +42,61 @@ export function matchesWord(source: string, pos: number, word: string): boolean 
   return true;
 }
 
-// Parses a heredoc operator (<<, <<-) and extracts the delimiter
+// Parses a heredoc operator (<<, <<-) and extracts the delimiter.
+// Real bash supports concatenating multiple delimiter parts like <<"EOF"'TAIL' or
+// <<X"Y" — the actual terminator is the concatenation of all parts.
 export function parseHeredocOperator(source: string, pos: number): { stripTabs: boolean; terminator: string; matchLength: number } | null {
-  // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, and numeric-only
-  // Backslash-quoted: delimiter is the contiguous non-special run after `\` (e.g., <<\}, <<\EOF)
-  const heredocPattern = /^<<(-)?[\t ]*(?:(['"])(.*?)\2|\\([^\s'"]+)|([A-Za-z_0-9.+:%,=][A-Za-z0-9_\-.+:%,=]*))/;
-  const match = source.slice(pos).match(heredocPattern);
-  if (!match) return null;
+  // Match the operator <<(-)? and trailing tabs/spaces
+  const opMatch = source.slice(pos).match(/^<<(-)?[\t ]*/);
+  if (!opMatch) return null;
+  const stripTabs = opMatch[1] === '-';
+  let i = pos + opMatch[0].length;
+  let terminator = '';
+  let matched = false;
+
+  // Consume one or more concatenated delimiter parts: 'quoted', "quoted",
+  // \escaped, or a bare identifier-like run.
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "'" || ch === '"') {
+      const close = source.indexOf(ch, i + 1);
+      if (close < 0) {
+        if (!matched) return null;
+        break;
+      }
+      terminator += source.slice(i + 1, close);
+      i = close + 1;
+      matched = true;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < source.length) {
+      const startWord = i + 1;
+      let end = startWord;
+      while (end < source.length && !/[\s'"\\]/.test(source[end])) end++;
+      if (end === startWord) {
+        if (!matched) return null;
+        break;
+      }
+      terminator += source.slice(startWord, end);
+      i = end;
+      matched = true;
+      continue;
+    }
+    if (matched ? /[A-Za-z0-9_\-.+:%,=]/.test(ch) : /[A-Za-z_0-9.+:%,=]/.test(ch)) {
+      const start = i;
+      while (i < source.length && /[A-Za-z0-9_\-.+:%,=]/.test(source[i])) i++;
+      terminator += source.slice(start, i);
+      matched = true;
+      continue;
+    }
+    break;
+  }
+
+  if (!matched || terminator.length === 0) return null;
   return {
-    stripTabs: match[1] === '-',
-    terminator: match[3] ?? match[4] ?? match[5],
-    matchLength: match[0].length
+    stripTabs,
+    terminator,
+    matchLength: i - pos
   };
 }
 

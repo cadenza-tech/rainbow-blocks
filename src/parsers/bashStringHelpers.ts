@@ -69,17 +69,12 @@ export function matchArithmeticBracket(source: string, pos: number): ExcludedReg
 }
 
 // Matches heredoc: <<EOF, <<'EOF', <<"EOF", <<-EOF, <<-'EOF', <<-"EOF", <<\EOF, <<\}
+// Also handles concatenated delimiter parts like <<"EOF"'TAIL' (terminator: EOFTAIL).
 export function matchHeredoc(source: string, pos: number): ExcludedRegion | null {
-  // Quoted delimiters: match anything between quotes; unquoted: allow hyphens, dots, and numeric-only
-  // Backslash-quoted: delimiter is the contiguous non-special run after `\` (e.g., <<\}, <<\EOF)
-  const heredocPattern = /^<<(-)?[\t ]*(?:(['"])(.*?)\2|\\([^\s'"]+)|([A-Za-z_0-9.+:%,=][A-Za-z0-9_\-.+:%,=]*))(?=[^A-Za-z0-9_\-.+:%,=]|$)/;
-  const match = source.slice(pos).match(heredocPattern);
-
-  if (!match) return null;
-
-  const stripTabs = match[1] === '-';
-  const terminator = match[3] ?? match[4] ?? match[5];
-  let i = pos + match[0].length;
+  const op = parseHeredocOperator(source, pos);
+  if (!op) return null;
+  const { stripTabs, terminator } = op;
+  let i = pos + op.matchLength;
 
   // Find the end of the current line (\n or \r)
   while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
