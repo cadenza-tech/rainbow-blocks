@@ -389,44 +389,38 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject 'end' inside an unmatched `(`/`[`/`{` opener — such 'end' is a parameter
-    // / argument identifier (e.g., `def foo(end) do ... end`), not a block close.
-    if (keyword === 'end' && this.isInsideOpenBracket(source, position)) {
+    // Reject 'end' that is being used as a parameter / argument identifier rather than
+    // a block close (e.g., `def foo(end) do ... end`). 'end' is a parameter identifier
+    // only when it sits as a complete comma-separated element: bordered on both sides
+    // by `(`, `,`, `[`, or `{` / `)`, `,`, `]`, or `}` (whitespace allowed).
+    if (keyword === 'end' && this.isEndAsParameterIdentifier(source, position)) {
       return false;
     }
 
     return true;
   }
 
-  // Returns true when there's an unmatched opening (/[/{ before position on the same logical line.
-  // Tracks bracket depth without crossing newlines (Elixir bracket constructs end at the closer).
-  private isInsideOpenBracket(source: string, position: number): boolean {
-    let parenDepth = 0;
-    let bracketDepth = 0;
-    let braceDepth = 0;
-    for (let i = position - 1; i >= 0; i--) {
-      const ch = source[i];
-      if (ch === '\n' || ch === '\r') {
-        // Cross newline only if balanced — if any depth is open, the unmatched bracket
-        // was on this line so we're inside it.
-        // (Elixir allows multi-line constructs but keeps tracking depth.)
-        continue;
-      }
-      if (ch === ')') parenDepth++;
-      else if (ch === '(') {
-        if (parenDepth === 0) return true;
-        parenDepth--;
-      } else if (ch === ']') bracketDepth++;
-      else if (ch === '[') {
-        if (bracketDepth === 0) return true;
-        bracketDepth--;
-      } else if (ch === '}') braceDepth++;
-      else if (ch === '{') {
-        if (braceDepth === 0) return true;
-        braceDepth--;
-      }
+  // Returns true when 'end' at `position` is a complete comma-separated element inside
+  // brackets, e.g. `foo(end)`, `foo(a, end)`, `[end]`, `{end, a}`. In these positions
+  // 'end' is being used as an identifier, not as a block close.
+  private isEndAsParameterIdentifier(source: string, position: number): boolean {
+    let beforePos = position - 1;
+    while (beforePos >= 0 && (source[beforePos] === ' ' || source[beforePos] === '\t')) {
+      beforePos--;
     }
-    return false;
+    if (beforePos < 0) return false;
+    const charBefore = source[beforePos];
+    if (charBefore !== '(' && charBefore !== ',' && charBefore !== '[' && charBefore !== '{') {
+      return false;
+    }
+
+    let afterPos = position + 3;
+    while (afterPos < source.length && (source[afterPos] === ' ' || source[afterPos] === '\t')) {
+      afterPos++;
+    }
+    if (afterPos >= source.length) return false;
+    const charAfter = source[afterPos];
+    return charAfter === ')' || charAfter === ',' || charAfter === ']' || charAfter === '}';
   }
 
   // Checks if position is followed by colon (keyword argument syntax)

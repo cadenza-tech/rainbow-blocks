@@ -80,16 +80,19 @@ export class ErlangBlockParser extends BaseBlockParser {
     // Module can be a quoted atom: fun 'my.module':func/N
     // Module/Function can be a macro: fun ?MODULE:handler/N, fun ?MY_FUNC/N
     // OTP 19+ allows Unicode characters in atoms/identifiers (\p{L}/\p{N})
+    // Arity can be a literal digit (\d+) or a bound variable (uppercase identifier per OTP 21+).
     const atomOrIdent = "(?:\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
-    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*\\d`, 'u');
+    const arityPattern = '(?:\\d+|[A-Z\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
+    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*${arityPattern}`, 'u');
     if (funRefModPattern.test(afterFun)) {
       return false;
     }
-    if (/^\s+\??[a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}]*\s*\/\s*\d/u.test(afterFun)) {
+    const funRefPattern = new RegExp(`^\\s+\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*\\s*/\\s*${arityPattern}`, 'u');
+    if (funRefPattern.test(afterFun)) {
       return false;
     }
     // fun 'quoted-atom'/Arity or fun ?'quoted-atom'/Arity (function reference without module prefix)
-    const quotedFunRef = /^\s+\??'(?:[^'\\\n\r]|\\.)*'\s*\/\s*\d/;
+    const quotedFunRef = new RegExp(`^\\s+\\??'(?:[^'\\\\\\n\\r]|\\\\.)*'\\s*/\\s*${arityPattern}`, 'u');
     if (quotedFunRef.test(afterFun)) {
       return false;
     }
@@ -533,31 +536,42 @@ export class ErlangBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
-            const topOpener = stack[stack.length - 1].token.value;
-            // 'catch' is only a valid intermediate for 'try' blocks
-            if (token.value === 'catch') {
+            const top = stack[stack.length - 1];
+            const topOpener = top.token.value;
+            // For `try` blocks the intermediates must appear in order of/catch/after,
+            // each at most once. Reject duplicates and out-of-order tokens.
+            if (topOpener === 'try' && (token.value === 'of' || token.value === 'catch' || token.value === 'after')) {
+              const order: Readonly<Record<string, number>> = { of: 0, catch: 1, after: 2 };
+              const seen = top.intermediates.map((t) => order[t.value]).filter((n): n is number => n !== undefined);
+              const lastSeen = seen.length === 0 ? -1 : Math.max(...seen);
+              const current = order[token.value];
+              if (seen.includes(current) || current <= lastSeen) {
+                break;
+              }
+              top.intermediates.push(token);
+            } else if (token.value === 'catch') {
               if (topOpener === 'try') {
-                stack[stack.length - 1].intermediates.push(token);
+                top.intermediates.push(token);
               }
             } else if (token.value === 'of') {
               // 'of' is only valid for 'case' and 'try' blocks
               if (topOpener === 'case' || topOpener === 'try') {
-                stack[stack.length - 1].intermediates.push(token);
+                top.intermediates.push(token);
               }
             } else if (token.value === 'after') {
               // 'after' is only valid for 'receive' and 'try' blocks
               if (topOpener === 'receive' || topOpener === 'try') {
-                stack[stack.length - 1].intermediates.push(token);
+                top.intermediates.push(token);
               }
             } else if (token.value === 'else') {
               // Per Erlang Reference Manual, `else` is only valid as an intermediate
               // for `maybe` blocks (OTP 25+). `if` only allows guard clauses (no else),
               // and `try` allows `of`/`catch`/`after` (no else).
               if (topOpener === 'maybe') {
-                stack[stack.length - 1].intermediates.push(token);
+                top.intermediates.push(token);
               }
             } else {
-              stack[stack.length - 1].intermediates.push(token);
+              top.intermediates.push(token);
             }
           }
           break;
