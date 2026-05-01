@@ -16,21 +16,92 @@ export class MatlabBlockParser extends BaseBlockParser {
     }
     // Reject end immediately after `:` on a for-loop header line. Such `end` is part of
     // the loop's range expression (e.g., `for i = 1:end`) — array-index `end`, not block close.
-    if (this.isEndInForHeaderRange(source, position)) {
+    if (this.isEndInForHeaderRange(source, position, excludedRegions)) {
+      return false;
+    }
+    // Reject end immediately preceded by a binary expression operator (+, -, *, /, ^, <, >, etc.).
+    // Such forms (`x = 1 + end`, `if x < end then`) are invalid MATLAB/Octave outside of array
+    // indexing, but parsing them as block close destroys outer block pairing.
+    if (keyword === 'end' && this.isPrecededByBinaryOperator(source, position)) {
       return false;
     }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
 
-  // Returns true when `end` is directly preceded by `:` on a for-loop header line.
-  private isEndInForHeaderRange(source: string, position: number): boolean {
+  // Returns true when `end` at position is preceded by an unambiguous binary expression operator
+  // on the same line (skipping whitespace). Excludes `=` because `x = end ...` is allowed by spec.
+  private isPrecededByBinaryOperator(source: string, position: number): boolean {
     let i = position - 1;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
-    if (i < 0 || source[i] !== ':') return false;
-    const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
-    const beforeText = source.slice(lineStart, position).trimStart();
-    return /^for[\s(]/.test(beforeText);
+    if (i < 0) return false;
+    const ch = source[i];
+    // Single-char operators that are unambiguously binary in this position.
+    // Note: `:` is excluded because it's handled by isEndInForHeaderRange and could appear
+    // in array slicing where end is valid. `,` is excluded because parens/brackets handling covers it.
+    if ('+*/^<>&|'.includes(ch)) return true;
+    // `-` could be unary; treat as binary only when preceded by a value-like char
+    if (ch === '-') {
+      let j = i - 1;
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+      if (j >= 0 && /[a-zA-Z0-9_)\]}]/.test(source[j])) return true;
+      return false;
+    }
+    return false;
+  }
+
+  // Returns true when `end` is part of a for-loop header range expression.
+  // Recognizes both `for` and `parfor`, and `for` after `;`/`,` separators on the same line.
+  // Skips across `...` line continuations when scanning backward for the `:`.
+  // Two range positions detected:
+  //   * RHS: `for i = 1:end`  — `end` directly preceded by `:`
+  //   * LHS: `for i = end:5`  — `end` directly followed by `:`
+  private isEndInForHeaderRange(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
+    // Case 1: end is preceded by `:` (RHS of range, e.g. `for i = 1:end`)
+    let i = position - 1;
+    while (i >= 0) {
+      if (excludedRegions) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      if ((ch === '\n' || ch === '\r') && excludedRegions) {
+        let nlStart = i;
+        if (ch === '\n' && i > 0 && source[i - 1] === '\r') {
+          nlStart = i - 1;
+        }
+        const regionBeforeNl = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+        if (regionBeforeNl?.end === nlStart && (source[regionBeforeNl.start] === '.' || source[regionBeforeNl.start] === '\\')) {
+          i = nlStart - 1;
+          continue;
+        }
+      }
+      break;
+    }
+    if (i >= 0 && source[i] === ':') {
+      const colonLineStart = Math.max(source.lastIndexOf('\n', i), source.lastIndexOf('\r', i)) + 1;
+      const beforeText = source.slice(colonLineStart, i);
+      if (/(?:^|[;,])\s*(?:par)?for[\s(]/.test(beforeText)) return true;
+    }
+
+    // Case 2: end is followed by `:` (LHS of range, e.g. `for i = end:5`)
+    let j = position + 3; // length of 'end'
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j < source.length && source[j] === ':' && j + 1 < source.length && source[j + 1] !== '=') {
+      const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
+      const beforeEnd = source.slice(lineStart, position);
+      // Require an `=` (assignment in for-header) before `end` on the same line, with for at start
+      if (/(?:^|[;,])\s*(?:par)?for[\s(].*=\s*$/.test(beforeEnd)) return true;
+    }
+
+    return false;
   }
 
   // Classdef section keywords that can also be used as function calls
@@ -134,12 +205,19 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Returns true when a block-opener keyword is being used as a standalone identifier on
   // the RHS of an assignment with no body following. Such forms (`r = for;`, `r = if,`,
   // `x = while)`) are invalid MATLAB but should not destroy outer block pairing.
+  // A `;` or `,` between the `=` and the keyword terminates the assignment context, so
+  // `x=1; do<NL>` should NOT treat `do` as an RHS identifier.
   private isUsedAsRhsIdentifier(source: string, position: number, keyword: string): boolean {
     const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
-    // Look for a plain `=` (not ==, <=, >=, !=, ~=) between lineStart and position
+    // Walk backward from the keyword. If we hit `;` or `,` before any `=`, the keyword
+    // is at a fresh statement position and not part of an RHS assignment.
     let hasAssignmentBefore = false;
-    for (let i = lineStart; i < position; i++) {
-      if (source[i] === '=') {
+    for (let i = position - 1; i >= lineStart; i--) {
+      const ch = source[i];
+      if (ch === ';' || ch === ',') {
+        return false;
+      }
+      if (ch === '=') {
         const prev = i > 0 ? source[i - 1] : '';
         const next = i + 1 < source.length ? source[i + 1] : '';
         if (next === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~' || prev === '=') {
@@ -212,6 +290,9 @@ export class MatlabBlockParser extends BaseBlockParser {
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
+    // Track openers that were rejected so their `end` is also skipped (instead of
+    // consuming the wrong outer block's close).
+    let pendingSkipEnds = 0;
 
     for (const token of tokens) {
       switch (token.type) {
@@ -230,11 +311,13 @@ export class MatlabBlockParser extends BaseBlockParser {
                 return v === 'function' || v === 'methods' || v === 'classdef';
               });
               if (!hasFunctionOrClass) {
+                pendingSkipEnds++;
                 break;
               }
             } else {
               const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
               if (!hasClassdef) {
+                pendingSkipEnds++;
                 break;
               }
             }
@@ -258,6 +341,12 @@ export class MatlabBlockParser extends BaseBlockParser {
           break;
 
         case 'block_close': {
+          // Skip ends that correspond to rejected block openers (e.g., arguments
+          // outside function/classdef context).
+          if (pendingSkipEnds > 0) {
+            pendingSkipEnds--;
+            break;
+          }
           const openBlock = stack.pop();
           if (openBlock) {
             pairs.push({
