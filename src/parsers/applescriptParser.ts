@@ -40,6 +40,21 @@ const COMPOUND_KEYWORDS = [
 ];
 
 export class ApplescriptBlockParser extends BaseBlockParser {
+  // Source captured during tokenize for use in matchBlocks (handler-name lookup).
+  private _currentSource = '';
+
+  // Returns the handler name (lowercased) for an `on`/`to` open block, or '' when none.
+  // Reads from the source stored during tokenize.
+  private handlerName(block: OpenBlock): string {
+    const source = this._currentSource;
+    let i = block.token.endOffset;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+    if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) return '';
+    let end = i;
+    while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
+    return source.slice(i, end).toLowerCase();
+  }
+
   private get helperCallbacks(): ApplescriptHelperCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
@@ -291,6 +306,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
   // Override tokenize to handle compound keywords and case-insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    this._currentSource = source;
     const tokens: Token[] = [];
     const newlinePositions = this.buildNewlinePositions(source);
     let i = 0;
@@ -358,10 +374,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       const type = this.getTokenType(keyword);
 
-      // Reject compound block openers immediately followed by `(` — these are function
-      // call forms (e.g., `with timeout(5)`) rather than block openers.
-      if (type === 'block_open' && flexMatch < source.length && source[flexMatch] === '(') {
-        return { nextPos: flexMatch };
+      // Reject compound block openers followed by `(` (with optional whitespace) — these
+      // are function call forms (e.g., `with timeout(5)`, `with timeout (5)`) rather than
+      // block openers.
+      if (type === 'block_open') {
+        let parenScan = flexMatch;
+        while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+        if (parenScan < source.length && source[parenScan] === '(') {
+          return { nextPos: flexMatch };
+        }
       }
 
       // Reject compound block closers not at physical line start (covers mid-line
@@ -441,12 +462,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
 
       const { line, column } = this.getLineAndColumn(i, newlinePositions);
-      // endOffset is `startOffset + value.length`, not `flexMatch`. flexMatch may extend
-      // past whitespace/comments/continuations between compound-keyword words; using it
-      // would over-decorate that intervening content.
+      // endOffset spans the actual source range from the first word to the end of the
+      // last word so the entire compound keyword is decorated. Earlier code used
+      // `startOffset + value.length`, which under-decorates when the words are
+      // separated by extra whitespace, comments, or `¬` continuations.
       return {
         nextPos: flexMatch,
-        token: { type, value: keyword, startOffset: i, endOffset: i + keyword.length, line, column }
+        token: { type, value: keyword, startOffset: i, endOffset: flexMatch, line, column }
       };
     }
 
@@ -740,12 +762,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           const expectedOpener = END_KEYWORD_MAP[closeValue];
           if (expectedOpener) {
             matchIndex = findLastOpenerByType(stack, expectedOpener);
-            // Fall back to topmost opener when the expected one is missing
-            // (handles handler definitions whose name happens to be a control keyword,
-            // e.g., `on tell()` ... `end tell` should pair with `on`; same for `to tell()`)
+            // Fall back to top `on`/`to` handler only when the handler name matches
+            // the close keyword's type (e.g., `on tell()` ... `end tell` legitimately
+            // pairs the on-handler with end tell because the handler is named `tell`).
             if (matchIndex < 0 && stack.length > 0) {
-              const topValue = stack[stack.length - 1].token.value;
-              if (topValue === 'on' || topValue === 'to') {
+              const topBlock = stack[stack.length - 1];
+              const topValue = topBlock.token.value;
+              if ((topValue === 'on' || topValue === 'to') && this.handlerName(topBlock) === expectedOpener) {
                 matchIndex = stack.length - 1;
               }
             }

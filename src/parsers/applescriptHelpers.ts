@@ -8,6 +8,23 @@ export interface ApplescriptHelperCallbacks {
   findExcludedRegionAt: (pos: number, regions: ExcludedRegion[]) => ExcludedRegion | null;
 }
 
+// Detects Unicode whitespace characters that may separate words in compound keywords:
+// NBSP (U+00A0), EN/EM/IDEOGRAPHIC SPACEs, and zero-width space.
+function isUnicodeWhitespace(ch: string): boolean {
+  if (ch === undefined) return false;
+  const code = ch.charCodeAt(0);
+  return (
+    code === 0x00a0 ||
+    code === 0x200b ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000
+  );
+}
+
 // Matches a compound keyword allowing flexible whitespace between words
 // Also handles line continuation character (U+00AC) between words
 // Returns the end position if matched, or -1 if not matched
@@ -22,11 +39,14 @@ export function matchCompoundKeyword(source: string, pos: number, keyword: strin
     j += word.length;
     // After each word except the last, consume whitespace including continuation and block comments
     if (w < words.length - 1) {
-      if (j >= source.length || (source[j] !== ' ' && source[j] !== '\t' && source[j] !== '\u00AC' && source.slice(j, j + 2) !== '(*')) {
+      if (
+        j >= source.length ||
+        (source[j] !== ' ' && source[j] !== '\t' && source[j] !== '\u00AC' && source.slice(j, j + 2) !== '(*' && !isUnicodeWhitespace(source[j]))
+      ) {
         return -1;
       }
-      // Consume spaces/tabs and block comments, then optionally a continuation + newline + more spaces/tabs
-      while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+      // Consume spaces, tabs, and Unicode whitespace; also handle block comments
+      while (j < source.length && (source[j] === ' ' || source[j] === '\t' || isUnicodeWhitespace(source[j]))) {
         j++;
       }
       // Skip block comments (* *) between words
@@ -310,8 +330,9 @@ export function isInsideIfCondition(
   if (/\bthen\b/.test(afterCond)) {
     return false;
   }
-  // 'repeat while/until' conditions don't use 'then', so return true immediately
-  const condMatchStr = condMatch[0].trim();
+  // 'repeat while/until' conditions don't use 'then', so return true immediately.
+  // Strip leading non-alphabetic prefix chars (e.g., `(` in `(repeat while ...`) before testing.
+  const condMatchStr = condMatch[0].replace(/^[^a-z]+/i, '').trim();
   if (/^repeat\s+(while|until)$/i.test(condMatchStr)) {
     return true;
   }
