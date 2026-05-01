@@ -28,7 +28,13 @@ const DATA_NAME_VERBS = new Set([
   'OF',
   'IN',
   'USING',
-  'AT'
+  'AT',
+  // Arithmetic operand introducers: MULTIPLY A BY <data>, DIVIDE A BY <data>
+  'BY',
+  // Result data name: ADD/SUBTRACT/MULTIPLY/DIVIDE ... GIVING <data>
+  'GIVING',
+  // DIVIDE ... REMAINDER <data>
+  'REMAINDER'
 ]);
 
 // Mapping of close keywords to their valid openers (case insensitive comparison)
