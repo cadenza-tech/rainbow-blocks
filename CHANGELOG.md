@@ -5,6 +5,48 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.40] - 2026-05-01
+
+### Fixed
+
+- Ada: Preserve original casing and whitespace in compound-end token value (`adaParser.ts`) so `END IF`, `End If`, and `end  if` (multiple spaces) are no longer normalized to lowercase `end if`; the `matchBlocks` regex now tolerates whitespace and `--` line comments between `end` and the type keyword
+- Ada: Detect mid-line `; type` / `; subtype` declarations whose `is` keyword appears on a continuation line (`adaParser.ts`) so `procedure P is\n  X : Integer; type T (D : Integer)\n    is range 1..100;` no longer leaks the inner type's `is` as a procedure intermediate
+- Ada: Use Unicode-aware word boundaries for `do` keyword detection in `isExtendedReturn` (`adaParser.ts`) and `isValidAcceptOpen` (`adaValidation.ts`) so identifiers containing non-ASCII letters (e.g., `doβ`) are no longer mistaken for the `do` keyword
+- Ada: Reject `:= do` and `do;` in `isExtendedReturn` (`adaParser.ts`) — extended-return body requires statements between `do` and `end return`, so malformed `return X : Integer := do;` no longer pairs `return` with a stray `end`
+- AppleScript: Use `flexMatch` as compound-keyword `endOffset` (`applescriptParser.ts`) so `end  tell` / `end\ttell` / `end (* c *) tell` decoration spans the actual source range instead of being cut off mid-keyword
+- AppleScript: Accept Unicode whitespace (NBSP U+00A0, EM/EN/IDEOGRAPHIC SPACE, ZWSP, etc.) between compound-keyword words in `matchCompoundKeyword` (`applescriptHelpers.ts`) so `end tell` and similar Unicode-spaced compounds are recognized
+- AppleScript: Strip non-alphabetic prefix characters from `condMatch[0]` in `isInsideIfCondition` (`applescriptHelpers.ts`) so `(repeat while tell)` correctly recognizes `repeat while` as a condition opener and rejects `tell` as a value
+- AppleScript: Validate handler name when falling back from `end <type>` to `on`/`to` opener in `matchBlocks` (`applescriptParser.ts`) so a stray `end if` inside `on run ... end` no longer closes the `on` handler — the fallback now requires the handler name to match the close-keyword type (e.g., `on tell()` legitimately pairs with `end tell`)
+- AppleScript: Reject compound block-open keywords followed by whitespace + `(` in `tryMatchCompoundKeywordToken` (`applescriptParser.ts`) so `with timeout (5)` is treated as a function call (consistent with `with timeout(5)`) instead of a block opener
+- Bash: Parse concatenated heredoc delimiter parts (`<<"EOF"'TAIL'`, `<<X"Y"`) by replacing the single-form regex with an iterative parser in `parseHeredocOperator` (`bashLeafHelpers.ts`) and `matchHeredoc` (`bashStringHelpers.ts`) so the actual terminator is the concatenation of all parts
+- Bash: Reject `#` immediately after extglob openers (`@(`, `!(`, `?(`, `*(`, `+(`) as comment start in `isCommentStart` (`bashLeafHelpers.ts`) so `case x in @(#*)) ;; esac` and similar extglob patterns containing literal `#` are parsed correctly
+- COBOL: Add `BY`, `GIVING`, and `REMAINDER` to `DATA_NAME_VERBS` (`cobolParser.ts`) so `MULTIPLY A BY ELSE`, `ADD A B GIVING ELSE`, and `DIVIDE A BY B GIVING C REMAINDER ELSE` no longer attach `ELSE` as an `IF` intermediate when used as data names
+- Crystal: Skip percent literals (`%r(...)`, `%w[...]`, `%|...|`, etc.) inside `{% %}` and `{{ }}` macro template bodies via new `skipMacroPercentLiteral` (`crystalExcluded.ts`) so `{% x = %r(/) %}` and `{% %|x%}|` no longer cause the macro body parser to consume past the actual `%}` close marker
+- Crystal: Propagate heredoc state through regex `#{}` interpolation by adding `heredocState` parameter to `matchRegexLiteral` and `skipRegexInterpolationShared` (`rubyFamilyHelpers.ts`, `crystalParser.ts`) so `/#{<<-EOF}/` correctly extends the excluded region across the heredoc body
+- Crystal: Recognize macro templates (`{% %}`, `{{ }}`) as non-content in `isPostfixConditional` (`crystalExcluded.ts`) so `{% x %} if cond\n  body\nend` correctly opens an `if` block instead of treating `if` as a postfix modifier of the macro template
+- Crystal: Reject `?` followed by `/` when preceded by `$` or `@` (`$?`, `@?`) in `tryMatchExcludedRegion` (`crystalParser.ts`) so `$?/2` correctly treats `?` as part of the global variable and `/` as division, not a char literal
+- Elixir: Replace `isInsideOpenBracket` with targeted `isEndAsParameterIdentifier` (`elixirParser.ts`) — `end` is now rejected only when it sits as a complete comma-separated element bordered by `(`/`,`/`[`/`{` and `)`/`,`/`]`/`}`. This restores `Enum.map(list, fn x -> x end)`, `(fn -> 1 end)`, `[fn -> 1 end]`, and pipelines with multiple `fn..end` blocks to be parsed correctly
+- Erlang: Accept variable arity (uppercase identifier) in `fun M:F/A`, `fun F/A`, and quoted-atom fun references (`erlangParser.ts`) per OTP 21+ spec so `fun lists:reverse/Arity` no longer falls through to be tokenized as a `fun..end` block opener
+- Erlang: Enforce `of`/`catch`/`after` ordering and reject duplicates in `try` block intermediates (`erlangParser.ts`) so `try X catch _ -> 1 of ok -> 2 end` only registers the in-order `catch` and skips the out-of-order `of`
+- Fortran: Detect `module function`, `module subroutine`, and `module procedure` inside (sub)module bodies as block openers by passing the keyword to `isFortranOpenConstructName` and requiring explicit `module procedure` to suppress (`fortranParser.ts`) — plain `module ` no longer hides these as construct names
+- Fortran: Skip blank lines inside `&` continuation chain in `isValidIfOpen` (`fortranParser.ts`) so `if (x > 0 &\n\n   .and. y > 0) then` correctly detects `then` and opens the `if` block
+- Fortran: Add `team` to `blockOpen` and `COMPOUND_END_TYPES` with validation that requires `change ` prefix (`fortranParser.ts`) so Fortran 2018 `change team (t) ... end team` is recognized as a block
+- Fortran: Reject `select type` / `select rank` not followed by `(...)` and `submodule` not followed by `(parent)` in `isValidBlockOpen` (`fortranParser.ts`) so invalid forms `select type x` and `submodule child` no longer open spurious blocks
+- Julia: Track comprehension context in `hasUnmatchedBlockOpenerBetween` (`juliaHelpers.ts`) so `if` filters appearing after a `for x in y` clause inside `[...]` or `(...)` are not counted as unmatched block openers — restores parsing of `[x for x in arr if a if b]`, `[[i+j for i in 1:n if i > 0] for j in 1:n]`, and similar nested comprehensions
+- Julia: Recognize value-introducing keywords (`return`, `yield`, `throw`, `if`, `for`, `while`, `do`, `begin`, `and`, `or`, `not`, etc.) before `[` in `isIndexingBracket` (`juliaHelpers.ts`) so `return [begin x end]` is parsed as array construction containing a `begin..end` block, not as indexing brackets where `begin` would mean `firstindex`
+- Lua: Pass `excludedRegions` to `isAfterGoto` and skip excluded characters during the backward scan (`luaParser.ts`) so a `goto` substring inside a comment, string, or long bracket no longer causes subsequent block keywords (`end`, `if`, etc.) to be filtered as goto label targets
+- MATLAB: Recognize `parfor` and mid-line `for` after `;`/`,` separators in `isEndInForHeaderRange` (`matlabParser.ts`) so `parfor i = 1:end` and `if true; for i = 1:end, body; end; end` correctly treat the inline `end` as range expression
+- MATLAB: Skip `...` line continuations when scanning backward for `:` in `isEndInForHeaderRange` (`matlabParser.ts`) so `for i = 1: ...\n   end` recognizes the `end` on the next line as part of the range expression
+- MATLAB: Detect `end` as the LHS of a for-header range (`for i = end:5`) and reject `end` after binary operators (`+`, `-`, `*`, `/`, `^`, `<`, `>`, `&`, `|`) in `isValidBlockClose` (`matlabParser.ts`) so `x = 1 + end;` and similar invalid expression-context uses no longer steal an outer block's close
+- MATLAB: Reject block-opener keywords used as standalone identifiers when an `=` is followed by `;`/`,` separator before the keyword in `isUsedAsRhsIdentifier` (`matlabParser.ts`) so `x=1;do\n  ...\nuntil cond` correctly opens the `do` block in Octave
+- MATLAB: Increment a skip counter for rejected `arguments`/`properties`/`methods`/`events`/`enumeration` openers and consume their `end` in `matchBlocks` (`matlabParser.ts`) so an `arguments` block outside function/methods/classdef context no longer breaks outer block pairing
+- Pascal: Skip `@end` (assembly local label) inside asm body in `addAsmExcludedRegions` (`pascalParser.ts`) so Borland/Delphi inline assembly with `JMP @end` / `@end:` labels no longer terminates the asm body at the label
+- Pascal: Reject `@end` (address-of operator) and `&end` (FreePascal escaped-keyword identifier) outside asm context in `isValidBlockClose` (`pascalParser.ts`) so `X := @end;` and similar references no longer pair as block close
+- Verilog: Add `matchMacroArgList` (`verilogHelpers.ts`) and apply it in `tryMatchExcludedRegion` (`verilogParser.ts`) so backtick macro invocations like `` `MY_MACRO(begin x = 1; end) `` exclude their argument lists, preventing block keywords inside the args from being tokenized
+- Verilog: Split `static`, `automatic`, `const`, `protected`, `local`, `virtual`, `pure` into a separate `METHOD_QUALIFIER_KEYWORDS` set (`verilogParser.ts`) — these qualifiers no longer suppress `function`/`task`/`class` as identifiers, so `static function int counter()` and `automatic function int f()` open valid blocks
+- Verilog: Reject `default clocking <name>;` and `global clocking <name>;` (LRM §14.16.7 specification statements) as block openers in `isValidBlockOpen` (`verilogParser.ts`) so default-clocking specifications without `@(...)` event control or body do not open spurious clocking blocks
+- VHDL: Reject block-open keywords immediately followed by attribute tick (`process'foreign`, `architecture'left`, etc.) in `isValidBlockOpen` (`vhdlParser.ts`) so 17 block keywords used in attribute references are no longer mis-tokenized as block openers
+
 ## [1.1.39] - 2026-05-01
 
 ### Fixed
@@ -1496,6 +1538,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.40]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.39...v1.1.40
 [1.1.39]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.38...v1.1.39
 [1.1.38]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.36...v1.1.37
