@@ -2943,5 +2943,13 @@ end package;`;
     });
   });
 
+  suite("Regression: keyword followed by attribute tick 'attr is not a block opener", () => {
+    test("should not open process block for process'foreign in expression", () => {
+      const source = "architecture rtl of test is\n  signal x : integer := process'foreign;\nbegin\nend architecture;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
   generateCommonTests(config);
 });

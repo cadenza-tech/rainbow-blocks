@@ -4712,5 +4712,29 @@ end program`;
     });
   });
 
+  suite('Regression: change team / end team (Fortran 2018)', () => {
+    test('should pair change team with end team', () => {
+      const source = 'change team (t)\n  i = 1\nend team\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+    });
+  });
+
+  suite('Regression: invalid select type without parens', () => {
+    test('should not open select block for `select type x` without ()', () => {
+      const source = 'select type x\n  print *, 1\nend select\n';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: invalid submodule without (parent)', () => {
+    test('should not open submodule block without parenthesized parent', () => {
+      const source = 'submodule child\nend submodule\n';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });

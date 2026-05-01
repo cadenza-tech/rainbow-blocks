@@ -2599,5 +2599,18 @@ end.`;
     });
   });
 
+  suite('Regression: @end label inside asm body', () => {
+    test('should ignore @end label inside asm body and pair with closing end', () => {
+      const source = 'asm\n  jmp @end\n  nop\n@end:\n  ret\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'asm', 'end');
+    });
+    test('should not treat @end outside asm as end keyword', () => {
+      const source = 'begin\n  X := @end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

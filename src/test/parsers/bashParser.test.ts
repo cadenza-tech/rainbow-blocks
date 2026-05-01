@@ -5498,4 +5498,30 @@ fi`;
       assertNoBlocks(pairs);
     });
   });
+
+  suite('Regression: heredoc with concatenated quoted/unquoted delimiter parts', () => {
+    test('should treat concatenated quoted parts as single delimiter (EOFTAIL)', () => {
+      const source = 'cat <<"EOF"\'TAIL\'\nbody\nEOFTAIL\nfor i in 1 2; do echo $i; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+    test('should treat unquoted-then-quoted parts as single delimiter (XY)', () => {
+      const source = 'cat <<X"Y"\nbody\nXY\nfor i in 1; do echo; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
+  suite('Regression: # inside extglob patterns is literal, not comment', () => {
+    test('should detect case/esac when extglob pattern contains # at start', () => {
+      const source = 'case x in @(#*)) echo;; esac\nfor i in 1; do echo; done';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should detect case/esac when negation extglob contains #', () => {
+      const source = 'case x in !(#)) echo;; esac\nfor i in 1; do echo; done';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
 });

@@ -1521,5 +1521,21 @@ end`;
     });
   });
 
+  suite('Regression: end on LHS of for-header range', () => {
+    test('should not treat end in for i = end:5 as block close', () => {
+      const source = 'function f(arr)\n  for i = end:5\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: block opener after ; followed by newline', () => {
+    test('should detect do/until when on same line as assignment', () => {
+      const source = 'x=1;do\n  y=1;\nuntil cond';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
   generateCommonTests(config);
 });

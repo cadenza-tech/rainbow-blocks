@@ -1859,6 +1859,24 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN should not register as intermediate');
     });
+    test('should not register ELSE as IF intermediate when used after BY (data name)', () => {
+      const source = 'IF X\n  MULTIPLY A BY ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE used as data name should not register');
+    });
+    test('should not register ELSE as IF intermediate when used after GIVING (data name)', () => {
+      const source = 'IF X\n  ADD A B GIVING ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE used as data name should not register');
+    });
+    test('should not register ELSE as IF intermediate when used after REMAINDER (data name)', () => {
+      const source = 'IF X\n  DIVIDE A BY B GIVING C REMAINDER ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE used as data name should not register');
+    });
   });
 
   generateCommonTests(config);

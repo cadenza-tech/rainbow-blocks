@@ -3526,5 +3526,23 @@ end`;
     });
   });
 
+  suite('Regression: comprehension filters and array construction', () => {
+    test('should treat second if as filter in [x for x in arr if a if b]', () => {
+      const source = 'function filtered(arr)\n    return [x for x in arr if x > 0 if x < 100]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should not pair outer for of nested comprehension when inner has if filter', () => {
+      const source = 'function makematrix(n)\n    A = [[i + j for i in 1:n if i > 0] for j in 1:n]\n    return A\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should treat [...] after return as array construction (not indexing)', () => {
+      const source = 'function f()\n    return [begin x end]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });

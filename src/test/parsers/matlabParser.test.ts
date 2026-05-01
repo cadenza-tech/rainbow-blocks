@@ -1599,5 +1599,26 @@ end`;
     });
   });
 
+  suite('Regression: parfor and mid-line for header', () => {
+    test('should treat parfor i = 1:end as range expression, not block close', () => {
+      const source = 'function f(arr)\n  parfor i = 1:end\n    arr(i) = i;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should treat for after ; as range expression', () => {
+      const source = 'if true; for i = 1:end, body; end; end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: end after binary operator', () => {
+    test('should not treat end after + as block close', () => {
+      const source = 'function f()\n  x = 1 + end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

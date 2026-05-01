@@ -2301,5 +2301,23 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: variable arity in fun reference', () => {
+    test('should not treat fun M:F/Arity (variable arity) as block opener', () => {
+      const source = 'foo() ->\n  F = fun lists:reverse/Arity,\n  ok.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: try intermediates must follow of/catch/after order', () => {
+    test('should not register catch followed by of as duplicate intermediate sequence', () => {
+      const source = 'foo() ->\n  try X catch _ -> 1 of ok -> 2 end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      // Only the in-order 'catch' should be registered; the out-of-order 'of' is rejected
+      assertIntermediates(pairs[0], ['catch']);
+    });
+  });
+
   generateCommonTests(config);
 });

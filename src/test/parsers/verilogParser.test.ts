@@ -2634,10 +2634,17 @@ endmodule`;
     test('should not tokenize begin/end inside assignment pattern as block keywords', () => {
       const source = "module m;\n  initial begin\n    x = '{begin: 0, end: 100};\n    y = 1;\n  end\nendmodule";
       const pairs = parser.parse(source);
-      // module/endmodule + initial/end + (no spurious begin/end pair from inside '{...})
-      assertBlockCount(pairs, 2);
+      // module/endmodule + initial/end + begin/end (chained control + begin shares 'end').
+      // Crucially, no spurious begin/end pair from inside '{begin: 0, end: 100}.
+      assertBlockCount(pairs, 3);
       const modulePair = pairs.find((p) => p.openKeyword.value === 'module');
       assert.ok(modulePair, 'module should pair with endmodule');
+      // The begin token should be the one at the start of `initial begin`, not from
+      // inside the assignment pattern. The 'begin' inside `'{begin: 0, ...}` should
+      // not have produced a token.
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'initial begin should pair with end');
+      assert.strictEqual(beginPair.openKeyword.line, 1, 'begin should be on line 1 (initial begin), not line 2');
     });
   });
 
@@ -2673,6 +2680,35 @@ endmodule`;
       const modulePair = pairs[0];
       assert.strictEqual(modulePair.openKeyword.value, 'module');
       assert.ok(modulePair.closeKeyword.line >= 3, 'module should pair with trailing endmodule');
+    });
+  });
+
+  suite('Regression: macro invocation argument list excludes block keywords', () => {
+    test('should not tokenize begin/end inside `MACRO(...)', () => {
+      const source = '`MY_MACRO(begin x = 1; end)\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: static/automatic qualifiers before function/task/class', () => {
+    test('should detect static function inside class', () => {
+      const source = 'class C;\n  static function int counter();\n    return 0;\n  endfunction\nendclass';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+    test('should detect automatic function inside module', () => {
+      const source = 'module m;\n  automatic function int f();\n    return 0;\n  endfunction\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression: default clocking specification has no body', () => {
+    test('should not open clocking block for `default clocking name;`', () => {
+      const source = 'module m;\n  default clocking cb;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
     });
   });
 

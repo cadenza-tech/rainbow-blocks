@@ -2764,5 +2764,17 @@ end if;`;
     });
   });
 
+  suite('Regression: mid-line type/subtype with multi-line is continuation', () => {
+    test('should not leak is from mid-line type with multi-line continuation', () => {
+      const source = 'procedure P is\n  X : Integer; type T (D : Integer)\n    is range 1..100;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      const intermediates = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      // Only the procedure's own `is` (and `begin`) should appear; the inner type T is range
+      // declaration's `is` should not leak.
+      assert.strictEqual(intermediates.filter((v) => v === 'is').length, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

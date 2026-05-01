@@ -1184,5 +1184,16 @@ end`;
     });
   });
 
+  suite('Regression: isAfterGoto must respect excluded regions', () => {
+    test('should detect function end when comment ends with goto', () => {
+      const pairs = parser.parse('function f() -- goto\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should detect function end when comment line ends with goto', () => {
+      const pairs = parser.parse('function f()\n  -- TODO: refactor with goto\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

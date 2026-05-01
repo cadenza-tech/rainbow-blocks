@@ -2591,5 +2591,23 @@ end try`;
     });
   });
 
+  suite('Regression: stray `end <type>` should not close on/to handler with mismatched name', () => {
+    test('should not pair on run with stray end if', () => {
+      const source = 'on run\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: compound block_open with whitespace before ( is rejected', () => {
+    test('should not detect with timeout (5) as block opener', () => {
+      const source = 'on run\n  with timeout (5)\nend run';
+      const pairs = parser.parse(source);
+      // 'on run ... end run' should pair (close keyword is bare 'end', then 'run' is handler name).
+      // The 'with timeout (5)' is a function call, not a block opener.
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

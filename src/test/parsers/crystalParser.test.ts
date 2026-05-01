@@ -3756,5 +3756,34 @@ end`;
     });
   });
 
+  suite('Regression: percent literal inside macro template body', () => {
+    test('should not let %r() inside {% %} swallow following blocks', () => {
+      const source = '{% x = %r(/) %}\nif true\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should keep %| | percent literal contents from ending {% %} early', () => {
+      const source = '{% %|x%}|\nif y\nend %}\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: heredoc inside regex interpolation', () => {
+    test('should extend excluded region across heredoc body in regex interpolation', () => {
+      const source = 'x = /#{<<-EOF}/\nif y\n  body\nend\nEOF\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: $? global variable followed by /', () => {
+    test('should not treat ?/ after $? as char literal', () => {
+      const source = 'x = $?/2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
