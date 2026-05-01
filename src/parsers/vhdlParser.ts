@@ -101,6 +101,14 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject keywords immediately followed by `'<attribute_name>` (attribute reference,
+    // LRM §16.3). For example, `process'foreign` is the foreign attribute on the
+    // `process` type, not a process block opener.
+    const afterPos = position + keyword.length;
+    if (afterPos < source.length && source[afterPos] === "'" && afterPos + 1 < source.length && /[a-zA-Z_]/.test(source[afterPos + 1])) {
+      return false;
+    }
+
     // Reject keywords inside parenthesized expressions (port maps, generic maps, function calls)
     if (isInsideParens(source, position, excludedRegions, cb)) {
       return false;
