@@ -179,12 +179,19 @@ export class AdaBlockParser extends BaseBlockParser {
       else if (ch === ')') parenDepth--;
       else if (ch === ';' && parenDepth === 0) return false;
       else if (parenDepth === 0 && (ch === 'd' || ch === 'D')) {
-        if (
-          i + 1 < source.length &&
-          (source[i + 1] === 'o' || source[i + 1] === 'O') &&
-          (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
-          (i + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 2]))
-        ) {
+        if (i + 1 < source.length && (source[i + 1] === 'o' || source[i + 1] === 'O') && isAdaWordAt(source, i, 'do')) {
+          // Reject `:= do` (no expression between assignment and do) and `do;`
+          // (no extended-return body) — both are malformed.
+          let pb = i - 1;
+          while (pb >= 0 && (source[pb] === ' ' || source[pb] === '\t' || source[pb] === '\n' || source[pb] === '\r')) pb--;
+          if (pb >= 1 && source[pb - 1] === ':' && source[pb] === '=') {
+            return false;
+          }
+          let pf = i + 2;
+          while (pf < source.length && (source[pf] === ' ' || source[pf] === '\t' || source[pf] === '\n' || source[pf] === '\r')) pf++;
+          if (pf < source.length && source[pf] === ';') {
+            return false;
+          }
           return true;
         }
       }
@@ -230,11 +237,12 @@ export class AdaBlockParser extends BaseBlockParser {
           continue;
         }
         const endType = match[1].toLowerCase();
-        // Normalize keyword to canonical 'end <type>' so embedded comments / CR / LF
-        // between 'end' and the type keyword don't break later re-extraction in matchBlocks.
-        // The original source span (pos..pos+length) is still preserved via length.
+        // Preserve original casing and whitespace in keyword value so callers
+        // (e.g., decorations) see the actual source span. matchBlocks uses a
+        // regex that tolerates whitespace and Ada line comments between 'end'
+        // and the type keyword for later re-extraction.
         compoundEndPositions.set(pos, {
-          keyword: `end ${match[1]}`,
+          keyword: fullMatch,
           length: fullMatch.length,
           endType
         });
@@ -495,6 +503,19 @@ export class AdaBlockParser extends BaseBlockParser {
                 }
                 isTypeDecl = true;
                 typeDeclStart = prevStart;
+              } else {
+                // Detect mid-line `; type` or `; subtype` declarations whose continuation
+                // produces the `is` keyword on a later line. prevLine has been
+                // trimStart-ed; compute the original-source offset by adding back the
+                // leading whitespace count.
+                const midDeclMatch = prevLine.match(/;\s*(type|subtype)\b/);
+                if (midDeclMatch && midDeclMatch.index !== undefined) {
+                  const originalLine = source.slice(prevStart, scanPos + 1);
+                  const leadingTrim = originalLine.length - originalLine.trimStart().length;
+                  const declOffsetInTrimmed = midDeclMatch.index + midDeclMatch[0].length - midDeclMatch[1].length;
+                  isTypeDecl = true;
+                  typeDeclStart = prevStart + leadingTrim + declOffsetInTrimmed;
+                }
               }
               // Stop scanning at lines that are not type declaration continuations
               // Continue if inside parenthesized discriminant (scanParenDepth > 0) or line starts with (
@@ -754,9 +775,9 @@ export class AdaBlockParser extends BaseBlockParser {
         case 'block_close': {
           const closeValue = token.value.toLowerCase();
 
-          // Check if it's a compound end (allow newlines/CR within the gap so that
-          // `end\n  if` and `end --comment\n if` are treated as compound `end if`)
-          const compoundMatch = closeValue.match(/^end[\s]+(\S+)/);
+          // Check if it's a compound end (allow whitespace, newlines, and Ada
+          // line comments between 'end' and the type keyword)
+          const compoundMatch = closeValue.match(/^end(?:\s|--[^\r\n]*)+(\w+)/);
           if (compoundMatch) {
             const endType = compoundMatch[1];
             let matchIndex = -1;
