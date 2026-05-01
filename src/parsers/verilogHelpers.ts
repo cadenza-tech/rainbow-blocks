@@ -288,6 +288,49 @@ export function matchPragmaDirective(source: string, pos: number): ExcludedRegio
   return { start: pos, end: i };
 }
 
+// Excludes a `MACRO(arg, arg, ...) macro invocation including the argument list.
+// `pos` points to the backtick; `parenStart` points to the opening `(`. The match
+// runs until the matched closing `)`, tracking nested parens, strings, and comments
+// so block keywords inside macro args are not tokenized.
+export function matchMacroArgList(source: string, pos: number, parenStart: number): ExcludedRegion {
+  let i = parenStart + 1;
+  let depth = 1;
+  while (i < source.length && depth > 0) {
+    const c = source[i];
+    if (c === '"') {
+      i++;
+      while (i < source.length && source[i] !== '"') {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        if (source[i] === '\n' || source[i] === '\r') break;
+        i++;
+      }
+      if (i < source.length && source[i] === '"') i++;
+      continue;
+    }
+    if (c === '/' && i + 1 < source.length && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') i++;
+      continue;
+    }
+    if (c === '/' && i + 1 < source.length && source[i + 1] === '*') {
+      i += 2;
+      while (i + 1 < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
+      if (i + 1 < source.length) i += 2;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    if (depth === 0) {
+      i++;
+      break;
+    }
+    i++;
+  }
+  return { start: pos, end: i };
+}
+
 // Tries to skip a label (identifier: or \escaped_name:), returns new position or original if not a label
 // Skips whitespace, comments, and newlines between identifier and colon
 export function trySkipLabel(source: string, pos: number, excludedRegions: ExcludedRegion[] = []): number {

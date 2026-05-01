@@ -8,6 +8,7 @@ import {
   matchBlockComment,
   matchDefineDirective,
   matchEscapedIdentifier,
+  matchMacroArgList,
   matchPragmaDirective,
   matchUndefDirective,
   matchVerilogString
@@ -106,12 +107,11 @@ const DATA_TYPE_KEYWORDS: ReadonlySet<string> = new Set([
   'uwire',
   'supply0',
   'supply1',
-  // Sign/storage qualifiers
+  // Sign qualifiers
   'signed',
   'unsigned',
-  'static',
-  'automatic',
-  'const',
+  // Storage class qualifiers (apply to variables/properties; do NOT precede method blocks
+  // legitimately on their own — see METHOD_QUALIFIER_KEYWORDS for those)
   'var',
   'ref',
   'rand',
@@ -121,6 +121,14 @@ const DATA_TYPE_KEYWORDS: ReadonlySet<string> = new Set([
   'output',
   'inout'
 ]);
+
+// SystemVerilog method/lifetime qualifier keywords that legitimately precede block
+// openers like `function`, `task`, and `class` (e.g., `static function int f()`).
+// When `keyword` is one of these block openers, a preceding qualifier should NOT
+// suppress the block.
+const METHOD_QUALIFIER_KEYWORDS: ReadonlySet<string> = new Set(['static', 'automatic', 'const', 'protected', 'local', 'virtual', 'pure']);
+
+const METHOD_QUALIFIER_TARGETS: ReadonlySet<string> = new Set(['function', 'task', 'class']);
 
 export class VerilogBlockParser extends BaseBlockParser {
   private get validationCallbacks(): VerilogValidationCallbacks {
@@ -340,7 +348,9 @@ export class VerilogBlockParser extends BaseBlockParser {
   // Returns true when the immediately preceding word on the same line is a SystemVerilog
   // data-type or qualifier keyword. Used to filter cases like `int function` where the
   // block keyword is being used as a parameter/variable name.
-  private isPrecededByDataTypeKeyword(source: string, position: number): boolean {
+  // Method qualifiers (static, automatic, etc.) before `function`/`task`/`class` are
+  // legitimate block openers and are not treated as data-type-suppressing prefixes.
+  private isPrecededByDataTypeKeyword(source: string, position: number, keyword?: string): boolean {
     let i = position - 1;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
     if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
@@ -350,7 +360,36 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Reject if the word boundary touches `$` (system tasks) or `\` (escaped identifier)
     if (i >= 0 && (source[i] === '$' || source[i] === '\\')) return false;
     const word = source.slice(wordStart, wordEnd);
-    return DATA_TYPE_KEYWORDS.has(word);
+    if (DATA_TYPE_KEYWORDS.has(word)) return true;
+    // Method qualifiers (static/automatic/const/...) only suppress when the following
+    // keyword is NOT one of the legitimate qualified block openers.
+    if (METHOD_QUALIFIER_KEYWORDS.has(word) && keyword !== undefined && !METHOD_QUALIFIER_TARGETS.has(keyword)) {
+      return true;
+    }
+    return false;
+  }
+
+  // Detects `default clocking <name>;` (and `global clocking <name>;`). When `clocking` is
+  // preceded by `default` or `global` and followed by `<identifier>;` (no `@(...)` event
+  // control), it's a clocking specification with no body — not an opening of a clocking block.
+  private isDefaultClockingSpecification(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0 || !/[a-zA-Z]/.test(source[i])) return false;
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z]/.test(source[i])) i--;
+    const word = source.slice(i + 1, wordEnd);
+    if (word !== 'default' && word !== 'global') return false;
+    // Look forward past `clocking` and an identifier; specification ends at `;`,
+    // while a real clocking block has `@(...)` event control or a body.
+    let j = position + 'clocking'.length;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    // Optional identifier
+    if (j < source.length && /[a-zA-Z_]/.test(source[j])) {
+      while (j < source.length && /[a-zA-Z0-9_$]/.test(source[j])) j++;
+    }
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    return j < source.length && source[j] === ';';
   }
 
   // Detects whether position is inside a SystemVerilog assignment pattern: `'{...}`
@@ -399,7 +438,7 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject keywords used as identifiers after a data type/qualifier keyword
     // (e.g., `int function`, `input module`, `bit task`)
-    if (this.isPrecededByDataTypeKeyword(source, position)) {
+    if (this.isPrecededByDataTypeKeyword(source, position, keyword)) {
       return false;
     }
 
@@ -424,6 +463,12 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject modifier-prefixed keywords (extern module/function/task, typedef class, pure virtual function/task)
     if (isPrecededByModifierKeyword(source, position, keyword, excludedRegions, this.validationCallbacks)) {
+      return false;
+    }
+
+    // Reject `default clocking <name>;` — default-clocking specification has no body
+    // (LRM §14.16.7). It is a one-line statement, not an opening of a clocking block.
+    if (keyword === 'clocking' && this.isDefaultClockingSpecification(source, position)) {
       return false;
     }
 
@@ -485,7 +530,7 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject keywords used as identifiers after a data type/qualifier keyword
     // (e.g., `int endmodule;` — endmodule is an illegal variable name preceded by `int`).
-    if (this.isPrecededByDataTypeKeyword(source, position)) {
+    if (this.isPrecededByDataTypeKeyword(source, position, keyword)) {
       return false;
     }
 
@@ -576,6 +621,18 @@ export class VerilogBlockParser extends BaseBlockParser {
         while (k < source.length && source[k] !== '>' && source[k] !== '\n' && source[k] !== '\r') k++;
         if (k < source.length && source[k] === '>') return { start: j, end: k + 1 };
         return { start: j, end: k };
+      }
+    }
+
+    // `MACRO(args) — generic user-macro invocation. Exclude the argument list so
+    // block keywords (begin/end, case/endcase, etc.) inside macro args are not
+    // mistakenly tokenized. Specific directives (`define/`undef/`pragma/`include)
+    // are matched by the dedicated handlers above and do not reach this branch.
+    if (char === '`' && pos + 1 < source.length && /[a-zA-Z_]/.test(source[pos + 1])) {
+      let j = pos + 1;
+      while (j < source.length && /[a-zA-Z0-9_$]/.test(source[j])) j++;
+      if (j < source.length && source[j] === '(') {
+        return matchMacroArgList(source, pos, j);
       }
     }
 
