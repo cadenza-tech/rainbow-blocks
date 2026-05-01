@@ -48,6 +48,14 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
       if (source.slice(i, i + 2) === '%}') {
         return { start: pos, end: i + 2 };
       }
+      // Skip percent literals (%r(...), %w[...], %|...|, etc.) inside macro body
+      if (char === '%') {
+        const percentEnd = skipMacroPercentLiteral(source, i);
+        if (percentEnd !== null) {
+          i = percentEnd;
+          continue;
+        }
+      }
       i++;
     }
     return { start: pos, end: source.length };
@@ -76,6 +84,16 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
       if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
         i = skipRegexLiteral(source, i);
         continue;
+      }
+      // Skip percent literals (%r(...), %w[...], %|...|, etc.) inside macro body.
+      // Done before {{ / }} detection so a paired-{} percent literal does not bump
+      // singleBraceDepth and confuse the closer.
+      if (char === '%') {
+        const percentEnd = skipMacroPercentLiteral(source, i);
+        if (percentEnd !== null) {
+          i = percentEnd;
+          continue;
+        }
       }
       if (source.slice(i, i + 2) === '{{') {
         depth++;
@@ -126,6 +144,58 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
   }
 
   return null;
+}
+
+// Skips a percent literal inside a macro template body. Percent literals can
+// appear with specifiers (%w, %r, %q, etc.) or as bare %... with paired or
+// non-paired delimiters. Returns position after the closing delimiter, or null
+// when source[pos] is not a percent literal start (e.g., %} which is the macro
+// close, or % used as modulo).
+const PERCENT_LITERAL_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+  '<': '>'
+};
+
+function skipMacroPercentLiteral(source: string, pos: number): number | null {
+  if (pos + 1 >= source.length) return null;
+
+  let delimPos = pos + 1;
+  let next = source[delimPos];
+
+  // %} is the macro close marker — not a percent literal
+  if (next === '}') return null;
+
+  // Specifier: q/Q/w/W/i/I/r/x followed by an actual delimiter
+  if (/[qQwWiIrx]/.test(next)) {
+    if (delimPos + 1 >= source.length) return null;
+    delimPos++;
+    next = source[delimPos];
+  }
+
+  // Delimiter must be a non-alphanumeric, non-whitespace symbol
+  if (/[a-zA-Z0-9 \t\r\n]/.test(next)) return null;
+
+  const close = PERCENT_LITERAL_PAIRED_DELIMITERS[next] ?? next;
+  const isPaired = next !== close;
+
+  let i = delimPos + 1;
+  let depth = 1;
+  while (i < source.length && depth > 0) {
+    const c = source[i];
+    if (c === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+    if (isPaired && c === next) {
+      depth++;
+    } else if (c === close) {
+      depth--;
+    }
+    i++;
+  }
+  return i;
 }
 
 // Heuristic: is `/` at pos a regex literal start (vs division)?
@@ -525,8 +595,12 @@ export function isPostfixConditional(source: string, position: number, excludedR
     }
     const region = findRegionAt(ci, excludedRegions);
     if (region) {
-      // Line comments (#) don't count as content; other regions (strings, literals) do.
-      if (source[region.start] !== '#') {
+      // Line comments (#) and macro templates ({% %}, {{ }}) don't count as
+      // content for postfix-conditional detection. Strings, literals, and
+      // regex do count.
+      const isComment = source[region.start] === '#';
+      const isMacroTemplate = source[region.start] === '{' && (source[region.start + 1] === '%' || source[region.start + 1] === '{');
+      if (!isComment && !isMacroTemplate) {
         hasNonExcludedContent = true;
       }
       ci = region.end;

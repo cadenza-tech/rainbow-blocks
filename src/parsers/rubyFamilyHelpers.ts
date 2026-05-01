@@ -186,10 +186,12 @@ export function matchRegexLiteral(
   pos: number,
   regexFlagsPattern: RegExp,
   skipInterpolation: SkipInterpolationFn,
-  allowMultiline: boolean
+  allowMultiline: boolean,
+  heredocState?: HeredocState
 ): ExcludedRegion {
   let i = pos + 1;
   let inCharClass = false;
+  let pendingHeredocEnd = -1;
   while (i < source.length) {
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
@@ -198,6 +200,17 @@ export function matchRegexLiteral(
     // Handle #{} interpolation inside regex
     if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
       i = skipInterpolation(source, i + 2);
+      // Track pending heredoc body to skip later
+      if (heredocState && heredocState.pendingEnd > i) {
+        pendingHeredocEnd = heredocState.pendingEnd;
+        heredocState.pendingEnd = -1;
+      }
+      continue;
+    }
+    // Skip heredoc body: at newline, if a heredoc is pending, jump past it
+    if (pendingHeredocEnd > i && (source[i] === '\n' || source[i] === '\r')) {
+      i = pendingHeredocEnd;
+      pendingHeredocEnd = -1;
       continue;
     }
     // Track character class brackets: [/] should not terminate regex
@@ -217,10 +230,17 @@ export function matchRegexLiteral(
       while (i < source.length && regexFlagsPattern.test(source[i])) {
         i++;
       }
+      // Propagate pending heredoc end back to caller
+      if (pendingHeredocEnd > i && heredocState) {
+        heredocState.pendingEnd = pendingHeredocEnd;
+      }
       return { start: pos, end: i };
     }
     if (!allowMultiline && (source[i] === '\n' || source[i] === '\r')) {
       // Unterminated regex
+      if (pendingHeredocEnd > i && heredocState) {
+        heredocState.pendingEnd = pendingHeredocEnd;
+      }
       return { start: pos, end: i };
     }
     i++;
@@ -474,10 +494,11 @@ export function skipInterpolationShared(source: string, pos: number, handlers: I
   return i;
 }
 
-// Shared skip logic for #{} interpolation in regex (no heredoc support)
-export function skipRegexInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers): number {
+// Shared skip logic for #{} interpolation in regex
+export function skipRegexInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers, heredocState?: HeredocState): number {
   let depth = 1;
   let i = pos;
+  let heredocSkipEnd = -1;
   while (i < source.length && depth > 0) {
     if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
@@ -530,8 +551,17 @@ export function skipRegexInterpolationShared(source: string, pos: number, handle
         i = result.end;
         continue;
       }
+    } else if (source[i] === '<' && i + 1 < source.length && source[i + 1] === '<' && heredocSkipEnd < 0) {
+      const heredocResult = handlers.matchHeredoc(source, i);
+      if (heredocResult) {
+        heredocSkipEnd = heredocResult.end;
+      }
     }
     i++;
+  }
+  // Communicate pending heredoc to caller when interpolation closes before line break
+  if (heredocSkipEnd > i && heredocState) {
+    heredocState.pendingEnd = Math.max(heredocState.pendingEnd, heredocSkipEnd);
   }
   return i;
 }

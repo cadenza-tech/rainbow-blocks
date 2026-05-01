@@ -174,8 +174,10 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
 
     // Question mark char literal (?x, ?\n, ?\uXXXX, etc.)
-    // ?" and ?' are valid char literals (the quote character itself)
-    if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_)\]}]/.test(source[pos - 1]))) {
+    // ?" and ?' are valid char literals (the quote character itself).
+    // Reject when preceded by $ or @ since $?, @? are special variable references
+    // and the following / is division, not part of a char literal.
+    if (char === '?' && pos + 1 < source.length && (pos === 0 || !/[a-zA-Z0-9_)\]}$@]/.test(source[pos - 1]))) {
       const nextChar = source[pos + 1];
       if (nextChar === '"' || nextChar === "'") return { start: pos, end: pos + 2 };
       if (nextChar === '\\' && pos + 2 < source.length) {
@@ -451,12 +453,19 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Matches regex literal with #{} interpolation
   private matchRegexLiteral(source: string, pos: number): ExcludedRegion {
-    return matchRegexLiteral(source, pos, REGEX_FLAGS_PATTERN, (s, p) => this.skipRegexInterpolation(s, p), false);
-  }
-
-  // Skips #{} interpolation inside regex, tracking brace depth
-  private skipRegexInterpolation(source: string, pos: number): number {
-    return skipRegexInterpolationShared(source, pos, this.interpolationHandlers);
+    const heredocState: HeredocState = { pendingEnd: -1 };
+    const result = matchRegexLiteral(
+      source,
+      pos,
+      REGEX_FLAGS_PATTERN,
+      (s, p) => skipRegexInterpolationShared(s, p, this.interpolationHandlers, heredocState),
+      false,
+      heredocState
+    );
+    if (heredocState.pendingEnd > result.end) {
+      return { start: result.start, end: heredocState.pendingEnd };
+    }
+    return result;
   }
 
   // Checks if slash is regex start (not division)
