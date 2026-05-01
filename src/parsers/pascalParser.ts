@@ -317,9 +317,12 @@ export class PascalBlockParser extends BaseBlockParser {
     return true;
   }
 
-  // Reject any close keyword (end/until) immediately after `.` (field/property access).
+  // Reject any close keyword (end/until) immediately after `.` (field/property access),
+  // `@` (address-of operator like `@end`), or `&` (FreePascal escaped-keyword identifier).
   protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return !this.isPrecededByFieldDot(source, position, excludedRegions);
+    if (this.isPrecededByFieldDot(source, position, excludedRegions)) return false;
+    if (position > 0 && (source[position - 1] === '@' || source[position - 1] === '&')) return false;
+    return true;
   }
 
   // Returns true when the position is preceded by `.` field-access dot, distinguishing
@@ -482,6 +485,12 @@ export class PascalBlockParser extends BaseBlockParser {
 
         // Skip end preceded by `.` (field access like `foo.end` inside asm body)
         if (endPos > 0 && source[endPos - 1] === '.') {
+          continue;
+        }
+
+        // Skip end preceded by `@` (assembly local label like `@end` used as branch target).
+        // Borland/Delphi asm uses `@name` for local labels; `JMP @end` references such a label.
+        if (endPos > 0 && source[endPos - 1] === '@') {
           continue;
         }
 
