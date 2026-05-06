@@ -29,17 +29,25 @@ export class MatlabBlockParser extends BaseBlockParser {
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
 
-  // Returns true when `end` at position is preceded by an unambiguous binary expression operator
-  // on the same line (skipping whitespace). Excludes `=` because `x = end ...` is allowed by spec.
+  // Returns true when `end` at position is preceded by an expression operator that makes
+  // `end` an operand outside any array-indexing context. Such uses (`x = end`, `x = 1:end`,
+  // `x = ~end`, `for i = end-1:5`) are invalid MATLAB outside indexing; treating them as
+  // block_close destroys outer block pairing. The for-header range check (isEndInForHeaderRange)
+  // is invoked before this and handles legitimate `for i = N:end` / `for i = end:N` cases.
   private isPrecededByBinaryOperator(source: string, position: number): boolean {
     let i = position - 1;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
     if (i < 0) return false;
     const ch = source[i];
-    // Single-char operators that are unambiguously binary in this position.
-    // Note: `:` is excluded because it's handled by isEndInForHeaderRange and could appear
-    // in array slicing where end is valid. `,` is excluded because parens/brackets handling covers it.
-    if ('+*/^<>&|'.includes(ch)) return true;
+    // Operators that put `end` in an expression context.
+    if ('+*/^<>&|~:'.includes(ch)) return true;
+    // `=` (single equals, not `==`/`>=`/`<=`/`!=`/`~=`) marks an assignment; `end` on the
+    // RHS is invalid outside indexing.
+    if (ch === '=') {
+      const prev = i > 0 ? source[i - 1] : '';
+      if (prev === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~') return false;
+      return true;
+    }
     // `-` could be unary; treat as binary only when preceded by a value-like char
     if (ch === '-') {
       let j = i - 1;
@@ -86,8 +94,7 @@ export class MatlabBlockParser extends BaseBlockParser {
       break;
     }
     if (i >= 0 && source[i] === ':') {
-      const colonLineStart = Math.max(source.lastIndexOf('\n', i), source.lastIndexOf('\r', i)) + 1;
-      const beforeText = source.slice(colonLineStart, i);
+      const beforeText = this.collectLogicalLineBefore(source, i, excludedRegions);
       if (/(?:^|[;,])\s*(?:par)?for[\s(]/.test(beforeText)) return true;
     }
 
@@ -95,13 +102,36 @@ export class MatlabBlockParser extends BaseBlockParser {
     let j = position + 3; // length of 'end'
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
     if (j < source.length && source[j] === ':' && j + 1 < source.length && source[j + 1] !== '=') {
-      const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
-      const beforeEnd = source.slice(lineStart, position);
+      const beforeEnd = this.collectLogicalLineBefore(source, position, excludedRegions);
       // Require an `=` (assignment in for-header) before `end` on the same line, with for at start
       if (/(?:^|[;,])\s*(?:par)?for[\s(].*=\s*$/.test(beforeEnd)) return true;
     }
 
     return false;
+  }
+
+  // Collects the logical line content preceding `position`, following `...` (and Octave `\`)
+  // continuations backward across physical line breaks. Returns the joined text with newlines
+  // collapsed to single spaces so anchored regexes still match.
+  private collectLogicalLineBefore(source: string, position: number, excludedRegions?: ExcludedRegion[]): string {
+    const segments: string[] = [];
+    let cursor = position;
+    while (cursor > 0) {
+      const lineStart = Math.max(source.lastIndexOf('\n', cursor - 1), source.lastIndexOf('\r', cursor - 1)) + 1;
+      segments.unshift(source.slice(lineStart, cursor));
+      if (lineStart === 0) break;
+      // Look at the previous physical line; if it ends with a `...` (or `\`) continuation
+      // excluded region, walk further back. Otherwise stop.
+      let nlEnd = lineStart - 1;
+      if (nlEnd > 0 && source[nlEnd] === '\n' && source[nlEnd - 1] === '\r') nlEnd--;
+      if (!excludedRegions) break;
+      const regionAtEnd = this.findExcludedRegionAt(nlEnd > 0 ? nlEnd - 1 : 0, excludedRegions);
+      if (!regionAtEnd || regionAtEnd.end !== nlEnd) break;
+      const regionStartCh = source[regionAtEnd.start];
+      if (regionStartCh !== '.' && regionStartCh !== '\\') break;
+      cursor = regionAtEnd.start;
+    }
+    return segments.join(' ');
   }
 
   // Classdef section keywords that can also be used as function calls
@@ -181,7 +211,7 @@ export class MatlabBlockParser extends BaseBlockParser {
       // Reject block opener used as standalone identifier on the RHS of an assignment
       // (e.g., `r = for;`, `r = if;`, `x = while)`). Such usages have no body, so the
       // keyword cannot be a real block opener.
-      if (this.isUsedAsRhsIdentifier(source, position, keyword)) {
+      if (this.isUsedAsRhsIdentifier(source, position, keyword, excludedRegions)) {
         return false;
       }
     }
@@ -207,19 +237,18 @@ export class MatlabBlockParser extends BaseBlockParser {
   // `x = while)`) are invalid MATLAB but should not destroy outer block pairing.
   // A `;` or `,` between the `=` and the keyword terminates the assignment context, so
   // `x=1; do<NL>` should NOT treat `do` as an RHS identifier.
-  private isUsedAsRhsIdentifier(source: string, position: number, keyword: string): boolean {
-    const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
-    // Walk backward from the keyword. If we hit `;` or `,` before any `=`, the keyword
-    // is at a fresh statement position and not part of an RHS assignment.
+  // Follows `...` line continuations backward so `r = ...\n  for;` is detected correctly.
+  private isUsedAsRhsIdentifier(source: string, position: number, keyword: string, excludedRegions?: ExcludedRegion[]): boolean {
+    const before = this.collectLogicalLineBefore(source, position, excludedRegions);
     let hasAssignmentBefore = false;
-    for (let i = position - 1; i >= lineStart; i--) {
-      const ch = source[i];
+    for (let i = before.length - 1; i >= 0; i--) {
+      const ch = before[i];
       if (ch === ';' || ch === ',') {
         return false;
       }
       if (ch === '=') {
-        const prev = i > 0 ? source[i - 1] : '';
-        const next = i + 1 < source.length ? source[i + 1] : '';
+        const prev = i > 0 ? before[i - 1] : '';
+        const next = i + 1 < before.length ? before[i + 1] : '';
         if (next === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~' || prev === '=') {
           continue;
         }
@@ -271,16 +300,22 @@ export class MatlabBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Filter out block_middle keywords that are struct field access (s.else, s . case)
-  // and block_middle keywords used as variable names (e.g., `case = 5`, `else = 1`).
+  // Filter out block_middle keywords that are struct field access (s.else, s . case),
+  // used as variable names (e.g., `case = 5`, `else = 1`), or appear inside parens/brackets/
+  // braces (e.g., `foo(case)` where `case` is a name argument).
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       if (this.isPrecededByDot(source, token.startOffset, excludedRegions)) {
         return false;
       }
-      if (token.type === 'block_middle' && this.isFollowedBySimpleAssignment(source, token.startOffset + token.value.length)) {
-        return false;
+      if (token.type === 'block_middle') {
+        if (this.isFollowedBySimpleAssignment(source, token.startOffset + token.value.length)) {
+          return false;
+        }
+        if (this.isInsideParensOrBrackets(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
       }
       return true;
     });
@@ -290,9 +325,10 @@ export class MatlabBlockParser extends BaseBlockParser {
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
-    // Track openers that were rejected so their `end` is also skipped (instead of
-    // consuming the wrong outer block's close).
-    let pendingSkipEnds = 0;
+    // Track stack depths at which a block opener was rejected, so the corresponding
+    // `end` (which appears at the same depth) can be skipped without consuming a
+    // legitimate inner block's close.
+    const pendingSkipDepths: number[] = [];
 
     for (const token of tokens) {
       switch (token.type) {
@@ -311,13 +347,13 @@ export class MatlabBlockParser extends BaseBlockParser {
                 return v === 'function' || v === 'methods' || v === 'classdef';
               });
               if (!hasFunctionOrClass) {
-                pendingSkipEnds++;
+                pendingSkipDepths.push(stack.length);
                 break;
               }
             } else {
               const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
               if (!hasClassdef) {
-                pendingSkipEnds++;
+                pendingSkipDepths.push(stack.length);
                 break;
               }
             }
@@ -341,10 +377,11 @@ export class MatlabBlockParser extends BaseBlockParser {
           break;
 
         case 'block_close': {
-          // Skip ends that correspond to rejected block openers (e.g., arguments
-          // outside function/classdef context).
-          if (pendingSkipEnds > 0) {
-            pendingSkipEnds--;
+          // Skip the `end` only when the current stack depth matches the depth
+          // recorded for a rejected opener — this preserves legitimate inner block
+          // pairings even when an enclosing classdef section keyword was rejected.
+          if (pendingSkipDepths.length > 0 && pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length) {
+            pendingSkipDepths.pop();
             break;
           }
           const openBlock = stack.pop();
