@@ -13,17 +13,18 @@ const SIGIL_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
   '<': '>'
 };
 
-// Returns matching close delimiter for sigils
+// Returns matching close delimiter for sigils. Per Elixir spec, valid sigil delimiters
+// are paired ASCII brackets (defined in SIGIL_PAIRED_DELIMITERS) or single ASCII non-alphanumeric
+// chars: / | " ' . Unicode letters/symbols are NOT valid sigil delimiters; treating them as
+// such would consume arbitrary subsequent code as the sigil body.
 function getSigilCloseDelimiter(open: string): string | null {
   if (open in SIGIL_PAIRED_DELIMITERS) {
     return SIGIL_PAIRED_DELIMITERS[open];
   }
-
-  // Non-paired delimiters (/, |, ", ', etc)
-  if (/[^a-zA-Z0-9\s]/.test(open)) {
+  // ASCII-only non-paired delimiters
+  if (open.length === 1 && open.charCodeAt(0) < 128 && /[^a-zA-Z0-9\s]/.test(open)) {
     return open;
   }
-
   return null;
 }
 
@@ -375,9 +376,7 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
     let i = delimiterPos + 3;
     let isSigilHeredoc = false;
     while (i < source.length) {
-      if (source[i] === '\n') {
-        isSigilHeredoc = true;
-      } else if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+      if (source[i] === '\n' || source[i] === '\r') {
         isSigilHeredoc = true;
       }
       // Handle escape sequences (lowercase: all escapes; uppercase: only escaped closing delimiter)

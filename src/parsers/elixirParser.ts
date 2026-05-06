@@ -368,6 +368,19 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (token.type === 'block_middle' && token.startOffset >= 2 && source[token.startOffset - 1] === '.' && source[token.startOffset - 2] === '.') {
         return false;
       }
+      // Reject middle keywords used as variable names: `after = 100`, `else = nil`,
+      // `rescue = ...`. Match `=` not followed by `=`/`>`/`~` (i.e., not `==`/`=>`/`=~`).
+      if (token.type === 'block_middle' && token.endOffset < source.length) {
+        let p = token.endOffset;
+        while (p < source.length && (source[p] === ' ' || source[p] === '\t')) p++;
+        if (
+          p < source.length &&
+          source[p] === '=' &&
+          (p + 1 >= source.length || (source[p + 1] !== '=' && source[p + 1] !== '>' && source[p + 1] !== '~'))
+        ) {
+          return false;
+        }
+      }
       return true;
     });
   }
@@ -709,8 +722,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         return true;
       }
     }
-    // Followed by newline: skip newlines and comments, then check for `do`
-    if (c === '\n' || c === '\r') {
+    // Followed by inline comment or newline: skip comments and newlines, then check for `do`
+    if (c === '\n' || c === '\r' || c === '#') {
       let k = j;
       while (k < source.length) {
         const ch = source[k];
