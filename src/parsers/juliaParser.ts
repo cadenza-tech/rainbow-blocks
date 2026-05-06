@@ -294,27 +294,41 @@ export class JuliaBlockParser extends BaseBlockParser {
   private allUnmatchedBeginsAreFirstindex(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
     // Walk range; for each `begin` not followed by `:`, fail. Also count ends so that a
     // genuine block (`begin ... end`) cancels out. If no unmatched non-firstindex begin
-    // remains, return true.
+    // remains, return true. Track [ ] bracket depth so `end` inside arr[end] (lastindex)
+    // does not erroneously cancel a real block opener.
     const blockOpen = this.keywords.blockOpen;
     let depth = 0;
     let nonFirstindexBegins = 0;
+    let bracketDepth = 0;
     for (let i = start; i < end; i++) {
       if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      if (source[i] === '[') {
+        bracketDepth++;
+        continue;
+      }
+      if (source[i] === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+        continue;
+      }
       if (source[i] === 'e' && i + 3 <= end && source.slice(i, i + 3) === 'end') {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + 3 < source.length ? source[i + 3] : ' ';
         if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && before !== '.') {
           if (!this.isAdjacentToUnicodeLetter(source, i, 3)) {
-            if (depth > 0) {
-              depth--;
-            } else if (nonFirstindexBegins > 0) {
-              nonFirstindexBegins--;
+            if (bracketDepth === 0) {
+              if (depth > 0) {
+                depth--;
+              } else if (nonFirstindexBegins > 0) {
+                nonFirstindexBegins--;
+              }
             }
             i += 2;
             continue;
           }
         }
       }
+      // Skip block-opener detection inside [ ] (those are value contexts, not blocks).
+      if (bracketDepth > 0) continue;
       for (const kw of blockOpen) {
         if (i + kw.length <= end && source[i] === kw[0] && source.slice(i, i + kw.length) === kw) {
           const before = i > 0 ? source[i - 1] : ' ';
@@ -503,8 +517,13 @@ export class JuliaBlockParser extends BaseBlockParser {
           if (!isIndexingBracket(source, i)) {
             return false;
           }
-          // `begin` inside indexing brackets is the firstindex keyword, never a block opener
+          // `begin` inside indexing brackets is normally the firstindex keyword. But if the
+          // bracket has no matching `]` (e.g., user editing in progress), treat as a real
+          // block opener so the begin/end pair is detected.
           if (keyword === 'begin') {
+            if (!this.hasMatchingCloseBracket(source, i + 1, excludedRegions)) {
+              return false;
+            }
             return true;
           }
           // Other block keywords inside indexing brackets may form a block expression
@@ -555,26 +574,33 @@ export class JuliaBlockParser extends BaseBlockParser {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + 3 < source.length ? source[i + 3] : ' ';
         if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && before !== '.' && !this.isAdjacentToUnicodeLetter(source, i, 3)) {
-          blockDepth--;
-          if (blockDepth === 0) {
-            return true;
+          // Inside [ ] brackets, `end` is the lastindex reference, not a block close.
+          if (bracketDepth === 0) {
+            blockDepth--;
+            if (blockDepth === 0) {
+              return true;
+            }
           }
           i += 3;
           continue;
         }
       }
       let matchedOpener = false;
-      for (const kw of this.keywords.blockOpen) {
-        if (i + kw.length <= source.length && source[i] === kw[0] && source.slice(i, i + kw.length) === kw) {
-          const before = i > 0 ? source[i - 1] : ' ';
-          const after = i + kw.length < source.length ? source[i + kw.length] : ' ';
-          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
-          if (before === '.') continue;
-          if (this.isAdjacentToUnicodeLetter(source, i, kw.length)) continue;
-          blockDepth++;
-          i += kw.length;
-          matchedOpener = true;
-          break;
+      // Block openers inside [ ] are also not real block-form openers (they could be value
+      // names like `Dict[begin]`). Skip opener matching while inside brackets.
+      if (bracketDepth === 0) {
+        for (const kw of this.keywords.blockOpen) {
+          if (i + kw.length <= source.length && source[i] === kw[0] && source.slice(i, i + kw.length) === kw) {
+            const before = i > 0 ? source[i - 1] : ' ';
+            const after = i + kw.length < source.length ? source[i + kw.length] : ' ';
+            if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+            if (before === '.') continue;
+            if (this.isAdjacentToUnicodeLetter(source, i, kw.length)) continue;
+            blockDepth++;
+            i += kw.length;
+            matchedOpener = true;
+            break;
+          }
         }
       }
       if (matchedOpener) continue;

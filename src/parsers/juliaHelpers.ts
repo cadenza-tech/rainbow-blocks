@@ -377,8 +377,19 @@ export function hasUnmatchedBlockOpenerBetween(
     }
   }
 
+  // Track [ ] bracket depth so an `end` inside `arr[end]` (lastindex) does NOT decrement
+  // the block depth meant to track block openers.
+  let bracketDepth = 0;
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
+    if (source[i] === '[') {
+      bracketDepth++;
+      continue;
+    }
+    if (source[i] === ']') {
+      if (bracketDepth > 0) bracketDepth--;
+      continue;
+    }
     // Detect 'for x in y' or 'for x = y' pattern — entering comprehension context.
     // Subsequent 'if's are filters, not block openers.
     if (
@@ -404,7 +415,8 @@ export function hasUnmatchedBlockOpenerBetween(
       if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
         if (!callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
           // Skip dot-preceded end (field access like obj.end, not block closer)
-          if (before !== '.') {
+          // Skip end inside [ ] brackets (lastindex reference, not block close)
+          if (before !== '.' && bracketDepth === 0) {
             if (depth > 0) depth--;
           }
           i += 2;
