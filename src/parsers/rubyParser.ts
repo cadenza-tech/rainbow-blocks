@@ -343,7 +343,9 @@ export class RubyBlockParser extends BaseBlockParser {
         const nextChar = source[pos + 1];
         if (nextChar === '\\' && pos + 2 < source.length) {
           const escChar = source[pos + 2];
-          // \C-x, \M-x (5 chars total: ?\C-x), \M-\C-x (8 chars total: ?\M-\C-x)
+          // \C-x, \M-x (5 chars total: ?\C-x), \M-\C-x (8 chars total: ?\M-\C-x).
+          // The trailing target char must be a non-newline (printable); otherwise the
+          // literal is unterminated and ends at the last `-`.
           if ((escChar === 'C' || escChar === 'M') && pos + 3 < source.length && source[pos + 3] === '-') {
             if (
               escChar === 'M' &&
@@ -354,13 +356,14 @@ export class RubyBlockParser extends BaseBlockParser {
               pos + 6 < source.length &&
               source[pos + 6] === '-'
             ) {
-              // Full \M-\C-x (8 chars) or unterminated \M-\C- at EOF (7 chars)
-              if (pos + 7 < source.length) {
+              // Full \M-\C-x (8 chars): require pos+7 to be a printable, non-newline char
+              if (pos + 7 < source.length && source[pos + 7] !== '\n' && source[pos + 7] !== '\r') {
                 return { start: pos, end: pos + 8 };
               }
               return { start: pos, end: pos + 7 };
             }
-            if (pos + 4 < source.length) {
+            // \C-x or \M-x: require pos+4 to be a printable, non-newline char
+            if (pos + 4 < source.length && source[pos + 4] !== '\n' && source[pos + 4] !== '\r') {
               return { start: pos, end: pos + 5 };
             }
             return { start: pos, end: pos + 4 };
