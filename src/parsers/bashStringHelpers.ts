@@ -40,6 +40,12 @@ export function matchArithmeticBracket(source: string, pos: number): ExcludedReg
   while (i < source.length && depth > 0) {
     const char = source[i];
 
+    // Skip escape sequences (e.g., \])
+    if (char === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+
     // Skip strings inside arithmetic bracket
     if (char === '"') {
       i = findBashDoubleQuoteEnd(source, i);
@@ -50,10 +56,31 @@ export function matchArithmeticBracket(source: string, pos: number): ExcludedReg
       continue;
     }
 
+    // Skip $'...' ANSI-C quoting
+    if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
+      const region = matchDollarSingleQuote(source, i);
+      i = region.end;
+      continue;
+    }
+
     // Skip parameter expansion ${...}
     if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
       const nested = matchParameterExpansion(source, i);
       i = nested.end;
+      continue;
+    }
+
+    // Skip command substitution $(...)
+    if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
+      const nested = matchCommandSubstitution(source, i);
+      i = nested.end;
+      continue;
+    }
+
+    // Skip backtick command substitution
+    if (char === '`') {
+      const region = matchBacktickCommand(source, i);
+      i = region.end;
       continue;
     }
 
@@ -214,6 +241,12 @@ function matchArithmeticExpansion(source: string, pos: number): ExcludedRegion {
   while (i < source.length && depth > 0) {
     const char = source[i];
 
+    // Skip escape sequences
+    if (char === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+
     // Skip strings inside arithmetic expansion
     if (char === '"') {
       i = findBashDoubleQuoteEnd(source, i);
@@ -225,10 +258,31 @@ function matchArithmeticExpansion(source: string, pos: number): ExcludedRegion {
       continue;
     }
 
+    // Skip $'...' ANSI-C quoting
+    if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
+      const region = matchDollarSingleQuote(source, i);
+      i = region.end;
+      continue;
+    }
+
     // Skip parameter expansion ${...}
     if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
       const nested = matchParameterExpansion(source, i);
       i = nested.end;
+      continue;
+    }
+
+    // Skip nested command substitution $(...)
+    if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
+      const nested = matchCommandSubstitution(source, i);
+      i = nested.end;
+      continue;
+    }
+
+    // Skip backtick command substitution
+    if (char === '`') {
+      const region = matchBacktickCommand(source, i);
+      i = region.end;
       continue;
     }
 
@@ -251,6 +305,12 @@ export function matchBareArithmeticEvaluation(source: string, pos: number): Excl
   while (i < source.length && depth > 0) {
     const char = source[i];
 
+    // Skip escape sequences
+    if (char === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+
     // Skip strings inside arithmetic evaluation
     if (char === '"') {
       i = findBashDoubleQuoteEnd(source, i);
@@ -262,10 +322,31 @@ export function matchBareArithmeticEvaluation(source: string, pos: number): Excl
       continue;
     }
 
+    // Skip $'...' ANSI-C quoting
+    if (char === '$' && i + 1 < source.length && source[i + 1] === "'") {
+      const region = matchDollarSingleQuote(source, i);
+      i = region.end;
+      continue;
+    }
+
     // Skip parameter expansion ${...}
     if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
       const nested = matchParameterExpansion(source, i);
       i = nested.end;
+      continue;
+    }
+
+    // Skip nested command substitution $(...)
+    if (char === '$' && i + 1 < source.length && source[i + 1] === '(') {
+      const nested = matchCommandSubstitution(source, i);
+      i = nested.end;
+      continue;
+    }
+
+    // Skip backtick command substitution
+    if (char === '`') {
+      const region = matchBacktickCommand(source, i);
+      i = region.end;
       continue;
     }
 
@@ -302,49 +383,7 @@ export function matchBashDoubleQuote(source: string, pos: number): ExcludedRegio
     // Parameter expansion ${...} - handle nested strings inside double-quoted context
     // In bash, ${var:-"default"} has nested double-quoted strings
     if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-      let j = i + 2;
-      let braceDepth = 1;
-      while (j < source.length && braceDepth > 0) {
-        if (source[j] === '\\' && j + 1 < source.length) {
-          j += 2;
-          continue;
-        }
-        // In bash, " inside ${} toggles the quoting context (quote-toggling model)
-        // "${x:-"default"}" - the inner " toggles off outer quoting, } still closes expansion
-        if (source[j] === '"') {
-          j++;
-          continue;
-        }
-        // $'...' ANSI-C quoting
-        if (source[j] === '$' && j + 1 < source.length && source[j + 1] === "'") {
-          const region = matchDollarSingleQuote(source, j);
-          j = region.end;
-          continue;
-        }
-        // Nested command substitution $(...)
-        if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '(') {
-          const nested = matchCommandSubstitution(source, j);
-          j = nested.end;
-          continue;
-        }
-        // Nested parameter expansion ${...}
-        if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '{') {
-          j += 2;
-          braceDepth++;
-          continue;
-        }
-        // Backtick command substitution
-        if (source[j] === '`') {
-          const region = matchBacktickCommand(source, j);
-          j = region.end;
-          continue;
-        }
-        if (source[j] === '}') {
-          braceDepth--;
-        }
-        j++;
-      }
-      i = j;
+      i = scanParameterExpansionBody(source, i);
       continue;
     }
 
@@ -363,6 +402,54 @@ export function matchBashDoubleQuote(source: string, pos: number): ExcludedRegio
     i++;
   }
   return { start: pos, end: source.length };
+}
+
+// Scans ${...} body inside a double-quoted context, returning the offset just past closing }.
+// In bash double-quote context: " inside ${ } enters a new string scope where } is literal,
+// but ' is literal (not a string delimiter). Handles nested ${...}, $(...), backticks, $'...'.
+function scanParameterExpansionBody(source: string, pos: number): number {
+  let j = pos + 2;
+  let braceDepth = 1;
+  while (j < source.length && braceDepth > 0) {
+    if (source[j] === '\\' && j + 1 < source.length) {
+      j += 2;
+      continue;
+    }
+    // " inside ${ } enters a new string scope; } inside that string is literal
+    if (source[j] === '"') {
+      j = findBashDoubleQuoteEnd(source, j);
+      continue;
+    }
+    // $'...' ANSI-C quoting
+    if (source[j] === '$' && j + 1 < source.length && source[j + 1] === "'") {
+      const region = matchDollarSingleQuote(source, j);
+      j = region.end;
+      continue;
+    }
+    // Nested command substitution $(...)
+    if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '(') {
+      const nested = matchCommandSubstitution(source, j);
+      j = nested.end;
+      continue;
+    }
+    // Nested parameter expansion ${...}
+    if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '{') {
+      j += 2;
+      braceDepth++;
+      continue;
+    }
+    // Backtick command substitution
+    if (source[j] === '`') {
+      const region = matchBacktickCommand(source, j);
+      j = region.end;
+      continue;
+    }
+    if (source[j] === '}') {
+      braceDepth--;
+    }
+    j++;
+  }
+  return j;
 }
 
 // Finds end of double-quoted string with Bash-aware handling for $(), ${}, single quotes, and backticks
@@ -386,45 +473,8 @@ function findBashDoubleQuoteEnd(source: string, pos: number): number {
     }
 
     // Parameter expansion ${...} - handle inline for double-quoted context
-    // Single quotes inside ${} within double quotes are literal (not string delimiters)
     if (char === '$' && i + 1 < source.length && source[i + 1] === '{') {
-      let j = i + 2;
-      let braceDepth = 1;
-      while (j < source.length && braceDepth > 0) {
-        if (source[j] === '\\' && j + 1 < source.length) {
-          j += 2;
-          continue;
-        }
-        if (source[j] === '"') {
-          j++;
-          continue;
-        }
-        if (source[j] === '$' && j + 1 < source.length && source[j + 1] === "'") {
-          const region = matchDollarSingleQuote(source, j);
-          j = region.end;
-          continue;
-        }
-        if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '(') {
-          const nested = matchCommandSubstitution(source, j);
-          j = nested.end;
-          continue;
-        }
-        if (source[j] === '$' && j + 1 < source.length && source[j + 1] === '{') {
-          j += 2;
-          braceDepth++;
-          continue;
-        }
-        if (source[j] === '`') {
-          const region = matchBacktickCommand(source, j);
-          j = region.end;
-          continue;
-        }
-        if (source[j] === '}') {
-          braceDepth--;
-        }
-        j++;
-      }
-      i = j;
+      i = scanParameterExpansionBody(source, i);
       continue;
     }
 
