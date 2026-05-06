@@ -119,11 +119,10 @@ export class FortranBlockParser extends BaseBlockParser {
         return false;
       }
       const subKw = selectMatch[1].toLowerCase();
-      if (subKw === 'type' || subKw === 'rank') {
-        const afterSubKw = afterSelect.slice(selectMatch[0].length);
-        if (!/^[ \t]*\(/.test(afterSubKw)) {
-          return false;
-        }
+      // All select sub-forms (case/type/rank) require a parenthesized expression.
+      const afterSubKw = afterSelect.slice(selectMatch[0].length);
+      if ((subKw === 'type' || subKw === 'rank' || subKw === 'case') && !/^[ \t]*\(/.test(afterSubKw)) {
+        return false;
       }
     }
 
@@ -163,11 +162,21 @@ export class FortranBlockParser extends BaseBlockParser {
       return this.isValidIfOpen(keyword, source, position, excludedRegions);
     }
 
-    // Skip keywords preceded by operator/expression context (e.g., 'x = do + 1')
-    // Only for keywords that never follow ')' in valid block-opening context.
-    // Excludes function/subroutine which can follow type specifiers like type(integer)
-    if (lowerKeyword !== 'function' && lowerKeyword !== 'subroutine' && isPrecededByOperator(source, position)) {
-      return false;
+    // Skip keywords preceded by operator/expression context (e.g., 'x = do + 1').
+    // For function/subroutine, the only valid operator predecessor is `)` from a type
+    // specifier like `type(integer) function f()`. Other operators (`=`, `*`, `+`, etc.)
+    // followed by function/subroutine indicate the keyword is being used as a variable.
+    if (isPrecededByOperator(source, position)) {
+      if (lowerKeyword === 'function' || lowerKeyword === 'subroutine') {
+        // Find the operator character after whitespace
+        let pi = position - 1;
+        while (pi >= 0 && (source[pi] === ' ' || source[pi] === '\t')) pi--;
+        if (pi < 0 || source[pi] !== ')') {
+          return false;
+        }
+      } else {
+        return false;
+      }
     }
 
     // Reject Fortran 77 labeled DO loops (e.g., 'do 100 i = 1, 10') because they
@@ -546,13 +555,68 @@ export class FortranBlockParser extends BaseBlockParser {
     return null;
   }
 
-  // Checks if a keyword is followed by = (assignment), excluding == and =>
+  // Checks if a keyword is followed by = (assignment), excluding == and =>.
+  // Also handles array-element assignments (e.g., `else(1) = 5` where the keyword name is
+  // a variable) and `&` line continuations to a following `=`.
   private isFollowedByAssignmentOp(source: string, afterPos: number): boolean {
     let i = afterPos;
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
+    while (i < source.length) {
+      if (source[i] === ' ' || source[i] === '\t') {
+        i++;
+        continue;
+      }
+      // `&` line continuation: skip newline + leading whitespace and any continuation `&`
+      if (source[i] === '&') {
+        let j = i + 1;
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+        if (j < source.length && (source[j] === '\n' || source[j] === '\r')) {
+          if (source[j] === '\r' && j + 1 < source.length && source[j + 1] === '\n') j += 2;
+          else j++;
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+          // Optional leading `&` on continuation line
+          if (j < source.length && source[j] === '&') j++;
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+          i = j;
+          continue;
+        }
+      }
+      break;
     }
-    if (i >= source.length || source[i] !== '=') return false;
+    if (i >= source.length) return false;
+    // Array-element assignment: `(N) = expr`
+    if (source[i] === '(') {
+      let depth = 1;
+      let pi = i + 1;
+      while (pi < source.length && depth > 0) {
+        const ch = source[pi];
+        if (ch === "'" || ch === '"') {
+          pi++;
+          while (pi < source.length) {
+            if (source[pi] === ch) {
+              if (pi + 1 < source.length && source[pi + 1] === ch) {
+                pi += 2;
+                continue;
+              }
+              pi++;
+              break;
+            }
+            pi++;
+          }
+          continue;
+        }
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        pi++;
+      }
+      // After `(...)` look for `=` (with whitespace skip)
+      while (pi < source.length && (source[pi] === ' ' || source[pi] === '\t')) pi++;
+      if (pi < source.length && source[pi] === '=') {
+        if (pi + 1 < source.length && (source[pi + 1] === '=' || source[pi + 1] === '>')) return false;
+        return true;
+      }
+      return false;
+    }
+    if (source[i] !== '=') return false;
     // Not == (comparison) or => (pointer assignment)
     if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '>')) return false;
     return true;
