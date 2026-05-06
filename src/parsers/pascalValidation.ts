@@ -548,7 +548,10 @@ export function isTypeDeclarationOf(
     }
     word = source.slice(i + 1, wordEnd + 1).toLowerCase();
   }
-  return word === 'array' || word === 'set' || word === 'file';
+  // `procedure of object`, `function of object` (Delphi method-pointer types) and
+  // `class of TBase` (class-reference type) are type declarations whose `of` is part of
+  // the type syntax, not a case-statement intermediate.
+  return word === 'array' || word === 'set' || word === 'file' || word === 'procedure' || word === 'function' || word === 'class';
 }
 
 // Checks if a class/interface keyword is a forward declaration (followed by ';', '(Parent);', or '[GUID];')

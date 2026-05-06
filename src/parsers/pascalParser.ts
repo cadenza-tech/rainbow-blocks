@@ -30,6 +30,11 @@ export class PascalBlockParser extends BaseBlockParser {
     if (this.isPrecededByFieldDot(source, position, excludedRegions)) {
       return false;
     }
+    // Reject FreePascal keyword-escape prefix (& or @ before keyword): &case is the
+    // identifier `case`, not the case statement; @procedure is a procedure-pointer.
+    if (position > 0 && (source[position - 1] === '&' || source[position - 1] === '@')) {
+      return false;
+    }
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
@@ -640,6 +645,11 @@ export class PascalBlockParser extends BaseBlockParser {
 
       // Reject block_middle keywords (of/else/except/finally) used as field-access dot
       if (type === 'block_middle' && this.isPrecededByFieldDot(source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Reject block_middle keywords with FreePascal keyword-escape prefix (& or @)
+      if (type === 'block_middle' && startOffset > 0 && (source[startOffset - 1] === '&' || source[startOffset - 1] === '@')) {
         continue;
       }
 
