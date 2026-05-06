@@ -1879,5 +1879,14 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-06: COBOL multi-line data-name verb', () => {
+    test('should not register ELSE as IF intermediate when MOVE is on previous line', () => {
+      const source = 'IF X\n  MOVE\n    ELSE TO Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after multi-line MOVE is data name');
+    });
+  });
+
   generateCommonTests(config);
 });

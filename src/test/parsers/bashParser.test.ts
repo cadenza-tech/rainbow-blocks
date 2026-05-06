@@ -4907,6 +4907,44 @@ fi`;
     });
   });
 
+  suite('Regression 2026-05-06: backticks and escapes in arithmetic expansions', () => {
+    test('should detect for-done when $((...)) contains backtick subshell', () => {
+      const source = 'x=$((`echo done))`))\nfor i in 1; do echo; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should fully contain (( ... )) when it embeds backtick with closing paren', () => {
+      const source = '((`echo )` + 1 ))';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should detect if-fi when $[...] contains backtick with bracket', () => {
+      const source = 'x=$[ `echo a]b` + 1 ]\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should fully contain $[...] when it embeds an escaped close bracket', () => {
+      const source = 'x=$[ a \\] b ]';
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.length >= 1);
+      const arithmeticRegion = regions.find((r) => r.start === 2);
+      assert.ok(arithmeticRegion, 'expected arithmetic bracket region starting at 2');
+      assert.strictEqual(arithmeticRegion?.end, source.length);
+    });
+
+    test('should detect if-fi when nested string in parameter expansion contains close brace', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: Bash parameter expansion
+      const source = '"${x:-"a}fi"}"\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   suite('Regression: keyword=value variable assignment', () => {
     test('should not treat done=value as block close', () => {
       const source = 'for i in 1; do\n  done=complete\n  echo ok\ndone';

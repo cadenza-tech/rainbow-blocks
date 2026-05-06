@@ -3544,5 +3544,28 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-06: block expression with nested arr[end]', () => {
+    test('should pair do/end inside indexing when arr[end] is nested', () => {
+      const source = 'a[do x; arr[end] end]';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.ok(doPair, 'do should pair with end across nested arr[end]');
+    });
+
+    test('should pair function/end inside indexing when arr[end] is nested', () => {
+      const source = 'a[function f() arr[end] end]';
+      const pairs = parser.parse(source);
+      const funcPair = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.ok(funcPair, 'function should pair with end across nested arr[end]');
+    });
+
+    test('should pair begin/end when bracket is unclosed', () => {
+      const source = 'a[begin x end';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'begin should pair with end when [ is unclosed');
+    });
+  });
+
   generateCommonTests(config);
 });

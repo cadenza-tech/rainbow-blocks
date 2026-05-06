@@ -2951,5 +2951,28 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-06: VHDL-2008 generic clause and multi-line wait', () => {
+    test('should accept function in generic clause as inside parens (not block opener)', () => {
+      const source =
+        'package my_pkg is\n  generic (\n    type T is private;\n    function compare(a, b : T) return boolean is <>\n  );\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+    });
+
+    test('should not detect for in multi-line wait...for clause as for-loop opener', () => {
+      const source = 'process\nbegin\n  wait\n    on clk\n    until cond\n    for 100 ns;\nend process;';
+      const pairs = parser.parse(source);
+      const forBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'for');
+      assert.ok(!forBlock, 'for in wait clause should not become a block opener');
+    });
+
+    test('should not detect while in multi-line wait...while clause as while-loop opener', () => {
+      const source = 'process\nbegin\n  wait\n  on sig\n  while running;\nend process;';
+      const pairs = parser.parse(source);
+      const whileBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'while');
+      assert.ok(!whileBlock, 'while in wait clause should not become a block opener');
+    });
+  });
+
   generateCommonTests(config);
 });

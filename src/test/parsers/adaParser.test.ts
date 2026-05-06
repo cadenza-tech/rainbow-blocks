@@ -2776,5 +2776,43 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-06: extended-return with := in trailing comment', () => {
+    test('should detect extended-return body when comment ends with := before do', () => {
+      const source = 'function F return Integer is\nbegin\n  return X : Integer -- := \n  do\n    R := 1;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return block should still pair when := appears in a comment');
+      assert.strictEqual(returnPair?.closeKeyword.value.toLowerCase(), 'end return');
+    });
+  });
+
+  suite('Regression 2026-05-06: mid-line is type continuation', () => {
+    test('should not leak is when type T follows is on previous line with no semicolon', () => {
+      const source = 'procedure P is type T\n  is range 1..10;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      const isCount = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, 'only procedure header is should appear; type-decl is should be filtered');
+    });
+
+    test('should not leak is when type T has trailing comment before continuation is', () => {
+      const source = 'procedure P is type T --comment\n  is range 1..10;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      const isCount = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1);
+    });
+  });
+
+  suite('Regression 2026-05-06: compound end with NBSP separator', () => {
+    test('should pair if/end if when separator is U+00A0 (NBSP)', () => {
+      const source = 'if A then\nnull;\nend if;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'if');
+      assert.match(pairs[0].closeKeyword.value.toLowerCase(), /^end\s+if$/);
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -3781,5 +3781,34 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-06: Elixir comment-before-newline do detection', () => {
+    test('should pair if-end correctly when condition has inline comment before newline+do', () => {
+      const source = 'if cond # comment\ndo\n  :ok\nend';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if should be paired with end, not cond paired with end');
+    });
+  });
+
+  suite('Regression 2026-05-06: Elixir block_middle as identifier name', () => {
+    test('should not register after as intermediate when used as variable name (after = 100)', () => {
+      const source = 'def foo do\n  after = 100\n  :ok\nend';
+      const pairs = parser.parse(source);
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(defPair);
+      const afterIntermediates = defPair?.intermediates.filter((t) => t.value === 'after');
+      assert.strictEqual(afterIntermediates?.length ?? 0, 0, 'after = 100 is variable assignment');
+    });
+  });
+
+  suite('Regression 2026-05-06: Elixir Unicode sigil delimiters rejected', () => {
+    test('should not consume source as sigil when ~s is followed by Unicode letter', () => {
+      const source = '~sα\ndef foo do\nend';
+      const pairs = parser.parse(source);
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(defPair, 'def should be detected; α is not a valid sigil delimiter');
+    });
+  });
+
   generateCommonTests(config);
 });

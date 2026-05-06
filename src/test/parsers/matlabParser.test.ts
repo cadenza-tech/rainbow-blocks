@@ -1620,5 +1620,76 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-06: MATLAB end-as-operand outside indexing', () => {
+    test('should pair function with the end on line 2, not the bogus end after =', () => {
+      const source = 'function f\n  x = end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'closeKeyword should be on line 2 (the real end)');
+    });
+
+    test('should pair function with the end on line 2, not the bogus end after :', () => {
+      const source = 'function f\n  x = 1:end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should pair function with the end on line 2, not the bogus end after ~', () => {
+      const source = 'function f\n  x = ~end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat for i = end-1:5 LHS as range expression, not block close', () => {
+      const source = 'function f\n  for i = end-1:5\n    disp(i);\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      // The for block should close at the end on line 3, not the end on line 1
+      assert.strictEqual(forBlock.closeKeyword.line, 3);
+    });
+
+    test('should detect block_middle case inside parentheses as not an intermediate', () => {
+      const source = 'switch x\n  z = foo(case);\n  case 1\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 1);
+      assert.strictEqual(pairs[0].intermediates[0].value, 'case');
+    });
+  });
+
+  suite('Regression 2026-05-06: MATLAB classdef section out-of-context', () => {
+    test('should pair inner function-end correctly when methods is rejected outside classdef', () => {
+      const source = 'methods\n  function f()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The inner end on line 2 closes function; the outer end on line 3 corresponds to rejected methods
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should pair inner if-end correctly when properties is rejected outside classdef', () => {
+      const source = 'properties\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
+  suite('Regression 2026-05-06: MATLAB line-continuation in for-header and RHS identifier', () => {
+    test('should treat for i = 1 then continued :end as range, not block close', () => {
+      const source = 'function f\n  for i = 1 ...\n    :end\n    disp(i);\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect continued for; as RHS identifier, not block opener', () => {
+      const source = 'function r = make\n  r = ...\n     for;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

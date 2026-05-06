@@ -2612,5 +2612,32 @@ end.`;
     });
   });
 
+  suite('Regression 2026-05-06: Pascal & keyword-escape and procedure-of-object', () => {
+    test('should not treat &case as block opener', () => {
+      const source = 'begin\n  X := &case;\n  case Y of\n    1: DoOne;\n  end;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(beginPair && casePair);
+    });
+
+    test('should not register of from procedure of object as case intermediate', () => {
+      const source = 'case X of\n  1: P := procedure of object;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      const ofIntermediates = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'of');
+      assert.strictEqual(ofIntermediates.length, 1, 'only the case-of should be an intermediate');
+    });
+
+    test('should not register of from class of TBase as case intermediate', () => {
+      const source = 'case X of\n  1: P := class of TBase;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      const ofIntermediates = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'of');
+      assert.strictEqual(ofIntermediates.length, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

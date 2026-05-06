@@ -1537,5 +1537,49 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-06: do(args) function call vs do/until block', () => {
+    test('should not treat do(1, 2) as block_open inside function', () => {
+      const source = 'function f()\n  do(1, 2);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still detect do as block opener when followed by newline body', () => {
+      const source = 'do\n  body = 1;\nuntil cond';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
+  suite('Regression 2026-05-06: typed-end after line continuation is not statement-leading', () => {
+    test('should not treat endif after ... continuation as block close', () => {
+      const source = 'function f()\n  if true\n    x = 1 ...\n    endif\n  endif\nendfunction';
+      const pairs = parser.parse(source);
+      // Only the real endif on line 4 closes the if; the endif after ... is mid-expression.
+      const ifBlock = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifBlock);
+      assert.strictEqual(ifBlock?.closeKeyword.line, 4);
+    });
+
+    test('should not treat until after \\\\ continuation as block close', () => {
+      const source = 'do\n  body = 1 \\\n  until cond\nuntil real_cond';
+      const pairs = parser.parse(source);
+      // The first `until` after `\` is mid-expression; the real `until cond` on line 3 closes do.
+      const doBlock = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.ok(doBlock);
+      assert.strictEqual(doBlock?.closeKeyword.line, 3);
+    });
+  });
+
+  suite('Regression 2026-05-06: case after otherwise is rejected', () => {
+    test('should not register case as intermediate after otherwise in switch', () => {
+      const source = 'switch x\notherwise\n  y = 1;\ncase 1\n  z = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      const middleValues = pairs[0].intermediates.map((t) => t.value);
+      assert.deepStrictEqual(middleValues, ['otherwise']);
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -4736,5 +4736,42 @@ end program`;
     });
   });
 
+  suite('Regression 2026-05-06: function/subroutine after non-paren operator', () => {
+    test('should not open function block when function appears after = in expression', () => {
+      const source = 'function f()\n  integer :: function = 5\n  f = function * 2\nend function';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+  });
+
+  suite('Regression 2026-05-06: block_middle followed by array assignment', () => {
+    test('should not register else as intermediate when else(N) = expr', () => {
+      const source = 'if (.true.) then\n  else(1) = 5\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const elseInts = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'else');
+      assert.strictEqual(elseInts.length, 0, 'else(1) = 5 is array assignment, not intermediate');
+    });
+
+    test('should not register else as intermediate with & continuation to =', () => {
+      const source = 'if (.true.) then\n  else &\n    = 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const elseInts = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'else');
+      assert.strictEqual(elseInts.length, 0);
+    });
+  });
+
+  suite('Regression 2026-05-06: select case without parens is rejected', () => {
+    test('should not open select block when select case has no parens', () => {
+      const source = 'select case\n  case (1)\n    y = 1\nend select';
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select case without parens is invalid; should not open');
+    });
+  });
+
   generateCommonTests(config);
 });

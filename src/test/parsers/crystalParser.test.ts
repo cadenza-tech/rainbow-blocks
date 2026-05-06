@@ -3785,5 +3785,33 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-06: keywords as method names after def', () => {
+    test('should pair def-end correctly when method is named end', () => {
+      const source = 'def end\n  42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should pair def-end correctly when method is named class', () => {
+      const source = 'def class\n  42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should pair def-end correctly when method is named begin', () => {
+      const source = 'def begin\n  42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should pair def-end correctly when method is named do', () => {
+      const source = 'def do\n  42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

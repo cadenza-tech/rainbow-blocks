@@ -2609,5 +2609,19 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-06: handler-form to/on requires identifier, not literal', () => {
+    test('should not treat to 5 at line start as handler block opener', () => {
+      const source = 'set x\n  to 5\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect to handlerName() at line start as block opener', () => {
+      const source = 'to greet(name)\n  display dialog name\nend greet';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

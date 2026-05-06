@@ -3553,5 +3553,39 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-06: while/for with implicit continuation and do', () => {
+    test('should pair while-end when next line begins with method-chain dot before do', () => {
+      const source = 'while x\n  .ready? do\n  body\nend';
+      const pairs = parser.parse(source);
+      const whilePair = pairs.find((p) => p.openKeyword.value === 'while');
+      assert.ok(whilePair, 'while should be paired with end');
+    });
+
+    test('should pair while-end when condition spans parens then do', () => {
+      const source = 'while (\n  cond\n) do\n  body\nend';
+      const pairs = parser.parse(source);
+      const whilePair = pairs.find((p) => p.openKeyword.value === 'while');
+      assert.ok(whilePair, 'while should be paired with end across paren-spanning condition');
+    });
+  });
+
+  suite('Regression 2026-05-06: char literal escape with trailing newline', () => {
+    test('should not consume newline as char target in ?\\C-<newline>', () => {
+      const source = '?\\C-\nif true\nend';
+      const regions = parser.getExcludedRegions(source);
+      const charRegion = regions.find((r) => r.start === 0);
+      assert.ok(charRegion);
+      assert.strictEqual(charRegion?.end, 4, 'region should cover ?\\C- (4 chars), not include the newline');
+    });
+
+    test('should not consume newline as char target in ?\\M-\\C-<newline>', () => {
+      const source = '?\\M-\\C-\nif true\nend';
+      const regions = parser.getExcludedRegions(source);
+      const charRegion = regions.find((r) => r.start === 0);
+      assert.ok(charRegion);
+      assert.strictEqual(charRegion?.end, 7, 'region should cover ?\\M-\\C- (7 chars), not include the newline');
+    });
+  });
+
   generateCommonTests(config);
 });

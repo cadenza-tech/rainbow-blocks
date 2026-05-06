@@ -2712,5 +2712,36 @@ endmodule`;
     });
   });
 
+  suite('Regression 2026-05-06: case/endcase chain-consume with control keywords', () => {
+    test('should pair always with endcase when case is the body of always', () => {
+      const source = 'always @(posedge clk) case (sel)\n  1: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always block should pair with endcase');
+      assert.strictEqual(alwaysPair?.closeKeyword.value, 'endcase');
+    });
+
+    test('should pair always with begin/end when unique if is the body', () => {
+      const source = 'always @(posedge clk) unique if (a) begin\n  x <= 1;\nend';
+      const pairs = parser.parse(source);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should pair when unique qualifier precedes if');
+    });
+
+    test('should pair randsequence with endsequence', () => {
+      const source = 'randsequence (s)\n  s: a b;\nendsequence';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'randsequence', 'endsequence');
+    });
+  });
+
+  suite('Regression 2026-05-06: matchAttribute with bare-newline string termination', () => {
+    test('should fully contain (* attr *) when string contains bare newline followed by text', () => {
+      const source = '(* attr = "abc\ndef" *) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
