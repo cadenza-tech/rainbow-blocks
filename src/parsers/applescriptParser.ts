@@ -504,6 +504,16 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
           return { nextPos: endPos };
         }
+        // 'to' and 'on' as handler-definition openers must be followed by an identifier
+        // (the handler name). Reject `to 5`, `to "string"`, etc., which are typos or
+        // continuations of the previous statement, not handler declarations.
+        if (keyword === 'to' || keyword === 'on') {
+          let probe = endPos;
+          while (probe < source.length && (source[probe] === ' ' || source[probe] === '\t')) probe++;
+          if (probe >= source.length || !/[a-zA-Z_]/.test(source[probe])) {
+            return { nextPos: endPos };
+          }
+        }
       }
 
       // 'tell', 'if', 'repeat' may appear mid-line in condition contexts (after 'if',
