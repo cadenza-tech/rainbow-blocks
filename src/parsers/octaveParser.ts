@@ -75,8 +75,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
   }
 
   // Reject block open keywords used as variable names (do = 1, if = 5, etc.)
+  // Reject `do` immediately followed by `(` — `do(args)` is a function call, not a do/until block.
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
+      return false;
+    }
+    if (keyword === 'do' && source[position + keyword.length] === '(') {
       return false;
     }
     return super.isValidBlockOpen(keyword, source, position, excludedRegions);
@@ -100,13 +104,30 @@ export class OctaveBlockParser extends MatlabBlockParser {
   }
 
   // Returns true when the position is at the start of a statement (line start, after
-  // a `;`/`,`/`\` continuation, or at the beginning of the source).
+  // a `;`/`,` separator, or at the beginning of the source). When the previous line
+  // ended with a `...` or `\` continuation, the current line is logically a continuation
+  // of the previous statement, so a typed-end keyword there is mid-expression, not leading.
   private isAtStatementLeadingPosition(source: string, position: number): boolean {
     let i = position - 1;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
     if (i < 0) return true;
     const ch = source[i];
-    if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') return true;
+    if (ch === ';' || ch === ',') return true;
+    if (ch === '\n' || ch === '\r') {
+      // Walk past the newline to check whether the previous physical line ended with
+      // `...` or `\` continuation (which would make `position` mid-expression).
+      let nlEnd = i;
+      if (ch === '\n' && i > 0 && source[i - 1] === '\r') nlEnd = i - 1;
+      let scan = nlEnd - 1;
+      while (scan >= 0 && (source[scan] === ' ' || source[scan] === '\t')) scan--;
+      if (scan >= 2 && source[scan] === '.' && source[scan - 1] === '.' && source[scan - 2] === '.') {
+        return false;
+      }
+      if (scan >= 0 && source[scan] === '\\') {
+        return false;
+      }
+      return true;
+    }
     return false;
   }
 
@@ -198,7 +219,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return false;
   }
 
-  // Custom block matching for Octave-specific end keywords
+  // Custom block matching for Octave-specific end keywords. Octave intentionally accepts
+  // properties/methods/events/enumeration as standalone block openers (older OOP convention
+  // for @ClassDir/method.m files), so unlike MATLAB the parser does not require an
+  // enclosing classdef.
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
@@ -218,6 +242,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
               if (topOpener !== 'if') break;
             } else if (middleValue === 'case' || middleValue === 'otherwise') {
               if (topOpener !== 'switch') break;
+              // Reject case after otherwise — switch semantics require otherwise to be last
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawOtherwise = intermediates.some((t) => t.value.toLowerCase() === 'otherwise');
+              if (sawOtherwise && middleValue === 'case') break;
             } else if (middleValue === 'catch') {
               if (topOpener !== 'try') break;
             } else if (middleValue === 'unwind_protect_cleanup') {
