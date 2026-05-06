@@ -41,7 +41,7 @@ const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
   endprogram: ['program'],
   endpackage: ['package'],
   endproperty: ['property'],
-  endsequence: ['sequence'],
+  endsequence: ['sequence', 'randsequence'],
   endchecker: ['checker'],
   endclocking: ['clocking'],
   endgroup: ['covergroup'],
@@ -176,7 +176,8 @@ export class VerilogBlockParser extends BaseBlockParser {
       'table',
       'macromodule',
       'config',
-      'randcase'
+      'randcase',
+      'randsequence'
     ],
     blockClose: [
       'endmodule',
@@ -792,9 +793,11 @@ export class VerilogBlockParser extends BaseBlockParser {
                 nestLevel: stack.length
               });
 
-              // For fork/join*, also close preceding control keyword (like always, initial, if)
-              // Mirrors the begin/end handling above
-              if (closeValue === 'join' || closeValue === 'join_any' || closeValue === 'join_none') {
+              // For fork/join* and case/endcase, also close preceding control keyword
+              // (like always, initial, if). The SV grammar allows `always_keyword statement`
+              // where `statement` can be a case_statement, so the always block should pair
+              // with the case's endcase the same way it does with fork/join.
+              if (closeValue === 'join' || closeValue === 'join_any' || closeValue === 'join_none' || closeValue === 'endcase') {
                 this.chainConsumeControlKeywords(stack, pairs, token, matchIndex, tokens, ti);
               }
             }

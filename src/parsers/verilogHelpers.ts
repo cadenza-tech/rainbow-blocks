@@ -106,18 +106,17 @@ export function matchAttribute(source: string, pos: number): ExcludedRegion {
       if (i < source.length && source[i] === '"') {
         i++;
       } else if (i < source.length && (source[i] === '\n' || source[i] === '\r')) {
-        // String terminated by bare newline: skip newline and any stray closing quote
-        if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
-          i += 2;
-        } else {
-          i++;
+        // String terminated by bare newline. Scan forward for `*)` directly without
+        // re-entering string mode, since further `"` chars are likely stale text from
+        // the unterminated string and should not toggle parsing state again.
+        let j = i;
+        while (j < source.length) {
+          if (source[j] === '*' && j + 1 < source.length && source[j + 1] === ')') {
+            return { start: pos, end: j + 2 };
+          }
+          j++;
         }
-        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-          i++;
-        }
-        if (i < source.length && source[i] === '"') {
-          i++;
-        }
+        return { start: pos, end: source.length };
       }
       continue;
     }

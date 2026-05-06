@@ -496,6 +496,35 @@ export function scanForBeginAfterControl(
       continue;
     }
 
+    // Skip SystemVerilog violation/check qualifiers that legitimately appear between a
+    // control keyword and the case/if statement: `unique`, `unique0`, `priority`.
+    // (LRM IEEE 1800-2017 §12.4 / §12.5)
+    for (const qualifier of ['unique0', 'unique', 'priority']) {
+      if (source.slice(i, i + qualifier.length) === qualifier) {
+        const after = source[i + qualifier.length];
+        if (after === undefined || !/[a-zA-Z0-9_$]/.test(after)) {
+          i += qualifier.length;
+          isControlKw = true;
+          break;
+        }
+      }
+    }
+    if (isControlKw) {
+      continue;
+    }
+
+    // Check for `case` keyword (case_statement is a valid statement body for control
+    // keywords like always/initial/if). Continue scanning so the trailing endcase can
+    // chain-consume back to the control keyword.
+    for (const caseKw of ['casez', 'casex', 'case']) {
+      if (source.slice(i, i + caseKw.length) === caseKw) {
+        const after = source[i + caseKw.length];
+        if (after === undefined || !/[a-zA-Z0-9_$]/.test(after)) {
+          return true;
+        }
+      }
+    }
+
     // Check for sensitivity list @(...) and skip it
     if (source[i] === '@') {
       i = skipSensitivityList(source, i + 1, excludedRegions, callbacks);
