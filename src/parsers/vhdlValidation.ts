@@ -92,6 +92,16 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       if (isWaitBeforeFor(prevLineNoComment, prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
         return false;
       }
+      // Continue scanning upward through wait-clause continuation lines (`on signal_list`,
+      // `until cond`, `for time`) so a multi-line wait statement is detected as a whole.
+      if (/^[ \t]*(on|until|for)\b/i.test(prevLineNoComment)) {
+        if (prevNl <= 0) break;
+        scanEnd = prevNl;
+        if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
+          scanEnd--;
+        }
+        continue;
+      }
       // Continue scanning upward through port map / generic map lines
       if (/\b(port|generic)[ \t]+map\b/.test(prevLineNoComment)) {
         if (prevNl <= 0) break;
@@ -244,29 +254,77 @@ function hasUseEntityOrConfigAfterFor(
   return false;
 }
 
-// Validates 'while' keyword: rejects 'wait while' (not a loop construct)
-export function isValidWhileOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
-  let i = position - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
-    i--;
-  }
-  // Skip excluded regions backward (comments between wait and while)
-  while (i >= 0 && callbacks.isInExcludedRegion(i, excludedRegions)) {
-    const region = callbacks.findExcludedRegionAt(i, excludedRegions);
-    if (region) {
-      i = region.start - 1;
-      while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
-        i--;
+// Walks backward from `start` over whitespace and comments, returning the offset of the
+// next non-whitespace/non-comment character (or -1 if start of source is reached).
+function skipBackwardWhitespaceAndComments(
+  source: string,
+  start: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): number {
+  let i = start;
+  while (i >= 0) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
       }
-    } else {
+    }
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
       i--;
+      continue;
     }
+    break;
   }
-  if (i >= 3) {
-    const candidate = source.slice(i - 3, i + 1).toLowerCase();
-    if (candidate === 'wait' && (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]))) {
-      return false;
+  return i;
+}
+
+// Validates 'while' keyword: rejects 'wait while' (not a loop construct).
+// Scans backward through whitespace and comments to the previous word; if it's `wait`,
+// reject. Also walks back through wait-clause keywords (`on`, `until`) so a multi-line
+// wait statement (`wait\n  on sig\n  while running;`) is detected as a wait-while clause.
+export function isValidWhileOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
+  let i = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
+  for (let safety = 0; safety < 20; safety++) {
+    if (i < 0) return true;
+    const wordEnd = i;
+    if (!/[a-zA-Z0-9_]/.test(source[wordEnd])) return true;
+    let wordStart = wordEnd;
+    while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
+    const word = source.slice(wordStart, wordEnd + 1).toLowerCase();
+    if (word === 'wait') return false;
+    if (word !== 'on' && word !== 'until') return true;
+    // Walk past the wait-clause expression: skip whitespace/comments, then any non-keyword
+    // tokens (signal names, parens, operators) until we reach `;`, another wait-clause
+    // keyword, or the `wait` keyword itself.
+    let j = skipBackwardWhitespaceAndComments(source, wordStart - 1, excludedRegions, callbacks);
+    while (j >= 0) {
+      if (callbacks.isInExcludedRegion(j, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[j];
+      if (ch === ';') return true;
+      if (/[a-zA-Z0-9_]/.test(ch)) {
+        let ws = j;
+        while (ws > 0 && /[a-zA-Z0-9_]/.test(source[ws - 1])) ws--;
+        const w = source.slice(ws, j + 1).toLowerCase();
+        if (w === 'wait') return false;
+        if (w === 'on' || w === 'until') {
+          i = j;
+          break;
+        }
+        j = ws - 1;
+        continue;
+      }
+      j--;
     }
+    if (j < 0) return true;
   }
   return true;
 }
@@ -746,25 +804,45 @@ function isCaseBranchArrow(
   return false;
 }
 
-// Checks if position is inside parenthesized expression (port map, generic map, function call)
-// Scans backward from position to find unmatched '('
+// Checks if position is inside parenthesized expression (port map, generic map, function call,
+// VHDL-2008 generic subprogram default declarations). Scans backward from position to find
+// unmatched '('; for VHDL-2008 generic/port clauses, `;` is an item separator inside parens
+// (not a statement boundary). To avoid false-positives from broken/in-progress paren state
+// (e.g., `port map (a => b;` followed by a fresh statement), the candidate `(` is verified
+// to have a matching `)` ahead in the source before declaring "inside parens".
 export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
   let depth = 0;
   for (let i = position - 1; i >= 0; i--) {
     if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
     const ch = source[i];
-    // Semicolon is a statement boundary in VHDL (never valid inside parentheses);
-    // encountering one means any unmatched ( belongs to a prior/broken statement
-    if (ch === ';') {
-      return false;
-    }
     if (ch === ')') {
       depth++;
     } else if (ch === '(') {
       if (depth === 0) {
-        return true;
+        return hasMatchingCloseParen(source, i, position, excludedRegions, callbacks);
       }
       depth--;
+    }
+  }
+  return false;
+}
+
+// Returns true when the '(' at openPos has a matching ')' somewhere after `position`.
+function hasMatchingCloseParen(
+  source: string,
+  openPos: number,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  let depth = 1;
+  for (let j = openPos + 1; j < source.length; j++) {
+    if (callbacks.isInExcludedRegion(j, excludedRegions)) continue;
+    const ch = source[j];
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return j > position;
     }
   }
   return false;
