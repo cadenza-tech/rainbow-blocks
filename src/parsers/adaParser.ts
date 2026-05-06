@@ -46,7 +46,10 @@ const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'pro
 
 // Pattern to match compound end keywords (case insensitive)
 // Allows whitespace, newlines, and -- line comments between 'end' and the type keyword
-const COMPOUND_END_PATTERN = new RegExp(`\\bend(?:[ \\t\\r\\n]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`, 'gi');
+const COMPOUND_END_PATTERN = new RegExp(
+  `\\bend(?:[ \\t\\r\\n\\u00A0\\u2000-\\u200A\\u202F\\u205F\\u3000]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`,
+  'gi'
+);
 
 export class AdaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -181,10 +184,32 @@ export class AdaBlockParser extends BaseBlockParser {
       else if (parenDepth === 0 && (ch === 'd' || ch === 'D')) {
         if (i + 1 < source.length && (source[i + 1] === 'o' || source[i + 1] === 'O') && isAdaWordAt(source, i, 'do')) {
           // Reject `:= do` (no expression between assignment and do) and `do;`
-          // (no extended-return body) — both are malformed.
+          // (no extended-return body) — both are malformed. Skip excluded regions
+          // (comments / strings) when scanning backward so a comment ending in `:=`
+          // is not confused with a real assignment operator.
           let pb = i - 1;
-          while (pb >= 0 && (source[pb] === ' ' || source[pb] === '\t' || source[pb] === '\n' || source[pb] === '\r')) pb--;
-          if (pb >= 1 && source[pb - 1] === ':' && source[pb] === '=') {
+          while (pb >= 0) {
+            if (this.isInExcludedRegion(pb, excludedRegions)) {
+              const region = this.findExcludedRegionAt(pb, excludedRegions);
+              if (region) {
+                pb = region.start - 1;
+                continue;
+              }
+            }
+            const c = source[pb];
+            if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+              pb--;
+              continue;
+            }
+            break;
+          }
+          if (
+            pb >= 1 &&
+            source[pb - 1] === ':' &&
+            source[pb] === '=' &&
+            !this.isInExcludedRegion(pb, excludedRegions) &&
+            !this.isInExcludedRegion(pb - 1, excludedRegions)
+          ) {
             return false;
           }
           let pf = i + 2;
@@ -504,11 +529,13 @@ export class AdaBlockParser extends BaseBlockParser {
                 isTypeDecl = true;
                 typeDeclStart = prevStart;
               } else {
-                // Detect mid-line `; type` or `; subtype` declarations whose continuation
-                // produces the `is` keyword on a later line. prevLine has been
-                // trimStart-ed; compute the original-source offset by adding back the
-                // leading whitespace count.
-                const midDeclMatch = prevLine.match(/;\s*(type|subtype)\b/);
+                // Detect mid-line `; type` / `; subtype` declarations whose continuation
+                // produces the `is` keyword on a later line. Also detect `is type` /
+                // `is subtype` (procedure body opener immediately followed by a type
+                // declaration), `declare type`, `private type`, and `record type`.
+                // prevLine has been trimStart-ed; compute the original-source offset
+                // by adding back the leading whitespace count.
+                const midDeclMatch = prevLine.match(/(?:;|\bis\b|\bdeclare\b|\bprivate\b|\brecord\b)\s+(type|subtype)\b/);
                 if (midDeclMatch && midDeclMatch.index !== undefined) {
                   const originalLine = source.slice(prevStart, scanPos + 1);
                   const leadingTrim = originalLine.length - originalLine.trimStart().length;
