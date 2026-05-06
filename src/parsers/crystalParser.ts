@@ -406,6 +406,12 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '$') {
         return false;
       }
+      // Filter out keywords used as method names after `def` (e.g., `def end`, `def class`,
+      // `def begin`, `def do`). Without this filter, the keyword token interferes with
+      // the def block's pairing.
+      if (this.isAfterDefKeyword(source, token.startOffset)) {
+        return false;
+      }
       // Filter out tokens immediately followed by colon (named tuple key)
       if (source[token.endOffset] === ':') {
         return false;
@@ -571,6 +577,19 @@ export class CrystalBlockParser extends BaseBlockParser {
       return { start: result.start, end: heredocState.pendingEnd };
     }
     return result;
+  }
+
+  // Returns true when the token at `position` immediately follows the keyword `def`
+  // (with at most spaces/tabs between). Used to filter keywords used as method names
+  // (e.g., `def end`, `def class`, `def begin`).
+  private isAfterDefKeyword(source: string, position: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i >= 2 && source.slice(i - 2, i + 1) === 'def') {
+      const defStart = i - 2;
+      return defStart === 0 || !/[a-zA-Z0-9_]/.test(source[defStart - 1]);
+    }
+    return false;
   }
 
   // Validates block open keywords, excluding postfix conditionals and loop do
