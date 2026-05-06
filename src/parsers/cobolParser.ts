@@ -417,7 +417,9 @@ export class CobolBlockParser extends BaseBlockParser {
   // not as a control-flow intermediate).
   private isPrecedingWordDataNameVerb(source: string, position: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    // Skip whitespace including newlines so multi-line statements (e.g., `MOVE\n  ELSE TO X`)
+    // are recognized as data-name verb contexts.
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) i--;
     if (i < 0) return false;
     const wordEnd = i + 1;
     let wordStart = i;
@@ -624,11 +626,38 @@ export class CobolBlockParser extends BaseBlockParser {
 
       const indicator = source[j];
 
-      // Comment lines (`*`, `/`, `D`, `d` at column 7): skip
-      if (indicator === '*' || indicator === '/' || indicator === 'D' || indicator === 'd') {
+      // Whitespace-only line beyond column 7 is a blank line and should be skipped
+      // (per COBOL spec, blank lines between continuation halves are ignored).
+      if (indicator === ' ' || indicator === '\t') {
+        let k = j;
+        while (k < source.length && source[k] !== '\n' && source[k] !== '\r') {
+          if (source[k] !== ' ' && source[k] !== '\t') break;
+          k++;
+        }
+        if (k >= source.length || source[k] === '\n' || source[k] === '\r') {
+          i = k;
+          continue;
+        }
+      }
+
+      // Comment lines (`*`, `/` at column 7): skip
+      if (indicator === '*' || indicator === '/') {
         while (j < source.length && source[j] !== '\n' && source[j] !== '\r') j++;
         i = j;
         continue;
+      }
+      // Debug indicator `D`/`d`: only treat as comment when there is at least one digit
+      // in the sequence area AND the next char (column 8) is not an identifier char
+      // (mirrors isFixedFormatCommentLine logic).
+      if (indicator === 'D' || indicator === 'd') {
+        const hasSequenceDigit = /\d/.test(sequenceArea);
+        const nextCh = source[j + 1];
+        const isIdentifierChar = nextCh !== undefined && /[a-zA-Z0-9_-]/.test(nextCh);
+        if (hasSequenceDigit && !isIdentifierChar) {
+          while (j < source.length && source[j] !== '\n' && source[j] !== '\r') j++;
+          i = j;
+          continue;
+        }
       }
 
       // Continuation indicator must be `-`
