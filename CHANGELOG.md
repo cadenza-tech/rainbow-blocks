@@ -5,6 +5,46 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.41] - 2026-05-06
+
+### Fixed
+
+- Ada: Skip excluded regions when scanning backward for `:=` before `do` in `isExtendedReturn` (`adaParser.ts`) so an extended-return body whose preceding comment ends with `:=` (e.g., `return X : Integer -- :=\n  do ...`) no longer triggers the `:= do` malformed-syntax rejection
+- Ada: Detect mid-line `is type` / `is subtype` / `declare type` / `private type` / `record type` declarations whose `is` keyword appears on a continuation line in the type-decl `is` filter (`adaParser.ts`) so `procedure P is type T\n  is range 1..10;` no longer leaks the inner type's `is` as a procedure intermediate
+- Ada: Accept Unicode whitespace (NBSP U+00A0, EM/EN/IDEOGRAPHIC SPACE, etc.) between `end` and the type keyword in `COMPOUND_END_PATTERN` (`adaParser.ts`) so `end if;` and similar Unicode-spaced compound-end forms are recognized
+- AppleScript: Require an identifier after `to` or `on` at logical line start in `tryMatchSingleKeywordToken` (`applescriptParser.ts`) so `set x\n  to 5\nend` no longer creates a phantom `to → end` block — handler-form `to handlerName(...)` still pairs correctly
+- Bash: Add backtick, `$(...)`, `$'...'`, and backslash-escape handling to `matchArithmeticExpansion`, `matchBareArithmeticEvaluation`, and `matchArithmeticBracket` (`bashStringHelpers.ts`) so `$((`echo done))`)`, `((`echo )` + 1 ))`, `$[ \`echo a]b\` + 1 ]`, and `$[ a \] b ]` are fully contained as excluded regions instead of leaking into surrounding code
+- Bash: Replace quote-toggling in nested `${...}` parameter expansion with proper string-scope handling via new `scanParameterExpansionBody` helper (`bashStringHelpers.ts`) so `"${x:-"a}fi"}"` correctly treats the inner `"...}..."` as a string scope where `}` is literal
+- COBOL: Skip whitespace-only lines (column 7+ blank but column 7 not in line-end) and apply identifier-character check before treating `D`/`d` indicator as debug line in `findFixedFormStringContinuation` (`cobolParser.ts`) so blank intervening lines no longer break fixed-format string continuation
+- COBOL: Skip newlines (not just spaces/tabs) in `isPrecedingWordDataNameVerb` (`cobolParser.ts`) so multi-line statements like `IF X\n  MOVE\n    ELSE TO Y\nEND-IF` correctly recognize `ELSE` as data-name target rather than `IF` intermediate
+- Crystal: Add `isAfterDefKeyword` filter (mirroring `rubyParser.ts`) and apply it in `tokenize` (`crystalParser.ts`) so keywords used as method names (`def end`, `def class`, `def begin`, `def do`, etc.) no longer interfere with the def block's pairing
+- Elixir: Treat `#` (inline comment start) the same as `\n` in `isKeywordUsedAsValue` (`elixirParser.ts`) so `if cond # comment\ndo\n  :ok\nend` correctly pairs `if` with `end` instead of treating `cond` as the block opener
+- Elixir: Recognize bare `\r` (CR-only line ending) as a heredoc-style sigil trigger in `matchSigil` (`elixirHelpers.ts`) for consistency with `matchTripleQuotedString`
+- Elixir: Reject `block_middle` keywords (`after`, `rescue`, `catch`, `else`) followed by `=` in `tokenize` (`elixirParser.ts`) so `after = 100`, `rescue = nil`, etc. used as variable assignments no longer attach as false intermediates
+- Elixir: Restrict `getSigilCloseDelimiter` to ASCII non-alphanumeric characters (`elixirHelpers.ts`) so `~sα` (Unicode letter) no longer accepts α as the close delimiter and consume the rest of the source as a sigil
+- Fortran: Allow `function` and `subroutine` after `)` (type specifier) but reject after other operators in `isValidBlockOpen` (`fortranParser.ts`) so `f = function * 2` (variable in expression) no longer opens a block while `type(integer) function f()` continues to work
+- Fortran: Detect array-element assignment (`(N) = expr`) and `&` line continuation in `isFollowedByAssignmentOp` (`fortranParser.ts`) so `else(1) = 5` and `else &\n   = 1` no longer attach `else` as an intermediate
+- Fortran: Require parenthesized expression for all `select` sub-forms (`case`, `type`, `rank`) in `isValidBlockOpen` (`fortranParser.ts`) — `select case` without `(...)` is no longer accepted, matching the existing `select type` / `select rank` validation
+- Julia: Track `[ ]` bracket depth in `hasUnmatchedBlockOpenerBetween` (`juliaHelpers.ts`), `hasMatchingEndBeforeBracketClose`, and `allUnmatchedBeginsAreFirstindex` (`juliaParser.ts`) so an `end` inside `arr[end]` (lastindex reference) no longer cancels out a real block opener — restores parsing of `a[do x; arr[end] end]`, `a[function f() arr[end] end]`, and similar block expressions inside indexing
+- Julia: Accept `begin` as a real block opener in `isInsideSquareBrackets` (`juliaParser.ts`) when the enclosing `[` has no matching `]` (e.g., user editing in progress) so `a[begin x end` (unclosed bracket) detects the begin/end pair
+- MATLAB: Reject `end` preceded by `=`, `~`, or `:` in `isPrecededByBinaryOperator` (`matlabParser.ts`) so `x = end`, `x = 1:end` (outside indexing), `x = ~end`, and `for i = end-1:5` (with `end` as range LHS expression) no longer steal an outer block's close
+- MATLAB: Filter `block_middle` tokens (`case`, `else`, `elseif`, `otherwise`, `catch`) inside parentheses, brackets, or braces in `tokenize` (`matlabParser.ts`) so `switch x\n  z = foo(case);\n  case 1\nend` correctly treats `foo(case)` as a function call argument, not a switch intermediate
+- MATLAB: Replace `pendingSkipEnds` counter with depth-tracking `pendingSkipDepths` stack in `matchBlocks` (`matlabParser.ts`) so a rejected `methods`/`properties`/`events`/`enumeration`/`arguments` opener correctly skips its matching `end` at the same nesting level instead of consuming an inner block's close
+- MATLAB: Add `collectLogicalLineBefore` helper that follows `...`/`\` line continuations backward and apply it in `isEndInForHeaderRange` and `isUsedAsRhsIdentifier` (`matlabParser.ts`) so `for i = 1 ...\n  :end` (continuation in for-header) and `r = ...\n   for;` (continuation before RHS identifier) are detected correctly
+- Octave: Reject `do` immediately followed by `(` (function-call form) in `isValidBlockOpen` (`octaveParser.ts`) so `do(args)` is treated as a function call instead of a do/until block opener that would prevent outer block pairing
+- Octave: Detect `...`/`\` line continuations on the previous line in `isAtStatementLeadingPosition` (`octaveParser.ts`) so typed-end keywords (`endif`, `until`, etc.) following a continuation line are mid-expression and not block close
+- Octave: Reject `case` after `otherwise` in `matchBlocks` (`octaveParser.ts`) — switch semantics require `otherwise` to be the last clause, so out-of-order `case` after `otherwise` is no longer registered as an intermediate
+- Pascal: Reject keywords preceded by `&` or `@` (FreePascal keyword-escape / address-of) in `isValidBlockOpen` and the `block_middle` path of `tokenize` (`pascalParser.ts`) so `&case`, `&begin`, `&try` no longer open spurious blocks
+- Pascal: Recognize `procedure of object`, `function of object` (method-pointer types), and `class of TBase` (class-reference type) in `isTypeDeclarationOf` (`pascalValidation.ts`) so `case X of\n  1: P := procedure of object;\nend` no longer registers the type-decl `of` as a case intermediate
+- Ruby: Treat current-line leading `.` (method chain) and `)` (closing paren of multi-line condition) as implicit continuation in `findLogicalLineStart` (`rubyValidation.ts`) so `while x\n  .ready? do` and `while (\n  cond\n) do` correctly pair `while` with `end` instead of treating `do` as a stray block opener
+- Ruby: Require non-newline target character for `?\C-x` and `?\M-\C-x` character literals (`rubyParser.ts`) so `?\C-\n` and `?\M-\C-\n` no longer consume the trailing newline as the control-character target
+- Verilog: Chain-consume preceding control keywords for `endcase` (in addition to fork/join) in `matchBlocks` (`verilogParser.ts`) so `always @(posedge clk) case (sel)\n  ...\nendcase` correctly pairs `always` with `endcase`, mirroring the existing fork/join behavior
+- Verilog: Skip SystemVerilog violation/check qualifiers (`unique`, `unique0`, `priority`) and recognize `case`/`casez`/`casex` as valid statement bodies in `scanForBeginAfterControl` (`verilogValidation.ts`) so `always @(posedge clk) unique if (a) begin ... end` and similar SV constructs detect the always-begin/end pairing
+- Verilog: Add `randsequence` to `blockOpen` and map `endsequence` to accept both `sequence` and `randsequence` openers (`verilogParser.ts`) so `randsequence (s) ... endsequence` is recognized as a block per IEEE 1800-2017 §18.17
+- Verilog: After bare-LF/CR string termination inside `(* attr *)`, scan forward for the literal `*)` close in `matchAttribute` (`verilogHelpers.ts`) without re-entering string mode so attribute strings with embedded newlines and trailing text no longer cause runaway excluded regions consuming the rest of the source
+- VHDL: Verify the candidate `(` has a matching `)` ahead in `isInsideParens` (`vhdlValidation.ts`) instead of treating `;` as a hard boundary, so VHDL-2008 generic clauses with semicolon-separated subprogram declarations (`generic (\n  type T is private;\n  function compare(...) return boolean is <>\n)`) correctly recognize keywords inside as paren-bound — broken/in-progress unclosed-paren cases continue to be handled gracefully
+- VHDL: Walk backward through wait-clause continuation lines (`on signal_list`, `until cond`, `for time`) in `isValidForOpen` and `isValidWhileOpen` (`vhdlValidation.ts`) so multi-line wait statements (`wait\n  on clk\n  until cond\n  for 100 ns;`) no longer mis-detect the trailing `for`/`while` as loop block openers
+
 ## [1.1.40] - 2026-05-01
 
 ### Fixed
@@ -1538,6 +1578,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.41]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.40...v1.1.41
 [1.1.40]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.39...v1.1.40
 [1.1.39]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.38...v1.1.39
 [1.1.38]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.37...v1.1.38
