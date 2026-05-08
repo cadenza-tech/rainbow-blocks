@@ -21,6 +21,10 @@ function getSigilCloseDelimiter(open: string): string | null {
   if (open in SIGIL_PAIRED_DELIMITERS) {
     return SIGIL_PAIRED_DELIMITERS[open];
   }
+  // Reject closing brackets: only the matching opener (in SIGIL_PAIRED_DELIMITERS) is valid.
+  if (open === ')' || open === ']' || open === '}' || open === '>') {
+    return null;
+  }
   // ASCII-only non-paired delimiters
   if (open.length === 1 && open.charCodeAt(0) < 128 && /[^a-zA-Z0-9\s]/.test(open)) {
     return open;

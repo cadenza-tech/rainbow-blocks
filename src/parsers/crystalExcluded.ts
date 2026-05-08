@@ -177,6 +177,9 @@ function skipMacroPercentLiteral(source: string, pos: number): number | null {
   // Delimiter must be a non-alphanumeric, non-whitespace symbol
   if (/[a-zA-Z0-9 \t\r\n]/.test(next)) return null;
 
+  // Reject closing brackets — only the opener form is a valid percent-literal delimiter.
+  if (next === ')' || next === ']' || next === '}' || next === '>') return null;
+
   const close = PERCENT_LITERAL_PAIRED_DELIMITERS[next] ?? next;
   const isPaired = next !== close;
 
