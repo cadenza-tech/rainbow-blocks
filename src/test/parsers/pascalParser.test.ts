@@ -2639,5 +2639,36 @@ end.`;
     });
   });
 
+  suite('Regression 2026-05-08: partial class is recognized as class block', () => {
+    test('should pair class/end for partial class declaration', () => {
+      const source = 'type\n  TFoo = partial class\n    X: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-08: addAsmExcludedRegions must reject identifier prefixes', () => {
+    test('should not treat αasm as asm block (Unicode-letter prefix)', () => {
+      const source = 'αasm\n  nop\nend\nbegin\n  X := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+    test('should not treat @asm as asm block (address-of operator)', () => {
+      const source = 'begin\n  X := @asm\n  Y := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+    test('should not treat TList<asm> as asm block (generic param)', () => {
+      const source = 'TList<asm> = class\n  X: Integer;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+    test('should not treat arr[asm] as asm block (array index)', () => {
+      const source = 'begin\n  X := arr[asm];\n  Y := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

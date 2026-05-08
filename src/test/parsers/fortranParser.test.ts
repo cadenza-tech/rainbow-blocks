@@ -4773,5 +4773,45 @@ end program`;
     });
   });
 
+  suite('Regression 2026-05-08: continuation END FILE I/O statement is not a block close', () => {
+    test('should not treat end &\\n file as block_close', () => {
+      const source = 'program test\nend &\n   file 10\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Regression 2026-05-08: user-defined dot operator before end identifier', () => {
+    test('should not treat end after .myop. as block_close', () => {
+      const source = 'program test\n  integer :: end\n  end = 5\n  x = y .myop. end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
+  suite('Regression 2026-05-08: bare end inside select case must not close the select block', () => {
+    test('should leave select intact when stray bare end appears in a case branch', () => {
+      const source =
+        'program test\n  select case (x)\n  case (1)\n    if (y > 0) then\n      print *, 1\n    end if\n    end\n  end select\nend program';
+      const pairs = parser.parse(source);
+      assert.ok(pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select' && p.closeKeyword.value.toLowerCase() === 'end select'));
+      assert.ok(pairs.find((p) => p.openKeyword.value.toLowerCase() === 'program' && p.closeKeyword.value.toLowerCase() === 'end program'));
+    });
+  });
+
+  suite('Regression 2026-05-08: interface NAME and type NAME suppress keyword construct names', () => {
+    test('should not treat block as block_open when used as interface name (stray end do follows)', () => {
+      const source = 'module foo\ninterface block\n  module procedure foo\nend interface\nend module\nend do';
+      const pairs = parser.parse(source);
+      // Without the fix, the phantom `block` opener would pair with the stray `end do`.
+      assert.ok(!pairs.some((p) => p.openKeyword.value.toLowerCase() === 'block'));
+    });
+    test('should not treat do as block_open when used as Fortran 90 type name', () => {
+      const source = 'type do\n  real :: x\nend type\nend do';
+      const pairs = parser.parse(source);
+      assert.ok(!pairs.some((p) => p.openKeyword.value.toLowerCase() === 'do'));
+    });
+  });
+
   generateCommonTests(config);
 });

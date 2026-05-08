@@ -3721,6 +3721,19 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-08: shorthand def with multi-line argument list', () => {
+    test('should not pair shorthand def with end when arguments span multiple lines', () => {
+      const source = 'class Vector\n  def magnitude(\n    x : Int32,\n    y : Int32\n  ) = Math.sqrt(x*x + y*y)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+    test('should not pair shorthand def with end when return type and assignment are on continuation line', () => {
+      const source = 'class Vector\n  def magnitude(\n    x : Int32\n  ) : Float64 = Math.sqrt(x*x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   suite('Regression 2026-04-29: regex literal inside macro template', () => {
     test('should skip regex /pat/ inside {% %} so %} in regex does not close macro', () => {
       const source = 'class MyClass\n  {% pattern = /hello%}world/ ; if true %}\nend';

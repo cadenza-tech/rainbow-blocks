@@ -3567,5 +3567,23 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-08: begin/end inside parens within indexing brackets', () => {
+    test('should treat begin/end as firstindex/lastindex for arr[(begin:end)]', () => {
+      const source = 'function f(arr)\n  return arr[(begin:end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should treat begin as firstindex for arr[(begin)]', () => {
+      const source = 'function f(arr)\n  return arr[(begin)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should treat end as lastindex for arr[(end - 1)]', () => {
+      const source = 'function f(arr)\n  return arr[(end - 1)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

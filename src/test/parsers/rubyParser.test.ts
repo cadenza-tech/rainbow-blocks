@@ -3587,5 +3587,29 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-08: def with backslash line continuation before keyword name', () => {
+    test('should treat def \\<NL>do as method named do (filter inner do)', () => {
+      const source = 'class Foo\n  def \\\n  do\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'class'));
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'def'));
+    });
+    test('should treat def \\<NL>class as method named class (filter inner class)', () => {
+      const source = 'class Foo\n  def \\\n  class\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'class'));
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'def'));
+    });
+    test('should treat def \\<CRLF>module as method named module', () => {
+      const source = 'class Foo\n  def \\\r\n  module\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'class'));
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'def'));
+    });
+  });
+
   generateCommonTests(config);
 });

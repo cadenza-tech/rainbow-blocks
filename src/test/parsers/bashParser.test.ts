@@ -5537,6 +5537,50 @@ fi`;
     });
   });
 
+  suite('Regression 2026-05-08: $$# is part of the same word, not a comment start', () => {
+    test('should treat $$#tag as a single word (not split into comment) so following keyword is detected', () => {
+      const source = 'if true; then echo $$#tag; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should treat $$$$#tag as a single word (literal # part of the word)', () => {
+      const source = 'if true; then echo $$$$#tag; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression 2026-05-08: empty-delimiter heredoc terminates at blank line', () => {
+    test("should treat <<'' body as excluded so inner for/done is not detected", () => {
+      const source = "cat <<''\nfor i in 1; do echo $i; done\n\nif true; then\n  echo ok\nfi";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should treat <<"" body as excluded so inner for/done is not detected', () => {
+      const source = 'cat <<""\nfor i in 1; do echo $i; done\n\nif true; then\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression 2026-05-08: brace block close } after heredoc terminator', () => {
+    test('should pair { and } when heredoc body precedes the }', () => {
+      const source = '{\ncat <<EOF\nbody\nEOF\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+    test('should pair { and } with tab-indented heredoc terminator (CRLF)', () => {
+      const source = '{\r\ncat <<-EOF\r\n\tbody\r\n\tEOF\r\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+    test('should pair { and } when heredoc body is empty', () => {
+      const source = '{\ncat <<EOF\nEOF\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
   suite('Regression: heredoc with concatenated quoted/unquoted delimiter parts', () => {
     test('should treat concatenated quoted parts as single delimiter (EOFTAIL)', () => {
       const source = 'cat <<"EOF"\'TAIL\'\nbody\nEOFTAIL\nfor i in 1 2; do echo $i; done';

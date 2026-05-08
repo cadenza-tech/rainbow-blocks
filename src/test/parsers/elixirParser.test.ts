@@ -3810,5 +3810,41 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-08: sigil close-bracket delimiters are rejected', () => {
+    test('should reject ~s} as sigil opener (close-brace is not a valid sigil delimiter)', () => {
+      const source = 'x = ~s}foo, end\ndef bar do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should reject ~s) as sigil opener', () => {
+      const source = 'x = ~s)foo)\ndef bar do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should reject ~s] as sigil opener', () => {
+      const source = 'x = ~s]foo]\ndef bar do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-08: block keyword as variable before another identifier+do', () => {
+    test('should pair if/end when cond is followed by another identifier and do', () => {
+      const source = 'if cond foo do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should pair if/end when try is followed by another identifier and do', () => {
+      const source = 'if try foo do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should pair if/end when quote is followed by another identifier and do', () => {
+      const source = 'if quote foo do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

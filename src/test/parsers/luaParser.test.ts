@@ -1195,5 +1195,20 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-08: isAfterGoto must reject .goto / :goto field/method access', () => {
+    test('should pair function/end when self.goto is the last expression', () => {
+      const pairs = parser.parse('function f()\n  return self.goto\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should pair function/end when self:goto is the method call', () => {
+      const pairs = parser.parse('function f()\n  return self:goto()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+    test('should pair function/end when module.goto is the field access', () => {
+      const pairs = parser.parse('function f()\n  return module.goto\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

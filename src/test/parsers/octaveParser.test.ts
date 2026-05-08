@@ -1581,5 +1581,25 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-08: arguments block requires enclosing function/methods/classdef', () => {
+    test('should reject standalone arguments block at top level', () => {
+      const source = 'arguments\n  x = 1\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+    test('should accept arguments block inside function', () => {
+      const source = 'function f\n  arguments\n    x\n  end\n  x = 1\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argsPair = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(argsPair, 'arguments inside function should pair with end');
+    });
+    test('should reject arguments block inside if (not function)', () => {
+      const source = 'if true\n  arguments\n    x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -2814,5 +2814,21 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-08: exit when X inside begin must not register when as intermediate', () => {
+    test('should leave begin intermediates empty when exit when is used without exception handler', () => {
+      const source = 'begin\n   exit when X;\nend;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.deepStrictEqual(pairs[0].intermediates, []);
+    });
+    test('should still register when as intermediate when exception handler is present', () => {
+      const source = 'begin\n   x := 1;\nexception\n   when others => null;\nend;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(middleValues, ['exception', 'when']);
+    });
+  });
+
   generateCommonTests(config);
 });
