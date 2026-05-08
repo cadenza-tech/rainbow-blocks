@@ -40,7 +40,8 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (i < 0) return false;
     const ch = source[i];
     // Operators that put `end` in an expression context.
-    if ('+*/^<>&|~:'.includes(ch)) return true;
+    // `\` is MATLAB's left-division operator; treat it like other binary operators.
+    if ('+*/^<>&|~:\\'.includes(ch)) return true;
     // `=` (single equals, not `==`/`>=`/`<=`/`!=`/`~=`) marks an assignment; `end` on the
     // RHS is invalid outside indexing.
     if (ch === '=') {
@@ -48,11 +49,17 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (prev === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~') return false;
       return true;
     }
-    // `-` could be unary; treat as binary only when preceded by a value-like char
+    // `-` could be unary; treat it as a value-context marker (i.e. end is operand) when
+    // (a) it follows a value-like char (binary minus), or
+    // (b) it follows `=`, `(`, `,`, `;`, `[`, `{`, or another operator (unary minus on RHS).
     if (ch === '-') {
       let j = i - 1;
       while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
-      if (j >= 0 && /[a-zA-Z0-9_)\]}]/.test(source[j])) return true;
+      if (j < 0) return false;
+      const prev = source[j];
+      if (/[a-zA-Z0-9_)\]}]/.test(prev)) return true;
+      if (prev === '=' || prev === '(' || prev === ',' || prev === ';' || prev === '[' || prev === '{') return true;
+      if ('+*/^<>&|~:\\'.includes(prev)) return true;
       return false;
     }
     return false;
