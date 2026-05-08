@@ -91,7 +91,21 @@ export class PascalBlockParser extends BaseBlockParser {
         if (prev === ';') {
           return true;
         }
-        if (prev === '.' || prev === ':' || prev === ',' || prev === '(' || prev === '=') {
+        // Expression/declaration prefixes that disqualify `asm` as a block opener.
+        // `[asm]` (array index), `<asm>` (generic param), arithmetic ops are all identifier contexts.
+        if (
+          prev === '.' ||
+          prev === ':' ||
+          prev === ',' ||
+          prev === '(' ||
+          prev === '=' ||
+          prev === '[' ||
+          prev === '<' ||
+          prev === '+' ||
+          prev === '-' ||
+          prev === '*' ||
+          prev === '/'
+        ) {
           return false;
         }
         if (/[a-zA-Z0-9_]/.test(prev)) {
@@ -323,10 +337,14 @@ export class PascalBlockParser extends BaseBlockParser {
   }
 
   // Reject any close keyword (end/until) immediately after `.` (field/property access),
-  // `@` (address-of operator like `@end`), or `&` (FreePascal escaped-keyword identifier).
+  // `@` (address-of operator like `@end`), `&` (FreePascal escaped-keyword identifier),
+  // `$` (hex-literal prefix like `$end`), or `#` (character-constant prefix like `#end`).
   protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isPrecededByFieldDot(source, position, excludedRegions)) return false;
-    if (position > 0 && (source[position - 1] === '@' || source[position - 1] === '&')) return false;
+    if (position > 0) {
+      const prev = source[position - 1];
+      if (prev === '@' || prev === '&' || prev === '$' || prev === '#') return false;
+    }
     return true;
   }
 
@@ -408,6 +426,11 @@ export class PascalBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip when adjacent to Unicode letters (e.g., αasm is an identifier, not a keyword).
+      if (this.isAdjacentToUnicodeLetter(source, asmStart, 3)) {
+        continue;
+      }
+
       // Skip asm used as an identifier (variable, field, parameter, etc.).
       // Forward check: reject when followed by ':' (type annotation like 'asm: Integer'),
       // ':=' (assignment), '.', ',', ')', '=', or '(' (function call).
@@ -430,7 +453,17 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         if (fp < source.length) {
           const next = source[fp];
-          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';' || next === '(') {
+          if (
+            next === ':' ||
+            next === '.' ||
+            next === ',' ||
+            next === ')' ||
+            next === '=' ||
+            next === ';' ||
+            next === '(' ||
+            next === '>' ||
+            next === ']'
+          ) {
             continue;
           }
         }
@@ -455,7 +488,24 @@ export class PascalBlockParser extends BaseBlockParser {
         if (bp >= 0 && source[bp] !== '\n' && source[bp] !== '\r') {
           const prev = source[bp];
           if (prev !== ';') {
-            if (prev === '.' || prev === ':' || prev === ',' || prev === '(' || prev === '=') {
+            // @asm = address-of, &asm = identifier-escape, <asm> = generic param,
+            // [asm] = array indexing, +/-/*/asm = arithmetic. None of these can introduce
+            // an asm block; treat them as non-statement context.
+            if (
+              prev === '.' ||
+              prev === ':' ||
+              prev === ',' ||
+              prev === '(' ||
+              prev === '=' ||
+              prev === '@' ||
+              prev === '&' ||
+              prev === '<' ||
+              prev === '[' ||
+              prev === '+' ||
+              prev === '-' ||
+              prev === '*' ||
+              prev === '/'
+            ) {
               continue;
             }
             if (/[a-zA-Z0-9_]/.test(prev)) {

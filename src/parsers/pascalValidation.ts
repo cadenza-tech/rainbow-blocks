@@ -9,7 +9,8 @@ export interface PascalValidationCallbacks {
 }
 
 // Type modifier keywords that can appear between '=' and class/object/interface
-export const TYPE_MODIFIERS = ['abstract', 'sealed', 'packed'];
+// 'partial' is the Delphi 2009+ partial-class modifier.
+export const TYPE_MODIFIERS = ['abstract', 'sealed', 'packed', 'partial'];
 
 // Checks if a position sits inside unbalanced parentheses (e.g. 'if (x = class)')
 // Stops at ';' (statement terminator) or start of file.
