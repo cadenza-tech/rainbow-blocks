@@ -20,8 +20,10 @@ export function isCommentStart(source: string, pos: number): boolean {
   return /[ \t\n\r;|&(]/.test(prev);
 }
 
-// Checks if '#' at position is part of $# variable (odd consecutive $ count before #)
-// $# → true (argument count), $$# → false ($$ is PID, # is comment), $$$# → true ($$ + $#)
+// Checks if '#' at position is preceded by '$' (a $-prefixed token like $#, $$#, $$$#).
+// Real bash never starts a comment with `#` immediately after `$`: even when `$$` is the
+// PID and the trailing `#` is literal, the `#` is part of the same word (e.g., `echo $$#tag`
+// prints `<PID>#tag`, not `<PID>` followed by a comment).
 export function isDollarHashVariable(source: string, pos: number): boolean {
   let count = 0;
   let p = pos - 1;
@@ -29,7 +31,7 @@ export function isDollarHashVariable(source: string, pos: number): boolean {
     count++;
     p--;
   }
-  return count > 0 && count % 2 === 1;
+  return count > 0;
 }
 
 // Checks if source matches a whole word at position (word boundary check)
@@ -92,7 +94,9 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
     break;
   }
 
-  if (!matched || terminator.length === 0) return null;
+  if (!matched) return null;
+  // Empty delimiter (e.g., `<<''` or `<<""`) is bash's "blank-line-terminated" heredoc.
+  // The terminator is an empty string, matched against the first blank line in the body.
   return {
     stripTabs,
     terminator,
@@ -122,17 +126,11 @@ export function matchHeredocBody(
     const trimmedLine = stripTabs ? line.replace(/^\t*/, '') : line;
 
     if (trimmedLine === terminator) {
-      let regionEnd = lineEnd;
-      if (regionEnd < source.length) {
-        if (source[regionEnd] === '\r' && regionEnd + 1 < source.length && source[regionEnd + 1] === '\n') {
-          regionEnd += 2;
-        } else {
-          regionEnd += 1;
-        }
-      }
+      // Stop region at end of terminator line (before the newline) so the trailing
+      // newline can serve as a command separator for following tokens like '}'.
       return {
         start: bodyStart,
-        end: regionEnd
+        end: lineEnd
       };
     }
 

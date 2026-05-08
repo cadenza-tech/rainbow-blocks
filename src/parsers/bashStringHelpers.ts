@@ -132,18 +132,11 @@ export function matchHeredoc(source: string, pos: number): ExcludedRegion | null
     const trimmedLine = stripTabs ? line.replace(/^\t*/, '') : line;
 
     if (trimmedLine === terminator) {
-      // Skip past the line ending after the terminator
-      let regionEnd = lineEnd;
-      if (regionEnd < source.length) {
-        if (source[regionEnd] === '\r' && regionEnd + 1 < source.length && source[regionEnd + 1] === '\n') {
-          regionEnd += 2;
-        } else {
-          regionEnd += 1;
-        }
-      }
+      // Stop region at end of terminator line (before the newline) so the trailing
+      // newline can serve as a command separator for following tokens like '}'.
       return {
         start: contentStart,
-        end: regionEnd
+        end: lineEnd
       };
     }
 
