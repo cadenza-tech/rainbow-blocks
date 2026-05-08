@@ -56,13 +56,17 @@ export class LuaBlockParser extends BaseBlockParser {
     if (source[i] === '.') {
       // .. is string concatenation operator, not field access
       if (i >= 1 && source[i - 1] === '.') return false;
-      // Trailing dot after a number literal (e.g., 1., 2.) is not field access
-      if (i >= 1 && /[0-9]/.test(source[i - 1])) {
+      // Trailing dot after a number literal (decimal or hex) is not field access.
+      // Decimal: digit-start (e.g., 1.). Hex: 0x prefix followed by hex digits (e.g., 0x1A.).
+      if (i >= 1 && /[0-9a-fA-F]/.test(source[i - 1])) {
         let k = i - 1;
         while (k > 0 && /[a-zA-Z0-9_]/.test(source[k - 1])) {
           k--;
         }
-        if (/[0-9]/.test(source[k])) return false;
+        if (/[0-9]/.test(source[k])) {
+          // Numeric literal — could be decimal (1.) or hex (0x1A.).
+          return false;
+        }
       }
       return true;
     }
@@ -221,7 +225,18 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isInExcludedRegion(j, excludedRegions)) return false;
     }
     if (source.slice(i - 3, i + 1) !== 'goto') return false;
-    return i - 3 === 0 || !/[a-zA-Z0-9_]/.test(source[i - 4]);
+    if (i - 3 > 0 && /[a-zA-Z0-9_]/.test(source[i - 4])) return false;
+    // `obj.goto` / `obj:goto` is a field access / method call, not the goto keyword
+    if (i - 3 > 0) {
+      const before = source[i - 4];
+      if (before === '.' || before === ':') {
+        // Reject only single dot/colon, not `..` (concat) or `::` (label)
+        if (i - 4 === 0 || source[i - 5] !== before) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {

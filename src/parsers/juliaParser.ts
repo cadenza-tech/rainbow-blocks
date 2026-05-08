@@ -267,7 +267,13 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === '(') {
         if (parenDepth === 0 && bracketDepth === 0) {
           if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
-            return false;
+            // If all unmatched begins are firstindex form (begin:) and there are no
+            // other unmatched openers, continue scanning so the outer `[` can mark
+            // `end` as lastindex (e.g., arr[(begin:end)]).
+            if (!this.allUnmatchedBeginsAreFirstindex(source, i + 1, position, excludedRegions)) {
+              return false;
+            }
+            continue;
           }
           // No block opener between ( and end: check if this paren group closes after end
           // f(end + 1) -> reject end (paren closes after end)
@@ -507,8 +513,9 @@ export class JuliaBlockParser extends BaseBlockParser {
         bracketDepth++;
       } else if (char === '[') {
         if (bracketDepth === 0) {
-          // If inside parentheses within brackets, the keyword is valid
-          if (parenDepth > 0) return false;
+          // If inside parentheses within brackets, only `begin` (firstindex) cares about
+          // the outer indexing context. Other block keywords are valid inside parens.
+          if (parenDepth > 0 && keyword !== 'begin') return false;
           // If there's a block opener between [ and the keyword, the block expression is valid
           if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
             return false;
@@ -538,7 +545,14 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === ')') {
         parenDepth++;
       } else if (char === '(') {
-        if (parenDepth === 0) return false;
+        if (parenDepth === 0) {
+          // We've exited a paren going backward. For `begin`, continue scanning so that
+          // `arr[(begin:end)]` is recognized: outer `[` makes begin a firstindex.
+          if (keyword === 'begin') {
+            continue;
+          }
+          return false;
+        }
         parenDepth--;
       }
     }

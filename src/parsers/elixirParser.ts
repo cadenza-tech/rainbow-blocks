@@ -418,7 +418,7 @@ export class ElixirBlockParser extends BaseBlockParser {
   // 'end' is being used as an identifier, not as a block close.
   private isEndAsParameterIdentifier(source: string, position: number): boolean {
     let beforePos = position - 1;
-    while (beforePos >= 0 && (source[beforePos] === ' ' || source[beforePos] === '\t')) {
+    while (beforePos >= 0 && (source[beforePos] === ' ' || source[beforePos] === '\t' || source[beforePos] === '\n' || source[beforePos] === '\r')) {
       beforePos--;
     }
     if (beforePos < 0) return false;
@@ -428,7 +428,10 @@ export class ElixirBlockParser extends BaseBlockParser {
     }
 
     let afterPos = position + 3;
-    while (afterPos < source.length && (source[afterPos] === ' ' || source[afterPos] === '\t')) {
+    while (
+      afterPos < source.length &&
+      (source[afterPos] === ' ' || source[afterPos] === '\t' || source[afterPos] === '\n' || source[afterPos] === '\r')
+    ) {
       afterPos++;
     }
     if (afterPos >= source.length) return false;
@@ -754,13 +757,32 @@ export class ElixirBlockParser extends BaseBlockParser {
     }
     // Note: `(` (function call) is intentionally NOT treated as value here, since
     // isBlockKeywordFunctionCall in callers handles function-call form separately.
-    // Followed by word-based operator: and/or/not/in/when
-    if (/[a-z]/.test(c)) {
+    // Followed by word-based operator (and/or/not/in/when) or another identifier+do pattern
+    if (/[a-z_]/.test(c)) {
       let wordEnd = j;
       while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) wordEnd++;
       const word = source.slice(j, wordEnd);
       if (['and', 'or', 'not', 'in', 'when'].includes(word)) {
         return true;
+      }
+      // "<this_kw> <ident> do" - this_kw is a value when the do has no body
+      // (i.e., 'do' is followed immediately by 'end'). This distinguishes
+      // "if cond foo do\nend" (cond is a value, do belongs to outer if) from
+      // "if true do :ok end ..." (if is the inner block opener).
+      let k = wordEnd;
+      while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+      if (source.slice(k, k + 2) === 'do') {
+        const afterDo = source[k + 2];
+        if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+          let m = k + 2;
+          while (m < source.length && /\s/.test(source[m])) m++;
+          if (source.slice(m, m + 3) === 'end') {
+            const afterEnd = source[m + 3];
+            if (afterEnd === undefined || !/[a-zA-Z0-9_?!]/.test(afterEnd)) {
+              return true;
+            }
+          }
+        }
       }
     }
     return false;

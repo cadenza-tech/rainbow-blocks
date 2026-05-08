@@ -55,6 +55,16 @@ const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
   '`endif': ['`ifdef', '`ifndef']
 };
 
+// Returns true when a keyword at `position` is preceded by `::` (scope resolution),
+// allowing whitespace between `::` and the keyword (e.g., `pkg :: end`).
+function isPrecededByScopeResolution(source: string, position: number): boolean {
+  let i = position - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
+    i--;
+  }
+  return i >= 1 && source[i] === ':' && source[i - 1] === ':';
+}
+
 // Control keywords that can precede begin and are closed together with it
 const CONTROL_KEYWORDS = [
   'always',
@@ -514,8 +524,9 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject keywords preceded by :: (scope resolution operator like pkg::end)
-    if (position >= 2 && source[position - 1] === ':' && source[position - 2] === ':') {
+    // Reject keywords preceded by :: (scope resolution operator like pkg::end),
+    // including forms with whitespace between `::` and the keyword (`pkg :: end`).
+    if (isPrecededByScopeResolution(source, position)) {
       return false;
     }
 

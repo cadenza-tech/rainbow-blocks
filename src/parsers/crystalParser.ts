@@ -126,7 +126,9 @@ export class CrystalBlockParser extends BaseBlockParser {
         i = result.end;
       } else {
         // Skip past quote in failed heredoc opener (e.g., <<-"FOO or <<~"FOO without closing quote)
-        // to prevent the quote from being re-scanned as a string delimiter
+        // to prevent the quote from being re-scanned as a string delimiter.
+        // Register the quoted span as an excluded region so that any block keywords
+        // inside the quotes (e.g., `<<-"end class"`) are not tokenized.
         if (
           source[i] === '<' &&
           i + 3 < source.length &&
@@ -135,15 +137,18 @@ export class CrystalBlockParser extends BaseBlockParser {
           (source[i + 3] === '"' || source[i + 3] === "'")
         ) {
           const quoteType = source[i + 3];
-          i = i + 4;
+          const quoteStart = i + 3;
+          let j = i + 4;
           // Scan forward to skip the closing quote on the same line
-          while (i < source.length && source[i] !== quoteType && source[i] !== '\n' && source[i] !== '\r') {
-            i++;
+          while (j < source.length && source[j] !== quoteType && source[j] !== '\n' && source[j] !== '\r') {
+            j++;
           }
           // Skip the closing quote itself
-          if (i < source.length && source[i] === quoteType) {
-            i++;
+          if (j < source.length && source[j] === quoteType) {
+            j++;
           }
+          regions.push({ start: quoteStart, end: j });
+          i = j;
         } else {
           i++;
         }
@@ -629,11 +634,12 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Detect Crystal shorthand method definition: `def name = expr` (no end keyword needed)
-  // Looks for a standalone `=` (preceded by whitespace) outside of parens, on the def line
+  // Looks for a standalone `=` (preceded by whitespace) outside of parens, on the def line.
+  // Multi-line argument lists are allowed (newlines inside parens do not terminate the scan).
   private hasShorthandDefAssignment(source: string, startPos: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = startPos;
     let parenDepth = 0;
-    while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+    while (i < source.length) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
         if (region) {
@@ -642,6 +648,20 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
       }
       const c = source[i];
+      // Backslash line continuation: skip backslash + the following newline
+      if (c === '\\' && i + 1 < source.length && (source[i + 1] === '\n' || source[i + 1] === '\r')) {
+        i++;
+        if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      // Newline outside of parens terminates the scan
+      if (parenDepth === 0 && (c === '\n' || c === '\r')) {
+        return false;
+      }
       if (c === '#') {
         return false;
       }

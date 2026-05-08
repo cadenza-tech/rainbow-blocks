@@ -252,10 +252,37 @@ export class RubyBlockParser extends BaseBlockParser {
     });
   }
 
-  // Checks if keyword is used as a method name after 'def' (e.g., def do, def begin, def end)
+  // Checks if keyword is used as a method name after 'def' (e.g., def do, def begin, def end).
+  // Recognizes backslash line continuation: `def \<NL>do` is `def do` (a method named 'do').
   private isAfterDefKeyword(source: string, position: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    while (i >= 0) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      // Backslash line continuation: a newline preceded by an odd number of backslashes
+      // is a line continuation. Step past the newline and the trailing backslash.
+      if (ch === '\n' || ch === '\r') {
+        let nlStart = i;
+        if (ch === '\n' && i > 0 && source[i - 1] === '\r') {
+          nlStart = i - 1;
+        }
+        let bs = nlStart - 1;
+        let count = 0;
+        while (bs >= 0 && source[bs] === '\\') {
+          count++;
+          bs--;
+        }
+        if (count % 2 === 1) {
+          i = bs;
+          continue;
+        }
+        break;
+      }
+      break;
+    }
     if (i >= 2 && source.slice(i - 2, i + 1) === 'def') {
       const defStart = i - 2;
       return defStart === 0 || !/[a-zA-Z0-9_]/.test(source[defStart - 1]);
