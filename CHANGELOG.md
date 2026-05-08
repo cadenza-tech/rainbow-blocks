@@ -5,6 +5,42 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.42] - 2026-05-08
+
+### Fixed
+
+- Ada: Filter `when` from `begin` block intermediates unless an `exception` intermediate is already present in `matchBlocks` (`adaParser.ts`) so `begin\n  exit when X;\nend;` no longer registers `exit when` modifiers as exception-handler intermediates
+- Ada: Extend `COMPOUND_END_PATTERN` separator class to include VT (U+000B), FF (U+000C), NEL (U+0085), Ogham space (U+1680), LS (U+2028), and PS (U+2029) per Ada LRM 2.1 format_effector (`adaParser.ts`)
+- Ada: Lift the `maxLines = 200` ceiling in `isValidLoopOpen` (`adaValidation.ts`) so a `loop` separated from its `for`/`while` prefix by many comment or continuation lines is still recognized as a loop block opener
+- Bash: Stop including the terminator-line newline in heredoc body excluded regions in `matchHeredocBody` (`bashLeafHelpers.ts`) and `matchHeredoc` (`bashStringHelpers.ts`) so a closing `}` on the line after `EOF` (e.g., `{\ncat <<EOF\nbody\nEOF\n}`) is no longer rejected as a predecessor inside an excluded region
+- Bash: Accept empty quoted heredoc delimiters (`<<''`, `<<""`) in `parseHeredocOperator` (`bashLeafHelpers.ts`) so blank-line-terminated heredocs are recognized and their bodies excluded
+- Bash: Treat `#` immediately after one or more `$` as part of the same word in `isDollarHashVariable` (`bashLeafHelpers.ts`) so `echo $$#tag` no longer truncates the line as a comment — matches real bash where `$$#tag` prints `<PID>#tag`
+- COBOL: Reject `PERFORM <para-name> <stray-token>` (no `THRU`/`UNTIL`/`VARYING`/`WITH`/`AFTER`/`BEFORE`/`TIMES` keyword and not a block-opener verb) as a paragraph call in `computeValidPositions` (`cobolParser.ts`) so it no longer pairs with a following `END-PERFORM`
+- Crystal: Allow newlines inside `(...)` / `[...]` / `{...}` argument lists in `hasShorthandDefAssignment` (`crystalParser.ts`) so multi-line `def name(\n  args\n) = expr` shorthand methods no longer pair `def` with the enclosing class's `end`
+- Crystal: Register the quoted span of a failed heredoc opener (e.g., `<<-"end class"`) as an excluded region in `findExcludedRegions` (`crystalParser.ts`) so block keywords inside the quotes are not tokenized
+- Crystal: Reject closing-bracket characters (`)`, `]`, `}`, `>`) as percent-literal delimiters in `skipMacroPercentLiteral` (`crystalExcluded.ts`) so `{% x = %) %}` no longer consumes the rest of the source as a percent literal
+- Elixir: Treat `<this_kw> <ident> do` as a value reference when the `do` body is empty (immediately followed by `end`) in `isKeywordUsedAsValue` (`elixirParser.ts`) so `if cond foo do\nend` correctly pairs `if` with `end` instead of treating `cond` as the block opener — distinguishes from inner block expressions like `for x <- list, if true do :ok end do ... end`
+- Elixir: Reject closing-bracket characters (`)`, `]`, `}`, `>`) as sigil delimiters in `getSigilCloseDelimiter` (`elixirHelpers.ts`) so `~s}content` no longer consumes the rest of the source as a sigil body
+- Elixir: Skip newlines (`\n`/`\r`) when scanning the parameter context around `end` in `isEndAsParameterIdentifier` (`elixirParser.ts`) so `def foo(end\n)` continues to treat `end` as a parameter identifier
+- Fortran: Add `interface` and `type` to `isFortranOpenConstructName` predecessor pattern (`fortranParser.ts`) so generic interface names and Fortran 90 derived-type names that spell keywords (`interface block`, `type do`, etc.) no longer create phantom block openers
+- Fortran: Skip select-style openers (`select`, `where`, `forall`, `critical`, `associate`) when looking for a fallback opener for bare `end` in `matchBlocks` (`fortranParser.ts`) so a stray `end` inside a `case` branch no longer prematurely closes the enclosing `select` block
+- Fortran: Extend `FORTRAN_DOT_OPERATOR_PATTERN` from built-in operators only to the general `\.<letter-list>\.` form (`fortranValidation.ts`) so user-defined operators (`x .myop. end`) put the following `end` in expression context
+- Fortran: Re-check for `file`/`record`/`stream` after `&` continuation-line skipping in `isValidFortranBlockClose` (`fortranValidation.ts`) so multi-line `END FILE` / `END RECORD` / `END STREAM` I/O statements (`end &\n  file 10`) are no longer mistaken for block closers
+- Julia: Continue scanning past `(` while looking for the enclosing `[` in `isInsideSquareBrackets` and `isInsideIndexingBrackets` (`juliaParser.ts`) so `arr[(begin:end)]` and `arr[(begin)]` recognize `begin`/`end` as `firstindex`/`lastindex` rather than block openers/closers
+- Lua: Reject `goto` preceded by a single `.` or `:` (field access / method call) in `isAfterGoto` (`luaParser.ts`) so `function f() return self.goto end` no longer filters the trailing `end` and breaks the function pair — distinguishes single-dot/colon from `..` (concat) and `::` (label)
+- Lua: Treat hex-prefixed numeric literals with trailing dot (e.g., `0x1A.`) as numbers in the trailing-dot branch of `isPrecededByDotOrColon` (`luaParser.ts`) so they are not misclassified as field access
+- MATLAB: Add `\` (left-division operator) to the binary operator set and accept unary minus following `=`, `(`, `,`, `;`, `[`, `{`, or another operator in `isPrecededByBinaryOperator` (`matlabParser.ts`) so `x = -end`, `x = ...\n  end`, and `x = a\end` are recognized as expression contexts and do not steal an outer block's close
+- Octave: Reject `arguments` block opener unless `function`/`methods`/`classdef` is on the stack in `matchBlocks` (`octaveParser.ts`) using the `pendingSkipDepths` pattern — top-level `arguments\n  x\nend` no longer creates a phantom block pair
+- Octave: Skip whitespace between `do` and `(` in `isValidBlockOpen` (`octaveParser.ts`) so `do (1, 2);` is rejected as a function-call form just like `do(1, 2);`
+- Octave: Reject typed-close keywords (`endif`, `endfor`, `endwhile`, etc., excluding `until`) when followed by tokens other than line ending, `;`, `,`, or comment in `isValidBlockClose` (`octaveParser.ts`) so `endif()`, `endif x = 5` no longer steal the enclosing block's close
+- Octave: Reject duplicate `otherwise` (in addition to `case` after `otherwise`) in `matchBlocks` (`octaveParser.ts`) — switch semantics permit only one `otherwise` clause
+- Pascal: Skip `asm` keywords adjacent to Unicode letters via `isAdjacentToUnicodeLetter` in `addAsmExcludedRegions` (`pascalParser.ts`) so `αasm` (Unicode identifier) does not generate a spurious asm excluded region
+- Pascal: Add `@`, `&`, `<`, `[`, `+`, `-`, `*`, `/` to the rejection prefix set for `asm` in `addAsmExcludedRegions` and `isValidBlockOpen` (`pascalParser.ts`) so `@asm`, `&asm`, `TList<asm>`, `arr[asm]`, etc. no longer mark surrounding code as an asm block
+- Pascal: Reject close keywords (`end`, `until`) preceded by `$` (hex literal prefix) or `#` (character constant prefix) in `isValidBlockClose` (`pascalParser.ts`) so `$end`, `$until`, `#end`, `#until` are no longer detected as block closers
+- Pascal: Add `partial` to `TYPE_MODIFIERS` (`pascalValidation.ts`) so Delphi 2009+ `partial class` declarations are recognized as block openers
+- Ruby: Recognize backslash line continuation (`\<newline>`) as whitespace in `isAfterDefKeyword` (`rubyParser.ts`) so `def \<NL>do`, `def \<NL>class`, `def \<NL>module`, etc. (methods named after reserved words via line continuation) correctly filter the keyword instead of treating it as a block opener
+- Verilog: Skip whitespace before checking for `::` scope resolution in `isValidBlockClose` via new `isPrecededByScopeResolution` helper (`verilogParser.ts`) so `pkg :: end` is rejected as a qualified identifier reference rather than a block close
+
 ## [1.1.41] - 2026-05-06
 
 ### Fixed
@@ -1578,6 +1614,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.42]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.41...v1.1.42
 [1.1.41]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.40...v1.1.41
 [1.1.40]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.39...v1.1.40
 [1.1.39]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.38...v1.1.39
