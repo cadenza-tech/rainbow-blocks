@@ -80,8 +80,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
       return false;
     }
-    if (keyword === 'do' && source[position + keyword.length] === '(') {
-      return false;
+    if (keyword === 'do') {
+      // Skip whitespace between `do` and `(` so `do (args)` is also rejected as a
+      // function-call form, not a do/until block.
+      let j = position + keyword.length;
+      while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+      if (source[j] === '(') {
+        return false;
+      }
     }
     return super.isValidBlockOpen(keyword, source, position, excludedRegions);
   }
@@ -99,6 +105,20 @@ export class OctaveBlockParser extends MatlabBlockParser {
     const isTypedClose = (lowerKw !== 'end' && lowerKw.startsWith('end')) || lowerKw === 'until';
     if (isTypedClose && !this.isAtStatementLeadingPosition(source, position)) {
       return false;
+    }
+    // Typed-end keywords (endif/endfor/endwhile/...) must be the only token on their
+    // statement: anything other than a separator (newline / EOF / `;` / `,`) or a comment
+    // immediately after rejects them as a block close (e.g., `endif()`, `endif x = 5`).
+    // `until` is excluded because it requires a condition expression (`until cond`).
+    if (isTypedClose && lowerKw !== 'until') {
+      let after = position + keyword.length;
+      while (after < source.length && (source[after] === ' ' || source[after] === '\t')) after++;
+      if (after < source.length) {
+        const ch = source[after];
+        if (ch !== '\n' && ch !== '\r' && ch !== ';' && ch !== ',' && ch !== '%' && ch !== '#') {
+          return false;
+        }
+      }
     }
     return super.isValidBlockClose(keyword, source, position, excludedRegions);
   }
@@ -222,14 +242,28 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // Custom block matching for Octave-specific end keywords. Octave intentionally accepts
   // properties/methods/events/enumeration as standalone block openers (older OOP convention
   // for @ClassDir/method.m files), so unlike MATLAB the parser does not require an
-  // enclosing classdef.
+  // enclosing classdef. The 'arguments' block (MATLAB R2019b compatibility) is the
+  // exception: it is only valid inside a function/methods/classdef body.
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
+    // Track stack depths at which an `arguments` opener was rejected so the matching
+    // `end` (at the same depth) is skipped instead of closing an outer block.
+    const pendingSkipDepths: number[] = [];
 
     for (const token of tokens) {
       switch (token.type) {
         case 'block_open':
+          if (token.value.toLowerCase() === 'arguments') {
+            const hasFunctionOrClass = stack.some((b) => {
+              const v = b.token.value.toLowerCase();
+              return v === 'function' || v === 'methods' || v === 'classdef';
+            });
+            if (!hasFunctionOrClass) {
+              pendingSkipDepths.push(stack.length);
+              break;
+            }
+          }
           stack.push({ token, intermediates: [] });
           break;
 
@@ -242,10 +276,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
               if (topOpener !== 'if') break;
             } else if (middleValue === 'case' || middleValue === 'otherwise') {
               if (topOpener !== 'switch') break;
-              // Reject case after otherwise — switch semantics require otherwise to be last
+              // Reject case after otherwise — switch semantics require otherwise to be last,
+              // and reject duplicate otherwise (only one is valid per switch).
               const intermediates = stack[stack.length - 1].intermediates;
               const sawOtherwise = intermediates.some((t) => t.value.toLowerCase() === 'otherwise');
-              if (sawOtherwise && middleValue === 'case') break;
+              if (sawOtherwise && (middleValue === 'case' || middleValue === 'otherwise')) break;
             } else if (middleValue === 'catch') {
               if (topOpener !== 'try') break;
             } else if (middleValue === 'unwind_protect_cleanup') {
@@ -256,6 +291,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
           break;
 
         case 'block_close': {
+          // Skip this `end` if it corresponds to a rejected `arguments` opener at this depth.
+          if (pendingSkipDepths.length > 0 && pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length) {
+            pendingSkipDepths.pop();
+            break;
+          }
           const closeValue = token.value.toLowerCase();
           let matchIndex = -1;
 
