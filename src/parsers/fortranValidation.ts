@@ -351,9 +351,9 @@ function findContinuationLineStart(source: string, currentLineStart: number): nu
   }
 }
 
-// Fortran logical/relational operator patterns: .eq., .ne., .lt., .gt., .le., .ge.,
-// .and., .or., .not., .eqv., .neqv.
-const FORTRAN_DOT_OPERATOR_PATTERN = /\.(eq|ne|lt|gt|le|ge|and|or|not|eqv|neqv)\.$/i;
+// Fortran logical/relational operator patterns: built-in (.eq., .ne., ..., .neqv.)
+// plus user-defined operators (.<letter-list>.) per Fortran spec.
+const FORTRAN_DOT_OPERATOR_PATTERN = /\.[a-zA-Z][a-zA-Z0-9_]*\.$/i;
 
 // Fortran statement keywords that take identifiers as arguments
 // When `end` or a compound-end keyword appears after one of these, it is an entity name
@@ -658,6 +658,13 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
   // end &\n%component (derived type component access across continuation)
   if (i < source.length && source[i] === '%') {
     return false;
+  }
+  // end &\n  file/record/stream (I/O statements across continuation)
+  if (i < source.length) {
+    const remainingAfterContinuation = source.slice(i);
+    if (/^(?:file|record|stream)\b/i.test(remainingAfterContinuation)) {
+      return false;
+    }
   }
   // end = ... (assignment) but not end == ... (comparison)
   if (i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {

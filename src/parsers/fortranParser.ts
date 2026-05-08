@@ -280,8 +280,10 @@ export class FortranBlockParser extends BaseBlockParser {
     // module-subprogram keyword (function/subroutine/procedure), require the explicit
     // 'module procedure' compound so plain 'module ' does not suppress it.
     const moduleAlt = isModuleSubprogramKeyword ? 'module[ \\t]+procedure' : 'module(?:[ \\t]+procedure)?';
+    // `interface NAME` (generic interface) and `type NAME` (Fortran 90 derived-type without ::)
+    // also introduce a name. Suppress keyword detection when NAME spells a Fortran keyword.
     const pattern = new RegExp(
-      `(?:^|[^a-zA-Z0-9_])(?:program|${moduleAlt}|submodule[ \\t]*\\([^)]*\\)|subroutine|function|recursive[ \\t]+(?:subroutine|function)|pure[ \\t]+(?:subroutine|function)|elemental[ \\t]+(?:subroutine|function))[ \\t]+$`,
+      `(?:^|[^a-zA-Z0-9_])(?:program|${moduleAlt}|submodule[ \\t]*\\([^)]*\\)|subroutine|function|recursive[ \\t]+(?:subroutine|function)|pure[ \\t]+(?:subroutine|function)|elemental[ \\t]+(?:subroutine|function)|interface|type)[ \\t]+$`,
       'i'
     );
     return pattern.test(before);
@@ -908,8 +910,13 @@ export class FortranBlockParser extends BaseBlockParser {
           }
 
           // If no compound match found, only fallback for simple 'end' (not compound end keywords)
+          // Skip blocks that require their own typed close keyword (e.g., select/where/forall):
+          // a bare `end` should never close a select/where/forall — the typed close must follow.
           if (matchIndex < 0 && !compoundMatch && stack.length > 0) {
-            matchIndex = stack.length - 1;
+            const STRICT_CLOSE_OPENERS = new Set(['select', 'where', 'forall', 'critical', 'associate']);
+            if (!STRICT_CLOSE_OPENERS.has(stack[stack.length - 1].token.value.toLowerCase())) {
+              matchIndex = stack.length - 1;
+            }
           }
 
           if (matchIndex >= 0) {
