@@ -45,9 +45,12 @@ const COMPOUND_END_TYPES = [
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
 
 // Pattern to match compound end keywords (case insensitive)
-// Allows whitespace, newlines, and -- line comments between 'end' and the type keyword
+// Allows whitespace, newlines, and -- line comments between 'end' and the type keyword.
+// Separator class covers Ada LRM 2.1 format_effector (HT, VT, FF, CR, LF, NEL) and the
+// Unicode Zs category (NBSP, U+1680, U+2000-200A, U+202F, U+205F, U+3000), plus Unicode
+// line/paragraph separators (LS U+2028, PS U+2029).
 const COMPOUND_END_PATTERN = new RegExp(
-  `\\bend(?:[ \\t\\r\\n\\u00A0\\u2000-\\u200A\\u202F\\u205F\\u3000]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend(?:[ \\t\\v\\f\\r\\n\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
 
@@ -776,17 +779,18 @@ export class AdaBlockParser extends BaseBlockParser {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else if (middleKw === 'when') {
-              // 'when' is valid for 'case', 'select', 'begin' (exception), 'entry' (guard),
-              // 'accept' (guard), and 'return' (Ada 2012 extended-return exception handler).
-              if (
-                topOpener === 'case' ||
-                topOpener === 'select' ||
-                topOpener === 'begin' ||
-                topOpener === 'entry' ||
-                topOpener === 'accept' ||
-                topOpener === 'return'
-              ) {
+              // 'when' is valid for 'case', 'select', 'entry' (guard), 'accept' (guard),
+              // and 'return' (Ada 2012 extended-return exception handler) directly.
+              // For 'begin', 'when' is only valid as part of an exception handler:
+              // require a preceding 'exception' intermediate before accepting it (otherwise
+              // 'exit when X' / 'delay until X when Y' modifiers would be misclassified).
+              if (topOpener === 'case' || topOpener === 'select' || topOpener === 'entry' || topOpener === 'accept' || topOpener === 'return') {
                 stack[stack.length - 1].intermediates.push(token);
+              } else if (topOpener === 'begin') {
+                const intermediates = stack[stack.length - 1].intermediates;
+                if (intermediates.some((t) => t.value.toLowerCase() === 'exception')) {
+                  stack[stack.length - 1].intermediates.push(token);
+                }
               }
             } else if (middleKw === 'then') {
               // 'then' is valid for 'if' and 'select' (select...then abort)

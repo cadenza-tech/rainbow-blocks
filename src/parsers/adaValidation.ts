@@ -229,8 +229,9 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
   const textBefore = source.slice(0, position);
   // Split on \r\n, \r, or \n to handle all line ending types
   const lineParts = textBefore.split(/\r\n|\r|\n/);
-  // Extended limit (was 20) to handle long for/while headers with many comment/continuation lines
-  const maxLines = Math.min(lineParts.length, 200);
+  // Scan all preceding lines (no fixed cap) so that loop openers separated by many
+  // comment/continuation lines are still detected.
+  const maxLines = lineParts.length;
 
   // Calculate absolute offset for the start of each line by scanning backward
   let lineStartOffset = textBefore.length;
