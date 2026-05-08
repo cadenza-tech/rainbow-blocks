@@ -231,14 +231,12 @@ export class CobolBlockParser extends BaseBlockParser {
                   // PERFORM para <count> TIMES → paragraph call with iteration, reject
                   continue;
                 }
-                // Fall through to hasMoreContent logic below
+                // PERFORM <para-name> <extra-token> with no recognised iteration verb is
+                // a paragraph call with stray text (or invalid syntax). Reject so we do
+                // not mark it as a structured PERFORM.
                 const isBlockOpenerVerb = this.keywords.blockOpen.some((kw) => kw === word);
                 if (!isBlockOpenerVerb) {
-                  const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/, '');
-                  const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
-                  if (!hasMoreContent) {
-                    continue;
-                  }
+                  continue;
                 }
                 openerPositions.push(pos);
                 continue;
