@@ -1765,5 +1765,29 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: command-syntax do argument is not block_open', () => {
+    test('should not treat do as block_open when it is a command-syntax argument', () => {
+      // `disp do` is command-syntax: `disp` is a command and `do` is its string argument.
+      // The `do` here must NOT be treated as a do/until block opener. The real do block
+      // starts on the next line. Without this fix, the command-arg `do` opens a phantom
+      // block that consumes the real `until` and breaks the outer function pairing.
+      // Lines: 0 = function f, 1 = disp do, 2 = real do, 3 = body, 4 = until x>0, 5 = end.
+      const source = 'function f\n  disp do\n  do\n    x = 1;\n  until x > 0\nend';
+      const pairs = parser.parse(source);
+      // The function should pair with the outer end on line 5.
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.value, 'end');
+      assert.strictEqual(functionBlock.closeKeyword.line, 5, 'function should pair with the outer end');
+      // The real do-until block should pair correctly (real do on line 2 with until on line 4).
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do' && p.openKeyword.line === 2);
+      assert.ok(doPair, 'real do (line 2) should pair with until');
+      assert.strictEqual(doPair.closeKeyword.value, 'until');
+      assert.strictEqual(doPair.closeKeyword.line, 4, 'do should pair with until on line 4');
+      // No second `do` block should be created from the command-syntax `do` on line 1.
+      const allDoPairs = pairs.filter((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(allDoPairs.length, 1, 'only one do block expected');
+    });
+  });
+
   generateCommonTests(config);
 });
