@@ -4982,6 +4982,28 @@ end select
     });
   });
 
+  suite('Regression: where / forall with empty parens is rejected', () => {
+    test('should not open where block when where has empty parens', () => {
+      // `where (mask)` requires a mask expression. Empty parens is invalid.
+      const source = 'where ()\n  x = 1\nend where';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not open forall block when forall has empty parens', () => {
+      // `forall (idx = ...)` requires index specifications. Empty parens is invalid.
+      const source = 'forall ()\n  x(i) = 1\nend forall';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still open where block with non-empty parens', () => {
+      const source = 'where (mask > 0)\n  x = 1\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+  });
+
   suite('Regression: change team without parens is rejected', () => {
     test('should not open team block when change team has no parens', () => {
       // Fortran 2018: `change team (...)` is a block opener; bare `change team` without
