@@ -5788,4 +5788,23 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: heredoc terminator special characters', () => {
+    test('should accept ! as heredoc terminator character', () => {
+      // Real bash accepts <<! as a valid heredoc opener; for/done inside body must not tokenize
+      const source = 'cat <<!\nfor i in 1; do echo; done\n!\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should accept * as heredoc terminator character', () => {
+      const source = 'cat <<*\nfor i in 1; do echo; done\n*\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should accept ? as heredoc terminator character', () => {
+      const source = 'cat <<?\nfor i in 1; do echo; done\n?\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
