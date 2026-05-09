@@ -2763,6 +2763,27 @@ end.`;
     });
   });
 
+  suite('Regression 2026-05-10: case label using block-close keyword', () => {
+    test('should not treat until as block close when used as case label inside repeat', () => {
+      const source = `repeat
+  case X of
+    until: foo;
+  end;
+until done`;
+      const pairs = parser.parse(source);
+      // Expected: case (offset 9) -> end (offset 37); repeat (offset 0) -> until (offset 42)
+      assertBlockCount(pairs, 2);
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.openKeyword.startOffset, 9);
+      assert.strictEqual(casePair.closeKeyword.value, 'end');
+      assert.strictEqual(casePair.closeKeyword.startOffset, 37);
+      const repeatPair = findBlock(pairs, 'repeat');
+      assert.strictEqual(repeatPair.openKeyword.startOffset, 0);
+      assert.strictEqual(repeatPair.closeKeyword.value, 'until');
+      assert.strictEqual(repeatPair.closeKeyword.startOffset, 42);
+    });
+  });
+
   suite('Regression 2026-05-09: field-access dot followed by newline', () => {
     test('should not treat end as block close when preceded by field-access dot across newline', () => {
       const source = `begin
