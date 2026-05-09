@@ -288,7 +288,7 @@ export class ElixirBlockParser extends BaseBlockParser {
   // Pattern: "<outer_block_kw> <this_kw> do" - this_kw is a variable, do belongs to outer.
   private isValueForPrecedingBlockKeyword(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
     // The keyword position must function as a value. Use the same broad detection as isKeywordUsedAsValue.
-    if (!this.isKeywordUsedAsValue(source, position + keyword.length)) {
+    if (!this.isKeywordUsedAsValue(source, position + keyword.length, keyword)) {
       return false;
     }
 
@@ -574,13 +574,15 @@ export class ElixirBlockParser extends BaseBlockParser {
         // Skip value form: "if cond do" where cond is a variable name that happens to be a keyword
         if (this.isBlockKeywordAt(source, i) && !this.isBlockKeywordFunctionCall(source, i)) {
           let kwLen = 0;
+          let kwName = '';
           for (const kw of ElixirBlockParser.DO_BLOCK_KEYWORDS) {
             if (source.startsWith(kw, i)) {
               kwLen = kw.length;
+              kwName = kw;
               break;
             }
           }
-          if (kwLen > 0 && !this.isKeywordUsedAsValue(source, i + kwLen)) {
+          if (kwLen > 0 && !this.isKeywordUsedAsValue(source, i + kwLen, kwName)) {
             innerBlockDepth++;
           }
         }
@@ -753,7 +755,12 @@ export class ElixirBlockParser extends BaseBlockParser {
   //   4. Followed by binary operator: "if cond + 1 do" - cond is part of an expression
   //   5. Followed by method/field access: "if cond.field do" - cond is a value
   //   6. Followed by word operator (and/or/not/in/when): "if cond and other do" - cond is a value
-  private isKeywordUsedAsValue(source: string, afterPos: number): boolean {
+  //
+  // When `currentKeyword` is a definition keyword (def/defp/defmacro/defguard/defmodule etc.),
+  // the chained "<this_kw> <ident> do\nend" heuristic is suppressed because definition
+  // keywords are syntactically required to start their own block; a following "def foo do/end"
+  // belongs to that inner def, not to a chained expression.
+  private isKeywordUsedAsValue(source: string, afterPos: number, currentKeyword?: string): boolean {
     let j = afterPos;
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
       j++;
@@ -814,17 +821,23 @@ export class ElixirBlockParser extends BaseBlockParser {
       // (i.e., 'do' is followed immediately by 'end'). This distinguishes
       // "if cond foo do\nend" (cond is a value, do belongs to outer if) from
       // "if true do :ok end ..." (if is the inner block opener).
-      let k = wordEnd;
-      while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
-      if (source.slice(k, k + 2) === 'do') {
-        const afterDo = source[k + 2];
-        if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
-          let m = k + 2;
-          while (m < source.length && /\s/.test(source[m])) m++;
-          if (source.slice(m, m + 3) === 'end') {
-            const afterEnd = source[m + 3];
-            if (afterEnd === undefined || !/[a-zA-Z0-9_?!]/.test(afterEnd)) {
-              return true;
+      // Skip this heuristic when this_kw is a definition keyword: definition keywords
+      // (def/defp/defmacro/defguard/defmodule etc.) always start their own block, so a
+      // following "def foo do\nend" must not be treated as a chained value expression.
+      const isDefinitionKw = currentKeyword !== undefined && DEFINITION_KEYWORDS.has(currentKeyword);
+      if (!isDefinitionKw) {
+        let k = wordEnd;
+        while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+        if (source.slice(k, k + 2) === 'do') {
+          const afterDo = source[k + 2];
+          if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+            let m = k + 2;
+            while (m < source.length && /\s/.test(source[m])) m++;
+            if (source.slice(m, m + 3) === 'end') {
+              const afterEnd = source[m + 3];
+              if (afterEnd === undefined || !/[a-zA-Z0-9_?!]/.test(afterEnd)) {
+                return true;
+              }
             }
           }
         }
@@ -832,7 +845,8 @@ export class ElixirBlockParser extends BaseBlockParser {
       // Chained pattern: "<this_kw> <next_word> <rest> do" where <next_word> is a block
       // keyword used as a value (e.g., "if for case do :ok end" or "if case x do :ok end").
       // Recursively check if the next identifier is used as a value, treating it as a chain.
-      if (this.isBlockKeywordAt(source, j) && this.isKeywordUsedAsValue(source, wordEnd)) {
+      // Suppress the chain when this_kw is a definition keyword for the same reason as above.
+      if (!isDefinitionKw && this.isBlockKeywordAt(source, j) && this.isKeywordUsedAsValue(source, wordEnd, source.slice(j, wordEnd))) {
         return true;
       }
     }
@@ -929,7 +943,7 @@ export class ElixirBlockParser extends BaseBlockParser {
             i += word.length;
             continue;
           }
-          if (this.isBlockKeywordAt(source, i) && !this.isKeywordUsedAsValue(source, i + word.length)) {
+          if (this.isBlockKeywordAt(source, i) && !this.isKeywordUsedAsValue(source, i + word.length, word)) {
             innerBlockDepth++;
             i += word.length;
             continue;
