@@ -101,11 +101,15 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject keywords immediately followed by `'<attribute_name>` (attribute reference,
-    // LRM §16.3). For example, `process'foreign` is the foreign attribute on the
-    // `process` type, not a process block opener.
-    const afterPos = position + keyword.length;
-    if (afterPos < source.length && source[afterPos] === "'" && afterPos + 1 < source.length && /[a-zA-Z_]/.test(source[afterPos + 1])) {
+    // Reject keywords followed by `'<attribute_name>` (attribute reference, LRM §16.3).
+    // For example, `process'foreign` or `process 'foreign` is the foreign attribute on
+    // the `process` type, not a process block opener. Allow horizontal whitespace
+    // (spaces/tabs) between the keyword and the apostrophe.
+    let attrPos = position + keyword.length;
+    while (attrPos < source.length && (source[attrPos] === ' ' || source[attrPos] === '\t')) {
+      attrPos++;
+    }
+    if (attrPos < source.length && source[attrPos] === "'" && attrPos + 1 < source.length && /[a-zA-Z_]/.test(source[attrPos + 1])) {
       return false;
     }
 
@@ -161,6 +165,43 @@ export class VhdlBlockParser extends BaseBlockParser {
       return this.isValidContextOpen(source, position, excludedRegions);
     }
 
+    // Reject `record` not preceded by `is` (LRM 5.3.3). The only valid block opener
+    // form is `type X is record ... end record;`. Anywhere else (e.g., `:= record`,
+    // `(record)`, etc.) is invalid VHDL and should not be a block opener.
+    if (lowerKeyword === 'record') {
+      return this.isValidRecordOpen(source, position, excludedRegions);
+    }
+
+    return true;
+  }
+
+  // Validates `record` as a block opener: must be preceded by `is` keyword
+  // (allowing whitespace and comments between them).
+  private isValidRecordOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 1) return false;
+    // Expect `is` immediately before (case-insensitive). The `s` is at position i,
+    // the `i` is at position i-1.
+    const isS = source[i] === 's' || source[i] === 'S';
+    const isI = source[i - 1] === 'i' || source[i - 1] === 'I';
+    if (!isS || !isI) return false;
+    // Ensure the `is` is a standalone word (not part of a longer identifier like `axis`)
+    if (i - 2 >= 0 && /[a-zA-Z0-9_]/.test(source[i - 2])) return false;
     return true;
   }
 
@@ -771,6 +812,38 @@ export class VhdlBlockParser extends BaseBlockParser {
             }
           } else {
             // Simple 'end' without type
+            // Special case: if the top of stack is `generate`, this `end;` is the
+            // optional alternative_label_end of the generate_statement_body (LRM 11.8),
+            // NOT the actual end of the generate itself (which requires `end generate;`).
+            // Pair the `end` with the most recent `begin` intermediate of the generate
+            // (creating a synthetic body pair) and leave the generate on the stack so
+            // the upcoming `end generate;` can close it.
+            const topGenerate = stack.length > 0 && stack[stack.length - 1].token.value.toLowerCase() === 'generate' ? stack[stack.length - 1] : null;
+            if (topGenerate) {
+              const generateIntermediates = topGenerate.intermediates;
+              let beginIdx = -1;
+              for (let i = generateIntermediates.length - 1; i >= 0; i--) {
+                if (generateIntermediates[i].value.toLowerCase() === 'begin') {
+                  beginIdx = i;
+                  break;
+                }
+              }
+              if (beginIdx >= 0) {
+                const beginToken = generateIntermediates[beginIdx];
+                pairs.push({
+                  openKeyword: beginToken,
+                  closeKeyword: token,
+                  intermediates: generateIntermediates.slice(beginIdx + 1),
+                  nestLevel: stack.length
+                });
+                // Drop the begin (and any intermediates after it) from generate's list
+                // so a subsequent `end;` doesn't re-pair with the same begin.
+                stack[stack.length - 1] = { token: topGenerate.token, intermediates: generateIntermediates.slice(0, beginIdx) };
+              }
+              // If no begin found, drop this `end;` silently (alternative_label_end
+              // without a body is unusual; treat the generate as still open).
+              break;
+            }
             const openBlock = stack.pop();
             if (openBlock) {
               pairs.push({
