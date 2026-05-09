@@ -2786,6 +2786,27 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-09: extended-return with := followed by string literal expression', () => {
+    test('should detect extended-return block when := is followed by a string literal expression before do', () => {
+      const source = 'function F return String is\nbegin\n  return X : String := "hello" do\n    null;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return block should pair when := is followed by a string expression');
+      assert.strictEqual(returnPair?.closeKeyword.value.toLowerCase(), 'end return');
+      assertBlockCount(pairs, 2);
+      const functionPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'function');
+      assert.ok(functionPair, 'function block should be paired');
+    });
+
+    test('should detect extended-return block when := is followed by a character literal expression before do', () => {
+      const source = "function F return Character is\nbegin\n  return X : Character := 'a' do\n    null;\n  end return;\nend F;";
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return block should pair when := is followed by a character expression');
+      assert.strictEqual(returnPair?.closeKeyword.value.toLowerCase(), 'end return');
+    });
+  });
+
   suite('Regression 2026-05-06: mid-line is type continuation', () => {
     test('should not leak is when type T follows is on previous line with no semicolon', () => {
       const source = 'procedure P is type T\n  is range 1..10;\nbegin\n  null;\nend P;';

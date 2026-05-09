@@ -1697,5 +1697,36 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: @end as function handle is not block close', () => {
+    test('should not treat @end as block close (function handle prefix)', () => {
+      // `@end` is a function handle to `end`. The `@` prefix marks the keyword as an
+      // identifier reference in expression context, so `end` here must not be treated
+      // as block close. Lines: 0 = function f, 1 = h = @end;, 2 = outer end.
+      const source = 'function f\n  h = @end;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+  });
+
+  suite('Regression 2026-05-09: command-syntax with line continuation before end (Octave)', () => {
+    test('should treat disp ...\\n end as command-syntax (... continuation)', () => {
+      // Same as MATLAB but verifies Octave parser also handles line continuation in
+      // command-syntax. `disp ...\n end` — the `end` is the string argument.
+      const source = 'function f\n  disp ...\n   end\nendfunction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should treat disp \\\\\\n end as command-syntax (\\ continuation, Octave)', () => {
+      // Octave-specific: `\` at end of line is also a line continuation.
+      const source = 'function f\n  disp \\\n   end\nendfunction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+  });
+
   generateCommonTests(config);
 });

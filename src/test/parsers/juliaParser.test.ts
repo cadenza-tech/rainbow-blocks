@@ -1328,13 +1328,15 @@ end`;
       });
 
       test('should handle Unicode identifier before prefix', () => {
+        // 変数r is a string macro with Unicode-letter prefix, so the entire 変数r"pattern"
+        // is a single excluded region (Bug 1 fix). Previously only "pattern" was excluded.
         const source = `変数r"pattern"
 function foo()
 end`;
         const pairs = parser.parse(source);
         assertBlockCount(pairs, 1);
         const regions = parser.getExcludedRegions(source);
-        assert.ok(regions.some((r) => source.slice(r.start, r.end) === '"pattern"'));
+        assert.ok(regions.some((r) => source.slice(r.start, r.end) === '変数r"pattern"'));
       });
     });
 
@@ -3644,6 +3646,75 @@ end`;
       assertSingleBlock(pairs, 'function', 'end');
       const outerEndOffset = source.lastIndexOf('end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, outerEndOffset);
+    });
+  });
+
+  suite('Regression 2026-05-09: Unicode letter before prefixed string macro', () => {
+    test('should treat αr"text"end as a single string macro region (Greek alpha prefix)', () => {
+      // Bug 1: αr"..." where α is a Unicode letter, αr is a custom string macro prefix.
+      // Previously: only "text" was excluded, end was tokenized causing begin..end mispair.
+      // Expected: αr"text"end is a complete prefixed string macro consuming end as suffix.
+      const source = 'begin\nαr"text"end\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === 'αr"text"end'));
+    });
+
+    test('should treat αcustom"x"end as a single string macro region', () => {
+      // Bug 1: longer multi-char identifier prefix starting with Unicode letter.
+      const source = 'begin\nαcustom"x"end\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === 'αcustom"x"end'));
+    });
+  });
+
+  suite('Regression 2026-05-09: Unicode letter before backtick command macro', () => {
+    test('should treat α`cmd`end as a single command macro region (single backtick)', () => {
+      // Bug 2: α is Unicode letter; α should be recognized as command macro prefix.
+      // Currently: prefix detection uses /[a-zA-Z0-9_]/ which rejects Unicode letters,
+      // so end gets tokenized.
+      const source = 'begin\nα`cmd`end\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === '`cmd`end'));
+    });
+
+    test('should treat α```cmd```end as a single command macro region (triple backtick)', () => {
+      // Bug 2: triple backtick variant.
+      const source = 'begin\nα```cmd```end\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === '```cmd```end'));
+    });
+  });
+
+  suite('Regression 2026-05-09: digit before prefixed string macro', () => {
+    test('should treat 1r"text"end as a string macro (digit is not part of prefix start)', () => {
+      // Bug 3: when prevChar is a digit (e.g., `1r"text"end`), digit cannot start an
+      // identifier, so r is a valid prefix start (the leading 1 is a numeric literal).
+      // Previously: prevChar=`1` matched /\w/ and rejected r as prefix.
+      // Expected: r"text"end is a prefixed string macro consuming end as suffix.
+      const source = 'begin\n1r"text"end\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === 'r"text"end'));
+    });
+  });
+
+  suite('Regression 2026-05-09: generator expression with named-tuple-like assignment', () => {
+    test('should treat (a = b for c in 1:3) as generator expression (for is not block-form)', () => {
+      // Bug 4: in (a = b for c in 1:3), `=` is part of an inline named-binding within the
+      // generator body, not a top-level assignment. The for keyword should be treated as
+      // a generator (no block form), so function..end is the only pair.
+      const source = 'function foo()\n(a = b for c in 1:3)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
     });
   });
 

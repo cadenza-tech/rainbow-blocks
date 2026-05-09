@@ -3837,5 +3837,91 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: heredoc body inside macro template', () => {
+    test('should treat heredoc body inside {% %} as excluded so internal %} and end do not break parsing', () => {
+      const source = `class Foo
+  macro mac
+    {%
+      msg = <<-EOF
+        text %} more text
+        another end here
+      EOF
+    %}
+    def m
+      "x"
+    end
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const classPair = findBlock(pairs, 'class');
+      const macroPair = findBlock(pairs, 'macro');
+      const defPair = findBlock(pairs, 'def');
+      // 0-indexed: last "end" is on line 12, "end" of macro is on 11, "end" of def is on 10
+      assert.strictEqual(classPair.closeKeyword.line, 12);
+      assert.strictEqual(macroPair.closeKeyword.line, 11);
+      assert.strictEqual(defPair.closeKeyword.line, 10);
+    });
+
+    test('should treat heredoc body inside {{ }} as excluded so internal }} and end do not break parsing', () => {
+      const source = `class Foo
+  def bar
+    s = {{ <<-EOF
+      text }} more
+      and end here
+    EOF
+    }}
+    "x"
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classPair = findBlock(pairs, 'class');
+      const defPair = findBlock(pairs, 'def');
+      // 0-indexed: last "end" is on line 9, "end" of def is on 8
+      assert.strictEqual(classPair.closeKeyword.line, 9);
+      assert.strictEqual(defPair.closeKeyword.line, 8);
+    });
+  });
+
+  suite('Regression 2026-05-09: heredoc identifier with non-ASCII unicode characters', () => {
+    test('should not consume trailing source after heredoc with multi-byte identifier', () => {
+      const source = 's = <<-Naïve\nhello\nNaïve\nif true\n  y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: end as parameter/property name with space-separated colon type annotation', () => {
+    test('should not detect end as block_close in property end : Int32 = 0', () => {
+      const source = 'class Foo\n  property end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      // Class must close at the LAST end (line 2), not the misdetected property name
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not detect end as block_close in getter end : Int32 = 0', () => {
+      const source = 'class Foo\n  getter end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not detect end as block_close in setter end : Int32 = 0', () => {
+      const source = 'class Foo\n  setter end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not break ternary expression with block in true branch', () => {
+      // Make sure the property fix does not affect unrelated patterns.
+      const source = 'def foo\n  result = flag ? 1 : 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

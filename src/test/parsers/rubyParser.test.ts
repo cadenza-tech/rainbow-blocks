@@ -3671,5 +3671,31 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: for...in with multi-line array/hash and do', () => {
+    test('should pair for-end when array literal closes on its own line before do', () => {
+      const source = 'for x in [\n  1,\n  2,\n  3\n] do\n  puts x\nend';
+      const pairs = parser.parse(source);
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'for should be paired with end');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should pair for-end when hash literal closes on its own line before do', () => {
+      const source = 'for k, v in {\n  a: 1,\n  b: 2\n} do\n  puts k\nend';
+      const pairs = parser.parse(source);
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'for should be paired with end');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should pair while-end when array literal closes on its own line before do', () => {
+      const source = 'while [\n  cond1,\n  cond2\n].any? do\n  body\nend';
+      const pairs = parser.parse(source);
+      const whilePair = pairs.find((p) => p.openKeyword.value === 'while');
+      assert.ok(whilePair, 'while should be paired with end');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

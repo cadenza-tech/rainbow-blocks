@@ -4904,5 +4904,81 @@ end program`;
     });
   });
 
+  suite('Regression 2026-05-09: end as statement keyword before block keywords', () => {
+    test('should not treat `do` after `end` in expression as phantom block_open', () => {
+      // Inner `end do` is in expression context; `do` must not be phantom block_open
+      const source = 'do i = 1, 5\n  x = end do / 2\nend do\n';
+      const tokens = parser.getTokens(source);
+      // Should have only outer do (offset 0) and end do (offset 29). No phantom do at offset 22.
+      const phantomDo = tokens.find((t) => t.startOffset === 22 && t.value.toLowerCase() === 'do');
+      assert.strictEqual(phantomDo, undefined, `Expected no phantom 'do' token at offset 22, got: ${JSON.stringify(phantomDo)}`);
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should not treat `function` after `end` in expression as phantom block_open', () => {
+      // Inner `end function` is in expression context; `function` must not be phantom block_open
+      const source = 'subroutine s()\n  x = end function / 2\nend subroutine\n';
+      const tokens = parser.getTokens(source);
+      // Should have no phantom function token within the assignment line
+      const fnTokens = tokens.filter((t) => t.value.toLowerCase() === 'function');
+      assert.strictEqual(
+        fnTokens.length,
+        0,
+        `Expected no 'function' tokens, got: ${JSON.stringify(fnTokens.map((t) => ({ value: t.value, line: t.line })))}`
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+  });
+
+  suite('Regression 2026-05-09: block data program unit', () => {
+    test('should pair `block data NAME` with `end block data`', () => {
+      const source = 'block data init\n  integer :: x\nend block data\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'block data');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end block data');
+    });
+
+    test('should pair `block data NAME` with concatenated `endblockdata`', () => {
+      const source = 'block data init\n  integer :: x\nendblockdata\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'block data');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'endblockdata');
+    });
+
+    test('should pair `block data` (no name) with `end block data`', () => {
+      const source = 'block data\n  integer :: x\nend block data\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'block data');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end block data');
+    });
+  });
+
+  suite('Regression 2026-05-09: select type intermediates', () => {
+    test('should detect `type is`, `class is`, `class default` as intermediates of select type', () => {
+      const source = `select type (x)
+type is (integer)
+  print *, "int"
+class is (real)
+  print *, "real"
+class default
+  print *, "other"
+end select
+`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'select');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end select');
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase().replace(/\s+/g, ' ').trim());
+      assert.ok(intermediateValues.includes('type is'), `Expected 'type is' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
+      assert.ok(intermediateValues.includes('class is'), `Expected 'class is' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
+      assert.ok(intermediateValues.includes('class default'), `Expected 'class default' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
+    });
+  });
+
   generateCommonTests(config);
 });

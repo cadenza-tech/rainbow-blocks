@@ -1105,17 +1105,17 @@ end`;
   suite('Coverage: uncovered code paths', () => {
     test('should reject control keyword when :: scope resolution follows', () => {
       // Covers lines 262-264: double-colon :: scope resolution skip returns false
+      // (scanForBeginAfterControl encounters `::` after the control keyword and bails out).
+      // Note: `:: begin` (whitespace-separated scope resolution before a block keyword)
+      // is now rejected at the outer scope-resolution check, so `begin` does not pair.
       const source = `module m;
   if (cond) :: begin
   end
 endmodule`;
       const pairs = parser.parse(source);
-      // 'if' is rejected (:: found), 'begin'/'end' is standalone, 'module'/'endmodule' is another
-      assertBlockCount(pairs, 2);
-      const modulePair = pairs.find((p) => p.openKeyword.value === 'module');
-      assert.ok(modulePair);
-      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
-      assert.ok(beginPair);
+      // 'if' is rejected (:: found), 'begin' is also rejected (preceded by ::),
+      // so only the outer module/endmodule remains.
+      assertSingleBlock(pairs, 'module', 'endmodule');
     });
 
     test('should handle escaped identifier label before begin', () => {
@@ -2851,6 +2851,112 @@ endmodule`;
       const source = 'module test;\n  wait fork;\nendmodule';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: macro arg string with bare newline termination', () => {
+    test('should not extend macro arg region when string contains bare newline', () => {
+      // Bug: a `"` inside `MACRO(...)` arg with a bare newline in it caused subsequent `"`
+      // chars to be treated as a new string opening, swallowing the closing `)` and
+      // extending the macro region across `endmodule` lines.
+      const source = 'module a;\n`MACRO("hello\nworld")\nendmodule\nmodule b;\nendmodule\n';
+      const pairs = parser.parse(source);
+      // Both module/endmodule pairs should be detected
+      assertBlockCount(pairs, 2);
+      const moduleA = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line === 0);
+      assert.ok(moduleA, 'module a should pair with endmodule');
+      const moduleB = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line >= 4);
+      assert.ok(moduleB, 'module b should pair with endmodule');
+    });
+  });
+
+  suite('Regression: pragma protect begin_protected/end_protected', () => {
+    test('should exclude content between `pragma protect begin_protected and end_protected', () => {
+      // Per IEEE 1800-2017 §28, `protect begin_protected` and `protect end_protected`
+      // are alternative forms used to wrap encrypted/encoded content. Block keywords
+      // inside the protected region must not be tokenized.
+      const source = '`pragma protect begin_protected\nbegin x = 1; end\n`pragma protect end_protected\n';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect blocks outside `pragma protect begin_protected/end_protected region', () => {
+      const source = 'module a;\nendmodule\n`pragma protect begin_protected\nbegin x = 1; end\n`pragma protect end_protected\nmodule b;\nendmodule\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const moduleA = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line === 0);
+      assert.ok(moduleA, 'module a should pair');
+      const moduleB = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line >= 5);
+      assert.ok(moduleB, 'module b should pair');
+    });
+  });
+
+  suite('Regression: wait fork; should not be a control keyword block opener', () => {
+    test('should not consume control keyword chain for wait fork; statement', () => {
+      // Bug: `wait fork;` is a SystemVerilog statement that does not require begin/end.
+      // With wait in CONTROL_KEYWORDS, scanForBeginAfterControl runs and may find a
+      // subsequent begin (wrong block), or `wait fork` may otherwise interact poorly
+      // with chained control consumption. This test verifies that the only blocks are
+      // the outer module/endmodule and the surrounding initial/begin/end if any.
+      const source = 'module test;\n  initial begin\n    wait fork;\n    x = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // Expected: module/endmodule, initial/end, begin/end (3 pairs)
+      assertBlockCount(pairs, 3);
+      // wait should NOT appear as a block opener
+      const waitPair = pairs.find((p) => p.openKeyword.value === 'wait');
+      assert.strictEqual(waitPair, undefined, 'wait fork; should not open a block');
+    });
+  });
+
+  suite('Regression: scope resolution with whitespace before keyword', () => {
+    test('should reject block_open keyword preceded by `pkg :: ` (whitespace separated)', () => {
+      // Bug: `pkg::case` is rejected by the existing direct-`::` check, but `pkg :: case`
+      // (with whitespace between `::` and the keyword) bypasses it. The block_open
+      // filter at line 444-447 only checks immediately-adjacent `::`.
+      const source = 'module m;\n  initial begin\n    x = pkg :: case;\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0, '`pkg :: case` (with spaces) should not be tokenized as block_open');
+    });
+
+    test('should reject block_middle default preceded by `pkg :: ` (whitespace separated)', () => {
+      // `pkg :: default` should not be treated as a case label. The existing default
+      // filter at line 290-292 checks immediately-adjacent `::` but not whitespace-separated.
+      // Use a context where `default` would appear in a valid case to ensure the test
+      // wouldn't filter due to no following `:`.
+      const source = 'case (x)\n  pkg :: default : y = 1;\n  default : y = 2;\nendcase';
+      const tokens = parser.getTokens(source);
+      const defaultTokens = tokens.filter((t) => t.value === 'default');
+      // Only the second `default` (the real case-label default) should be tokenized
+      assert.strictEqual(defaultTokens.length, 1, 'Only the real `default:` should remain after filtering');
+      // The remaining default should be at the offset where `default :` appears alone (no `pkg :: ` prefix)
+      assert.ok(defaultTokens[0].startOffset > 30, 'The remaining default should be the second one (after pkg :: default)');
+    });
+  });
+
+  suite("Regression: assignment pattern '{key value} without colon", () => {
+    test("should reject block_open used as field name in '{} without colon", () => {
+      // Bug: assignment pattern `'{...}` filtering only triggered when followed by `:`.
+      // A nested expression like `'{begin + 1}` would incorrectly tokenize `begin`.
+      // (Here `begin` is referring to a previously declared variable.)
+      const source = "module m;\n  int x = '{begin};\nendmodule";
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0, "begin inside '{} should not be tokenized");
+    });
+  });
+
+  suite('Regression: ifdef with comment between directive and macro name', () => {
+    test('should treat KEYWORD as macro name when comment separates `ifdef and KEYWORD', () => {
+      // Bug: `ifdef /* comment */ MY_MACRO` should treat MY_MACRO as the macro arg,
+      // but the existing code only skips spaces/tabs after `ifdef`. When a block
+      // comment intervenes, the macro arg detection fails and downstream filtering
+      // does not exclude the macro name.
+      const source = '`ifdef /* comment */ end\nmodule m;\nendmodule\n`endif\n';
+      const tokens = parser.getTokens(source);
+      // `end` after `ifdef /* comment */` is the macro name, not a block_close
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 0, 'end should not be tokenized as block_close when it is a macro arg name');
     });
   });
 

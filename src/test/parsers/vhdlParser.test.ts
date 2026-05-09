@@ -3024,5 +3024,91 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-09: reserved-word label after compound end should not open a new block', () => {
+    // VHDL allows an optional designator/label after the compound end:
+    //   `end generate <label>;`, `end process <label>;`, `end loop <label>;`, etc.
+    // In well-formed code the trailing word is an identifier (not a reserved word).
+    // Some users/code generators erroneously place a reserved word there
+    // (e.g., `end generate loop;`, `end process if;`). The reserved word must NOT
+    // be tokenized as a fresh block_open, otherwise the surrounding architecture
+    // fails to close because the next `end <type>;` matches that ghost opener instead.
+    test('should not treat trailing `loop` after `end generate` as a new block opener', () => {
+      const source = `architecture rtl of foo is
+begin
+  gen: for i in 0 to 3 generate
+    sig <= '1';
+  end generate loop;
+end rtl;`;
+      const pairs = parser.parse(source);
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value.toLowerCase(), 'end', 'architecture should be closed by the final end rtl;');
+      // No spurious loop-opener block should remain.
+      const looseLoop = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(!looseLoop, 'trailing reserved word after compound end must not pair as a block');
+    });
+
+    test('should not treat trailing `if` after `end process` as a new block opener', () => {
+      const source = `architecture rtl of foo is
+begin
+  proc: process(clk)
+  begin
+    null;
+  end process if;
+end rtl;`;
+      const pairs = parser.parse(source);
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value.toLowerCase(), 'end', 'architecture should be closed by the final end rtl;');
+      const looseIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(!looseIf, 'trailing reserved word after compound end must not pair as a block');
+    });
+
+    test('should not treat trailing `while` after `end if` as a new block opener', () => {
+      const source = `architecture rtl of foo is
+begin
+  process(clk)
+  begin
+    if cond then
+      null;
+    end if while;
+  end process;
+end rtl;`;
+      const pairs = parser.parse(source);
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value.toLowerCase(), 'end', 'architecture should be closed by the final end rtl;');
+      const looseWhile = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'while');
+      assert.ok(!looseWhile, 'trailing reserved word after compound end must not pair as a block');
+    });
+
+    test('should not treat trailing `for` after `end if` as a new block opener', () => {
+      const source = `architecture rtl of foo is
+begin
+  process(clk)
+  begin
+    if cond then
+      null;
+    end if for;
+  end process;
+end rtl;`;
+      const pairs = parser.parse(source);
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value.toLowerCase(), 'end', 'architecture should be closed by the final end rtl;');
+      const looseFor = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'for');
+      assert.ok(!looseFor, 'trailing reserved word after compound end must not pair as a block');
+    });
+
+    test('should not treat trailing `case` after `end record` as a new block opener', () => {
+      const source = `package my_pkg is
+  type rec_t is record
+    a : integer;
+  end record case;
+end package;`;
+      const pairs = parser.parse(source);
+      const pkgPair = findBlock(pairs, 'package');
+      assert.strictEqual(pkgPair.closeKeyword.value.toLowerCase(), 'end package', 'package should be closed by end package;');
+      const looseCase = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(!looseCase, 'trailing reserved word after compound end must not pair as a block');
+    });
+  });
+
   generateCommonTests(config);
 });

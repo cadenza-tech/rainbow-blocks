@@ -1231,5 +1231,19 @@ end`;
     });
   });
 
+  suite('Regression: isAfterGoto must reject keywords preceded by Unicode-letter identifier ending in goto', () => {
+    test('should treat αgoto as identifier and pair do/end after it', () => {
+      const pairs = parser.parse('αgoto\ndo print(1) end');
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should pair both for/end and inner do/end when αgoto appears between them', () => {
+      const pairs = parser.parse('for i = 1, 10 do\n  αgoto\n  do\n    print(i)\n  end\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'do');
+    });
+  });
+
   generateCommonTests(config);
 });

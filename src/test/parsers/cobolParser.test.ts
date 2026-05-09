@@ -1886,6 +1886,24 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after multi-line MOVE is data name');
     });
+    test('should not register ELSE as IF intermediate when inline comment intervenes after MOVE', () => {
+      const source = 'IF X\n  MOVE\n  *> some comment\n  ELSE TO Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after MOVE with intervening *> comment is data name');
+    });
+    test('should not register WHEN as EVALUATE intermediate when inline comment intervenes after ADD', () => {
+      const source = 'EVALUATE X\n  ADD\n  *> comment\n  WHEN TO Y\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after ADD with intervening *> comment is data name');
+    });
+    test('should not register ELSE as IF intermediate when >> directive line intervenes after MOVE', () => {
+      const source = 'IF X\n  MOVE\n>>SOURCE FORMAT IS FREE\n  ELSE TO Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after MOVE with intervening >> directive is data name');
+    });
   });
 
   suite('Regression: ELSE/WHEN after expression operators', () => {

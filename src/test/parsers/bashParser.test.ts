@@ -5661,4 +5661,131 @@ fi`;
       assertSingleBlock(pairs, '{', '}');
     });
   });
+
+  suite('Regression: function NAME \\<newline>{ ... } with continuation before brace', () => {
+    test('should detect { } when { follows \\<newline> after function name', () => {
+      const source = 'function f \\\n{ echo hi; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+    test('should detect { } when { follows \\<newline> after name() form', () => {
+      const source = 'f() \\\n{ echo hi; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+    test('should detect { } when { follows \\<newline> after coproc NAME', () => {
+      const source = 'coproc mycoproc \\\n{ echo hi; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Regression: raw { } inside [[ ]] not detected as block', () => {
+    test('should not detect { } inside multi-line [[ ]] as block', () => {
+      const source = 'if [[\n{\n}\n]]; then echo; fi';
+      const pairs = parser.parse(source);
+      // The outer if/fi pair is detected, the {/} inside [[ ]] should not
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: word-character fusion for done/fi/esac suffixes', () => {
+    test('should not treat done in done#tag as block close', () => {
+      const source = 'for i in 1; do\n  done#tag\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      // The closing should be the final 'done', not the 'done' in 'done#tag'
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
+    test('should not treat fi in fi.suffix as block close', () => {
+      const source = 'if true; then\n  fi.suffix\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi: as block close', () => {
+      const source = 'if true; then\n  fi:\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi! as block close', () => {
+      const source = 'if true; then\n  fi!\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi~ as block close', () => {
+      const source = 'if true; then\n  fi~\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi/path as block close', () => {
+      const source = 'if true; then\n  fi/path\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi, as block close', () => {
+      const source = 'if true; then\n  fi,\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi@ as block close', () => {
+      const source = 'if true; then\n  fi@\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi% as block close', () => {
+      const source = 'if true; then\n  fi%\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat fi in fi^ as block close', () => {
+      const source = 'if true; then\n  fi^\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat done in done@x as block close', () => {
+      const source = 'for i in 1; do\n  done@x\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
+  });
+
+  suite('Regression: time coproc { ... } anonymous coprocess', () => {
+    test('should detect { } in time coproc { ... }', () => {
+      const source = 'time coproc { echo hi; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Regression: empty heredoc terminator with subshell paren', () => {
+    test('should not match empty <<"" terminator at subshell ) line (then/fi inside body)', () => {
+      // <<""  body terminates only at a blank line, so the ')' line is body content,
+      // and the inner `then/fi` are inside the heredoc body, not real tokens.
+      const source = 'x=$(cat <<""\nbody\n)if true; then echo; fi\n)';
+      const tokens = parser.getTokens(source);
+      // With empty terminator, ')' should NOT terminate the heredoc body.
+      // No tokens should appear inside the heredoc body region.
+      // The `then` (offset 28) and `fi` (offset 39) are inside the unterminated body.
+      const thenTokens = tokens.filter((t) => t.value === 'then');
+      const fiTokens = tokens.filter((t) => t.value === 'fi');
+      assert.strictEqual(thenTokens.length, 0, 'then inside empty-heredoc body should not be tokenized');
+      assert.strictEqual(fiTokens.length, 0, 'fi inside empty-heredoc body should not be tokenized');
+    });
+    test('should still match empty <<"" terminator at blank line', () => {
+      // Blank line terminates the empty-delimiter heredoc; if/fi after blank line is detected
+      const source = 'cat <<""\nbody\n\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });

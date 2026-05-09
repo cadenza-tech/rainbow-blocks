@@ -2132,6 +2132,30 @@ bar() -> fun() -> ok end.`;
       const beginTokens = tokens.filter((t) => t.value === 'begin');
       assert.strictEqual(beginTokens.length, 0);
     });
+
+    test('should filter keywords inside nested function calls in -record default value', () => {
+      const tokens = parser.getTokens('-record(s, {h = nested(begin)}).\nfoo() -> ok end.');
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0);
+    });
+
+    test('should not pair begin inside -record nested call with end outside', () => {
+      const pairs = parser.parse('-record(s, {h = nested(begin)}).\nfoo() -> ok end.');
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPair, undefined, 'begin inside nested() should not be a block opener');
+    });
+
+    test('should treat -define body containing single bare keyword as filtered', () => {
+      const tokens = parser.getTokens('-define(M, begin).\nfoo() -> ok end.');
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0, 'bare begin in -define body should be filtered');
+    });
+
+    test('should not pair -define bare begin keyword with later end', () => {
+      const pairs = parser.parse('-define(M, begin).\nfoo() -> ok end.');
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPair, undefined, 'bare begin in -define body should not pair with later end');
+    });
   });
 
   suite('Regression: fun() in -record union type not treated as block opener', () => {
@@ -2385,6 +2409,31 @@ bar() -> fun() -> ok end.`;
       const source = 'foo() ->\n  F = fun lists:reverse/Arity,\n  ok.';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+
+    test('should not tokenize fun M:F/?ARITY (macro arity) as block opener', () => {
+      const tokens = parser.getTokens('foo() ->\n  F = fun lists:reverse/?ARITY,\n  ok.');
+      const funTokens = tokens.filter((t) => t.value === 'fun');
+      assert.strictEqual(funTokens.length, 0, 'fun reference with macro arity should not be tokenized');
+    });
+
+    test('should not tokenize fun F/?ARITY (macro arity without module) as block opener', () => {
+      const tokens = parser.getTokens('foo() ->\n  F = fun reverse/?ARITY,\n  ok.');
+      const funTokens = tokens.filter((t) => t.value === 'fun');
+      assert.strictEqual(funTokens.length, 0, 'fun reference without module and with macro arity should not be tokenized');
+    });
+
+    test("should not tokenize fun 'quoted'/?ARITY (quoted-atom macro arity) as block opener", () => {
+      const tokens = parser.getTokens("foo() ->\n  F = fun 'my-func'/?ARITY,\n  ok.");
+      const funTokens = tokens.filter((t) => t.value === 'fun');
+      assert.strictEqual(funTokens.length, 0, 'quoted-atom fun reference with macro arity should not be tokenized');
+    });
+
+    test('should not pair begin/end across fun reference with macro arity', () => {
+      // The `fun lists:reverse/?ARITY` reference must not consume the begin's end.
+      const source = 'foo() ->\n  begin\n    F = fun lists:reverse/?ARITY,\n    ok\n  end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
     });
   });
 

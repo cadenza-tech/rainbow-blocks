@@ -1602,9 +1602,12 @@ end try`;
     });
 
     test('should handle continuation character reaching end of file', () => {
+      // `display dialog "X" \u00AC\nend repeat` is a single logical line (continuation),
+      // so `end repeat` is treated as part of the expression, not a block close.
+      // The repeat block has no matching close, so no pair is produced.
       const source = 'repeat 3 times\n  display dialog "X" \u00AC\nend repeat';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assertNoBlocks(pairs);
     });
   });
 
@@ -2707,6 +2710,108 @@ end try`;
       assertBlockCount(pairs, 1);
       assert.strictEqual(pairs[0].openKeyword.value, 'to');
       assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+  });
+
+  suite('Regression 2026-05-09: record key position should suppress block_middle keywords', () => {
+    test('should not detect else as block_middle when used as record key {else: 5}', () => {
+      const source = 'if x then\n  set r to {else: 5}\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect else if as block_middle when used as record key {else if: 5}', () => {
+      const source = 'if x then\n  set r to {else if: 5}\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect on error as block_middle when used as record key {on error: 5}', () => {
+      const source = 'try\n  set r to {on error: 5}\n  beep\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect else as block_middle when used as record key after comma', () => {
+      const source = 'if x then\n  set r to {a: 1, else: 5}\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
+  suite('Regression 2026-05-09: NBSP/Unicode whitespace indentation should still allow close keyword detection', () => {
+    test('should detect end tell when indented with NBSP (U+00A0)', () => {
+      const NBSP = ' ';
+      const source = `tell application "Finder"\n${NBSP}end tell`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should detect end if when indented with NBSP (U+00A0)', () => {
+      const NBSP = ' ';
+      const source = `if x then\n${NBSP}beep\n${NBSP}end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect bare end when indented with NBSP (U+00A0)', () => {
+      const NBSP = ' ';
+      const source = `on myHandler()\n${NBSP}beep\n${NBSP}end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: continuation ¬ before close keyword should suppress false close detection', () => {
+    test('should not detect inner end tell on continuation line as close', () => {
+      const source = 'tell application "Finder"\n  set x to 5 ¬\n  end tell\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      // The outer end tell at the very end should be the close keyword.
+      assert.ok(
+        pairs[0].closeKeyword.startOffset > source.indexOf('beep'),
+        'close should be the outer end tell after beep, not the continuation-line end tell'
+      );
+    });
+
+    test('should not detect inner end if on continuation line as close', () => {
+      const source = 'if cond then\n  set x to 5 ¬\n  end if\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.ok(
+        pairs[0].closeKeyword.startOffset > source.indexOf('beep'),
+        'close should be the outer end if after beep, not the continuation-line end if'
+      );
+    });
+
+    test('should not detect bare end on continuation line as close', () => {
+      const source = 'on myHandler()\n  set x to 5 ¬\n  end\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+      assert.ok(
+        pairs[0].closeKeyword.startOffset > source.indexOf('beep'),
+        'close should be the outer end after beep, not the continuation-line end'
+      );
+    });
+  });
+
+  suite('Regression 2026-05-09: on error followed by ( should not be detected as block_middle', () => {
+    test('should not detect on error() as block_middle inside try block', () => {
+      const source = 'try\n  on error()\n  beep\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect on error () (with space) as block_middle inside try block', () => {
+      const source = 'try\n  on error ()\n  beep\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], []);
     });
   });
 

@@ -1813,5 +1813,137 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: end after logical NOT operator !', () => {
+    test('should not treat end after ! (logical NOT) as block close', () => {
+      // `!end` is logical-NOT applied to `end` (operand context). The `end` is invalid
+      // outside of array indexing, but treating it as block_close destroys outer pairing.
+      // Lines: 0 = function f, 1 = x = !end, 2 = if true, 3 = end, 4 = outer end.
+      const source = 'function f\n  x = !end\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+  });
+
+  suite('Regression 2026-05-09: BOM at file start does not break command-syntax detection', () => {
+    test('should not tokenize end after disp when the file starts with BOM + disp end', () => {
+      // `﻿` is the byte-order-mark; some saved files include it. After the BOM the
+      // very first statement is `disp end` which is command-syntax (`disp('end')`).
+      // The parser must skip the BOM when checking statement-start so the `end` here is
+      // not treated as block_close. Without the BOM fix the leading `end` gets tokenized
+      // as block_close even though it is a string argument.
+      const source = '﻿disp end';
+      const tokens = parser.getTokens(source);
+      // No tokens should be emitted; `end` is a command-syntax argument, not a block close.
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 0, 'end after disp at file start with BOM must be filtered as command-syntax arg');
+    });
+  });
+
+  suite('Regression 2026-05-09: end .field with whitespace before dot is field access', () => {
+    test('should not treat end .field as block close (space before dot)', () => {
+      // `end .x` (whitespace then dot then identifier) is struct field access, not a
+      // block close. Lines: 0 = function f, 1 = end .x = 1, 2 = outer end.
+      const source = 'function f\n  end .x = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+
+    test('should not treat end\\t.field as block close (tab before dot)', () => {
+      const source = 'function f\n  end\t.x = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
+  suite('Regression 2026-05-09: section keyword rejected at tokenize keeps stray end skipped', () => {
+    test('should pair classdef with the LAST end when properties + 1 (operator) is rejected', () => {
+      // `properties + 1` is invalid section-keyword usage — the parser rejects it at
+      // tokenize. The `end` on line 2 was intended for the (rejected) properties block,
+      // so classdef should pair with the LAST end on line 3, leaving the stray end
+      // unmatched (defensive: avoids classdef pairing with the wrong end).
+      const source = 'classdef A\n  properties + 1\n  end\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 3, 'classdef should pair with the LAST end');
+    });
+
+    test('should pair classdef with the LAST end when properties = 5 (assignment) is rejected', () => {
+      const source = 'classdef A\n  properties = 5\n  end\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 3, 'classdef should pair with the LAST end');
+    });
+  });
+
+  suite('Regression 2026-05-09: case as function call vs block_middle', () => {
+    test('should not treat case() function call inside switch as intermediate', () => {
+      // `case(value)` inside a function body that is also inside a switch should be
+      // treated as a function call, not a switch-case intermediate. The expected
+      // structure: switch...end with no intermediates, and the function call doesn't
+      // create a phantom intermediate.
+      const source = 'switch x\n  case 1\n    y = case(value);\n    z = 2;\nend';
+      const pairs = parser.parse(source);
+      // switch pairs with end. Only the leading `case 1` is a real intermediate.
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+  });
+
+  suite('Regression 2026-05-09: command-syntax with case as argument', () => {
+    test('should not treat clear case as block_middle', () => {
+      // `clear case` is command-syntax: `clear` is a command and `case` is its string
+      // argument. The `case` here must not be tokenized as block_middle.
+      const source = 'switch x\n  case 1\n    clear case\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      // Only the real `case 1` should be in intermediates.
+      assertIntermediates(pairs[0], ['case']);
+    });
+  });
+
+  suite('Regression 2026-05-09: command-syntax with line continuation before end', () => {
+    test('should treat disp ...\\n end as command-syntax (... continuation)', () => {
+      // `disp ...\n end` — the `disp` is command-syntax and the `...` continues onto
+      // the next line where `end` appears as the string argument. The parser must
+      // recognise this and not treat the `end` as block close.
+      const source = 'function f\n  disp ...\n   end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should pair with the outer end');
+    });
+  });
+
+  suite('Regression 2026-05-09: command-syntax with multiple arguments before end', () => {
+    test('should treat clear all end as command-syntax (multi-arg form)', () => {
+      // `clear all end` is command-syntax: `clear` is a command and `all`, `end` are
+      // string arguments. Currently the parser only checks the immediately-preceding
+      // identifier — but `end` here is the LAST arg, preceded by `all` which is not
+      // a recognised keyword, so the rejection should still fire.
+      const source = 'function f\n  clear all end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+  });
+
+  suite('Regression 2026-05-09: do is not a reserved word in MATLAB', () => {
+    test('should treat do end as command-syntax (do is identifier in MATLAB)', () => {
+      // In MATLAB `do` is NOT a reserved word (it is Octave-specific). When `do end`
+      // appears in MATLAB the `end` is a command-syntax string argument, not a block
+      // close. Lines: 0 = function f, 1 = do end, 2 = outer end.
+      const source = 'function f\n  do end\nend';
+      const pairs = parser.parse(source);
+      // function should pair with the OUTER end, not with the `end` inside `do end`.
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+  });
+
   generateCommonTests(config);
 });

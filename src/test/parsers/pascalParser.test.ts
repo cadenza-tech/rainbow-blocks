@@ -2678,6 +2678,18 @@ end.`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'class', 'end');
     });
+
+    test('should not treat record as block opener when generic has multiple type parameters separated by semicolons', () => {
+      // Multi-parameter generic with `;` separator between params:
+      //   function Bar<T1; T2: record>: T2;
+      // Inside <...>, ';' is a parameter separator, not a statement boundary.
+      // The 'record' constraint must still be recognized as inside the generic angle brackets.
+      const source = `TFoo = class
+    function Bar<T1; T2: record>: T2;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
   });
 
   suite('Regression 2026-05-09: := assignment and additional comparison context keywords', () => {

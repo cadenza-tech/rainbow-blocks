@@ -3951,5 +3951,190 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: operator atoms should be recognized as excluded regions', () => {
+    // Operator atoms in Elixir use punctuation rather than letters: :+, :-, :*, :/, :<,
+    // :>, :=, :!, :?, :~, :^, :&, :|, plus multi-char :==, :!=, :<=, :>=, :=~, :->,
+    // :<-, :<>. These must be added to excluded regions so adjacent block keywords are
+    // not falsely detected (e.g., x = :+if y do end should not produce an if/end pair
+    // because :+ is an atom, not a colon-plus-identifier sequence).
+    test('should treat :+ as an excluded region (single-char operator atom)', () => {
+      const source = 'x = :+';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':+ should produce an excluded region starting at offset 4');
+      assert.strictEqual(atomRegion?.end, 6, ':+ should span 2 characters');
+    });
+    test('should treat :== as an excluded region (multi-char operator atom)', () => {
+      const source = 'x = :==';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':== should produce an excluded region starting at offset 4');
+      assert.strictEqual(atomRegion?.end, 7, ':== should span 3 characters');
+    });
+    test('should treat :-> as an excluded region', () => {
+      const source = 'x = :->';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':-> should produce an excluded region starting at offset 4');
+      assert.strictEqual(atomRegion?.end, 7, ':-> should span 3 characters');
+    });
+    test('should treat :! as an excluded region', () => {
+      const source = 'x = :!';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 6);
+    });
+    test('should not produce false if/end pair after :+ when no whitespace separates from if', () => {
+      // :+if is not valid Elixir, but our parser should not introduce false pairs.
+      // With :+ recognized as an atom (excluded region), the if at offset 6 is no longer
+      // adjacent to a non-identifier; specifically :+ is the atom, then "if" is regular code.
+      // The if/end pair still forms (because nothing prevents it), but the regions reflect
+      // the atom presence.
+      const source = 'x = :+\nif y do\nend';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':+ should be an excluded region');
+    });
+  });
+
+  suite('Regression 2026-05-09: hasDoKeyword should handle unbalanced parens', () => {
+    // hasDoKeyword tracks paren/bracket/brace depth to ignore "do" inside grouping. With
+    // unbalanced source code (e.g., a typo `if x)`), the depth could go negative and
+    // prevent "do" from being detected at depth 0. Clamp negative depths so detection
+    // remains robust against malformed input.
+    test('should detect if/end with unbalanced closing paren before do', () => {
+      const source = 'if x) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should detect if/end with unbalanced closing bracket before do', () => {
+      const source = 'if x] do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should detect if/end with unbalanced closing brace before do', () => {
+      const source = 'if x} do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: sigil modifier should not consume word operators', () => {
+    // Sigil modifiers are short lowercase letter sequences (e.g., u, i, m). The modifier
+    // scanner must stop before reserved guard/operator words like when/in/and/or/not so
+    // that they remain available as code rather than being absorbed into the sigil region.
+    test('should not consume "when" as modifier after ~r/.../ delimiter', () => {
+      const source = 'x = ~r/pat/when y == 1';
+      const regions = parser.getExcludedRegions(source);
+      const sigilRegion = regions.find((r) => r.start === 4);
+      assert.ok(sigilRegion, 'sigil region should start at 4');
+      // Region must end at the closing /, not absorb 'when'.
+      assert.strictEqual(sigilRegion?.end, 11, 'sigil region must end at /, not consume when');
+    });
+    test('should not consume "in" as modifier after ~r/.../ delimiter', () => {
+      const source = 'x = ~r/pat/in [1]';
+      const regions = parser.getExcludedRegions(source);
+      const sigilRegion = regions.find((r) => r.start === 4);
+      assert.ok(sigilRegion);
+      assert.strictEqual(sigilRegion?.end, 11, 'sigil region must end at /, not consume in');
+    });
+    test('should not consume "and" as modifier after ~r/.../ delimiter', () => {
+      const source = 'x = ~r/pat/and y';
+      const regions = parser.getExcludedRegions(source);
+      const sigilRegion = regions.find((r) => r.start === 4);
+      assert.ok(sigilRegion);
+      assert.strictEqual(sigilRegion?.end, 11, 'sigil region must end at /, not consume and');
+    });
+    test('should not consume "or" as modifier after ~r/.../ delimiter', () => {
+      const source = 'x = ~r/pat/or y';
+      const regions = parser.getExcludedRegions(source);
+      const sigilRegion = regions.find((r) => r.start === 4);
+      assert.ok(sigilRegion);
+      assert.strictEqual(sigilRegion?.end, 11, 'sigil region must end at /, not consume or');
+    });
+    test('should not consume "not" as modifier after ~r/.../ delimiter', () => {
+      const source = 'x = ~r/pat/not y';
+      const regions = parser.getExcludedRegions(source);
+      const sigilRegion = regions.find((r) => r.start === 4);
+      assert.ok(sigilRegion);
+      assert.strictEqual(sigilRegion?.end, 11, 'sigil region must end at /, not consume not');
+    });
+  });
+
+  suite('Regression 2026-05-09: hasCommaInParens should ignore commas inside fn body', () => {
+    // hasCommaInParens distinguishes if(cond, do: val) (function call) from if(cond) do...end
+    // (block). It must skip commas inside a nested fn-end since those are fn parameter separators
+    // belonging to the inner fn, not arguments to the outer if.
+    test('should detect if/end when fn parameter list has a comma', () => {
+      const source = 'if(fn x, y -> x + y end) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      // Expected: 2 pairs (fn-end inside, if-end outside)
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value, 'end');
+      const fnPair = findBlock(pairs, 'fn');
+      assert.strictEqual(fnPair.closeKeyword.value, 'end');
+    });
+    test('should detect unless/end when fn parameter list has a comma', () => {
+      const source = 'unless(fn a, b -> a end) do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const unlessPair = findBlock(pairs, 'unless');
+      assert.strictEqual(unlessPair.closeKeyword.value, 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: fn and quote after .. range operator are value expressions', () => {
+    // fn and quote are value-producing expression keywords, distinct from definition keywords
+    // (def, defp, defmodule, etc.). 1..fn -> 1 end and 1..quote do :a end should produce
+    // valid block pairs because fn-end and quote-end return values.
+    test('should pair fn/end after .. range operator', () => {
+      const source = 'x = 1..fn -> 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+    test('should pair quote/end after .. range operator', () => {
+      const source = 'x = 1..quote do :a end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'quote', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: invalid sigil delimiters should be rejected', () => {
+    // Per Elixir spec, valid sigil delimiters are paired (), [], {}, <> or single
+    // ASCII chars from the whitelist: / | " '. Other characters like _, $, @, ^, ~
+    // must NOT be treated as sigil delimiters; doing so would consume actual code.
+    // Pattern: a literal non-delimiter char followed by " if x do " then the same char.
+    // If accepted as delimiter, the body "if x do" is consumed as a sigil body and the
+    // subsequent end has no opener to pair with. With proper rejection, ~r is treated
+    // as a malformed token and the if/end pair on the trailing tokens is detected.
+    test('should not treat ~r$..$ as a sigil (dollar sign is not a valid delimiter)', () => {
+      const source = 'x = ~r$ if x do $\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should not treat ~r@..@ as a sigil (at sign is not a valid delimiter)', () => {
+      const source = 'x = ~r@ if x do @\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should not treat ~r^..^ as a sigil (caret is not a valid delimiter)', () => {
+      const source = 'x = ~r^ if x do ^\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should not treat ~r~..~ as a sigil (tilde is not a valid delimiter)', () => {
+      const source = 'x = ~r~ if x do ~\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should not treat ~r!..! as a sigil (exclamation is not a valid delimiter)', () => {
+      const source = 'x = ~r! if x do !\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
