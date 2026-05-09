@@ -3718,5 +3718,55 @@ end`;
     });
   });
 
+  suite('Regression: string/char/symbol/command literal followed by generator for', () => {
+    test('should treat ("x" for i in 1:10) as generator expression in parens', () => {
+      // Bug: string literal directly followed by `for` in parens should be a generator,
+      // not block-form for. Previously, isOnlyWhitespaceBetween treated the string region
+      // as whitespace-equivalent, causing for to be misclassified as block-form.
+      const source = 'function f()\n  g("x" for i in 1:10)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat ["x" for i in 1:10] as generator expression in brackets', () => {
+      // Bug: same case for bracket version (array comprehension).
+      const source = 'function f()\n  ["x" for i in 1:10]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test("should treat ('x' for i in 1:10) as generator expression in parens (char literal)", () => {
+      // Bug: char literal directly followed by `for` in parens should be a generator.
+      const source = "function f()\n  g('x' for i in 1:10)\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat (:sym for i in 1:10) as generator expression in parens (symbol)', () => {
+      // Bug: symbol literal directly followed by `for` in parens should be a generator.
+      const source = 'function f()\n  g(:sym for i in 1:10)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat (`cmd` for i in 1:10) as generator expression in parens (command literal)', () => {
+      // Bug: command literal directly followed by `for` in parens should be a generator.
+      const source = 'function f()\n  g(`cmd` for i in 1:10)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat (# comment\\nfor ... end) as block-form for in parens', () => {
+      // Counter-test: a comment is not a value expression, so for is still block-form.
+      const source = 'function f()\n  (\n    # comment\n    for i in 1:10\n      x\n    end\n  )\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const fnBlock = findBlock(pairs, 'function');
+      assert.strictEqual(fnBlock.closeKeyword?.value, 'end');
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.closeKeyword?.value, 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
