@@ -7,7 +7,25 @@ import type { PascalValidationCallbacks } from './pascalValidation';
 import { isIfThenElse, isInsideParens, isTypeDeclarationOf, isVariantRecordCase, TYPE_MODIFIERS } from './pascalValidation';
 
 // Keywords that indicate comparison context (= is comparison, not type definition)
-const COMPARISON_CONTEXT_KEYWORDS = new Set(['if', 'while', 'until', 'then', 'or', 'and', 'not', 'xor', 'else']);
+const COMPARISON_CONTEXT_KEYWORDS = new Set([
+  'if',
+  'while',
+  'until',
+  'then',
+  'or',
+  'and',
+  'not',
+  'xor',
+  'else',
+  'for',
+  'in',
+  'is',
+  'as',
+  'div',
+  'mod',
+  'shl',
+  'shr'
+]);
 
 export class PascalBlockParser extends BaseBlockParser {
   private get validationCallbacks(): PascalValidationCallbacks {
@@ -32,13 +50,33 @@ export class PascalBlockParser extends BaseBlockParser {
     }
     // Reject FreePascal keyword-escape prefix (& or @ before keyword): &case is the
     // identifier `case`, not the case statement; @procedure is a procedure-pointer.
-    if (position > 0 && (source[position - 1] === '&' || source[position - 1] === '@')) {
-      return false;
+    // Also reject '$' (hex-literal prefix) and '#' (char-constant prefix) which can
+    // appear immediately before a word that happens to spell a Pascal keyword.
+    if (position > 0) {
+      const prev = source[position - 1];
+      if (prev === '&' || prev === '@' || prev === '$' || prev === '#') {
+        return false;
+      }
     }
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
       if (isVariantRecordCase(source, position, excludedRegions, this.validationCallbacks)) {
+        return false;
+      }
+    }
+
+    // Generic constraint: function Bar<T: record>: T;
+    // 'record' inside <> is a generic type constraint, not a block opener.
+    if (keyword === 'record' && this.isInsideGenericConstraint(source, position, excludedRegions)) {
+      return false;
+    }
+
+    // Case label: case X of begin: Foo; end / case X of try: Foo; end
+    // A keyword used as a case-label has '...of'/'...;'/'...,' before and ':' after.
+    // (Excluding ':=' assignment.)
+    if (keyword === 'begin' || keyword === 'try' || keyword === 'record' || keyword === 'case' || keyword === 'repeat') {
+      if (this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
         return false;
       }
     }
@@ -306,7 +344,8 @@ export class PascalBlockParser extends BaseBlockParser {
     }
 
     // Check if '=' is in a comparison context (not a type definition)
-    // e.g. 'if x = class', 'if Self.X = class', 'if a + b = class', 'while foo() = class'
+    // e.g. 'if x = class', 'if Self.X = class', 'if a + b = class', 'while foo() = class',
+    // and 'Y := X = class' (`:=` assignment makes the trailing '=' a comparison).
     // Scan backward to the start of the statement and look for any comparison-context
     // keyword along the way. Stop at statement boundaries (';' and start-of-source).
     {
@@ -321,6 +360,10 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         const ch = source[ci];
         if (ch === ';') break;
+        // ':=' assignment operator: the '=' beyond it is a comparison, not a type def.
+        if (ch === '=' && ci > 0 && source[ci - 1] === ':') {
+          return false;
+        }
         if (/[a-zA-Z_]/.test(ch)) {
           const wordEnd = ci;
           while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
@@ -348,8 +391,103 @@ export class PascalBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // Returns true when the keyword at `position` is used as a case-label rather than a
+  // block opener. Case labels look like `of begin:`, `; try:`, `, record:`, etc.
+  // The check requires:
+  //  (1) the next non-whitespace character after the keyword is ':' (and not ':=' assign),
+  //  (2) the previous non-whitespace, non-comment token is `of`, `;`, or `,`.
+  private isUsedAsCaseLabel(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // (1) Forward check: must be followed by ':' (not ':=')
+    let fp = position + keyword.length;
+    while (fp < source.length) {
+      if (this.isInExcludedRegion(fp, excludedRegions)) {
+        const region = this.findExcludedRegionAt(fp, excludedRegions);
+        if (region) {
+          fp = region.end;
+          continue;
+        }
+      }
+      if (source[fp] === ' ' || source[fp] === '\t' || source[fp] === '\n' || source[fp] === '\r') {
+        fp++;
+        continue;
+      }
+      break;
+    }
+    if (fp >= source.length || source[fp] !== ':') return false;
+    // ':=' is assignment, not a case-label colon
+    if (fp + 1 < source.length && source[fp + 1] === '=') return false;
+
+    // (2) Backward check: previous non-whitespace, non-comment token must be 'of', ';', or ','
+    let bp = position - 1;
+    while (bp >= 0) {
+      if (this.isInExcludedRegion(bp, excludedRegions)) {
+        const region = this.findExcludedRegionAt(bp, excludedRegions);
+        if (region) {
+          bp = region.start - 1;
+          continue;
+        }
+      }
+      if (source[bp] === ' ' || source[bp] === '\t' || source[bp] === '\n' || source[bp] === '\r') {
+        bp--;
+        continue;
+      }
+      break;
+    }
+    if (bp < 0) return false;
+    const prev = source[bp];
+    if (prev === ';' || prev === ',') return true;
+    // Check for 'of' (word ending at bp)
+    if (/[a-zA-Z]/.test(prev)) {
+      let ws = bp;
+      while (ws >= 0 && /[a-zA-Z0-9_]/.test(source[ws])) ws--;
+      const word = source.slice(ws + 1, bp + 1).toLowerCase();
+      if (word === 'of') return true;
+    }
+    return false;
+  }
+
+  // Returns true when the position is inside a generic constraint angle bracket, e.g.
+  // `function Bar<T: record>: T;`. Scans backward from the position for an unbalanced '<'
+  // before encountering a statement boundary (';') or start of source. The scan respects
+  // excluded regions and balances nested '< >' brackets. '>=' / '<=' / '>>' / '<<' are
+  // skipped to avoid mistaking comparison/shift operators for generic brackets.
+  private isInsideGenericConstraint(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ';') return false;
+      if (ch === '>') {
+        // Skip '>=' (comparison) and '>>' (shift)
+        if (i > 0 && (source[i - 1] === '<' || source[i - 1] === '=' || source[i - 1] === '>')) {
+          i -= 2;
+          continue;
+        }
+        depth++;
+      } else if (ch === '<') {
+        // Skip '<=' (comparison) and '<<' (shift)
+        if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '<')) {
+          i--;
+          continue;
+        }
+        if (depth === 0) return true;
+        depth--;
+      }
+      i--;
+    }
+    return false;
+  }
+
   // Returns true when the position is preceded by `.` field-access dot, distinguishing
-  // it from the `..` range operator (which is not field access).
+  // it from the `..` range operator (which is not field access). Also skips newlines so
+  // multi-line member access like `Foo.\n  End` is recognised as a field access.
   private isPrecededByFieldDot(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -360,7 +498,7 @@ export class PascalBlockParser extends BaseBlockParser {
           continue;
         }
       }
-      if (source[i] === ' ' || source[i] === '\t') {
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
         i--;
         continue;
       }
@@ -489,8 +627,9 @@ export class PascalBlockParser extends BaseBlockParser {
           const prev = source[bp];
           if (prev !== ';') {
             // @asm = address-of, &asm = identifier-escape, <asm> = generic param,
-            // [asm] = array indexing, +/-/*/asm = arithmetic. None of these can introduce
-            // an asm block; treat them as non-statement context.
+            // [asm] = array indexing, +/-/*/asm = arithmetic, $asm = hex-literal prefix,
+            // #asm = char-constant prefix. None of these can introduce an asm block;
+            // treat them as non-statement context.
             if (
               prev === '.' ||
               prev === ':' ||
@@ -499,6 +638,8 @@ export class PascalBlockParser extends BaseBlockParser {
               prev === '=' ||
               prev === '@' ||
               prev === '&' ||
+              prev === '$' ||
+              prev === '#' ||
               prev === '<' ||
               prev === '[' ||
               prev === '+' ||
