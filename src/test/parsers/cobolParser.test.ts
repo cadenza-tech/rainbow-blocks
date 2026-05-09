@@ -1793,6 +1793,29 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-09: COPY statement with reserved-word filename as block_open', () => {
+    test('should not treat COPY IF. as block_open paired with END-IF', () => {
+      // The filename in `COPY IF.` is being used as a copybook name, not as a block opener.
+      // Without the fix, IF would be tokenized as block_open and erroneously pair with the
+      // following standalone END-IF (which is itself an orphan).
+      const source = 'COPY IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat COPY PERFORM. as block_open paired with END-PERFORM', () => {
+      const source = 'COPY PERFORM.\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat COPY EVALUATE. as block_open paired with END-EVALUATE', () => {
+      const source = 'COPY EVALUATE.\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression 2026-04-30: fixed-format string literal continuation (column-7 hyphen)', () => {
     test('should not pair IF in continuation prep area with the trailing END-IF', () => {
       // An unterminated literal on line 1 is continued on the next line whose column-7 is
