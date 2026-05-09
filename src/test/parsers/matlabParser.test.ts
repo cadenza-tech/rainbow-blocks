@@ -1945,6 +1945,47 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: function handle @ with whitespace before keyword', () => {
+    test('should not treat for after @ space as block_open', () => {
+      // `@ for x` is technically invalid MATLAB (function handle requires no space after @),
+      // but we should still treat the `for` here as a function handle target — not as a real
+      // block opener — to avoid destroying outer block pairing.
+      // Lines: 0 = function f, 1 = h = @ for x;, 2 = for i = 1:5, 3 = end (inner), 4 = outer end.
+      const source = 'function f\n  h = @ for x;\n  for i=1:5\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      const forBlock = findBlock(pairs, 'for');
+      // The for at line 2 (real for-loop) should pair with end at line 3.
+      assert.strictEqual(forBlock.openKeyword.line, 2);
+      assert.strictEqual(forBlock.closeKeyword.line, 3);
+    });
+
+    test('should not treat if after @\\t (tab) as block_open', () => {
+      const source = 'function f\n  h = @\tif x;\n  if y\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat while after @ multiple spaces as block_open', () => {
+      const source = 'function f\n  h = @   while x;\n  if y\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should still treat @keyword without space as function handle', () => {
+      // Sanity check: existing behavior must be preserved.
+      const source = 'function f\n  h = @for;\n  if y\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-09: block_middle as RHS identifier is not intermediate', () => {
     test('should not treat case as intermediate when used as RHS identifier in switch', () => {
       // `y = case;` — `case` is on the RHS of an assignment, an operand context.
