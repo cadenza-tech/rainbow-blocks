@@ -178,6 +178,13 @@ export class OctaveBlockParser extends MatlabBlockParser {
       }
     }
     if (keyword === 'arguments' && this.isArgumentsFunctionCall(source, position, excludedRegions)) {
+      // Phantom-section tracking: when `arguments(obj);` is rejected as a block opener,
+      // the user likely wrote a stray `end` for it. Record the position so matchBlocks
+      // can phantom-skip one `end`. Only when the keyword is at line-start (so a stray
+      // `end` would be expected to follow on a subsequent line).
+      if (this.isAtSectionKeywordLineStart(source, position) && !this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+        this.octavePhantomSectionPositions.push(position);
+      }
       return false;
     }
     const result = super.isValidBlockOpen(keyword, source, position, excludedRegions);
