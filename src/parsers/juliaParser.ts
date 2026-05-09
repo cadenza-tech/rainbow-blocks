@@ -1088,8 +1088,6 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Matches prefixed strings: r"...", raw"...", b"...", s"...", v"...", and custom macros
   private matchPrefixedString(source: string, pos: number): ExcludedRegion | null {
-    const char = source[pos];
-
     // Prefix must not be part of an identifier.
     // Julia identifier start chars: ASCII letters (a-z, A-Z, _), Unicode Letters (\p{L}).
     // Note: digits cannot start an identifier in Julia. So if prevChar is a digit (e.g.,
@@ -1104,17 +1102,51 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar)) {
         return null;
       }
+      // Check for low surrogate (BMP-outside char's second code unit). If present, the
+      // previous identifier char ends at pos - 2 (high surrogate). Reject if it's a letter.
+      if (prevChar >= '\uDC00' && prevChar <= '\uDFFF' && pos >= 2) {
+        const cp = source.codePointAt(pos - 2);
+        if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) {
+          return null;
+        }
+      }
     }
 
     // Match any identifier prefix followed by " (Julia string macro syntax).
     // Identifier start: ASCII letter/underscore or Unicode letter (digits cannot start identifiers).
+    // Handle BMP-outside characters (surrogate pairs) by using codePointAt.
     const isUnicodeLetter = (c: string) => c.charCodeAt(0) > 127 && /\p{L}/u.test(c);
     const isIdentStart = (c: string) => /[a-zA-Z_]/.test(c) || isUnicodeLetter(c);
     const isIdentCont = (c: string) => /[a-zA-Z0-9_]/.test(c) || (c.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(c));
-    if (isIdentStart(char)) {
-      let prefixEnd = pos + 1;
-      while (prefixEnd < source.length && isIdentCont(source[prefixEnd])) {
-        prefixEnd++;
+    // Check if pos is a high surrogate that combines with pos+1 to form a BMP-outside letter.
+    const isSurrogateLetterStart = (s: string, p: number): boolean => {
+      if (p + 1 >= s.length) return false;
+      const high = s.charCodeAt(p);
+      if (high < 0xd800 || high > 0xdbff) return false;
+      const cp = s.codePointAt(p);
+      return cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp));
+    };
+    const isSurrogateLetterOrNumberCont = (s: string, p: number): boolean => {
+      if (p + 1 >= s.length) return false;
+      const high = s.charCodeAt(p);
+      if (high < 0xd800 || high > 0xdbff) return false;
+      const cp = s.codePointAt(p);
+      return cp !== undefined && cp > 0xffff && /[\p{L}\p{N}]/u.test(String.fromCodePoint(cp));
+    };
+    const startedBySurrogate = isSurrogateLetterStart(source, pos);
+    const char = source[pos];
+    if (isIdentStart(char) || startedBySurrogate) {
+      let prefixEnd = startedBySurrogate ? pos + 2 : pos + 1;
+      while (prefixEnd < source.length) {
+        if (isIdentCont(source[prefixEnd])) {
+          prefixEnd++;
+          continue;
+        }
+        if (isSurrogateLetterOrNumberCont(source, prefixEnd)) {
+          prefixEnd += 2;
+          continue;
+        }
+        break;
       }
       if (prefixEnd < source.length && source[prefixEnd] === '"') {
         // Don't match block keywords as string macro prefixes
