@@ -1289,8 +1289,9 @@ end`;
       parser.parse(sourceB);
       const cacheB = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
       assert.notStrictEqual(cacheA, cacheB, 'changing source must invalidate the cache');
-      assert.strictEqual(cacheB!.source, sourceB);
-      assert.strictEqual(cacheB!.lengths[0], 5, 'cache for sourceB must reflect `while`');
+      assert.ok(cacheB, 'cacheB must exist after parsing sourceB');
+      assert.strictEqual(cacheB.source, sourceB);
+      assert.strictEqual(cacheB.lengths[0], 5, 'cache for sourceB must reflect `while`');
     });
   });
 

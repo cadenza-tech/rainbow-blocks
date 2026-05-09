@@ -484,7 +484,7 @@ export function isBlockWhereOrForall(source: string, position: number, keyword: 
   // Note: this lookahead is a quick check for the trivial case `()`. The full
   // emptiness check below also runs after parenthesis matching to handle
   // `( ! comment\n  & \n)` etc.
-  let openParenContentStart = i + 1;
+  const openParenContentStart = i + 1;
   // Find matching closing parenthesis, skipping strings and comments
   let depth = 1;
   i++;

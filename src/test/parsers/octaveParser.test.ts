@@ -1771,8 +1771,7 @@ end`;
       // `unwind_protect` block. A second `unwind_protect_cleanup` is a syntax error
       // and must NOT be recorded as an intermediate. Otherwise the BlockPair's
       // intermediates are corrupt.
-      const source =
-        'unwind_protect\n  a;\nunwind_protect_cleanup\n  b;\nunwind_protect_cleanup\n  c;\nend_unwind_protect';
+      const source = 'unwind_protect\n  a;\nunwind_protect_cleanup\n  b;\nunwind_protect_cleanup\n  c;\nend_unwind_protect';
       const pairs = parser.parse(source);
       const block = findBlock(pairs, 'unwind_protect');
       assertIntermediates(block, ['unwind_protect_cleanup']);

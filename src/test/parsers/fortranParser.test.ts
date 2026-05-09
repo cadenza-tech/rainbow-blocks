@@ -5089,10 +5089,7 @@ end select`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'select', 'end select');
       const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase().replace(/\s+/g, ' ').trim());
-      assert.ok(
-        intermediateValues.includes('case default'),
-        `Expected 'case default' as intermediate, got: ${JSON.stringify(intermediateValues)}`
-      );
+      assert.ok(intermediateValues.includes('case default'), `Expected 'case default' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
     });
   });
 

@@ -82,8 +82,7 @@ function normalizeFortranEndType(rawType: string): string {
 // 4-char tokens; the bare-keyword loop is suppressed at these positions via
 // suppressedDefaultKeywordPositions so the compound `case default` / `rank default`
 // token is the only token emitted there.
-const SELECT_TYPE_GUARD_PATTERN =
-  /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b|case[ \t]+default\b|rank[ \t]+default\b)/gi;
+const SELECT_TYPE_GUARD_PATTERN = /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b|case[ \t]+default\b|rank[ \t]+default\b)/gi;
 
 export class FortranBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {

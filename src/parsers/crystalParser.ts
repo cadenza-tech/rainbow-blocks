@@ -652,7 +652,7 @@ export class CrystalBlockParser extends BaseBlockParser {
       // Detect backslash line continuation: `\<LF>`, `\<CR>`, or `\<CRLF>` immediately
       // before the current position. The newline may be CRLF (2 chars) or single LF/CR.
       // Walk back across the newline, then check for `\` before it.
-      let nlEnd = pos;
+      const nlEnd = pos;
       let nlStart = -1;
       if (source[nlEnd] === '\n') {
         if (nlEnd > 0 && source[nlEnd - 1] === '\r') {

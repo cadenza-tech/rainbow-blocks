@@ -3021,7 +3021,10 @@ endmodule`;
       assert.strictEqual(waitTokens.length, 0, 'wait used as label should not be tokenized as block_open');
       const pairs = parser.parse(source);
       // No `wait` block in pairs
-      assert.strictEqual(pairs.find((p) => p.openKeyword.value === 'wait'), undefined);
+      assert.strictEqual(
+        pairs.find((p) => p.openKeyword.value === 'wait'),
+        undefined
+      );
     });
 
     test('should reject `if` as block_open when used as label (if : begin)', () => {
@@ -3044,7 +3047,10 @@ endmodule`;
       const source = 'module m;\n  initial begin\n    wait fork;\n  end\nendmodule';
       const pairs = parser.parse(source);
       // wait fork; is rejected via isValidWaitOpen, so wait should not appear
-      assert.strictEqual(pairs.find((p) => p.openKeyword.value === 'wait'), undefined);
+      assert.strictEqual(
+        pairs.find((p) => p.openKeyword.value === 'wait'),
+        undefined
+      );
     });
 
     test('should still accept `if (cond) begin` valid construct', () => {
@@ -3152,7 +3158,7 @@ endmodule`;
       assertBlockCount(pairs, 3);
     });
 
-    test('should still suppress block keywords inside `\'{begin: 1}` (assignment pattern)', () => {
+    test("should still suppress block keywords inside `'{begin: 1}` (assignment pattern)", () => {
       // Sanity check: existing assignment pattern suppression still works.
       const source = "module m;\n  int x = '{begin: 1};\nendmodule";
       const tokens = parser.getTokens(source);

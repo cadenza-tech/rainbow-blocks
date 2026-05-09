@@ -2456,11 +2456,7 @@ bar() -> fun() -> ok end.`;
       const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
       if (beginPair?.closeKeyword) {
         // If begin is paired, it must be with the trailing 'end' (offset 25), not the macro-body 'end' (offset 17)
-        assert.notStrictEqual(
-          beginPair.closeKeyword.startOffset,
-          source.indexOf('end}'),
-          "begin must not pair with 'end' inside -define body"
-        );
+        assert.notStrictEqual(beginPair.closeKeyword.startOffset, source.indexOf('end}'), "begin must not pair with 'end' inside -define body");
       }
     });
 

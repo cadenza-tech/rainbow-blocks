@@ -459,8 +459,7 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
   // Both quoted and unquoted variants use Unicode-letter classes so identifiers containing
   // non-ASCII letters (e.g. <<-Naïve, <<-"αβγ") are matched fully, preventing the terminator
   // from being a truncated ASCII prefix that never matches the actual identifier line.
-  const heredocPattern =
-    /<<[-~](['"])((?:[A-Za-z_]|\p{L})(?:[A-Za-z0-9_]|\p{L})*)\1|<<[-~]((?:[A-Za-z_]|\p{L})(?:[A-Za-z0-9_]|\p{L})*)/gu;
+  const heredocPattern = /<<[-~](['"])((?:[A-Za-z_]|\p{L})(?:[A-Za-z0-9_]|\p{L})*)\1|<<[-~]((?:[A-Za-z_]|\p{L})(?:[A-Za-z0-9_]|\p{L})*)/gu;
 
   // Find line end
   let lineEnd = pos;

@@ -72,12 +72,7 @@ function isPrecededByScopeResolution(source: string, position: number): boolean 
 // Does NOT skip escaped identifiers (`\name`) because they are label names — they
 // represent a separate token between the keyword and the label colon
 // (e.g., `always \my_label :` is `<keyword> <label> :`, not `<label> :`).
-function isFollowedByLabelColon(
-  source: string,
-  position: number,
-  keywordLength: number,
-  excludedRegions: ExcludedRegion[]
-): boolean {
+function isFollowedByLabelColon(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
   let i = position + keywordLength;
   while (i < source.length) {
     const ch = source[i];
