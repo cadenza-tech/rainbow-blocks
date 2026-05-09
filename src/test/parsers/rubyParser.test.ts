@@ -2914,6 +2914,40 @@ end`;
       const pairs = parser.parse('1 <<if true\n  2\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not filter keyword after <<keyword when next-line excluded region coincides with contentStart', () => {
+      // 1<<if has shift operator (no space, followed by Ruby keyword 'if'); matchHeredoc returns null.
+      // The next line is a #-comment at column 0, whose excluded region happens to start exactly
+      // at contentStart (the offset right after the newline of the <<if line). The previous filter
+      // mistakenly identified this as a heredoc body. Both def-end and if-end pairs must remain.
+      const source = 'def foo\n  x = 1<<if cond\n# col 0 comment\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'def' && p.closeKeyword?.value === 'end'),
+        'def-end pair should be present'
+      );
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'if' && p.closeKeyword?.value === 'end'),
+        'if-end pair should be present (1<<if must not be treated as heredoc)'
+      );
+    });
+
+    test('should not filter keyword after <<keyword when next-line string also starts at contentStart', () => {
+      // Variant: a single-quoted string at column 0 of the next line, whose excluded region
+      // coincides with the contentStart offset of the <<if shift operator's line.
+      const source = "def foo\n  x = 1<<while cond\n'col 0 string'\n  break\n  end\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'def' && p.closeKeyword?.value === 'end'),
+        'def-end pair should be present'
+      );
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'while' && p.closeKeyword?.value === 'end'),
+        'while-end pair should be present (1<<while must not be treated as heredoc)'
+      );
+    });
   });
 
   suite('Regression: ?# and ?/ character literals in interpolation', () => {
