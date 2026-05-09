@@ -163,7 +163,42 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (this.isLoneEndInArrayConstruction(source, position, excludedRegions)) {
       return false;
     }
+    // `end` immediately after `<:` or `>:` (subtype/supertype operators) is invalid syntax
+    // (end is not a type), but should not be classified as block_close so the trailing
+    // real `end` can pair with the function/struct correctly. Skip this check inside
+    // indexing brackets (already handled above).
+    if (this.isPrecededBySubtypeOperator(source, position, excludedRegions)) {
+      return false;
+    }
     return true;
+  }
+
+  // Checks if `end` at `position` is preceded by `<:` or `>:` (subtype/supertype operator).
+  // Skips intervening whitespace (and excluded regions like comments) but stops at any
+  // other token. Used to reject `end` as a block_close in `where T<:end` and similar
+  // invalid syntax where `end` is being used as a (nonexistent) type.
+  private isPrecededBySubtypeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      // Found a non-whitespace char. Check if it's `:` preceded by `<` or `>`.
+      if (ch === ':' && i > 0 && (source[i - 1] === '<' || source[i - 1] === '>')) {
+        return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   // Checks if the `end` at `position` is directly inside an array construction `[...]`
