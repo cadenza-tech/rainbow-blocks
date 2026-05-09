@@ -231,6 +231,7 @@ export class LuaBlockParser extends BaseBlockParser {
     }
     if (source.slice(i - 3, i + 1) !== 'goto') return false;
     if (i - 3 > 0 && /[a-zA-Z0-9_]/.test(source[i - 4])) return false;
+    if (this.isAdjacentToUnicodeLetter(source, i - 3, 4)) return false;
     // `obj.goto` / `obj:goto` is a field access / method call, not the goto keyword
     if (i - 3 > 0) {
       const before = source[i - 4];

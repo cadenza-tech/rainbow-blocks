@@ -815,9 +815,13 @@ export class JuliaBlockParser extends BaseBlockParser {
             return false;
           }
           // Check for named tuple context: (name = for ...)
-          // If there's a '=' (not '==') between '(' and the keyword, it's assignment
+          // If there's a '=' (not '==') between '(' and the keyword, it could be either:
+          //   - Assignment with block-form RHS: (name = for ...) — keyword IS block opener.
+          //   - Generator with named binding: (name = value for x in iter) — keyword is generator.
+          // Distinguish by whether the keyword is preceded by a value expression.
+          // For assignment-with-block-form, `for` is immediately after `=` (no value between).
           if (hasAssignmentBetween(source, i + 1, position, excludedRegions)) {
-            return false;
+            return this.isPrecededByValueExpression(source, position, excludedRegions);
           }
           return true;
         }
@@ -1087,22 +1091,29 @@ export class JuliaBlockParser extends BaseBlockParser {
     const char = source[pos];
 
     // Prefix must not be part of an identifier.
-    // Julia identifier characters: ASCII word chars (\w), digits, and Unicode Letters/Numbers.
+    // Julia identifier start chars: ASCII letters (a-z, A-Z, _), Unicode Letters (\p{L}).
+    // Note: digits cannot start an identifier in Julia. So if prevChar is a digit (e.g.,
+    // `1r"text"`), the prefix is valid since `1r` cannot be a single identifier — `1`
+    // is a numeric literal, `r"..."` is a separate macro call (numeric coefficient pattern).
     // Unicode Symbol_Other characters (e.g., × U+00D7) are operators, not identifier chars.
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[\w]/.test(prevChar)) {
+      if (/[a-zA-Z_]/.test(prevChar)) {
         return null;
       }
-      if (prevChar.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(prevChar)) {
+      if (prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar)) {
         return null;
       }
     }
 
-    // Match any identifier prefix followed by " (Julia string macro syntax)
-    if (/[a-zA-Z_]/.test(char)) {
+    // Match any identifier prefix followed by " (Julia string macro syntax).
+    // Identifier start: ASCII letter/underscore or Unicode letter (digits cannot start identifiers).
+    const isUnicodeLetter = (c: string) => c.charCodeAt(0) > 127 && /\p{L}/u.test(c);
+    const isIdentStart = (c: string) => /[a-zA-Z_]/.test(c) || isUnicodeLetter(c);
+    const isIdentCont = (c: string) => /[a-zA-Z0-9_]/.test(c) || (c.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(c));
+    if (isIdentStart(char)) {
       let prefixEnd = pos + 1;
-      while (prefixEnd < source.length && /[a-zA-Z0-9_]/.test(source[prefixEnd])) {
+      while (prefixEnd < source.length && isIdentCont(source[prefixEnd])) {
         prefixEnd++;
       }
       if (prefixEnd < source.length && source[prefixEnd] === '"') {
@@ -1270,10 +1281,20 @@ export class JuliaBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
+  // Returns true if the character could be the last char of a command macro prefix
+  // (i.e., the backtick that follows it is part of a prefixed command macro call).
+  // Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
+  private isCommandMacroPrefixChar(c: string): boolean {
+    if (/[a-zA-Z0-9_]/.test(c)) return true;
+    return c.charCodeAt(0) > 127 && /\p{L}/u.test(c);
+  }
+
   // Matches triple backtick command string: ``` ... ```
   private matchTripleBacktickCommand(source: string, pos: number): ExcludedRegion {
     let i = pos + 3;
-    const isPrefixed = pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1]);
+    // A backtick command is "prefixed" if preceded by an identifier char.
+    // Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
+    const isPrefixed = pos > 0 && this.isCommandMacroPrefixChar(source[pos - 1]);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -1329,7 +1350,9 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Matches command string (backtick)
   private matchCommandString(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
-    const isPrefixed = pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1]);
+    // A backtick command is "prefixed" if preceded by an identifier char.
+    // Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
+    const isPrefixed = pos > 0 && this.isCommandMacroPrefixChar(source[pos - 1]);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {

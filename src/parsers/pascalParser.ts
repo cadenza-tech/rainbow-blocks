@@ -448,9 +448,10 @@ export class PascalBlockParser extends BaseBlockParser {
 
   // Returns true when the position is inside a generic constraint angle bracket, e.g.
   // `function Bar<T: record>: T;`. Scans backward from the position for an unbalanced '<'
-  // before encountering a statement boundary (';') or start of source. The scan respects
-  // excluded regions and balances nested '< >' brackets. '>=' / '<=' / '>>' / '<<' are
-  // skipped to avoid mistaking comparison/shift operators for generic brackets.
+  // before reaching the start of source. The scan respects excluded regions and balances
+  // nested '< >' brackets. '>=' / '<=' / '>>' / '<<' are skipped to avoid mistaking
+  // comparison/shift operators for generic brackets. ';' inside generics is a parameter
+  // separator (e.g. `<T1; T2: record>`), not a statement boundary, so it is skipped.
   private isInsideGenericConstraint(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let depth = 0;
     let i = position - 1;
@@ -463,7 +464,6 @@ export class PascalBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ';') return false;
       if (ch === '>') {
         // Skip '>=' (comparison) and '>>' (shift)
         if (i > 0 && (source[i - 1] === '<' || source[i - 1] === '=' || source[i - 1] === '>')) {

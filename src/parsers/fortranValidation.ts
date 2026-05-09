@@ -373,7 +373,12 @@ const FORTRAN_STATEMENT_KEYWORDS = new Set([
   'to',
   // 'cycle NAME' / 'exit NAME' reference construct labels; NAME may match a block keyword
   'cycle',
-  'exit'
+  'exit',
+  // 'end' followed by a compound-end type keyword is an expression where the inner type
+  // keyword (do/function/etc.) must not be treated as a block opener.
+  // Example: `x = end do / 2` (a literal `end` value used in expression). Without `end`
+  // here, the inner `do`/`function` would be a phantom block_open.
+  'end'
 ]);
 
 // Skips backward across & continuation line boundaries

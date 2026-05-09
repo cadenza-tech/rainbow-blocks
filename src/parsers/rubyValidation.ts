@@ -86,15 +86,16 @@ export function findLogicalLineStart(
     const prevChar = source[lineStart - 1];
     // Previous line must end with \n or \r
     if (prevChar !== '\n' && prevChar !== '\r') break;
-    // Implicit continuation: current line starts with `.` (method chain) or `)` (closing
-    // paren of multi-line condition). Both indicate the previous line is logically the
-    // same statement.
+    // Implicit continuation: current line starts with `.` (method chain), `)` (closing
+    // paren of multi-line condition), `]` (closing bracket of multi-line array literal),
+    // or `}` (closing brace of multi-line hash/block literal). All indicate the previous
+    // line is logically the same statement.
     let cursor = lineStart;
     while (cursor < source.length && (source[cursor] === ' ' || source[cursor] === '\t')) cursor++;
     if (cursor < source.length) {
       const firstCh = source[cursor];
       const inExcluded = excludedRegions && callbacks.isInExcludedRegion(cursor, excludedRegions);
-      if (!inExcluded && (firstCh === ')' || (firstCh === '.' && source[cursor + 1] !== '.'))) {
+      if (!inExcluded && (firstCh === ')' || firstCh === ']' || firstCh === '}' || (firstCh === '.' && source[cursor + 1] !== '.'))) {
         let prevLineStart = lineStart - 1;
         if (prevChar === '\n' && prevLineStart > 0 && source[prevLineStart - 1] === '\r') prevLineStart--;
         while (prevLineStart > 0 && source[prevLineStart - 1] !== '\n' && source[prevLineStart - 1] !== '\r') {

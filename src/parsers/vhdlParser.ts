@@ -409,6 +409,81 @@ export class VhdlBlockParser extends BaseBlockParser {
     return null;
   }
 
+  // For each compound `end <type>` occurrence, scan forward from the end of the
+  // compound keyword up to `;` (or end of source) to locate a single trailing
+  // identifier-like word. If that word is itself a reserved block keyword
+  // (e.g., `loop`, `if`, `for`, `while`, `case`, `process`, `generate`), return
+  // its starting offset so the outer tokenize loop can ignore it. Identifiers that
+  // are NOT reserved words (the normal label case) are left untouched: they never
+  // hit the keyword regex anyway. Whitespace and excluded regions (comments) are
+  // tolerated; if anything else is encountered (e.g., a second word, an operator),
+  // we abort for that compound end without recording any skip position.
+  private findTrailingLabelPositions(
+    source: string,
+    compoundEndPositions: Map<number, { keyword: string; length: number; endType: string }>,
+    excludedRegions: ExcludedRegion[]
+  ): Set<number> {
+    const skipPositions = new Set<number>();
+    const reservedWords = new Set<string>([
+      ...this.keywords.blockOpen.map((k) => k.toLowerCase()),
+      ...this.keywords.blockClose.map((k) => k.toLowerCase()),
+      ...this.keywords.blockMiddle.map((k) => k.toLowerCase())
+    ]);
+
+    for (const [endStart, info] of compoundEndPositions) {
+      let i = endStart + info.length;
+      // Skip whitespace and excluded regions (comments) up to the trailing word.
+      while (i < source.length) {
+        if (this.isInExcludedRegion(i, excludedRegions)) {
+          const region = this.findExcludedRegionAt(i, excludedRegions);
+          if (region) {
+            i = region.end;
+            continue;
+          }
+        }
+        const ch = source[i];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+          i++;
+          continue;
+        }
+        break;
+      }
+      if (i >= source.length) continue;
+      // Already at `;` or another terminator: no label.
+      if (source[i] === ';') continue;
+      // Must be an identifier start.
+      if (!/[a-zA-Z_]/.test(source[i])) continue;
+      const wordStart = i;
+      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+      const word = source.slice(wordStart, i).toLowerCase();
+      // Skip whitespace/comments after the candidate word, expecting `;`.
+      // If anything else (another word, operator, etc.) appears we conservatively
+      // do not record a skip — the syntax is ambiguous and we prefer the existing
+      // behavior over silently dropping tokens.
+      let j = i;
+      while (j < source.length) {
+        if (this.isInExcludedRegion(j, excludedRegions)) {
+          const region = this.findExcludedRegionAt(j, excludedRegions);
+          if (region) {
+            j = region.end;
+            continue;
+          }
+        }
+        const ch = source[j];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+          j++;
+          continue;
+        }
+        break;
+      }
+      if (j >= source.length || source[j] !== ';') continue;
+      if (reservedWords.has(word)) {
+        skipPositions.add(wordStart);
+      }
+    }
+    return skipPositions;
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // First, find all compound end keywords and their positions
@@ -444,6 +519,16 @@ export class VhdlBlockParser extends BaseBlockParser {
       match = COMPOUND_END_PATTERN.exec(source);
     }
 
+    // Detect trailing label positions after each compound end. The grammar permits
+    // an optional designator/label after the compound `end <type>` form
+    // (e.g., `end process my_label;`). The label is normally an ordinary identifier,
+    // but malformed inputs sometimes place a reserved word there
+    // (e.g., `end generate loop;`). Without this filter the reserved word is later
+    // tokenized as a fresh `block_open`, which absorbs the surrounding architecture's
+    // `end <type>;` and breaks pairing. Collect the offsets of any reserved-word
+    // labels so the keyword loop below can skip them.
+    const labelPositionsToSkip = this.findTrailingLabelPositions(source, compoundEndPositions, excludedRegions);
+
     // Tokenize with case-insensitive matching
     const tokens: Token[] = [];
     const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
@@ -457,6 +542,11 @@ export class VhdlBlockParser extends BaseBlockParser {
       const startOffset = keywordMatch.index;
 
       if (this.isInExcludedRegion(startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Skip reserved-word labels that follow a compound `end <type>` form.
+      if (labelPositionsToSkip.has(startOffset)) {
         continue;
       }
 

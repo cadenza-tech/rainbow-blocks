@@ -60,9 +60,10 @@ export class ErlangBlockParser extends BaseBlockParser {
     // Module can be a quoted atom: fun 'my.module':func/N
     // Module/Function can be a macro: fun ?MODULE:handler/N, fun ?MY_FUNC/N
     // OTP 19+ allows Unicode characters in atoms/identifiers (\p{L}/\p{N})
-    // Arity can be a literal digit (\d+) or a bound variable (uppercase identifier per OTP 21+).
+    // Arity can be a literal digit (\d+), a bound variable (uppercase identifier per OTP 21+),
+    // or a macro reference (?MACRO/?macro).
     const atomOrIdent = "(?:\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
-    const arityPattern = '(?:\\d+|[A-Z\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
+    const arityPattern = '(?:\\d+|[A-Z\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\?[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
     const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*${arityPattern}`, 'u');
     if (funRefModPattern.test(afterFun)) {
       return false;
@@ -637,12 +638,18 @@ export class ErlangBlockParser extends BaseBlockParser {
             continue;
           }
           // For -record, unmatched braces contain real expressions
-          if (insideUnmatchedBrace && RECORD_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
+          // (but keywords inside nested function calls inside the brace are still filtered)
+          if (insideUnmatchedBrace && !insideNestedCall && RECORD_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
             return false;
           }
           // For -define, the body (after the first top-level ',') contains real expressions,
           // but only outside tuple braces and outside nested function calls.
           if (sawCommaAtTopLevel && !insideUnmatchedBrace && !insideNestedCall && DEFINE_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
+            // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
+            // itself, so it's a reserved-word reference, not a real block opener.
+            if (this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
+              return true;
+            }
             return false;
           }
           return true;
@@ -664,6 +671,54 @@ export class ErlangBlockParser extends BaseBlockParser {
           insideUnmatchedBrace = true;
         }
       }
+    }
+    return false;
+  }
+
+  // Returns true if the keyword at `pos` is the entire body of a -define macro: -define(NAME, KEYWORD).
+  // In this case the keyword is a reserved-word reference, not a real block opener/closer.
+  // Both conditions must hold:
+  //   1. The keyword is immediately preceded by the body-introducing comma (only whitespace/comments between).
+  //   2. The keyword is immediately followed by ')' (only whitespace/comments between).
+  // Without (1), a real block opener like `end` in `-define(M, fun(X) -> X end)` would be
+  // misclassified as bare just because it precedes ')'.
+  private isBareKeywordInDefineBody(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Backward: nearest non-whitespace/comment char must be ',' (the -define body-introducing comma)
+    let b = pos - 1;
+    while (b >= 0) {
+      const ch = source[b];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        b--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(b, excludedRegions);
+      if (region) {
+        b = region.start - 1;
+        continue;
+      }
+      break;
+    }
+    if (b < 0 || source[b] !== ',') {
+      return false;
+    }
+    // Forward: nearest non-whitespace/comment char must be ')' (the -define closing paren)
+    let keywordEnd = pos;
+    while (keywordEnd < source.length && /[a-zA-Z0-9_]/.test(source[keywordEnd])) {
+      keywordEnd++;
+    }
+    let i = keywordEnd;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      return ch === ')';
     }
     return false;
   }

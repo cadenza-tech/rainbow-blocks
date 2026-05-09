@@ -21,9 +21,11 @@ import {
   isValidFortranBlockClose,
   isValidProcedureOpen
 } from './fortranValidation';
-import { findLastOpenerByType, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
+import { findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
+// 'block data' must be listed BEFORE 'block' for longest-first alternation matching:
+// `end block data` should match the multi-word form, not `end block`.
 const COMPOUND_END_TYPES = [
   'program',
   'subroutine',
@@ -33,6 +35,9 @@ const COMPOUND_END_TYPES = [
   'if',
   'do',
   'select',
+  // Fortran block data program unit (legacy). Both spaced and concatenated forms.
+  'block[ \\t]+data',
+  'blockdata',
   'block',
   'associate',
   'critical',
@@ -56,6 +61,24 @@ const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
   'gi'
 );
 
+// Normalize endType for compound end matching:
+// `block data`, `block  data`, `blockdata` all map to canonical `block data`.
+// Used to align the captured endType (matched text) with the opener token value.
+function normalizeFortranEndType(rawType: string): string {
+  const lower = rawType.toLowerCase();
+  if (lower === 'blockdata' || /^block[ \t]+data$/.test(lower)) {
+    return 'block data';
+  }
+  return lower;
+}
+
+// Pattern to detect select-type guards: `type is (...)`, `class is (...)`, `class default`.
+// These are intermediates (block_middle) of a `select type` block, not standalone openers.
+// `type` is in keywords.blockOpen but rejected by isValidTypeOpen when followed by `is(`,
+// so we inject `type is` here. `class` is not in any keyword list, so its detection is
+// unique to this pass and cannot collide with the regular keyword loop.
+const SELECT_TYPE_GUARD_PATTERN = /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b)/gi;
+
 export class FortranBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
@@ -68,6 +91,11 @@ export class FortranBlockParser extends BaseBlockParser {
       'if',
       'do',
       'select',
+      // 'block data' (with space) and 'blockdata' (concatenated) must be listed BEFORE
+      // 'block' for longest-first alternation: `block data NAME` opens a block-data
+      // program unit, distinct from a `block` construct.
+      'block data',
+      'blockdata',
       'block',
       'associate',
       'critical',
@@ -643,7 +671,9 @@ export class FortranBlockParser extends BaseBlockParser {
       const pos = match.index;
       if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
         const fullMatch = match[0];
-        const endType = match[1].toLowerCase();
+        // Normalize endType so `block data` / `block  data` / `blockdata` all map to
+        // canonical `block data` for stack lookup.
+        const endType = normalizeFortranEndType(match[1]);
         // Validate the compound `end <type>` is not followed by =, (...) =, //, or %
         // (i.e., not a variable / array element / string concat / component access).
         // Without this check, `end if = 5` would be tokenized as a phantom block_close.
@@ -667,7 +697,7 @@ export class FortranBlockParser extends BaseBlockParser {
       const pos = contMatch.index;
       if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions) && !compoundEndPositions.has(pos)) {
         const fullMatch = contMatch[0];
-        const endType = contMatch[1].toLowerCase();
+        const endType = normalizeFortranEndType(contMatch[1]);
         const normalizedKeyword = `end ${contMatch[1]}`;
         // Validate the compound `end <type>` (continuation form) is not in expression context
         if (isValidFortranBlockClose(normalizedKeyword, source, pos)) {
@@ -863,8 +893,45 @@ export class FortranBlockParser extends BaseBlockParser {
       }
     }
 
-    // Re-sort by position after adding concatenated forms
-    if (compoundEndPositions.size > processedCompoundPositions.size) {
+    // Detect select-type guards: `type is (...)`, `class is (...)`, `class default`.
+    // These are intermediates of a `select type` block. `type` and `class` are
+    // detected via source scan because the regex-based keyword loop cannot easily
+    // express the multi-token intermediate form, and `class is`/`class default`
+    // would otherwise leave a phantom `class` token in non-select-type contexts
+    // (e.g., `class(t) :: x` declaration).
+    let guardInjectionAdded = false;
+    SELECT_TYPE_GUARD_PATTERN.lastIndex = 0;
+    let guardMatch = SELECT_TYPE_GUARD_PATTERN.exec(source);
+    while (guardMatch !== null) {
+      const pos = guardMatch.index;
+      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
+        const fullMatch = guardMatch[1];
+        // Trim trailing `(` from `type is (` / `class is (` so the token value is
+        // the keyword phrase only. `class default` has no trailing paren.
+        let phraseEnd = fullMatch.length;
+        if (fullMatch.endsWith('(')) {
+          phraseEnd--;
+          while (phraseEnd > 0 && (fullMatch[phraseEnd - 1] === ' ' || fullMatch[phraseEnd - 1] === '\t')) {
+            phraseEnd--;
+          }
+        }
+        const phrase = source.slice(pos, pos + phraseEnd);
+        const { line, column } = this.getLineAndColumn(pos, newlinePositions);
+        result.push({
+          type: 'block_middle',
+          value: phrase,
+          startOffset: pos,
+          endOffset: pos + phraseEnd,
+          line,
+          column
+        });
+        guardInjectionAdded = true;
+      }
+      guardMatch = SELECT_TYPE_GUARD_PATTERN.exec(source);
+    }
+
+    // Re-sort by position after adding concatenated forms or guard injections
+    if (compoundEndPositions.size > processedCompoundPositions.size || guardInjectionAdded) {
       result.sort((a, b) => a.startOffset - b.startOffset);
     }
 
@@ -887,7 +954,7 @@ export class FortranBlockParser extends BaseBlockParser {
         case 'block_middle':
           if (stack.length > 0) {
             const topBlock = stack[stack.length - 1];
-            const middleValue = token.value.toLowerCase();
+            const middleValue = token.value.toLowerCase().replace(/[ \t]+/g, ' ');
             const openerValue = topBlock.token.value.toLowerCase();
             // Skip the first case/rank after select (it's the opening guard: select case/rank (x))
             if ((middleValue === 'case' || middleValue === 'rank') && openerValue === 'select' && !firstCaseSkipped.has(topBlock)) {
@@ -899,6 +966,13 @@ export class FortranBlockParser extends BaseBlockParser {
               break;
             }
             if ((middleValue === 'case' || middleValue === 'rank') && openerValue !== 'select') {
+              break;
+            }
+            // `type is` / `class is` / `class default` are guards of `select type`.
+            // Only valid when the parent opener is `select` (which itself was paired
+            // with `select type (...)` via isValidBlockOpen).
+            const isSelectTypeGuard = middleValue === 'type is' || middleValue === 'class is' || middleValue === 'class default';
+            if (isSelectTypeGuard && openerValue !== 'select') {
               break;
             }
             // Check if this is an else-where variant (elsewhere, else where, else &\n where)
@@ -940,8 +1014,18 @@ export class FortranBlockParser extends BaseBlockParser {
           // Check if it's a compound end (e.g., "end program", "endprogram")
           const compoundMatch = closeValue.match(/^end[ \t]*(.+)/);
           if (compoundMatch) {
-            const endType = compoundMatch[1];
-            matchIndex = findLastOpenerByType(stack, endType, true);
+            // Normalize so `endblockdata`, `end block data`, `end  block  data` all
+            // map to canonical `block data` and find the matching opener.
+            const endType = normalizeFortranEndType(compoundMatch[1]);
+            // Walk stack from top, normalizing each opener value to handle `BLOCKDATA`
+            // (concatenated, fixed-form) vs `block data` (spaced, free-form) interchangeably.
+            for (let si = stack.length - 1; si >= 0; si--) {
+              const openerValue = normalizeFortranEndType(stack[si].token.value);
+              if (openerValue === endType) {
+                matchIndex = si;
+                break;
+              }
+            }
           }
 
           // If no compound match found, only fallback for simple 'end' (not compound end keywords)
