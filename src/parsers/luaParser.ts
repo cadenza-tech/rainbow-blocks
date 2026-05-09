@@ -11,6 +11,12 @@ export class LuaBlockParser extends BaseBlockParser {
     blockMiddle: ['then', 'else', 'elseif']
   };
 
+  // Cache of filtered for/while positions for the most recently parsed source.
+  // isDoPartOfLoop is called once per `do` keyword; without caching, each call
+  // rebuilds the full prefix loop-position list, yielding O(N^2) total work.
+  // Cache is keyed by source string identity (parse() recomputes per source).
+  private loopPositionCache: { source: string; positions: number[]; lengths: number[] } | null = null;
+
   // Validates block open keywords, excluding do that's part of while/for loop
   // Also rejects keywords preceded by '.' or ':' (table field/method access like t.end, obj:repeat)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -77,37 +83,60 @@ export class LuaBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Builds (and caches) the filtered for/while position list for the source.
+  // All filters that depend solely on (source, excludedRegions) are applied
+  // once here, so isDoPartOfLoop only has to binary-search this list.
+  private getLoopPositions(source: string, excludedRegions: ExcludedRegion[]): { positions: number[]; lengths: number[] } {
+    if (this.loopPositionCache !== null && this.loopPositionCache.source === source) {
+      return this.loopPositionCache;
+    }
+    const loopPattern = /\b(while|for)\b/g;
+    const positions: number[] = [];
+    const lengths: number[] = [];
+    for (const match of source.matchAll(loopPattern)) {
+      const pos = match.index;
+      if (this.isInExcludedRegion(pos, excludedRegions)) continue;
+      if (this.isAdjacentToUnicodeLetter(source, pos, match[0].length)) continue;
+      if (this.isPrecededByDotOrColon(source, pos, excludedRegions)) continue;
+      if (this.isAfterGoto(source, pos, excludedRegions)) continue;
+      positions.push(pos);
+      lengths.push(match[0].length);
+    }
+    this.loopPositionCache = { source, positions, lengths };
+    return this.loopPositionCache;
+  }
+
+  // Returns the index of the largest entry in `sortedPositions` that is < target,
+  // or -1 if none. sortedPositions must be strictly increasing.
+  private upperBoundLessThan(sortedPositions: number[], target: number): number {
+    let lo = 0;
+    let hi = sortedPositions.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sortedPositions[mid] < target) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo - 1;
+  }
+
   // Checks if do at position is part of a while/for loop (not standalone)
   // Searches backwards from do position, crossing newlines since Lua allows multi-line loop headers
   private isDoPartOfLoop(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Search backwards from the do position for a while/for keyword
-    const beforeDo = source.slice(0, position);
-    const loopPattern = /\b(while|for)\b/g;
-    const loopMatches = [...beforeDo.matchAll(loopPattern)];
+    const { positions: loopPositions, lengths: loopLengths } = this.getLoopPositions(source, excludedRegions);
 
     // Check matches in reverse order (closest first)
-    for (let m = loopMatches.length - 1; m >= 0; m--) {
-      const loopMatch = loopMatches[m];
-      const loopAbsolutePos = loopMatch.index;
-      if (this.isInExcludedRegion(loopAbsolutePos, excludedRegions)) {
-        continue;
-      }
-      if (this.isAdjacentToUnicodeLetter(source, loopAbsolutePos, loopMatch[0].length)) {
-        continue;
-      }
-      if (this.isPrecededByDotOrColon(source, loopAbsolutePos, excludedRegions)) {
-        continue;
-      }
-      // Skip loop keywords used as `goto <label>` targets; they are label
-      // names, not real loop-opening keywords.
-      if (this.isAfterGoto(source, loopAbsolutePos, excludedRegions)) {
-        continue;
-      }
+    const startIdx = this.upperBoundLessThan(loopPositions, position);
+    for (let m = startIdx; m >= 0; m--) {
+      const loopAbsolutePos = loopPositions[m];
+      const loopLength = loopLengths[m];
 
       // Find the matching 'do' for this loop keyword, accounting for nested loops
       // Each nested for/while consumes one do, so we track nesting
       // Also track other block openers (function, if, repeat) that can contain standalone do
-      const afterLoopStart = loopAbsolutePos + loopMatch[0].length;
+      const afterLoopStart = loopAbsolutePos + loopLength;
       const searchRange = source.slice(afterLoopStart, position + 2);
       const blockPattern = /\b(do|for|while|function|if|repeat|end|until)\b/g;
       const matches = [...searchRange.matchAll(blockPattern)];
