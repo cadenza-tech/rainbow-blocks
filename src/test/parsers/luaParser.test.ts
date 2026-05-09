@@ -1245,5 +1245,26 @@ end`;
     });
   });
 
+  suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
+    test('should pair standalone do/end and outer function/end when goto for precedes do', () => {
+      // Bug: outer loop-keyword scan in isDoPartOfLoop did not check isAfterGoto.
+      // `goto for` makes `for` a label name, not a real loop keyword, so the
+      // following `do` must be treated as a standalone block opener.
+      const pairs = parser.parse('function f()\n  goto for\n  do print(1) end\nend');
+      assertBlockCount(pairs, 2);
+      const fn = findBlock(pairs, 'function');
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(fn.nestLevel, 0);
+      assert.strictEqual(doBlock.nestLevel, 1);
+    });
+
+    test('should pair standalone do/end when goto while precedes do', () => {
+      const pairs = parser.parse('function f()\n  goto while\n  do print(1) end\nend');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'do');
+    });
+  });
+
   generateCommonTests(config);
 });
