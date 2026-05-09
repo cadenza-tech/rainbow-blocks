@@ -3112,5 +3112,54 @@ endmodule`;
     });
   });
 
+  suite('Regression: block keywords inside generic brace expression', () => {
+    test('should not tokenize `begin` inside `{begin: 1}` (no apostrophe)', () => {
+      // Bug: the assignment-pattern filter only suppresses block keywords when the
+      // brace has a leading apostrophe (`'{...}`). A bare `{begin: 1}` would
+      // incorrectly tokenize `begin` as block_open, falsely opening a new block.
+      const source = 'module m;\n  initial begin\n    a = {begin: 1};\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      // Only one `begin` token (the real `initial begin`) should be tokenized
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 1);
+      assert.strictEqual(beginTokens[0].startOffset, source.indexOf('begin'));
+    });
+
+    test('should not tokenize `end` inside `{end + 1}`', () => {
+      // Same bug: `end` in a brace expression should not be tokenized as block_close.
+      const source = 'module m;\n  initial begin\n    a = {end + 1, x};\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      // The `end` inside braces should not be tokenized; only the real `end` after `}` line.
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1);
+      // The real `end` is on the line `  end\nendmodule`
+      assert.ok(endTokens[0].startOffset > source.indexOf('}'));
+    });
+
+    test('should not tokenize keywords in nested `{outer, {begin}}`', () => {
+      // Nested braces: the inner `{begin}` is also inside an outer brace context.
+      const source = 'module m;\n  initial begin\n    a = {outer, {begin}};\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 1);
+      assert.strictEqual(beginTokens[0].startOffset, source.indexOf('begin'));
+    });
+
+    test('should still parse blocks normally outside of braces', () => {
+      // Sanity check: the fix must not break normal block parsing.
+      const source = 'module m;\n  initial begin\n    a = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+    });
+
+    test('should still suppress block keywords inside `\'{begin: 1}` (assignment pattern)', () => {
+      // Sanity check: existing assignment pattern suppression still works.
+      const source = "module m;\n  int x = '{begin: 1};\nendmodule";
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
