@@ -2447,5 +2447,29 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: -define body with stray brace before closing paren', () => {
+    test('should not pair begin with end inside -define body when stray } is present', () => {
+      // -define(M, end}). is invalid Erlang (unbalanced }). The 'end' inside the macro body
+      // must not be treated as a real block closer for the outer 'begin'.
+      const source = 'begin\n-define(M, end}).\n end\n';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      if (beginPair?.closeKeyword) {
+        // If begin is paired, it must be with the trailing 'end' (offset 25), not the macro-body 'end' (offset 17)
+        assert.notStrictEqual(
+          beginPair.closeKeyword.startOffset,
+          source.indexOf('end}'),
+          "begin must not pair with 'end' inside -define body"
+        );
+      }
+    });
+
+    test('should filter end keyword inside -define body when followed by stray }', () => {
+      const tokens = parser.getTokens('-define(M, end}).');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 0, "bare 'end' in -define body with stray } should be filtered");
+    });
+  });
+
   generateCommonTests(config);
 });
