@@ -592,7 +592,13 @@ export class VhdlBlockParser extends BaseBlockParser {
         }
         // Check previous lines for type/subtype declaration (multi-line case)
         // e.g., "type state_t\n  is (idle, active);"
-        if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore)) {
+        // Also handle attribute_specification with entity_class on its own line, e.g.:
+        //   attribute keep of foo :
+        //     package is true;
+        // Here stmtBefore is just the entity_class keyword (single word) when the colon
+        // ends the previous line. The upward scan will verify the `attribute` declaration
+        // is present and act as a safety net for unrelated single-word patterns.
+        if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore) || /^\w+\s*$/.test(stmtBefore)) {
           let skipThisIs = false;
           let scanPos = lineStart - 1;
           if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
