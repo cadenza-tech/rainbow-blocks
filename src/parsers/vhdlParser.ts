@@ -700,7 +700,11 @@ export class VhdlBlockParser extends BaseBlockParser {
               (afterIs + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[afterIs + 4]))
             ) {
               let afterNull = afterIs + 4;
-              while (afterNull < source.length && (source[afterNull] === ' ' || source[afterNull] === '\t')) afterNull++;
+              while (
+                afterNull < source.length &&
+                (source[afterNull] === ' ' || source[afterNull] === '\t' || source[afterNull] === '\n' || source[afterNull] === '\r')
+              )
+                afterNull++;
               if (afterNull < source.length && source[afterNull] === ';') {
                 continue;
               }
