@@ -690,11 +690,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return null;
   }
 
-  // Checks if block comment opener (%{ or #{) has no trailing non-whitespace content
+  // Checks if block comment opener (%{ or #{) has no trailing non-whitespace content.
+  // Treats space, tab, vertical tab (\v = \x0B), and form feed (\f = \x0C) as whitespace
+  // (symmetric with MATLAB's isBlockCommentStart).
   private isOctaveBlockCommentStart(source: string, pos: number): boolean {
     let i = pos + 2;
     while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-      if (source[i] !== ' ' && source[i] !== '\t') {
+      const ch = source[i];
+      if (ch !== ' ' && ch !== '\t' && ch !== '\v' && ch !== '\f') {
         return false;
       }
       i++;
@@ -721,8 +724,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
         if (this.isAtLineStartWithWhitespace(source, i)) {
           let trailingPos = i + 2;
           let hasTrailingContent = false;
+          // Treat space, tab, vertical tab (\v = \x0B), and form feed (\f = \x0C) as whitespace
+          // (symmetric with MATLAB's matchBlockComment).
           while (trailingPos < source.length && source[trailingPos] !== '\n' && source[trailingPos] !== '\r') {
-            if (source[trailingPos] !== ' ' && source[trailingPos] !== '\t') {
+            const tch = source[trailingPos];
+            if (tch !== ' ' && tch !== '\t' && tch !== '\v' && tch !== '\f') {
               hasTrailingContent = true;
               break;
             }
