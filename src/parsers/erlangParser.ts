@@ -37,41 +37,21 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Block keywords (begin, case, if, receive, try, maybe) inside -spec/-type/-callback/-opaque
+    // declarations are reserved-word usage in type expressions, not block openers.
+    // Unlike `fun`, these keywords have no type-variant syntax and are always rejected
+    // in spec context.
     if (keyword !== 'fun') {
+      if (this.isInSpecContext(source, position, excludedRegions)) {
+        return false;
+      }
       return true;
     }
 
     // 'fun' in -spec/-type/-callback/-opaque declarations is a type, not a block
     // Note: -record is excluded because fun() inside records defines real anonymous functions
-    const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
-    const rawLineBefore = source.slice(lineStart, position);
-    const trimmedLength = rawLineBefore.length - rawLineBefore.trimStart().length;
-    const lineBefore = rawLineBefore.trimStart();
-    if (/^-[ \t]*(spec|type|callback|opaque)\b/.test(lineBefore)) {
-      // Check if there is a period (declaration separator) between the attribute and this fun
-      // If so, this fun is in a separate declaration, not part of the type
-      const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/) as RegExpMatchArray;
-      const afterAttr = lineStart + trimmedLength + lineBefore.indexOf(attrMatch[0]) + attrMatch[0].length;
-      let foundPeriod = false;
-      for (let j = afterAttr; j < position; j++) {
-        if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
-          if (j + 1 < source.length && source[j + 1] === '.') {
-            j++;
-            continue;
-          }
-          if (j > 0 && source[j - 1] === '.') {
-            continue;
-          }
-          if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
-            continue;
-          }
-          foundPeriod = true;
-          break;
-        }
-      }
-      if (!foundPeriod) {
-        return false;
-      }
+    if (this.isOnSpecAttributeLine(source, position, excludedRegions)) {
+      return false;
     }
 
     // Check if fun is followed by an identifier and '/' (function reference)
@@ -175,63 +155,85 @@ export class ErlangBlockParser extends BaseBlockParser {
 
     // fun() in type context (inside parentheses of -spec/-type)
     if (/^[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?\(/.test(afterFun)) {
-      // Check if in a -spec/-type context by scanning back for attribute
-      // Must search for actual attribute pattern, not just '-'
-      // (to avoid matching '-' in '->' operator)
-      const textBefore = source.slice(0, position);
-      const attrPattern = /-[ \t]*(?:spec|type|callback|opaque)\b/g;
-      let lastAttr = -1;
-      for (const match of textBefore.matchAll(attrPattern)) {
-        // Skip matches inside excluded regions (strings, comments)
-        if (this.isInExcludedRegion(match.index, excludedRegions)) {
-          continue;
-        }
-        // Verify the '-' is at the start of a line (module attributes must be at line start)
-        const dashPos = match.index;
-        let atLineStart = dashPos === 0;
-        if (!atLineStart) {
-          let k = dashPos - 1;
-          while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
-            k--;
-          }
-          atLineStart = k < 0 || source[k] === '\n' || source[k] === '\r';
-        }
-        if (!atLineStart) {
-          continue;
-        }
-        lastAttr = match.index;
-      }
-      if (lastAttr >= 0) {
-        // Only reject if no period between the attribute and this fun
-        // (period separates Erlang declarations)
-        // Verify the period is not inside an excluded region
-        // Skip periods in float literals (digit.digit) and range operators (..)
-        let foundPeriod = false;
-        for (let j = lastAttr; j < position; j++) {
-          if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
-            // Skip range operator (..)
-            if (j + 1 < source.length && source[j + 1] === '.') {
-              j++;
-              continue;
-            }
-            if (j > 0 && source[j - 1] === '.') {
-              continue;
-            }
-            // Skip float literals (digit.digit)
-            if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
-              continue;
-            }
-            foundPeriod = true;
-            break;
-          }
-        }
-        if (!foundPeriod) {
-          return false;
-        }
+      if (this.isInSpecContext(source, position, excludedRegions)) {
+        return false;
       }
     }
 
     return true;
+  }
+
+  // Returns true if 'keyword' on the same source line is preceded by a -spec/-type/-callback/-opaque
+  // attribute (no declaration-ending period in between). Used to reject single-line spec usage like:
+  //   -spec foo() -> begin atom() end.
+  //   -type t() :: case Y of 1 -> err end.
+  private isOnSpecAttributeLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
+    const rawLineBefore = source.slice(lineStart, position);
+    const trimmedLength = rawLineBefore.length - rawLineBefore.trimStart().length;
+    const lineBefore = rawLineBefore.trimStart();
+    const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/);
+    if (!attrMatch) {
+      return false;
+    }
+    const afterAttr = lineStart + trimmedLength + lineBefore.indexOf(attrMatch[0]) + attrMatch[0].length;
+    return !this.hasDeclarationEndingPeriod(source, afterAttr, position, excludedRegions);
+  }
+
+  // Returns true if position is inside a -spec/-type/-callback/-opaque declaration that has not
+  // yet been closed by a declaration-ending period. Scans backwards across multiple lines.
+  private isInSpecContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const textBefore = source.slice(0, position);
+    const attrPattern = /-[ \t]*(?:spec|type|callback|opaque)\b/g;
+    let lastAttr = -1;
+    for (const match of textBefore.matchAll(attrPattern)) {
+      // Skip matches inside excluded regions (strings, comments)
+      if (this.isInExcludedRegion(match.index, excludedRegions)) {
+        continue;
+      }
+      // Verify the '-' is at the start of a line (module attributes must be at line start)
+      const dashPos = match.index;
+      let atLineStart = dashPos === 0;
+      if (!atLineStart) {
+        let k = dashPos - 1;
+        while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
+          k--;
+        }
+        atLineStart = k < 0 || source[k] === '\n' || source[k] === '\r';
+      }
+      if (!atLineStart) {
+        continue;
+      }
+      lastAttr = match.index;
+    }
+    if (lastAttr < 0) {
+      return false;
+    }
+    return !this.hasDeclarationEndingPeriod(source, lastAttr, position, excludedRegions);
+  }
+
+  // Returns true if a declaration-ending period exists between [start, end).
+  // Skips periods inside excluded regions, range operators (..), and float literals (digit.digit).
+  private hasDeclarationEndingPeriod(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    for (let j = start; j < end; j++) {
+      if (source[j] !== '.' || this.isInExcludedRegion(j, excludedRegions)) {
+        continue;
+      }
+      // Skip range operator (..)
+      if (j + 1 < source.length && source[j + 1] === '.') {
+        j++;
+        continue;
+      }
+      if (j > 0 && source[j - 1] === '.') {
+        continue;
+      }
+      // Skip float literals (digit.digit)
+      if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
+        continue;
+      }
+      return true;
+    }
+    return false;
   }
 
   // Filter out keywords used as map keys (followed by =>),
@@ -472,8 +474,10 @@ export class ErlangBlockParser extends BaseBlockParser {
         return { start: pos, end: pos + 4 };
       }
 
-      // $\n, $\t, $\\, etc - basic escape (3 chars)
-      return { start: pos, end: pos + 3 };
+      // $\<char> - basic escape; handle surrogate pairs for characters outside BMP
+      const code = source.codePointAt(pos + 2);
+      const charLen = code !== undefined && code > 0xffff ? 2 : 1;
+      return { start: pos, end: pos + 2 + charLen };
     }
     // $x where x is any character (handle surrogate pairs for characters outside BMP)
     const code = source.codePointAt(pos + 1);
