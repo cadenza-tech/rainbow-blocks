@@ -2909,6 +2909,59 @@ end`;
     });
   });
 
+  suite('Regression: pattern-matching in operator vs intermediate keyword', () => {
+    test('should not treat in as intermediate inside if condition (Ruby 3.0+ pattern match)', () => {
+      // `if x in 1` is a pattern-matching expression where `in` is an operator,
+      // not an intermediate boundary. The if-end pair should have no intermediates.
+      const source = 'if x in 1\n  puts "match"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat in as intermediate inside unless condition', () => {
+      const source = 'unless x in [1, 2]\n  puts "no match"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat in as intermediate inside while condition', () => {
+      const source = 'while x in {a: 1}\n  break\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat in as intermediate inside until condition', () => {
+      const source = 'until x in [1]\n  x = step\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'until', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat in as intermediate inside begin-block expression', () => {
+      const source = 'begin\n  x in 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still treat in as intermediate inside case (case/in pattern matching)', () => {
+      const source = 'case x\nin 1\n  one\nin 2\n  two\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['in', 'in']);
+    });
+
+    test('should still skip in for for-in loops (existing behaviour)', () => {
+      const source = 'for x in [1, 2, 3]\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   suite('Regression: << shift operator vs heredoc in tokenize filter', () => {
     test('should not filter keyword after << shift operator', () => {
       const pairs = parser.parse('1 <<if true\n  2\nend');
