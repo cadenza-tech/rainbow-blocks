@@ -75,6 +75,10 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Walk backward, skipping whitespace and `...`/`\` line-continuation regions (which
     // include the trailing newline), looking for the leading identifier of the command.
     // We must encounter at least one identifier (the command itself) at statement start.
+    // Multi-argument command-syntax (`clear all end`) walks past intermediate identifiers
+    // — including block keywords that appear in argument position (`disp end case` is
+    // command-syntax with `end` and `case` as string args) — until reaching a non-keyword
+    // identifier at statement start.
     let i = position - 1;
     while (i >= 0) {
       // Skip space/tab
@@ -112,17 +116,23 @@ export class MatlabBlockParser extends BaseBlockParser {
       const ident = source.slice(idStart, idEnd + 1);
       // Identifier must start with letter or underscore (not a digit).
       if (!/^[a-zA-Z_]/.test(ident)) return false;
-      // A recognised block keyword (`if`, `for`, etc.) breaks the command-syntax chain.
-      if (this.getAllBlockKeywords().has(ident.toLowerCase())) return false;
       // Check what precedes this identifier. If it is statement-start (newline / `;` /
-      // `,` / file start with optional BOM), this identifier is the leading command and
-      // we accept the chain. BOM (U+FEFF) is treated as whitespace.
+      // `,` / file start with optional BOM), this identifier is the leading command.
+      // BOM (U+FEFF) is treated as whitespace.
       let j = idStart - 1;
       while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\u{FEFF}')) j--;
-      if (j < 0) return true;
-      const ch = source[j];
-      if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') {
-        return true;
+      const atStatementStart = j < 0 || source[j] === '\n' || source[j] === '\r' || source[j] === ';' || source[j] === ',';
+      // A recognised block keyword (`if`, `for`, etc.) at statement start breaks the
+      // command-syntax chain — we cannot treat a real block opener as a command. But a
+      // block keyword in argument position (preceded by another identifier) is just a
+      // string argument, and we should continue walking back to find the real command.
+      if (this.getAllBlockKeywords().has(ident.toLowerCase()) && atStatementStart) {
+        return false;
+      }
+      if (atStatementStart) {
+        // Leading identifier reached. If it's a non-keyword identifier, this is the
+        // command; the chain is valid command-syntax.
+        return !this.getAllBlockKeywords().has(ident.toLowerCase());
       }
       // Otherwise, the preceding non-space char should be either another identifier
       // (multi-arg form) or a line continuation. Continue walking back.
