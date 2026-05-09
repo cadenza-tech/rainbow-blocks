@@ -72,12 +72,18 @@ function normalizeFortranEndType(rawType: string): string {
   return lower;
 }
 
-// Pattern to detect select-type guards: `type is (...)`, `class is (...)`, `class default`.
-// These are intermediates (block_middle) of a `select type` block, not standalone openers.
+// Pattern to detect select-type/case/rank guards:
+//   `type is (...)`, `class is (...)`, `class default` (select type)
+//   `case default` (select case), `rank default` (select rank)
+// These are intermediates (block_middle) of their respective select block, not standalone openers.
 // `type` is in keywords.blockOpen but rejected by isValidTypeOpen when followed by `is(`,
 // so we inject `type is` here. `class` is not in any keyword list, so its detection is
-// unique to this pass and cannot collide with the regular keyword loop.
-const SELECT_TYPE_GUARD_PATTERN = /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b)/gi;
+// unique to this pass. `case` and `rank` are blockMiddle keywords already tokenized as
+// 4-char tokens; the bare-keyword loop is suppressed at these positions via
+// suppressedDefaultKeywordPositions so the compound `case default` / `rank default`
+// token is the only token emitted there.
+const SELECT_TYPE_GUARD_PATTERN =
+  /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b|case[ \t]+default\b|rank[ \t]+default\b)/gi;
 
 export class FortranBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -718,6 +724,21 @@ export class FortranBlockParser extends BaseBlockParser {
       contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
     }
 
+    // Pre-scan: collect positions where `case` / `rank` is the start of a `case default`
+    // / `rank default` compound. The bare `case` / `rank` token at these positions must
+    // be suppressed in the keyword loop so the compound token (injected later via
+    // SELECT_TYPE_GUARD_PATTERN) is the only token emitted.
+    const suppressedDefaultKeywordPositions = new Set<number>();
+    const defaultGuardPattern = /\b(case|rank)[ \t]+default\b/gi;
+    let defaultMatch = defaultGuardPattern.exec(source);
+    while (defaultMatch !== null) {
+      const pos = defaultMatch.index;
+      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
+        suppressedDefaultKeywordPositions.add(pos);
+      }
+      defaultMatch = defaultGuardPattern.exec(source);
+    }
+
     // Tokenize with case-insensitive matching
     const tokens: Token[] = [];
     const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
@@ -801,6 +822,13 @@ export class FortranBlockParser extends BaseBlockParser {
       // line (no preceding code on the physical line, no `)` reachable across continuations)
       // is a misplaced identifier, not a real intermediate.
       if (type === 'block_middle' && keyword.toLowerCase() === 'then' && !isThenAfterParen(source, startOffset)) {
+        continue;
+      }
+
+      // Suppress bare `case` / `rank` when it is the start of a `case default` / `rank default`
+      // compound. The full compound token is injected later via SELECT_TYPE_GUARD_PATTERN.
+      const lowerKeyword = keyword.toLowerCase();
+      if (type === 'block_middle' && (lowerKeyword === 'case' || lowerKeyword === 'rank') && suppressedDefaultKeywordPositions.has(startOffset)) {
         continue;
       }
 
@@ -958,8 +986,10 @@ export class FortranBlockParser extends BaseBlockParser {
         case 'block_middle':
           if (stack.length > 0) {
             const topBlock = stack[stack.length - 1];
-            const middleValue = token.value.toLowerCase().replace(/[ \t]+/g, ' ');
+            const middleValue = token.value.toLowerCase().replace(/[ \t\r\n]+/g, ' ');
             const openerValue = topBlock.token.value.toLowerCase();
+            // `case default` / `rank default` are case/rank intermediates of select case / select rank.
+            const isCaseRankDefault = middleValue === 'case default' || middleValue === 'rank default';
             // Skip the first case/rank after select (it's the opening guard: select case/rank (x))
             if ((middleValue === 'case' || middleValue === 'rank') && openerValue === 'select' && !firstCaseSkipped.has(topBlock)) {
               firstCaseSkipped.add(topBlock);
@@ -969,7 +999,7 @@ export class FortranBlockParser extends BaseBlockParser {
             if (middleValue === 'then' && openerValue !== 'if') {
               break;
             }
-            if ((middleValue === 'case' || middleValue === 'rank') && openerValue !== 'select') {
+            if ((middleValue === 'case' || middleValue === 'rank' || isCaseRankDefault) && openerValue !== 'select') {
               break;
             }
             // `type is` / `class is` / `class default` are guards of `select type`.
