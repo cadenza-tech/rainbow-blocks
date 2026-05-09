@@ -5817,4 +5817,14 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: heredoc operator with line continuation', () => {
+    test('should support <<\\<NL>EOF line continuation', () => {
+      // <<\<newline>EOF: backslash-newline is a line continuation,
+      // so the actual delimiter is EOF on the next line
+      const source = 'cat <<\\\nEOF\nfor i in 1; do echo; done\nEOF\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
