@@ -3126,5 +3126,14 @@ end package;`;
     });
   });
 
+  suite('Regression: is null filter with newline before semicolon', () => {
+    test('should filter is in null procedure declaration with newline before semicolon', () => {
+      const source = 'package p is\n  procedure foo is null\n  ;\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   generateCommonTests(config);
 });
