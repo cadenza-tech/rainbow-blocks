@@ -3110,5 +3110,21 @@ end package;`;
     });
   });
 
+  suite('Regression: is filter for entity_class on its own line in attribute_specification', () => {
+    test('should filter is when entity_class keyword is on its own line', () => {
+      const source = 'package p is\n  attribute keep of foo :\n    package is true;\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should filter is when procedure entity_class is on its own line', () => {
+      const source = 'package p is\n  attribute keep of foo :\n    procedure is true;\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   generateCommonTests(config);
 });
