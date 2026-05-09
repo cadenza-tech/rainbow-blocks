@@ -3962,6 +3962,14 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: line comment inside macro string interpolation', () => {
+    test('should not let comment braces confuse interpolation depth', () => {
+      const source = '{% "#{ # { hello\n42 }" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: property with multiple comma-separated names', () => {
     test('should not detect end as block_close in property foo, end', () => {
       const source = 'class Foo\n  property foo, end\nend';
