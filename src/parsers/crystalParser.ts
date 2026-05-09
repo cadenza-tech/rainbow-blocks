@@ -627,7 +627,15 @@ export class CrystalBlockParser extends BaseBlockParser {
     while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
     const identStart = i + 1;
     const ident = source.slice(identStart, identEnd);
-    if (ident !== 'property' && ident !== 'getter' && ident !== 'setter') return false;
+    if (
+      ident !== 'property' &&
+      ident !== 'getter' &&
+      ident !== 'setter' &&
+      ident !== 'class_property' &&
+      ident !== 'class_getter' &&
+      ident !== 'class_setter'
+    )
+      return false;
     // Macro identifier must be at start of statement: preceded by line start, semicolon,
     // or whitespace following one of those. Reject method calls like `obj.property`.
     if (identStart > 0) {
