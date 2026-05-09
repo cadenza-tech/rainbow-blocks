@@ -176,6 +176,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (j < source.length && (source[j] === '(' || source[j] === '[' || source[j] === '{')) {
         return false;
       }
+      // Reject `do` used as a command-syntax argument (`disp do` → `disp('do')`).
+      // The pattern is `<identifier> <whitespace> do` at statement start where the
+      // identifier is not a recognized keyword. Treating such `do` as a block open
+      // destroys outer block pairing because the spurious `do` consumes the real
+      // `until` / leaves a phantom block on the stack.
+      if (this.isOctaveCommandSyntaxArgument(source, position, excludedRegions)) {
+        return false;
+      }
     }
     if (keyword === 'arguments' && this.isArgumentsFunctionCall(source, position, excludedRegions)) {
       // Phantom-section tracking: when `arguments(obj);` is rejected as a block opener,
@@ -234,6 +242,56 @@ export class OctaveBlockParser extends MatlabBlockParser {
       nextChar !== ':' &&
       !this.isCommentChar(nextChar)
     );
+  }
+
+  // Returns true when an Octave keyword (`do`) at position is the argument of a
+  // command-syntax invocation, e.g. `disp do`. Mirrors the structure of MATLAB's
+  // private isCommandSyntaxArgument but is callable for any keyword (since `do` is
+  // Octave-specific — MATLAB excludes it from its own command-syntax detection).
+  // Detection collects the full logical line preceding the keyword (following `...`
+  // and Octave `\` line continuations) and checks whether the line begins with a
+  // non-keyword identifier.
+  private isOctaveCommandSyntaxArgument(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
+    // Require at least one space/tab between the previous token and the keyword.
+    if (position <= 0 || (source[position - 1] !== ' ' && source[position - 1] !== '\t')) return false;
+    let i = position - 1;
+    while (i >= 0) {
+      if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      if (excludedRegions) {
+        let region = this.findExcludedRegionAt(i, excludedRegions);
+        if (!region && i >= 0) {
+          let nlStart = i;
+          if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') nlStart = i - 1;
+          const candidate = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+          if (candidate && candidate.end === nlStart) region = candidate;
+        }
+        if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      if (source[i] === '\n' || source[i] === '\r') return false;
+      if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+      const idEnd = i;
+      while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+      const idStart = i + 1;
+      const ident = source.slice(idStart, idEnd + 1);
+      if (!/^[a-zA-Z_]/.test(ident)) return false;
+      // A recognised block keyword breaks the command-syntax chain.
+      if (this.getAllBlockKeywords().has(ident.toLowerCase())) return false;
+      let j = idStart - 1;
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\u{FEFF}')) j--;
+      if (j < 0) return true;
+      const ch = source[j];
+      if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') {
+        return true;
+      }
+      i = j;
+    }
+    return false;
   }
 
   // Returns true when `arguments(...)` looks like a function call rather than an
