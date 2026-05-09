@@ -158,12 +158,18 @@ export class RubyBlockParser extends BaseBlockParser {
 
     return tokens.filter((token) => {
       // Filter out keywords in heredoc identifiers (<<end, <<-do, <<~if, <<'end', <<"do", etc.)
-      // Only filter when the << is actually a heredoc (excluded region starts after opener line), not a shift operator
+      // Only filter when the << is actually a heredoc, not a shift operator. We confirm by
+      // re-running matchHeredoc at the << position rather than guessing from neighbouring
+      // excluded regions (a column-0 #-comment or quoted string on the next line can
+      // accidentally start exactly at the heredoc contentStart and produce a false positive).
       if (token.startOffset >= 2) {
         const prefixStart = Math.max(0, token.startOffset - 4);
         const prefix = source.slice(prefixStart, token.startOffset);
         if (/<<[~-]?['"`]?$/.test(prefix)) {
-          // Find the position after the opener line's newline
+          const ltLtPosInPrefix = prefix.indexOf('<<');
+          const ltLtPos = prefixStart + ltLtPosInPrefix;
+          const heredocResult = matchHeredoc(source, ltLtPos);
+          // Find the position after the opener line's newline (heredoc body start)
           let lineEnd = token.endOffset;
           // Skip past optional closing quote of the heredoc identifier
           if (lineEnd < source.length && (source[lineEnd] === "'" || source[lineEnd] === '"' || source[lineEnd] === '`')) {
@@ -182,8 +188,10 @@ export class RubyBlockParser extends BaseBlockParser {
               contentStart++;
             }
           }
-          // Only filter if this was a real heredoc (its body starts an excluded region)
-          if (excludedRegions.some((r) => r.start === contentStart)) {
+          // Only filter when matchHeredoc confirms a real heredoc whose body starts at the
+          // computed contentStart. If matchHeredoc returns null (shift operator) or the body
+          // start does not match, the keyword is on the operator's line and must remain.
+          if (heredocResult !== null && heredocResult.contentStart === contentStart) {
             return false;
           }
         }
