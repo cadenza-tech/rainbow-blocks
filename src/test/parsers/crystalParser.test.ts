@@ -3946,6 +3946,14 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: macro template percent literal with backslash delimiter', () => {
+    test('should terminate macro template when percent literal uses backslash delimiter', () => {
+      const source = '{% %\\foo\\ %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: property with multiple comma-separated names', () => {
     test('should not detect end as block_close in property foo, end', () => {
       const source = 'class Foo\n  property foo, end\nend';
