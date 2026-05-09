@@ -1992,5 +1992,40 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-09: ELSE/WHEN expression context honors excluded regions', () => {
+    test('should register ELSE as IF intermediate when expression-like char is inside *> inline comment', () => {
+      // Without the fix, the backward scan from ELSE would land on the trailing `+` in the
+      // inline comment and falsely treat ELSE as a data name in an expression context.
+      const source = 'IF X\n  *> comment ending +\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+
+    test('should register ELSE as IF intermediate when expression-like char is inside >> compiler directive', () => {
+      // The >> directive line ends with `+`, but it is a comment-like region.
+      // ELSE should still be recognized as an IF intermediate.
+      const source = 'IF X\n>>SOURCE FORMAT IS FREE +\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+
+    test('should register WHEN as EVALUATE intermediate when expression-like char is inside *> inline comment', () => {
+      const source = 'EVALUATE X\n  *> trailing operator +\n  WHEN 1\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+
+    test('should still detect real expression context with operator outside excluded region', () => {
+      // Sanity check: real expression operators must still suppress ELSE registration.
+      const source = 'IF X\n  COMPUTE Y = X + ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'Real + operator still suppresses ELSE');
+    });
+  });
+
   generateCommonTests(config);
 });
