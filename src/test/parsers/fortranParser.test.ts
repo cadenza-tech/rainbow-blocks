@@ -1164,7 +1164,8 @@ end procedure`;
 end select`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'select', 'end select');
-      const caseIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'case');
+      // `case` and `case default` are both case intermediates of the select case block.
+      const caseIntermediates = pairs[0].intermediates.filter((i) => /^case\b/i.test(i.value));
       assert.strictEqual(caseIntermediates.length, 3, `Expected 3 case intermediates, got ${caseIntermediates.length}`);
     });
   });
@@ -4477,7 +4478,8 @@ end program`;
     test('should detect rank as intermediate in select rank', () => {
       const pairs = parser.parse('select rank (x)\n  rank (0)\n    x = 1\n  rank default\n    y = 1\nend select');
       assertSingleBlock(pairs, 'select', 'end select');
-      assertIntermediates(pairs[0], ['rank', 'rank']);
+      // `rank` and `rank default` are both rank intermediates of the select rank block.
+      assertIntermediates(pairs[0], ['rank', 'rank default']);
     });
 
     test('should skip first rank after select (opening guard)', () => {
@@ -4977,6 +4979,52 @@ end select
       assert.ok(intermediateValues.includes('type is'), `Expected 'type is' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
       assert.ok(intermediateValues.includes('class is'), `Expected 'class is' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
       assert.ok(intermediateValues.includes('class default'), `Expected 'class default' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
+    });
+  });
+
+  suite('Regression: case default / rank default produce full token value', () => {
+    test('should tokenize `case default` as a single 12-char token', () => {
+      const source = `select case (x)
+  case (1)
+    y = 1
+  case default
+    z = 2
+end select`;
+      const tokens = parser.getTokens(source);
+      const defaultToken = tokens.find((t) => /default/i.test(t.value));
+      assert.ok(defaultToken, `Expected a token containing 'default'; got tokens: ${JSON.stringify(tokens.map((t) => t.value))}`);
+      assert.strictEqual(defaultToken.value.toLowerCase().replace(/\s+/g, ' '), 'case default');
+      assert.strictEqual(defaultToken.endOffset - defaultToken.startOffset, 12);
+    });
+
+    test('should tokenize `rank default` as a single 12-char token', () => {
+      const source = `select rank (x)
+  rank (0)
+    y = 1
+  rank default
+    z = 2
+end select`;
+      const tokens = parser.getTokens(source);
+      const defaultToken = tokens.find((t) => /default/i.test(t.value));
+      assert.ok(defaultToken, `Expected a token containing 'default'; got tokens: ${JSON.stringify(tokens.map((t) => t.value))}`);
+      assert.strictEqual(defaultToken.value.toLowerCase().replace(/\s+/g, ' '), 'rank default');
+      assert.strictEqual(defaultToken.endOffset - defaultToken.startOffset, 12);
+    });
+
+    test('should still pair select case with `case default` intermediate', () => {
+      const source = `select case (x)
+  case (1)
+    y = 1
+  case default
+    z = 2
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase().replace(/\s+/g, ' ').trim());
+      assert.ok(
+        intermediateValues.includes('case default'),
+        `Expected 'case default' as intermediate, got: ${JSON.stringify(intermediateValues)}`
+      );
     });
   });
 
