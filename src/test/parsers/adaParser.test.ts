@@ -2884,5 +2884,39 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-09: Unicode whitespace in or else and short-circuit detection', () => {
+    test('should treat or<NBSP>else as short-circuit (intermediates only contain then)', () => {
+      // `or` and `else` separated by NBSP (U+00A0)
+      const source = 'if A or else B then\nnull;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should treat and<U+2028>then as short-circuit (no double then)', () => {
+      // `and` and `then` separated by line separator (U+2028)
+      const source = 'if A and then B then\nnull;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should keep or and else as intermediates when select is followed by NBSP before or', () => {
+      // `select` and `or` separated by NBSP — `or` must still be recognized as a select-block intermediate
+      const source = 'select  \n  delay 1.0;\nor\n  delay 2.0;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+
+    test('should treat or<U+3000>else as short-circuit (ideographic space)', () => {
+      // `or` and `else` separated by U+3000 (ideographic space, common in CJK editors)
+      const source = 'if A or　else B then\nnull;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
   generateCommonTests(config);
 });
