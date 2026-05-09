@@ -826,10 +826,18 @@ export class MatlabBlockParser extends BaseBlockParser {
   };
 
   // Checks if position is preceded by `@` (function handle prefix: @keyword)
-  // Allows whitespace between `@` and keyword position is NOT allowed in MATLAB —
-  // function handles must be `@name` with no space, so we only check the immediate prior char
+  // Strictly speaking MATLAB requires `@name` with no whitespace, but to avoid
+  // destroying outer block pairing in code like `h = @ for x;`, we also treat
+  // `@` with intervening same-line whitespace (space/tab) as a function handle
+  // marker. This follows the best-effort parsing principle: invalid syntax should
+  // not corrupt surrounding valid blocks.
   protected isPrecededByAtSign(source: string, position: number): boolean {
-    return position > 0 && source[position - 1] === '@';
+    if (position <= 0) return false;
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    return i >= 0 && source[i] === '@';
   }
 
   // Checks if keyword is followed by = (but not ==) indicating variable assignment
