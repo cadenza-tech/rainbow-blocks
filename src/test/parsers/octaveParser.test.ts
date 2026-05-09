@@ -1765,6 +1765,20 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: only one unwind_protect_cleanup per unwind_protect in Octave', () => {
+    test('should accept only the first unwind_protect_cleanup as intermediate', () => {
+      // The Octave language spec allows exactly one `unwind_protect_cleanup` per
+      // `unwind_protect` block. A second `unwind_protect_cleanup` is a syntax error
+      // and must NOT be recorded as an intermediate. Otherwise the BlockPair's
+      // intermediates are corrupt.
+      const source =
+        'unwind_protect\n  a;\nunwind_protect_cleanup\n  b;\nunwind_protect_cleanup\n  c;\nend_unwind_protect';
+      const pairs = parser.parse(source);
+      const block = findBlock(pairs, 'unwind_protect');
+      assertIntermediates(block, ['unwind_protect_cleanup']);
+    });
+  });
+
   suite('Regression 2026-05-09: VT/FF allowed around block comment delimiters in Octave', () => {
     test('should treat %{ followed by VT as block comment start (MATLAB-symmetric)', () => {
       // MATLAB treats vertical tab (`\v`) and form feed (`\f`) as whitespace around
