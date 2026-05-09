@@ -2782,6 +2782,17 @@ until done`;
       assert.strictEqual(repeatPair.closeKeyword.value, 'until');
       assert.strictEqual(repeatPair.closeKeyword.startOffset, 42);
     });
+
+    test('should not treat end as block close when used as case label', () => {
+      const source = `case X of
+  end: foo;
+end`;
+      const pairs = parser.parse(source);
+      // The first `end:` is a case label; only the trailing `end` closes the case block.
+      assertSingleBlock(pairs, 'case', 'end');
+      // Verify the trailing end is the one used (offset 22), not the case-label end (offset 12)
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 22);
+    });
   });
 
   suite('Regression 2026-05-09: field-access dot followed by newline', () => {
