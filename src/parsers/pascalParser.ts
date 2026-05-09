@@ -389,10 +389,11 @@ export class PascalBlockParser extends BaseBlockParser {
       const prev = source[position - 1];
       if (prev === '@' || prev === '&' || prev === '$' || prev === '#') return false;
     }
-    // Case label: `case X of until: foo;` — `until` belongs to the case label expression,
-    // not a block close. Without this check, the inner `until` consumes the outer `repeat`
-    // and breaks repeat-until pairing.
-    if (keyword === 'until' && this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
+    // Case label: `case X of until: foo;` / `case X of end: foo;` —
+    // the close keyword belongs to the case label expression, not a block close.
+    // Without this check, the inner `until` consumes the outer `repeat` and breaks
+    // repeat-until pairing; the inner `end` closes the case block prematurely.
+    if ((keyword === 'until' || keyword === 'end') && this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
       return false;
     }
     return true;
