@@ -2974,5 +2974,55 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-09: if-generate with begin/end body block', () => {
+    test('should pair if/generate and architecture when generate body has begin..end;', () => {
+      // VHDL-2008 generate_statement_body: optional declarative_part + begin + concurrent_statements + end;
+      // The body's `end;` closes the body (an alternative_label_end), NOT the `generate` itself.
+      // The actual `end generate;` that follows must still pair with `if`+`generate`.
+      const source = `architecture rtl of test is
+begin
+  g: if c generate
+    signal x : std_logic;
+  begin
+    null;
+  end;
+  end generate;
+end architecture;`;
+      const pairs = parser.parse(source);
+      // Expected: architecture, if, generate (both closed by end generate), and begin->end body pair
+      assertBlockCount(pairs, 4);
+      const architecturePair = findBlock(pairs, 'architecture');
+      assert.strictEqual(architecturePair.closeKeyword.value.toLowerCase(), 'end architecture');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value.toLowerCase(), 'end generate');
+      const generatePair = findBlock(pairs, 'generate');
+      assert.strictEqual(generatePair.closeKeyword.value.toLowerCase(), 'end generate');
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword.value.toLowerCase(), 'end');
+    });
+  });
+
+  suite("Regression 2026-05-09: keyword followed by space + 'attr is not a block opener", () => {
+    test("should not open process block for `process 'foreign` (space before tick)", () => {
+      // LRM §16.3 attribute reference: prefix may be followed by whitespace before the apostrophe.
+      // Bare RHS form (no surrounding architecture) - parser should still reject this as a block opener.
+      const source = "x <= process 'foreign;\nend process;";
+      const pairs = parser.parse(source);
+      const processPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.ok(!processPair, "process followed by space + 'attr should not be a block opener");
+    });
+  });
+
+  suite('Regression 2026-05-09: record on RHS without `is` should not open a block', () => {
+    test('should not open record block when used as a literal/RHS value', () => {
+      // `record` is a reserved word that only opens a block in `type X is record ...`.
+      // Anywhere else (invalid VHDL) it should NOT be treated as a block opener.
+      const source = 'signal x : integer := record;\nend record;';
+      const pairs = parser.parse(source);
+      const recordPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.ok(!recordPair, 'record on RHS should not be a block opener');
+    });
+  });
+
   generateCommonTests(config);
 });

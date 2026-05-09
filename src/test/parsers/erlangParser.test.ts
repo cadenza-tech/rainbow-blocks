@@ -375,6 +375,26 @@ end`;
       const regions = parser.getExcludedRegions(source);
       assert.strictEqual(regions[0].end, 3);
     });
+
+    test('should handle escaped surrogate pair character literal', () => {
+      // $\<emoji>: $ + \ + U+1F600 (surrogate pair, 2 UTF-16 code units)
+      const source = '$\\\u{1F600} ++ begin end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      const charRegion = regions[0];
+      // Region must span all 4 code units: '$', '\\', high surrogate, low surrogate
+      assert.strictEqual(charRegion.end - charRegion.start, 4);
+      assert.strictEqual(source.slice(charRegion.start, charRegion.end), '$\\\u{1F600}');
+    });
+
+    test('should handle escaped surrogate pair character literal before block keyword', () => {
+      // $\<emoji> immediately followed by 'begin' to test surrogate pair boundary
+      const source = '$\\\u{1F4A9}begin end';
+      const regions = parser.getExcludedRegions(source);
+      // Must consume both surrogate halves (4 code units) so 'begin' is not affected
+      assert.strictEqual(regions[0].end, 4);
+    });
   });
 
   suite('Catch expression prefix', () => {
@@ -582,6 +602,65 @@ end`;
       const source = 'fun() -> ok end';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'fun', 'end');
+    });
+  });
+
+  suite('Block keywords in spec/type/callback/opaque context', () => {
+    test('should not treat begin in -spec as block opener', () => {
+      const source = `-spec foo() -> begin atom() end.
+bar() -> ok.`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat case in -type as block opener', () => {
+      const source = '-type t() :: case Y of 1 -> err end.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat if in -spec as block opener', () => {
+      const source = '-spec foo() -> if true -> ok end.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat receive in -callback as block opener', () => {
+      const source = '-callback handle() -> receive msg -> ok end.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat try in -opaque as block opener', () => {
+      const source = '-opaque t() :: try x catch _:_ -> ok end.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat maybe in -spec as block opener', () => {
+      const source = '-spec foo() -> maybe ok end.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat begin as block opener after period ends spec', () => {
+      const source = `-spec foo() -> integer().
+bar() ->
+  begin
+    ok
+  end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still treat case as block opener outside spec context', () => {
+      const source = `foo(X) ->
+  case X of
+    1 -> one;
+    _ -> other
+  end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
     });
   });
 

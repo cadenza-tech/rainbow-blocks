@@ -223,11 +223,32 @@ end`;
     });
 
     test('should match keyword adjacent to non-BMP non-letter (emoji surrogate pair)', () => {
-      // U+1F600 Grinning Face is not a letter (\p{L} returns false)
+      // U+1F600 Grinning Face is Symbol_Other (\p{So}), not a Ruby/Julia/Elixir identifier character
       // Surrogate pair before keyword should not prevent match
       const source = 'if\n\uD83D\uDE00end';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not match keyword adjacent to combining mark (Mn)', () => {
+      // U+0303 Combining Tilde is a Mark Nonspacing - valid identifier continuation in Ruby/Julia/Elixir
+      const source = 'if\nx\u0303end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match keyword adjacent to Letter Number (Nl)', () => {
+      // U+2160 Roman Numeral One is Letter Number - valid identifier character
+      const source = 'if\n\u2160end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not match keyword adjacent to non-ASCII Decimal Number (Nd)', () => {
+      // U+0669 Arabic-Indic Digit Nine is non-ASCII Decimal Number, not matched by \w
+      const source = 'if\nx\u0669end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
 
     test('should handle CR-only line endings', () => {

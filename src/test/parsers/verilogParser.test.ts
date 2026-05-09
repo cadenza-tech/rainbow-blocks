@@ -2584,12 +2584,18 @@ endmodule`;
   });
 
   suite('Regression: `pragma directive arguments should not be tokenized', () => {
-    test('should exclude `pragma protect begin/end from block keyword detection', () => {
-      const source = '`pragma protect begin\nmodule m;\nendmodule\n`pragma protect end\n';
+    test('should not tokenize begin/end keywords appearing in `pragma directive arguments', () => {
+      // Verify that `begin` in `pragma protect begin / `end` in `pragma protect end
+      // do not open/close a block. Note: protected content is excluded as a region;
+      // see Regression 2026-05-09: pragma protect begin/end excludes content.
+      const source = 'module a;\nendmodule\n`pragma protect begin\n`pragma protect end\nmodule b;\nendmodule\n';
       const pairs = parser.parse(source);
-      assertBlockCount(pairs, 1);
-      assert.strictEqual(pairs[0].openKeyword.value, 'module');
-      assert.strictEqual(pairs[0].closeKeyword.value, 'endmodule');
+      // Two module/endmodule pairs around the pragma protect region.
+      assertBlockCount(pairs, 2);
+      const moduleA = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line === 0);
+      assert.ok(moduleA, 'module a should pair');
+      const moduleB = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line >= 4);
+      assert.ok(moduleB, 'module b should pair');
     });
   });
 
@@ -2738,6 +2744,111 @@ endmodule`;
   suite('Regression 2026-05-06: matchAttribute with bare-newline string termination', () => {
     test('should fully contain (* attr *) when string contains bare newline followed by text', () => {
       const source = '(* attr = "abc\ndef" *) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression 2026-05-09: macro arg list with whitespace before paren', () => {
+    test('should exclude `MY_MACRO (begin x = 1; end) when space precedes paren', () => {
+      const source = '`MY_MACRO (begin x = 1; end)\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should exclude `MY_MACRO\\t(begin x = 1; end) when tab precedes paren', () => {
+      const source = '`MY_MACRO\t(begin x = 1; end)\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should NOT consume args when newline precedes paren (macro without args)', () => {
+      // `BARE_MACRO followed by newline then `(begin)` is not a macro invocation argument list.
+      // The begin/end inside the parens should be tokenized normally.
+      const source = '`BARE_MACRO\n(begin) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      // module/endmodule should still pair
+      const modulePair = pairs.find((p) => p.openKeyword.value === 'module');
+      assert.ok(modulePair, 'module should still pair with endmodule');
+    });
+  });
+
+  suite('Regression 2026-05-09: extern automatic function/task should not open', () => {
+    test('should not tokenize function in "extern static automatic function void f()"', () => {
+      const source = 'class C;\n  extern static automatic function void f();\nendclass';
+      const tokens = parser.getTokens(source);
+      const functionTokens = tokens.filter((t) => t.value === 'function');
+      assert.strictEqual(functionTokens.length, 0, 'function token should not be emitted in extern qualifier-prefixed declaration');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should not tokenize task in "extern automatic task t()"', () => {
+      const source = 'class C;\n  extern automatic task t();\nendclass';
+      const tokens = parser.getTokens(source);
+      const taskTokens = tokens.filter((t) => t.value === 'task');
+      assert.strictEqual(taskTokens.length, 0, 'task token should not be emitted in extern automatic task declaration');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should still detect non-extern automatic function as block opener', () => {
+      const source = 'class C;\n  automatic function int f();\n    return 0;\n  endfunction\nendclass';
+      const pairs = parser.parse(source);
+      // class/endclass + function/endfunction
+      assertBlockCount(pairs, 2);
+    });
+  });
+
+  suite('Regression 2026-05-09: pragma protect begin/end excludes content', () => {
+    test('should exclude content between `pragma protect begin and `pragma protect end', () => {
+      const source = '`pragma protect begin\nbegin x = 1; end\n`pragma protect end\n';
+      const pairs = parser.parse(source);
+      // Inside the protect region, begin/end should NOT be tokenized.
+      assertNoBlocks(pairs);
+    });
+
+    test('should still detect blocks outside `pragma protect begin/end region', () => {
+      const source = 'module a;\nendmodule\n`pragma protect begin\nbegin x = 1; end\n`pragma protect end\nmodule b;\nendmodule\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const moduleA = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line === 0);
+      assert.ok(moduleA, 'module a should pair');
+      const moduleB = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line >= 5);
+      assert.ok(moduleB, 'module b should pair');
+    });
+  });
+
+  suite('Regression 2026-05-09: foreach control keyword chains with begin/end', () => {
+    test('should pair foreach with end via initial-foreach-begin chain', () => {
+      const source = 'module m;\n  initial foreach (arr[i]) begin\n    arr[i] = 0;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // Expected: module/endmodule, initial/end, foreach/end, begin/end
+      assertBlockCount(pairs, 4);
+      const modulePair = pairs.find((p) => p.openKeyword.value === 'module');
+      assert.ok(modulePair, 'module should pair with endmodule');
+      const initialPair = pairs.find((p) => p.openKeyword.value === 'initial');
+      assert.ok(initialPair, 'initial should pair (chained with end)');
+      const foreachPair = pairs.find((p) => p.openKeyword.value === 'foreach');
+      assert.ok(foreachPair, 'foreach should pair (chained with end)');
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'begin should pair with end');
+    });
+
+    test('should pair wait with end via wait(expr) begin chain', () => {
+      const source = 'module m;\n  initial wait (ready) begin\n    x = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // Expected: module/endmodule, initial/end, wait/end, begin/end
+      assertBlockCount(pairs, 4);
+      const waitPair = pairs.find((p) => p.openKeyword.value === 'wait');
+      assert.ok(waitPair, 'wait should pair (chained with end)');
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'begin should pair with end');
+    });
+
+    test('should still reject wait fork as block open', () => {
+      // Regression check: making wait a control keyword should not break wait-fork detection
+      const source = 'module test;\n  wait fork;\nendmodule';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
     });

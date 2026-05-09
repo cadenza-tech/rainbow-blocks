@@ -1566,6 +1566,17 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should treat backslash escape inside invalid <<-"..." opener as escape, not closing quote', () => {
+      // `<<-"a\"b"` is rejected by matchHeredoc (the identifier `a\` is invalid).
+      // The defensive fallback scans forward for the closing quote on the same line.
+      // It must treat `\"` as an escape sequence so the trailing `"` (which IS the
+      // closing quote of the opener) is consumed and does NOT remain orphaned to
+      // start a string region that swallows downstream code (def/end here).
+      const source = 'x = <<-"a\\"b"\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Coverage: heredoc at EOF without newline', () => {

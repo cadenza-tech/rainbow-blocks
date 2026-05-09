@@ -2670,5 +2670,100 @@ end.`;
     });
   });
 
+  suite('Regression 2026-05-09: generic constraint record', () => {
+    test('should not treat record in generic constraint as block opener', () => {
+      const source = `TFoo = class
+    function Bar<T: record>: T;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: := assignment and additional comparison context keywords', () => {
+    test('should not treat class as block when := assigns result of x = class', () => {
+      const source = `begin
+    Y := X = class
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+    test('should not treat class as block after for/in comparison with =', () => {
+      // After `for I in X = class do`, the = is comparison, not type def
+      const source = `begin
+    for I in X = class do Bar;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: $/# prefixed open keywords', () => {
+    test('should not treat $begin as block opener (hex literal prefix)', () => {
+      const source = 'begin\n  X := $begin\n  Y := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The outer begin is at offset 0, the inner $begin at offset 14
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'should pair outer begin (offset 0), not $begin');
+    });
+    test('should not treat #begin as block opener (char constant prefix)', () => {
+      const source = 'begin\n  X := #begin\n  Y := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'should pair outer begin (offset 0), not #begin');
+    });
+  });
+
+  suite('Regression 2026-05-09: $asm/#asm not treated as asm block', () => {
+    test('should not treat $asm as asm block (hex literal prefix)', () => {
+      const source = 'var X: Integer;\n$asm + 1\nbegin\n  X := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+    test('should not treat #asm as asm block (char constant prefix)', () => {
+      const source = 'var X: Integer;\n#asm + 1\nbegin\n  X := 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: case label using block-open keyword', () => {
+    test('should not treat try as block opener when used as case label', () => {
+      const source = `case X of
+    try: Foo;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+    test('should not treat begin as block opener when used as case label', () => {
+      const source = `case X of
+    begin: Foo;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+    test('should not treat record as block opener when used as case label', () => {
+      const source = `case X of
+    record: Foo;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: field-access dot followed by newline', () => {
+    test('should not treat end as block close when preceded by field-access dot across newline', () => {
+      const source = `begin
+    X := Foo.
+    end;
+    Y := 1;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The outer end is at the second end (offset 43), not the field-access end (offset 24)
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 43, 'should pair begin with the outer end, not the field-access Foo.\\n  end');
+    });
+  });
+
   generateCommonTests(config);
 });

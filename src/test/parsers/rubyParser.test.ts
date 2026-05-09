@@ -465,6 +465,66 @@ EOF`;
       const result = parser.parse(source);
       assertNoBlocks(result);
     });
+
+    test('should handle quoted heredoc identifier containing space', () => {
+      const source = `x = <<"my id"
+begin
+  body
+end
+my id
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle quoted heredoc identifier containing hyphen', () => {
+      const source = `x = <<"my-id"
+begin
+  body
+end
+my-id
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle quoted heredoc identifier containing dot', () => {
+      const source = `x = <<"my.id"
+begin
+  body
+end
+my.id
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle quoted heredoc with empty identifier', () => {
+      const source = `x = <<""
+if true
+  body
+end
+
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should handle single-quoted heredoc identifier containing space', () => {
+      const source = `x = <<'my id'
+begin
+  body
+end
+my id
+def foo
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Division and regex after ? and ! characters', () => {

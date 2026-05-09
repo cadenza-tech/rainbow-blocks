@@ -3307,11 +3307,15 @@ end`;
       findBlock(pairs, 'if');
     });
 
-    test('should treat end as lastindex after multiple completed blocks in indexing brackets', () => {
+    test('should treat begin and end as firstindex/lastindex in multi-begin indexing brackets', () => {
+      // Per parser design, ALL bare `begin` inside indexing brackets is filtered as
+      // firstindex (regardless of `:` suffix). The matching `end` keywords are all
+      // treated as lastindex consistently. This applies even when expressions look
+      // like "block expressions" used as values.
       const source = 'x = a[begin 1 end + begin 2 end, end]';
       const tokens = parser.getTokens(source);
       const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 2);
+      assert.strictEqual(endTokens.length, 0);
     });
   });
 
@@ -3582,6 +3586,64 @@ end`;
       const source = 'function f(arr)\n  return arr[(end - 1)]\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: begin/end inside indexing brackets without colon', () => {
+    test('should treat begin and end as firstindex/lastindex in a[begin x end] inside function', () => {
+      // Bug 1b: `a[begin x end]` - begin is filtered as firstindex, end should also be lastindex
+      const source = 'function f()\n  a[begin x end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // outer 'end' must match function (offset 30)
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, outerEndOffset);
+    });
+
+    test('should treat begin/end as firstindex/lastindex in a[(begin x end)] inside function', () => {
+      // Bug 1a: `a[(begin x end)]` - begin in parens still treated as firstindex
+      const source = 'function f()\n  a[(begin\n    1\n  end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, outerEndOffset);
+    });
+  });
+
+  suite('Regression 2026-05-09: end followed by operator inside indexing brackets', () => {
+    test('should treat end as lastindex in arr[if end!=2 1 else 0 end]', () => {
+      // Bug 2: `end!=2` - the `end` followed by `!=` is lastindex, not block close
+      const source = 'arr[if end!=2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      // if at offset 4 should pair with the outer end at offset 23, not the `end` of `end!=2`
+      assertSingleBlock(pairs, 'if', 'end');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, outerEndOffset);
+    });
+  });
+
+  suite('Regression 2026-05-09: prefixed string after Unicode operator', () => {
+    test('should match r"x"end string macro after Unicode operator like ×', () => {
+      // Bug 3: `a×r"x"end` - prefixed string after Unicode Symbol_Other (× = U+00D7)
+      // Should be recognized as r"..." string macro consuming `end` as suffix
+      const source = 'function f()\n  a×r"x"end\nend';
+      const pairs = parser.parse(source);
+      // Outer function should pair with the line-3 outer end, not the `end` inside `r"x"end`
+      assertSingleBlock(pairs, 'function', 'end');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, outerEndOffset);
+    });
+  });
+
+  suite('Regression 2026-05-09: end inside array construction', () => {
+    test('should not treat end inside [end] (array construction) as block close', () => {
+      // Bug 4: `return [end]` - [end] is array construction (after return),
+      // and `end` inside should not be a block close
+      const source = 'function f()\n  return [end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, outerEndOffset);
     });
   });
 

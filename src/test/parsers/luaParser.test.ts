@@ -1210,5 +1210,26 @@ end`;
     });
   });
 
+  suite('Regression: isDoPartOfLoop should skip end after goto', () => {
+    test('should pair for...end when goto end appears between for and do', () => {
+      // Bug: end after goto (a label name) was treated as a real end keyword
+      // in isDoPartOfLoop's forward scan, breaking the loop scope detection
+      // and causing do to be treated as a standalone block opener.
+      const pairs = parser.parse('for goto end do x = 1 end');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should pair for...end when goto-targeted keyword appears in loop header', () => {
+      // The same scenario with a different goto target keyword
+      const pairs = parser.parse('for goto until do x = 1 end');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should pair while...end when goto end appears in condition expression area', () => {
+      const pairs = parser.parse('while goto end do x = 1 end');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

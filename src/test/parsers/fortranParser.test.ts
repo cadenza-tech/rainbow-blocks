@@ -4718,6 +4718,15 @@ end program`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 1);
     });
+
+    test('should pair change team with end team across continuation line', () => {
+      // Fortran 2018: 'change &\n team' should be recognized as a block opener for 'team'
+      const source = 'change &\n  team (t)\n    i = 1\nend team\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'team');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase(), 'end team');
+    });
   });
 
   suite('Regression: invalid select type without parens', () => {
@@ -4810,6 +4819,88 @@ end program`;
       const source = 'type do\n  real :: x\nend type\nend do';
       const pairs = parser.parse(source);
       assert.ok(!pairs.some((p) => p.openKeyword.value.toLowerCase() === 'do'));
+    });
+  });
+
+  suite('Regression: compound `end <type>` excluded in variable access context', () => {
+    test('should not treat `end if = 5` as block_close', () => {
+      const source = 'if (.true.) then\n  end if = 5\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // The closing 'end if' must be the one on line 2 (not the `end if = 5` on line 1)
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'closeKeyword must be the real end if on the last line, not the assignment');
+    });
+
+    test('should not treat `end if(1) = 5` as block_close (array element assignment)', () => {
+      const source = 'if (.true.) then\n  end if(1) = 5\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'closeKeyword must be the real end if on the last line');
+    });
+
+    test('should not treat `end if // "x"` as block_close (string concatenation)', () => {
+      const source = 'if (.true.) then\n  s = end if // "x"\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'closeKeyword must be the real end if on the last line');
+    });
+
+    test('should not treat `end if%comp` as block_close (component access)', () => {
+      const source = 'if (.true.) then\n  x = end if%comp\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'closeKeyword must be the real end if on the last line');
+    });
+  });
+
+  suite('Regression: standalone `then` on its own line is not block_middle', () => {
+    test('should treat only the original then as intermediate, not the bare standalone then', () => {
+      // The first `then` is the if-construct intermediate. The second `then` (on its own line)
+      // is a misplaced identifier; it must NOT be registered as a second intermediate.
+      const source = 'if (.true.) then\n  then\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const thenIntermediates = pairs[0].intermediates.filter((t) => t.value.toLowerCase() === 'then');
+      assert.strictEqual(thenIntermediates.length, 1, `expected 1 then intermediate, got ${thenIntermediates.length}`);
+      assert.strictEqual(thenIntermediates[0].line, 0, 'the lone then intermediate must be on line 0 (the if header)');
+    });
+  });
+
+  suite('Regression: assign / go to / cycle / exit with end identifier', () => {
+    test('should not treat end as block_close after `assign N to end`', () => {
+      const source = 'program test\n  integer :: end\n  assign 100 to end\n100 continue\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat end as block_close after `go to end` (space-separated)', () => {
+      const source = 'program test\n  integer :: end\n  go to end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat end as block_close after `cycle end` construct name', () => {
+      const source = 'program test\n  end: do i = 1, 10\n    cycle end\n  end do end\nend program';
+      const pairs = parser.parse(source);
+      const programPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'program');
+      assert.ok(programPair, 'program/end program should be paired');
+      assert.strictEqual(programPair.closeKeyword.value.toLowerCase(), 'end program');
+      // Also: do/end do should be paired (not closed by phantom `end` from `cycle end`)
+      const doPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'do');
+      assert.ok(doPair, 'do/end do should be paired');
+      assert.strictEqual(doPair.closeKeyword.value.toLowerCase(), 'end do');
+    });
+
+    test('should not treat end as block_close after `exit end` construct name', () => {
+      const source = 'program test\n  end: do i = 1, 10\n    exit end\n  end do end\nend program';
+      const pairs = parser.parse(source);
+      const programPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'program');
+      assert.ok(programPair, 'program/end program should be paired');
+      assert.strictEqual(programPair.closeKeyword.value.toLowerCase(), 'end program');
+      // Also: do/end do should be paired (not closed by phantom `end` from `exit end`)
+      const doPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'do');
+      assert.ok(doPair, 'do/end do should be paired');
+      assert.strictEqual(doPair.closeKeyword.value.toLowerCase(), 'end do');
     });
   });
 

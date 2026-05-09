@@ -1888,5 +1888,68 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: ELSE/WHEN after expression operators', () => {
+    test('should not register ELSE as intermediate when preceded by + operator (COMPUTE)', () => {
+      const source = 'IF X\n  COMPUTE Y = X + ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after + operator is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by - operator', () => {
+      const source = 'IF X\n  COMPUTE Y = X - ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after - operator is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by * operator', () => {
+      const source = 'IF X\n  COMPUTE Y = X * ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after * operator is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by / operator', () => {
+      const source = 'IF X\n  COMPUTE Y = X / ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after / operator is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by ** operator', () => {
+      const source = 'IF X\n  COMPUTE Y = X ** ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after ** operator is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by = operator', () => {
+      const source = 'IF X\n  COMPUTE Y = ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after = is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by comma (USING list)', () => {
+      const source = 'IF X\n  CALL "PROC" USING A, ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after comma is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by open paren', () => {
+      const source = 'IF X\n  COMPUTE Y = (ELSE + 1)\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after ( is data name');
+    });
+    test('should not register WHEN as EVALUATE intermediate when preceded by + operator', () => {
+      const source = 'EVALUATE X\n  COMPUTE Y = X + WHEN\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after + operator is data name');
+    });
+    test('should not register WHEN as EVALUATE intermediate when preceded by comma', () => {
+      const source = 'EVALUATE X\n  CALL "PROC" USING A, WHEN\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after comma is data name');
+    });
+  });
+
   generateCommonTests(config);
 });

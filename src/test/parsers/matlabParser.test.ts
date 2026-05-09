@@ -1691,5 +1691,127 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: end after compound comparison operators', () => {
+    test('should pair function with the outer end, not the bogus end after >=', () => {
+      // Lines are 0-indexed. Line 0 = function f, line 4 = outer end.
+      const source = 'function f\n  x = a >= end\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      // The inner end-as-operand after `>=` should not be treated as block close.
+      // Expected: function paired with outer end (line 4); if-end pair on lines 2-3.
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the LAST end');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+
+    test('should pair function with the outer end, not the bogus end after <=', () => {
+      const source = 'function f\n  x = a <= end\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should pair function with the outer end, not the bogus end after ==', () => {
+      const source = 'function f\n  x = a == end\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should pair function with the outer end, not the bogus end after ~=', () => {
+      const source = 'function f\n  x = a ~= end\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should pair function with the outer end, not the bogus end after != (Octave compat)', () => {
+      // != is not standard MATLAB but we should still treat it as a binary operator
+      // so `end` after it is operand context, not block close.
+      const source = 'function f\n  x = a != end\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+  });
+
+  suite('Regression 2026-05-09: end after binary operator with line continuation', () => {
+    test('should not treat end after + ... newline as block close', () => {
+      const source = 'function f\n  x = a + ...\n      end\nend';
+      const pairs = parser.parse(source);
+      // The `end` on line 2 is in expression context (after `+ ...`), not a block close.
+      // function should pair with the outer end on line 3 (0-indexed).
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should pair with the outer end');
+    });
+
+    test('should not treat end after * ... newline as block close', () => {
+      const source = 'function f\n  x = a * ...\n      end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not treat end after >= ... newline as block close', () => {
+      const source = 'function f\n  x = a >= ...\n       end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not treat end after - with two-line continuation as block close', () => {
+      const source = 'function f\n  x = a - ...\n      ...\n      end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4);
+    });
+  });
+
+  suite('Regression 2026-05-09: end.x is struct field access, not block close', () => {
+    test('should not treat end before .x as block close', () => {
+      // Lines are 0-indexed. Line 0 = function f, line 2 = outer end.
+      const source = 'function f\n  end.x = 1\nend';
+      const pairs = parser.parse(source);
+      // The `end.x` should not be treated as a block close because what follows
+      // is `.x = 1`, indicating field access not block termination.
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+  });
+
+  suite('Regression 2026-05-09: command-syntax disp end', () => {
+    test('should not treat end after command-syntax invocation as block close', () => {
+      // `disp end` is command-syntax sugar for `disp('end')` — `end` is a string argument.
+      // Line 0 = function f, line 1 = disp end, line 2 = outer end.
+      const source = 'function f\n  disp end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+  });
+
+  suite('Regression 2026-05-09: block comment %{ followed by vertical tab or form feed', () => {
+    test('should treat %{\\v as block comment start (vertical tab is whitespace)', () => {
+      // `%{` followed by a vertical tab (\v) and then content should be treated as a block
+      // comment start; the inner `end` keyword on the next line should not be tokenized.
+      const source = '%{\v\n if true\n end\n%}\nfunction f\nend';
+      const pairs = parser.parse(source);
+      // Only function-end pair should be detected; the if/end inside the block comment
+      // must be excluded.
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat %{\\f as block comment start (form feed is whitespace)', () => {
+      const source = '%{\f\n if true\n end\n%}\nfunction f\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });

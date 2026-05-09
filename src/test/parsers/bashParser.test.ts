@@ -5606,4 +5606,59 @@ fi`;
       assertBlockCount(pairs, 2);
     });
   });
+
+  suite('Regression: empty case in command/process substitution closes properly', () => {
+    test('should close $(case x in esac) so following if-fi is detected', () => {
+      const source = '$(case x in esac)\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should close <(case x in esac) so following if-fi is detected', () => {
+      const source = '<(case x in esac)\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should close >(case x in esac) so following if-fi is detected', () => {
+      const source = '>(case x in esac)\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: esac as pipe-separated case pattern alternative', () => {
+    test('should treat esac in foo|esac) as case pattern, not block close', () => {
+      const source = 'case x in foo|esac) echo;; esac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+      // The closing esac should be the one at offset 27 (last esac in source)
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 27);
+    });
+    test('should treat esac in a|b|esac) as case pattern alternative', () => {
+      const source = 'case x in a|b|esac) echo;; esac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 27);
+    });
+  });
+
+  suite('Regression: time prefix with line continuation before -p flag', () => {
+    test('should detect if after time \\<newline> -p across line continuation', () => {
+      const source = 'time \\\n -p if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should detect if after time \\<newline> -- across line continuation', () => {
+      const source = 'time \\\n -- if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
+  suite('Regression: function definition with line continuation before name', () => {
+    test('should detect { } when function name follows \\<newline>', () => {
+      const source = 'function \\\nmyname { echo hi; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
 });

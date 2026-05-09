@@ -3846,5 +3846,110 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: triple-quoted heredoc terminator requires line-end after """', () => {
+    test('should reject """ as terminator when followed by non-whitespace (def)', () => {
+      // Triple-quoted heredoc terminator must be followed by space, tab, newline, EOF, or comment.
+      // Here `"""def` is not a valid terminator, so the heredoc continues until the final """.
+      const source = '"""\n  """def foo\ndo\n  :ok\nend\n"""\nx = 1';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+    });
+    test('should accept """ as terminator when followed by space', () => {
+      const source = '"""\n  body\n  """ \ndef foo do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should accept """ as terminator at end of file', () => {
+      const source = '"""\n  body\n  """';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+    test('should accept """ as terminator when followed by comment', () => {
+      const source = '"""\n  body\n  """# comment\ndef foo do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: sigil heredoc modifier should not consume reserved words', () => {
+    test('should not consume "end" as modifier after ~s""" terminator', () => {
+      // The sigil terminator """ should not greedily consume `end` as a modifier
+      // because `end` is a reserved word, not a valid sigil modifier.
+      const source = 'def foo do\n  x = ~s"""\n  body\n  """end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should not consume "do" as modifier after ~s""" terminator', () => {
+      const source = '~s"""\nbody\n"""do\n:ok\nend';
+      parser.parse(source);
+      // do/end should pair (do is not a modifier)
+      const endTokens = parser.getTokens(source).filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1);
+    });
+    test('should not consume "end" as modifier after ~s() non-triple sigil', () => {
+      const source = 'def foo do\n  x = ~s(body)end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should still accept lowercase modifiers like "u" after ~s""" terminator', () => {
+      const source = 'x = ~s"""\nbody\n"""u\ndef foo do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: chained block_open keywords as values', () => {
+    test('should detect if/end when followed by chained block keywords (if for case do)', () => {
+      // `if for case do :ok end` should be parsed as `if/end` pair (1).
+      // `for` and `case` are used as values (variable names) here.
+      const source = 'if for case do :ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should detect case/end when followed by chained block keywords', () => {
+      const source = 'case for cond do :ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: middle keyword as map key should not be intermediate', () => {
+    test('should not register else as intermediate when used as map key (else => 1)', () => {
+      const source = 'if true do\n  x = %{else => 1}\nelse\n  :ok\nend';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair);
+      const elseIntermediates = ifPair?.intermediates.filter((t) => t.value === 'else');
+      assert.strictEqual(elseIntermediates?.length ?? 0, 1, 'only the real else should be an intermediate');
+    });
+    test('should not register rescue as intermediate when used as map key (rescue => 1)', () => {
+      const source = 'try do\n  x = %{rescue => 1}\nrescue\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      const tryPair = pairs.find((p) => p.openKeyword.value === 'try');
+      assert.ok(tryPair);
+      const rescueIntermediates = tryPair?.intermediates.filter((t) => t.value === 'rescue');
+      assert.strictEqual(rescueIntermediates?.length ?? 0, 1);
+    });
+    test('should not register catch as intermediate when used as map key (catch => 1)', () => {
+      const source = 'try do\n  x = %{catch => 1}\ncatch\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      const tryPair = pairs.find((p) => p.openKeyword.value === 'try');
+      assert.ok(tryPair);
+      const catchIntermediates = tryPair?.intermediates.filter((t) => t.value === 'catch');
+      assert.strictEqual(catchIntermediates?.length ?? 0, 1);
+    });
+    test('should not register after as intermediate when used as map key (after => 1)', () => {
+      const source = 'receive do\n  x = %{after => 1}\nafter\n  100 -> :ok\nend';
+      const pairs = parser.parse(source);
+      const receivePair = pairs.find((p) => p.openKeyword.value === 'receive');
+      assert.ok(receivePair);
+      const afterIntermediates = receivePair?.intermediates.filter((t) => t.value === 'after');
+      assert.strictEqual(afterIntermediates?.length ?? 0, 1);
+    });
+  });
+
   generateCommonTests(config);
 });

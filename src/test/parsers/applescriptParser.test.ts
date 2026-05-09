@@ -2623,5 +2623,92 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-09: single-word block opener with whitespace before ( is rejected', () => {
+    test('should not detect try () as block opener (single space)', () => {
+      const source = 'on run\n  try ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect try () as block opener (multiple spaces)', () => {
+      const source = 'on run\n  try   ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect try () as block opener (tab separator)', () => {
+      const source = 'on run\n  try\t()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect repeat () as block opener', () => {
+      const source = 'on run\n  repeat ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect considering () as block opener', () => {
+      const source = 'on run\n  considering ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect ignoring () as block opener', () => {
+      const source = 'on run\n  ignoring ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect tell () as block opener', () => {
+      const source = 'on run\n  tell ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-09: nested handler tell pairs with handler not outer tell', () => {
+    test('should pair inner on tell() with inner end tell, outer tell with outer end tell (LIFO)', () => {
+      const source = 'tell app\n  on tell()\n    beep\n  end tell\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerHandler = pairs.find((p) => p.openKeyword.value === 'on');
+      const outerTell = pairs.find((p) => p.openKeyword.value === 'tell' && p.openKeyword.startOffset === 0);
+      assert.ok(innerHandler, 'inner on tell() should be paired');
+      assert.ok(outerTell, 'outer tell at offset 0 should be paired');
+      // Inner handler must close at the inner end tell (line 4), not the outer end tell (line 5).
+      assert.ok(
+        innerHandler.closeKeyword.startOffset < outerTell.closeKeyword.startOffset,
+        'inner handler close must come before outer tell close (LIFO)'
+      );
+    });
+  });
+
+  suite('Regression 2026-05-09: compound end keyword fallback uses last word for handler name match', () => {
+    test('should pair on transaction() with end transaction via fallback', () => {
+      const source = 'on transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+
+    test('should pair on timeout() with end timeout via fallback', () => {
+      const source = 'on timeout()\n  beep\nend timeout';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end timeout');
+    });
+
+    test('should pair to transaction() with end transaction via fallback', () => {
+      const source = 'to transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'to');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+  });
+
   generateCommonTests(config);
 });

@@ -1601,5 +1601,101 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: continuation chars inside comments do not affect statement-leading detection', () => {
+    test('should treat endif after a # comment ending in ... as block close', () => {
+      // The `...` inside the comment is just text, not a line continuation
+      const source = 'if true\n  # comment ...\n  endif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should treat endif after a % comment ending in ... as block close', () => {
+      const source = 'if true\n  % comment ...\nendif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should treat until after a # comment ending in \\ as block close', () => {
+      const source = 'do\n  # comment \\\n  until cond';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should treat endfor after a comment ending in \\ as block close', () => {
+      const source = 'for i = 1:10\n  # comment \\\nendfor';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'endfor');
+    });
+  });
+
+  suite('Regression 2026-05-09: do[args] / do{args} reject as block_open', () => {
+    test('should not treat do[1] as block_open (function-call-like indexing)', () => {
+      const source = 'function f\n  x = do[1];\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      // function-end and if-end, but no do/until block
+      assertBlockCount(pairs, 2);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do[1] should not open a block');
+    });
+
+    test('should not treat do{1} as block_open (function-call-like indexing)', () => {
+      const source = 'function f\n  x = do{1};\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do{1} should not open a block');
+    });
+  });
+
+  suite('Regression 2026-05-09: do followed by line continuation then ( is function call', () => {
+    test('should not treat do ...\\n(args) as do/until block', () => {
+      const source = 'function f\n  x = do ...\n  (1, 2);\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      // function-end and if-end, but no do/until block
+      assertBlockCount(pairs, 2);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do ...\\n( should be a function call across continuation');
+    });
+
+    test('should not treat do \\\\\\n(args) as do/until block', () => {
+      const source = 'function f\n  x = do \\\n  (1, 2);\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do \\\\\\n( should be a function call across continuation');
+    });
+  });
+
+  suite('Regression 2026-05-09: vertical tab and form feed treated as whitespace for typed-close', () => {
+    test('should treat endif preceded by vertical tab as block close', () => {
+      const source = 'if true\nendif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should treat endif preceded by form feed as block close', () => {
+      const source = 'if true\nendif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+  });
+
+  suite('Regression 2026-05-09: arguments(obj) function-call vs arguments block', () => {
+    test('should not treat arguments(obj) as block_open in classdef methods', () => {
+      const source = 'classdef A\n  methods\n    function f(obj)\n      arguments(obj);\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      // classdef, methods, function are 3 blocks, no arguments block
+      const argumentsPair = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.strictEqual(argumentsPair, undefined, 'arguments(obj) should not open a block');
+    });
+
+    test('should still detect arguments block (no parens form) inside function', () => {
+      const source = 'function f(x)\n  arguments\n    x\n  end\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      const argumentsPair = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(argumentsPair, 'arguments<NL> inside function should still be a block');
+    });
+  });
+
   generateCommonTests(config);
 });

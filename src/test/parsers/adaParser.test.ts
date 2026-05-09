@@ -2830,5 +2830,38 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-09: extended-return with Unicode identifier', () => {
+    test('should detect extended-return block when object name starts with non-ASCII letter', () => {
+      const source = 'function F return Integer is\nbegin\n  return Ñame : Integer do\n    null;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return block with Unicode identifier should be paired');
+      assert.strictEqual(returnPair.closeKeyword.value.toLowerCase(), 'end return');
+      assert.strictEqual(returnPair.nestLevel, 1);
+      const functionPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'function');
+      assert.ok(functionPair, 'function block should be paired');
+      assert.strictEqual(functionPair.nestLevel, 0);
+    });
+  });
+
+  suite('Regression 2026-05-09: compound end pattern must not consume next if', () => {
+    test('should not greedily merge end<newline>if with the following independent if block', () => {
+      const source = 'if A then null;\nend\nif Cond then null; end if;\n';
+      const pairs = parser.parse(source);
+      // Expect two independent if blocks: the first `if A then` closed by simple `end`,
+      // and the second `if Cond then` closed by `end if;`.
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(firstIf, 'first if block should be paired');
+      // First closer is the bare `end` (not compound) — its value should be exactly "end".
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      // Second if block — its open keyword should be the second `if` and close should be `end if`.
+      const secondIf = pairs.find((p) => p !== firstIf && p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(secondIf, 'second if block (independent) should also be paired');
+      assert.match(secondIf.closeKeyword.value.toLowerCase(), /^end\s+if$/);
+    });
+  });
+
   generateCommonTests(config);
 });
