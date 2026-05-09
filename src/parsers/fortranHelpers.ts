@@ -478,6 +478,13 @@ export function isBlockWhereOrForall(source: string, position: number, keyword: 
     return false;
   }
 
+  // Reject empty parens `where ()` / `forall ()`. Both constructs require a non-empty
+  // expression: where(MASK), forall(IDX = ...). Empty content (only whitespace and
+  // comments / continuation lines) is invalid.
+  // Note: this lookahead is a quick check for the trivial case `()`. The full
+  // emptiness check below also runs after parenthesis matching to handle
+  // `( ! comment\n  & \n)` etc.
+  let openParenContentStart = i + 1;
   // Find matching closing parenthesis, skipping strings and comments
   let depth = 1;
   i++;
@@ -532,6 +539,25 @@ export function isBlockWhereOrForall(source: string, position: number, keyword: 
 
   // If no closing paren found, not valid
   if (depth > 0) {
+    return false;
+  }
+
+  // Reject empty parens (only whitespace / comments / continuations between `(` and `)`).
+  // i now points one past the matching `)`; (i - 1) is the `)` itself. The content span
+  // is [openParenContentStart, i - 1).
+  const innerContent = source.slice(openParenContentStart, i - 1);
+  // Strip Fortran inline comments and `&` continuation tokens, then check for any
+  // non-whitespace character. This treats `(! comment)`, `(  &\n  & )`, etc. as empty.
+  const strippedInner = innerContent
+    .split(/(?:\r\n|\r|\n)/)
+    .map((line) => {
+      const commentIdx = line.indexOf('!');
+      const codeOnly = commentIdx >= 0 ? line.slice(0, commentIdx) : line;
+      // Drop `&` continuation tokens
+      return codeOnly.replace(/&/g, '');
+    })
+    .join('');
+  if (strippedInner.trim().length === 0) {
     return false;
   }
 
