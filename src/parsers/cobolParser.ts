@@ -407,7 +407,7 @@ export class CobolBlockParser extends BaseBlockParser {
       const lower = token.value.toLowerCase();
       if (lower !== 'when' && lower !== 'else') return true;
       if (this.isPrecedingWordDataNameVerb(source, token.startOffset)) return false;
-      if (this.isInExpressionContext(source, token.startOffset)) return false;
+      if (this.isInExpressionContext(source, token.startOffset, excludedRegions)) return false;
       return true;
     });
   }
@@ -437,10 +437,27 @@ export class CobolBlockParser extends BaseBlockParser {
   // (arithmetic operator, separator, or open parenthesis), indicating that the
   // keyword is used as an operand/data name rather than a control-flow intermediate.
   // Examples: `COMPUTE Y = X + ELSE`, `CALL "P" USING A, ELSE`, `(ELSE + 1)`.
-  private isInExpressionContext(source: string, position: number): boolean {
+  // Skips excluded regions (*> inline comments, >> compiler directives, strings) so
+  // expression-like characters appearing inside them are not mistaken for real operators.
+  private isInExpressionContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
-    // Skip whitespace including newlines (continuation across lines is permitted).
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) i--;
+    // Skip whitespace including newlines (continuation across lines is permitted)
+    // and any excluded regions (comments, directives, strings) encountered along the way.
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const c = source[i];
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
     if (i < 0) return false;
     const ch = source[i];
     // Arithmetic operators: + - * / = < >
