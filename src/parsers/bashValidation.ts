@@ -9,6 +9,42 @@ export interface BashValidationCallbacks {
   findExcludedRegionAt: (pos: number, regions: ExcludedRegion[]) => ExcludedRegion | null;
 }
 
+// Skips whitespace and \<newline> line continuations backward from `pos`.
+// Returns the resulting position and whether any line continuation was crossed.
+function skipWhitespaceAndContinuationBackward(source: string, pos: number): { pos: number; crossedContinuation: boolean } {
+  let p = pos;
+  let crossed = false;
+  while (p >= 0) {
+    if (source[p] === ' ' || source[p] === '\t') {
+      p--;
+      continue;
+    }
+    // Detect \<newline> sequences (LF, CRLF, CR)
+    if (source[p] === '\n' || source[p] === '\r') {
+      let bs = p - 1;
+      if (source[p] === '\n' && bs >= 0 && source[bs] === '\r') {
+        bs--;
+      }
+      if (bs >= 0 && source[bs] === '\\') {
+        // Verify odd number of backslashes (so the last \ truly escapes the newline)
+        let count = 0;
+        let scan = bs;
+        while (scan >= 0 && source[scan] === '\\') {
+          count++;
+          scan--;
+        }
+        if (count % 2 === 1) {
+          p = bs - 1;
+          crossed = true;
+          continue;
+        }
+      }
+    }
+    break;
+  }
+  return { pos: p, crossedContinuation: crossed };
+}
+
 // Check if a keyword is at shell command position (start of a simple command)
 export function isAtCommandPosition(
   source: string,
@@ -273,21 +309,26 @@ export function isAtCommandPosition(
   }
 
   // time command with flags: time -p cmd, time -- cmd, time -p -- cmd
+  // Also handles line continuations: time \<newline> -p cmd, time -p \<newline> cmd
   if (i >= 0 && source[i] !== '\n' && source[i] !== '\r') {
     let ts = i;
     const beforeFlags = ts;
-    // Skip backward past -p and -- flags
+    let crossedContinuation = false;
+    // Skip backward past -p and -- flags, transparently traversing \<newline> line continuations
     while (ts >= 0) {
       const flag = source.slice(Math.max(0, ts - 1), ts + 1);
       if (flag === '-p' || flag === '--') {
         ts -= 2;
-        while (ts >= 0 && (source[ts] === ' ' || source[ts] === '\t')) ts--;
+        // Skip whitespace and line continuations (\<newline> sequences)
+        const result = skipWhitespaceAndContinuationBackward(source, ts);
+        ts = result.pos;
+        if (result.crossedContinuation) crossedContinuation = true;
         continue;
       }
       break;
     }
-    // Verify whitespace between time and first flag when flags were consumed
-    if (ts !== beforeFlags && (ts < 0 || (source[ts + 1] !== ' ' && source[ts + 1] !== '\t'))) {
+    // Verify whitespace or line continuation between time and first flag when flags were consumed
+    if (ts !== beforeFlags && !crossedContinuation && (ts < 0 || (source[ts + 1] !== ' ' && source[ts + 1] !== '\t'))) {
       ts = -1;
     }
     if (ts >= 3 && source.slice(ts - 3, ts + 1) === 'time') {
@@ -462,13 +503,7 @@ export function isCasePattern(
     }
   }
 
-  // esac) is almost always case-close + subshell-close, not a case pattern;
-  // the backward scan below would falsely match ;; from the last case arm
-  if (keyword === 'esac') {
-    return false;
-  }
-
-  // Default: check if preceded by case separator (;;, ;&, ;;&) or `in` keyword
+  // Default: check if preceded by case separator (;;, ;&, ;;&), `in` keyword, or pipe (|)
   // to distinguish case patterns from keywords followed by stray )
   let s = position - 1;
   while (s >= 0) {
@@ -479,6 +514,17 @@ export function isCasePattern(
     if (source[s] !== ' ' && source[s] !== '\t' && source[s] !== '\n' && source[s] !== '\r') break;
     s--;
   }
+  // After pipe (|) separator in case pattern alternatives (e.g., foo|for), foo|esac))
+  // Checked first so `esac` after `|` is treated as a case pattern alternative.
+  if (s >= 0 && source[s] === '|') {
+    return true;
+  }
+
+  // esac) is almost always case-close + subshell-close, not a case pattern;
+  // the backward scan below would falsely match ;; from the last case arm
+  if (keyword === 'esac') {
+    return false;
+  }
   if (s >= 1 && source[s] === ';' && source[s - 1] === ';') {
     return true;
   }
@@ -486,10 +532,6 @@ export function isCasePattern(
     return true;
   }
   if (s >= 1 && source[s] === 'n' && source[s - 1] === 'i' && (s < 2 || !/[a-zA-Z0-9_]/.test(source[s - 2]))) {
-    return true;
-  }
-  // After pipe (|) separator in case pattern alternatives (e.g., foo|for))
-  if (s >= 0 && source[s] === '|') {
     return true;
   }
   return false;

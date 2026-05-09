@@ -27,6 +27,39 @@ import { findLastOpenerByType } from './parserUtils';
 // Keywords that are closed by `done`
 const DONE_OPENERS = new Set(['for', 'while', 'until', 'select']);
 
+// Skips whitespace and \<newline> line continuations backward from `pos`.
+// Used to traverse between tokens separated by line continuations
+// (e.g., `function \<newline> name { ... }`).
+function skipWhitespaceAndContinuationBackwardLocal(source: string, pos: number): number {
+  let p = pos;
+  while (p >= 0) {
+    if (source[p] === ' ' || source[p] === '\t') {
+      p--;
+      continue;
+    }
+    if (source[p] === '\n' || source[p] === '\r') {
+      let bs = p - 1;
+      if (source[p] === '\n' && bs >= 0 && source[bs] === '\r') {
+        bs--;
+      }
+      if (bs >= 0 && source[bs] === '\\') {
+        let count = 0;
+        let scan = bs;
+        while (scan >= 0 && source[scan] === '\\') {
+          count++;
+          scan--;
+        }
+        if (count % 2 === 1) {
+          p = bs - 1;
+          continue;
+        }
+      }
+    }
+    break;
+  }
+  return p;
+}
+
 export class BashBlockParser extends BaseBlockParser {
   private get validationCallbacks(): BashValidationCallbacks {
     return {
@@ -482,7 +515,8 @@ export class BashBlockParser extends BaseBlockParser {
             // Check for "function name {" (Bash allows hyphens, dots, colons, etc. in function names)
             while (j >= 0 && /[^\s;|&(){}<>$`"'\\#]/.test(source[j])) j--;
             let k = j;
-            while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+            // Skip whitespace and \<newline> line continuations between the name and the keyword
+            k = skipWhitespaceAndContinuationBackwardLocal(source, k);
             if (
               k >= 7 &&
               source.slice(k - 7, k + 1) === 'function' &&

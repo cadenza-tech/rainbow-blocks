@@ -521,6 +521,20 @@ function isAtSubshellCommandPosition(source: string, pos: number): boolean {
   return ch === ';' || ch === '|' || ch === '&' || ch === '(' || ch === '{' || ch === '\n' || ch === '\r' || ch === '`';
 }
 
+// Returns true when the position is immediately preceded (after whitespace) by the bare `in` keyword.
+// In bash case statements, the syntax `case word in [pattern_list] esac` allows an empty pattern list,
+// so `esac` may appear directly after `in` without an intervening separator.
+function isPrecededByInKeyword(source: string, pos: number): boolean {
+  let j = pos - 1;
+  while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) {
+    j--;
+  }
+  if (j < 1) return false;
+  if (source[j] !== 'n' || source[j - 1] !== 'i') return false;
+  // Word boundary: must not be part of a longer identifier (e.g., `bin`, `coin`)
+  return j - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[j - 2]);
+}
+
 function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedRegion {
   const { initialPos, regionStart } = config;
   let i = initialPos;
@@ -648,7 +662,8 @@ function scanSubshellBody(source: string, config: SubshellScanConfig): ExcludedR
       !(i > 0 && source[i - 1] === '$') &&
       matchesWord(source, i, 'esac') &&
       !isWordUsedAsAssignmentOrFunction(source, i, 4) &&
-      isAtSubshellCommandPosition(source, i)
+      // Allow `case x in esac` (empty pattern list): `in` directly precedes `esac`.
+      (isAtSubshellCommandPosition(source, i) || (caseDepth > 0 && isPrecededByInKeyword(source, i)))
     ) {
       if (caseDepth > 0) caseDepth--;
       i += 4;
