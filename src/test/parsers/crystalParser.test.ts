@@ -3946,5 +3946,28 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: property with multiple comma-separated names', () => {
+    test('should not detect end as block_close in property foo, end', () => {
+      const source = 'class Foo\n  property foo, end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      // Class must close at the LAST end (line 2)
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not detect do as block_open in property foo, do', () => {
+      const source = 'class Foo\n  property foo, do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not detect end in getter with multiple names: foo, bar, end', () => {
+      const source = 'class Foo\n  getter foo, bar, end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
