@@ -368,7 +368,12 @@ const FORTRAN_STATEMENT_KEYWORDS = new Set([
   'namelist',
   'external',
   'intrinsic',
-  'implicit'
+  'implicit',
+  // 'to' covers both `assign N to LABEL` and `go to LABEL` (space-separated form)
+  'to',
+  // 'cycle NAME' / 'exit NAME' reference construct labels; NAME may match a block keyword
+  'cycle',
+  'exit'
 ]);
 
 // Skips backward across & continuation line boundaries
@@ -527,6 +532,72 @@ export function isMiddleInExpressionContext(source: string, position: number): b
   }
   if (char === '=') {
     return true;
+  }
+  return false;
+}
+
+// Validates that `then` follows a closing paren `)` from an if-construct header.
+// A bare `then` at line start (with only whitespace/&-continuation before it on its
+// physical line and no `)` reachable through backward continuation) is not a real
+// block_middle - it's a misplaced identifier and must be skipped.
+export function isThenAfterParen(source: string, position: number): boolean {
+  let i = position - 1;
+  // Skip same-line whitespace
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  if (i < 0) return false;
+  // Direct predecessor `)`: this is the standard `if (cond) then` form
+  if (source[i] === ')') return true;
+  // Allow leading `&` on the current physical line (continuation)
+  if (source[i] === '&') {
+    i--;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 0) return false;
+    if (source[i] === ')') return true;
+  }
+  // Cross-line: backtrack through `&` continuation lines, comment-only lines, blank
+  // lines. Look for `)` at the end of the previous code line.
+  while (i >= 0 && (source[i] === '\n' || source[i] === '\r')) {
+    // Find start of previous physical line
+    let lineEnd = i;
+    if (source[lineEnd] === '\n' && lineEnd > 0 && source[lineEnd - 1] === '\r') {
+      lineEnd--;
+    }
+    let lineStart = lineEnd;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    let lineContent = source.slice(lineStart, lineEnd);
+    // Strip inline comment
+    const commentIdx = findInlineCommentIndex(lineContent);
+    if (commentIdx >= 0) {
+      lineContent = lineContent.slice(0, commentIdx);
+    }
+    const trimmed = lineContent.trimEnd();
+    // Comment-only / blank line: keep walking backward
+    if (trimmed.length === 0) {
+      i = lineStart - 1;
+      continue;
+    }
+    // Previous line must end with `&` (continuation) for cross-line scan to be valid
+    if (!trimmed.endsWith('&')) {
+      return false;
+    }
+    // Look at the last code character before the `&`
+    let endIdx = trimmed.length - 1; // points at '&'
+    endIdx--;
+    while (endIdx >= 0 && (trimmed[endIdx] === ' ' || trimmed[endIdx] === '\t')) {
+      endIdx--;
+    }
+    if (endIdx < 0) {
+      // Bare `&` line, walk back further
+      i = lineStart - 1;
+      continue;
+    }
+    return trimmed[endIdx] === ')';
   }
   return false;
 }

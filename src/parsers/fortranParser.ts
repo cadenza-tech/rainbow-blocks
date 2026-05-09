@@ -17,6 +17,7 @@ import {
   isInsideParentheses,
   isMiddleInExpressionContext,
   isPrecededByOperator,
+  isThenAfterParen,
   isValidFortranBlockClose,
   isValidProcedureOpen
 } from './fortranValidation';
@@ -103,7 +104,10 @@ export class FortranBlockParser extends BaseBlockParser {
     if (lowerKeyword === 'team') {
       const lineStart = findLineStart(source, position);
       const before = source.slice(lineStart, position);
-      if (!/(?:^|[^a-zA-Z0-9_])change[ \t]+$/i.test(before)) {
+      const sameLineMatch = /(?:^|[^a-zA-Z0-9_])change[ \t]+$/i.test(before);
+      // Also accept 'change &\n  team' across continuation line(s)
+      const continuationMatch = isPrecedingContinuationKeyword(source, position, 'change');
+      if (!sameLineMatch && !continuationMatch) {
         return false;
       }
     }
@@ -628,6 +632,10 @@ export class FortranBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Find all compound end keywords and their positions
     const compoundEndPositions = new Map<number, { keyword: string; length: number; endType: string }>();
+    // Track positions where the compound `end <type>` was rejected due to expression
+    // context (e.g., `end if = 5`). The bare `end` token at these positions must also
+    // be skipped, otherwise it would phantom-close the parent if-block.
+    const rejectedCompoundEndPositions = new Set<number>();
 
     COMPOUND_END_PATTERN.lastIndex = 0;
     let match = COMPOUND_END_PATTERN.exec(source);
@@ -636,11 +644,18 @@ export class FortranBlockParser extends BaseBlockParser {
       if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
         const fullMatch = match[0];
         const endType = match[1].toLowerCase();
-        compoundEndPositions.set(pos, {
-          keyword: fullMatch, // Preserve original case
-          length: fullMatch.length,
-          endType
-        });
+        // Validate the compound `end <type>` is not followed by =, (...) =, //, or %
+        // (i.e., not a variable / array element / string concat / component access).
+        // Without this check, `end if = 5` would be tokenized as a phantom block_close.
+        if (isValidFortranBlockClose(fullMatch, source, pos)) {
+          compoundEndPositions.set(pos, {
+            keyword: fullMatch, // Preserve original case
+            length: fullMatch.length,
+            endType
+          });
+        } else {
+          rejectedCompoundEndPositions.add(pos);
+        }
       }
       match = COMPOUND_END_PATTERN.exec(source);
     }
@@ -653,12 +668,18 @@ export class FortranBlockParser extends BaseBlockParser {
       if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions) && !compoundEndPositions.has(pos)) {
         const fullMatch = contMatch[0];
         const endType = contMatch[1].toLowerCase();
-        // Normalize keyword to "end <type>" for consistent matching in matchBlocks
-        compoundEndPositions.set(pos, {
-          keyword: `end ${contMatch[1]}`,
-          length: fullMatch.length,
-          endType
-        });
+        const normalizedKeyword = `end ${contMatch[1]}`;
+        // Validate the compound `end <type>` (continuation form) is not in expression context
+        if (isValidFortranBlockClose(normalizedKeyword, source, pos)) {
+          // Normalize keyword to "end <type>" for consistent matching in matchBlocks
+          compoundEndPositions.set(pos, {
+            keyword: normalizedKeyword,
+            length: fullMatch.length,
+            endType
+          });
+        } else {
+          rejectedCompoundEndPositions.add(pos);
+        }
       }
       contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
     }
@@ -719,6 +740,13 @@ export class FortranBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip bare `end` when the compound `end <type>` at this position was rejected
+      // (e.g., `end if = 5` where the compound is in assignment context). Without this,
+      // the bare `end` would phantom-close the parent block.
+      if (type === 'block_close' && keyword.toLowerCase() === 'end' && rejectedCompoundEndPositions.has(startOffset)) {
+        continue;
+      }
+
       // Skip block_middle keywords inside parenthesized expressions (conditions, function arguments)
       if (type === 'block_middle' && isInsideParentheses(source, startOffset)) {
         continue;
@@ -732,6 +760,13 @@ export class FortranBlockParser extends BaseBlockParser {
       // Skip block_middle keywords used in expression context (e.g., `print *, then`, `x = then + 1`)
       // Exception: ')' is a valid predecessor (e.g., `if (cond) then`, `select case (x)`)
       if (type === 'block_middle' && isMiddleInExpressionContext(source, startOffset)) {
+        continue;
+      }
+
+      // `then` must follow `)` from an if-construct header. A bare `then` on its own
+      // line (no preceding code on the physical line, no `)` reachable across continuations)
+      // is a misplaced identifier, not a real intermediate.
+      if (type === 'block_middle' && keyword.toLowerCase() === 'then' && !isThenAfterParen(source, startOffset)) {
         continue;
       }
 
