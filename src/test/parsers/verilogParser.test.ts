@@ -2960,5 +2960,54 @@ endmodule`;
     });
   });
 
+  suite('Regression: data type with packed dimension or block comment before reserved-word identifier', () => {
+    test('should reject reserved-word identifier in declaration after `reg [size]`', () => {
+      // Bug: `reg [7:0] endmodule;` declares a variable named `endmodule`. The
+      // isPrecededByDataTypeKeyword check only looks at the immediately preceding
+      // word, so the `]` of the dimension specifier breaks the check and the
+      // declared identifier is falsely tokenized as block_close.
+      const source = 'module m;\n  reg [7:0] endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      // Only one endmodule token expected: the actual block close at end
+      assert.strictEqual(endmoduleTokens.length, 1);
+      assert.strictEqual(endmoduleTokens[0].startOffset, source.lastIndexOf('endmodule'));
+      // And the block pair should match the outer module/endmodule
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should reject reserved-word identifier in declaration after `reg /* comment */`', () => {
+      // Same bug as above but with a block comment between `reg` and the identifier.
+      const source = 'module m;\n  reg /* width */ endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1);
+      assert.strictEqual(endmoduleTokens[0].startOffset, source.lastIndexOf('endmodule'));
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should reject reserved-word identifier in declaration after `logic [N-1:0]`', () => {
+      // Same bug variant: SystemVerilog logic data type with dimension specifier.
+      const source = 'module m;\n  logic [N-1:0] endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1);
+      assert.strictEqual(endmoduleTokens[0].startOffset, source.lastIndexOf('endmodule'));
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should reject reserved-word identifier in declaration after `reg [a:b][c:d]` (multi-dim)', () => {
+      // Multiple dimension specifiers should also be skipped backward.
+      const source = 'module m;\n  reg [7:0][3:0] endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1);
+      assert.strictEqual(endmoduleTokens[0].startOffset, source.lastIndexOf('endmodule'));
+    });
+  });
+
   generateCommonTests(config);
 });
