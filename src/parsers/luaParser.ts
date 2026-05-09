@@ -4,6 +4,12 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import { findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 
+// Valid Lua numeric prefix that can legitimately be followed by a trailing `.`
+// (i.e., the integer part of a float). Decimal: `[0-9]+`. Hex: `0[xX][0-9a-fA-F]+`.
+// Strings like `1A`, `1e5`, or `0xZ` do NOT match, so a trailing `.` after them
+// must be field access, not a numeric trailing dot.
+const LUA_NUMBER_TRAILING_DOT_PREFIX = /^(?:[0-9]+|0[xX][0-9a-fA-F]+)$/;
+
 export class LuaBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: ['if', 'while', 'for', 'repeat', 'function', 'do'],
@@ -63,13 +69,15 @@ export class LuaBlockParser extends BaseBlockParser {
       // .. is string concatenation operator, not field access
       if (i >= 1 && source[i - 1] === '.') return false;
       // Trailing dot after a number literal (decimal or hex) is not field access.
-      // Decimal: digit-start (e.g., 1.). Hex: 0x prefix followed by hex digits (e.g., 0x1A.).
+      // We walk back through identifier-like characters and validate the swept
+      // range as a Lua number prefix. `1A`, `1e5`, `0xZ` etc. do not match the
+      // valid prefix grammar, so a trailing `.` after them is field access.
       if (i >= 1 && /[0-9a-fA-F]/.test(source[i - 1])) {
         let k = i - 1;
         while (k > 0 && /[a-zA-Z0-9_]/.test(source[k - 1])) {
           k--;
         }
-        if (/[0-9]/.test(source[k])) {
+        if (LUA_NUMBER_TRAILING_DOT_PREFIX.test(source.slice(k, i))) {
           // Numeric literal — could be decimal (1.) or hex (0x1A.).
           return false;
         }
