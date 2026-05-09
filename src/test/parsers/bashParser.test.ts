@@ -5807,4 +5807,14 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: heredoc with escaped backslash delimiter', () => {
+    test('should accept <<\\\\EOF (escaped backslash followed by identifier)', () => {
+      // <<\\EOF is bash for: terminator literally is "\EOF" (one backslash + EOF)
+      // The parser should recognize the heredoc and skip body keywords
+      const source = 'cat <<\\\\EOF\nfor i in 1; do echo; done\n\\EOF\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
