@@ -3072,5 +3072,45 @@ endmodule`;
     });
   });
 
+  suite('Regression: pragma protect begin without matching end', () => {
+    test('should only exclude the pragma line when no matching `pragma protect end exists', () => {
+      // Bug: `pragma protect begin` opens a protected region. If no matching
+      // `pragma protect end is found, matchPragmaDirective falls back to excluding
+      // through end of source, swallowing all subsequent code.
+      // Fix: fall back to single-line exclusion (only the pragma directive line itself)
+      // so subsequent valid code still parses.
+      const source = '`pragma protect begin\nDATA_HERE\nmodule m2;\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      // The pragma region should not extend past its line end
+      const pragmaRegion = regions.find((r) => r.start === 0);
+      assert.ok(pragmaRegion);
+      // The line ends at the first newline (offset 21: `\`pragma protect begin\n`)
+      assert.strictEqual(pragmaRegion.end, source.indexOf('\n'));
+      // The subsequent `module m2;...endmodule` should still parse as a block
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should exclude region between begin and end when matching `pragma protect end exists', () => {
+      // Sanity check: when both begin and end exist, the entire region is excluded.
+      const source = '`pragma protect begin\nKEYWORDS_HERE\n`pragma protect end\nmodule m2;\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const pragmaRegion = regions.find((r) => r.start === 0);
+      assert.ok(pragmaRegion);
+      // The exclusion should extend to the `pragma protect end line, not to source end
+      assert.ok(pragmaRegion.end < source.length);
+      // The subsequent module/endmodule should still be parsed
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should only exclude the pragma line for `pragma protect begin_protected without end', () => {
+      // begin_protected is also accepted as the protected-region opener
+      const source = '`pragma protect begin_protected\nKEYWORDS\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
