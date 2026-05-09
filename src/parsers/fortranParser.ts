@@ -169,6 +169,12 @@ export class FortranBlockParser extends BaseBlockParser {
       if ((subKw === 'type' || subKw === 'rank' || subKw === 'case') && !/^[ \t]*\(/.test(afterSubKw)) {
         return false;
       }
+      // Reject empty parens `select case ()` / `select rank ()` / `select type ()`.
+      // The parenthesized content must not be empty (only whitespace).
+      const parenMatch = afterSubKw.match(/^[ \t]*\(([ \t]*)\)/);
+      if (parenMatch) {
+        return false;
+      }
     }
 
     // 'module procedure/function/subroutine' inside submodule is not a new module block
