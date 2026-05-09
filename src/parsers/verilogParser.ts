@@ -368,9 +368,49 @@ export class VerilogBlockParser extends BaseBlockParser {
   // block keyword is being used as a parameter/variable name.
   // Method qualifiers (static, automatic, etc.) before `function`/`task`/`class` are
   // legitimate block openers and are not treated as data-type-suppressing prefixes.
-  private isPrecededByDataTypeKeyword(source: string, position: number, keyword?: string): boolean {
+  // Skips packed/unpacked dimension specifiers (`[size]`) and block comments (`/* */`)
+  // that may appear between the data-type keyword and the identifier
+  // (e.g., `reg [7:0] endmodule`, `logic /* width */ endmodule`).
+  private isPrecededByDataTypeKeyword(source: string, position: number, keyword?: string, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    // Skip whitespace, dimension specifiers `[...]`, and block comments backwards.
+    // Loop until a stable position is reached.
+    while (i >= 0) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      // Skip dimension specifier `[...]`: walk back from `]` to its matching `[`,
+      // tracking nested brackets so multi-dimensional declarations work correctly.
+      if (ch === ']') {
+        let depth = 1;
+        i--;
+        while (i >= 0 && depth > 0) {
+          if (excludedRegions !== undefined && this.isInExcludedRegion(i, excludedRegions)) {
+            i--;
+            continue;
+          }
+          if (source[i] === ']') depth++;
+          else if (source[i] === '[') depth--;
+          if (depth > 0) i--;
+        }
+        if (i < 0) return false;
+        // i now points to the matching `[`; step before it
+        i--;
+        continue;
+      }
+      // Skip block comment `/* ... */` backward: when current position is in an
+      // excluded region whose end equals i+1, jump to just before its start.
+      if (excludedRegions !== undefined && this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      break;
+    }
     if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
     const wordEnd = i + 1;
     while (i >= 0 && /[a-zA-Z0-9_$]/.test(source[i])) i--;
@@ -456,8 +496,8 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject keywords used as identifiers after a data type/qualifier keyword
-    // (e.g., `int function`, `input module`, `bit task`)
-    if (this.isPrecededByDataTypeKeyword(source, position, keyword)) {
+    // (e.g., `int function`, `input module`, `bit task`, `reg [7:0] endmodule`)
+    if (this.isPrecededByDataTypeKeyword(source, position, keyword, excludedRegions)) {
       return false;
     }
 
@@ -559,8 +599,9 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject keywords used as identifiers after a data type/qualifier keyword
-    // (e.g., `int endmodule;` — endmodule is an illegal variable name preceded by `int`).
-    if (this.isPrecededByDataTypeKeyword(source, position, keyword)) {
+    // (e.g., `int endmodule;` — endmodule is an illegal variable name preceded by `int`,
+    // or `reg [7:0] endmodule;` — same with packed dimension specifier).
+    if (this.isPrecededByDataTypeKeyword(source, position, keyword, excludedRegions)) {
       return false;
     }
 
