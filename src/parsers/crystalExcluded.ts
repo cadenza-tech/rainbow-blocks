@@ -201,11 +201,16 @@ function skipMacroPercentLiteral(source: string, pos: number): number | null {
   const close = PERCENT_LITERAL_PAIRED_DELIMITERS[next] ?? next;
   const isPaired = next !== close;
 
+  // When backslash is the delimiter, it cannot also serve as an escape character —
+  // otherwise the closing `\` is consumed as part of an escape sequence and the
+  // literal never terminates.
+  const escapeEnabled = close !== '\\';
+
   let i = delimPos + 1;
   let depth = 1;
   while (i < source.length && depth > 0) {
     const c = source[i];
-    if (c === '\\' && i + 1 < source.length) {
+    if (escapeEnabled && c === '\\' && i + 1 < source.length) {
       i += 2;
       continue;
     }
