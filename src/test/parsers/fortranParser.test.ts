@@ -4980,5 +4980,30 @@ end select
     });
   });
 
+  suite('Regression: continuation-form compound end in expression context', () => {
+    test('should not treat `end & \\n if = 5` as block_close (continuation-form assignment)', () => {
+      // The continuation-form compound end (`end & \n if = 5`) must be detected as an
+      // assignment to the variable `if`, not as a phantom block_close. Otherwise the
+      // outer if-block would falsely pair with this expression.
+      const source = 'if (.true.) then\nend & \n if = 5';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat `end & \\n if // "x"` as block_close (continuation-form string concat)', () => {
+      const source = 'if (.true.) then\n  s = end & \n if // "x"\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'closeKeyword must be the real end if on the last line');
+    });
+
+    test('should not treat `end & \\n if%comp` as block_close (continuation-form component access)', () => {
+      const source = 'if (.true.) then\n  x = end & \n if%comp\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'closeKeyword must be the real end if on the last line');
+    });
+  });
+
   generateCommonTests(config);
 });
