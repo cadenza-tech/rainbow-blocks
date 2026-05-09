@@ -1728,5 +1728,28 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: phantom section keyword end skip in Octave', () => {
+    test('should pair classdef with the LAST end when properties = 5 (assignment) is rejected', () => {
+      // Same as MATLAB phantom section logic — when `properties = 5` is rejected as
+      // a section opener, the user's stray `end` should be absorbed so classdef pairs
+      // with the OUTER end, not the inner one.
+      // Lines: 0 = classdef A, 1 = properties = 5, 2 = inner end (phantom skip target),
+      // 3 = outer end.
+      const source = 'classdef A\n  properties = 5\n  end\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 3, 'classdef should pair with the LAST end');
+    });
+
+    test('should pair classdef with the LAST end when properties + 1 (operator) is rejected', () => {
+      // `properties + 1` rejects properties as section opener (operator after it).
+      // Same phantom skip behaviour as `properties = 5`.
+      const source = 'classdef A\n  properties + 1\n  end\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 3, 'classdef should pair with the LAST end');
+    });
+  });
+
   generateCommonTests(config);
 });
