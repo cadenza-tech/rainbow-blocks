@@ -2921,6 +2921,31 @@ end procedure;`;
     });
   });
 
+  suite('Regression 2026-05-10: malformed and-then short-circuit collapses to single then intermediate', () => {
+    test('should collapse Test_and then to a single then intermediate', () => {
+      // Malformed input: `Test_and then` is not a valid `and then` short-circuit
+      // because `_and` is part of the identifier `Test_and`. The trailing `then`
+      // would otherwise leak into the if-block intermediates twice (once for the
+      // malformed `Test_and then` and once for the genuine `then`). Collapse to
+      // a single `then` so the if-block is colored with the correct intermediate
+      // count.
+      const source = 'if Test_and then B then null; end if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should collapse 1and then to a single then intermediate', () => {
+      // Malformed input: `1and` is an invalid identifier (digits cannot start an
+      // identifier in Ada). The `then` after `1and` must not be tracked as a
+      // separate intermediate from the genuine if-`then`.
+      const source = 'if 1and then B then null; end if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
   suite('Regression 2026-05-09: Unicode whitespace in or else and short-circuit detection', () => {
     test('should treat or<NBSP>else as short-circuit (intermediates only contain then)', () => {
       // `or` and `else` separated by NBSP (U+00A0)
