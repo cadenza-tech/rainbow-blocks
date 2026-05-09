@@ -98,6 +98,11 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isPrecededByDotOrColon(source, loopAbsolutePos, excludedRegions)) {
         continue;
       }
+      // Skip loop keywords used as `goto <label>` targets; they are label
+      // names, not real loop-opening keywords.
+      if (this.isAfterGoto(source, loopAbsolutePos, excludedRegions)) {
+        continue;
+      }
 
       // Find the matching 'do' for this loop keyword, accounting for nested loops
       // Each nested for/while consumes one do, so we track nesting
