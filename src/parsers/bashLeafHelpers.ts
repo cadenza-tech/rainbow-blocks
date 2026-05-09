@@ -136,7 +136,8 @@ export function matchHeredocBody(
 
     // Inside subshell: terminator at line start followed by ')' closes the heredoc
     // Content after ')' (e.g., 'EOF) file') belongs outside the subshell
-    if (inSubshell && trimmedLine.startsWith(`${terminator})`)) {
+    // Empty terminator (<<""): only blank line terminates, so a bare ')' line is body content
+    if (inSubshell && terminator !== '' && trimmedLine.startsWith(`${terminator})`)) {
       // End the heredoc region at the position of the ')', not past it
       const trimOffset = stripTabs ? line.length - line.replace(/^\t*/, '').length : 0;
       const parenPos = lineStart + trimOffset + terminator.length;

@@ -40,6 +40,15 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         i = skipMacroString(source, i, char);
         continue;
       }
+      // Skip heredoc body (<<- or <<~) so internal %} or end keywords inside the
+      // body do not prematurely close the macro template
+      if (char === '<' && i + 2 < source.length && source[i + 1] === '<' && (source[i + 2] === '-' || source[i + 2] === '~')) {
+        const heredocResult = matchHeredoc(source, i);
+        if (heredocResult) {
+          i = heredocResult.end;
+          continue;
+        }
+      }
       // Skip regex literals (/.../) when at expression start position
       if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
         i = skipRegexLiteral(source, i);
@@ -79,6 +88,15 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
       if (char === '"' || char === "'" || char === '`') {
         i = skipMacroString(source, i, char);
         continue;
+      }
+      // Skip heredoc body (<<- or <<~) so internal }} or end keywords inside the
+      // body do not prematurely close the macro template
+      if (char === '<' && i + 2 < source.length && source[i + 1] === '<' && (source[i + 2] === '-' || source[i + 2] === '~')) {
+        const heredocResult = matchHeredoc(source, i);
+        if (heredocResult) {
+          i = heredocResult.end;
+          continue;
+        }
       }
       // Skip regex literals (/.../) when at expression start position
       if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
@@ -422,8 +440,11 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     return null;
   }
 
-  // Pattern requires dash or tilde: <<-'EOF', <<-"EOF", <<-EOF, <<~'EOF', <<~"EOF", <<~EOF
-  const heredocPattern = /<<[-~](['"])([A-Za-z_][A-Za-z0-9_]*)\1|<<[-~]([A-Za-z_][A-Za-z0-9_]*)/g;
+  // Pattern requires dash or tilde: <<-'EOF', <<-"EOF", <<-EOF, <<~'EOF', <<~"EOF", <<~EOF.
+  // The unquoted variant uses Unicode-letter classes so identifiers containing non-ASCII
+  // letters (e.g. <<-Naïve) are matched fully, preventing the terminator from being a
+  // truncated ASCII prefix that never matches the actual identifier line.
+  const heredocPattern = /<<[-~](['"])([A-Za-z_][A-Za-z0-9_]*)\1|<<[-~]((?:[A-Za-z_]|\p{L})(?:[A-Za-z0-9_]|\p{L})*)/gu;
 
   // Find line end
   let lineEnd = pos;

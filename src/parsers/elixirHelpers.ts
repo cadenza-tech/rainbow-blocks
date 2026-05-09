@@ -13,10 +13,16 @@ const SIGIL_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
   '<': '>'
 };
 
+// Whitelist of valid single-character sigil delimiters per Elixir spec.
+// See: https://hexdocs.pm/elixir/sigils.html — sigils accept either paired brackets
+// (handled in SIGIL_PAIRED_DELIMITERS) or one of these non-paired characters.
+const SIGIL_NONPAIRED_DELIMITERS = new Set(['/', '|', '"', "'"]);
+
 // Reserved words that should not be consumed as sigil modifiers.
 // Sigil modifiers in Elixir are typically short lowercase letter sequences (e.g., `u`, `i`, `m`)
 // and never overlap with reserved keywords. When the modifier scanner encounters one of these
-// words, it must stop before the word to avoid consuming actual code.
+// words, it must stop before the word to avoid consuming actual code. Includes block keywords
+// plus Elixir guard/operator words (when/in/and/or/not) to keep the scanner conservative.
 const SIGIL_MODIFIER_RESERVED_WORDS = new Set([
   'end',
   'def',
@@ -42,7 +48,12 @@ const SIGIL_MODIFIER_RESERVED_WORDS = new Set([
   'else',
   'rescue',
   'catch',
-  'after'
+  'after',
+  'when',
+  'in',
+  'and',
+  'or',
+  'not'
 ]);
 
 // Skips letters that follow a sigil closing delimiter as sigil modifiers, but stops before
@@ -69,20 +80,59 @@ function skipSigilModifiers(source: string, pos: number): number {
 }
 
 // Returns matching close delimiter for sigils. Per Elixir spec, valid sigil delimiters
-// are paired ASCII brackets (defined in SIGIL_PAIRED_DELIMITERS) or single ASCII non-alphanumeric
-// chars: / | " ' . Unicode letters/symbols are NOT valid sigil delimiters; treating them as
-// such would consume arbitrary subsequent code as the sigil body.
+// are paired ASCII brackets (defined in SIGIL_PAIRED_DELIMITERS) or one of the whitelisted
+// single ASCII characters (defined in SIGIL_NONPAIRED_DELIMITERS). Other characters such as
+// _, $, @, ^, ~ are NOT valid sigil delimiters; treating them as such would consume
+// arbitrary subsequent code as the sigil body.
 function getSigilCloseDelimiter(open: string): string | null {
   if (open in SIGIL_PAIRED_DELIMITERS) {
     return SIGIL_PAIRED_DELIMITERS[open];
   }
-  // Reject closing brackets: only the matching opener (in SIGIL_PAIRED_DELIMITERS) is valid.
-  if (open === ')' || open === ']' || open === '}' || open === '>') {
-    return null;
-  }
-  // ASCII-only non-paired delimiters
-  if (open.length === 1 && open.charCodeAt(0) < 128 && /[^a-zA-Z0-9\s]/.test(open)) {
+  if (SIGIL_NONPAIRED_DELIMITERS.has(open)) {
     return open;
+  }
+  return null;
+}
+
+// Multi-character operator atoms in Elixir, in order of match preference (longer first).
+// Per Elixir docs, the following operators may be used as atoms with the colon prefix.
+// Two-char operators must be matched before single-char ones to avoid splitting (e.g.,
+// ":==" must match as :== not :=).
+const OPERATOR_ATOM_MULTI = ['==', '!=', '<=', '>=', '=~', '->', '<-', '<>'] as const;
+
+// Single-character operator atoms in Elixir.
+const OPERATOR_ATOM_SINGLE = new Set(['+', '-', '*', '/', '<', '>', '=', '!', '?', '~', '^', '&', '|']);
+
+// Returns an excluded region for an operator-style atom starting at pos (which must be ':'),
+// or null if no operator atom is present. Operator atoms are :== :!= :<= :>= :=~ :-> :<- :<>
+// and the single-char forms :+ :- :* :/ :< :> := :! :? :~ :^ :& :|. The same preceding-char
+// rule as letter atoms applies (must not follow an identifier or another colon to avoid
+// confusing keyword-list / type-spec syntax with an atom).
+export function matchOperatorAtom(source: string, pos: number): ExcludedRegion | null {
+  if (source[pos] !== ':') return null;
+  // Reject when colon follows an identifier-continuation char or another colon (keyword
+  // list / type spec / module attribute / etc.).
+  if (pos > 0) {
+    const prevChar = source[pos - 1];
+    if (/[a-zA-Z0-9_)\]}?!:]/.test(prevChar)) return null;
+    if (prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar)) return null;
+    if (pos - 2 >= 0) {
+      const highSurrogate = source.charCodeAt(pos - 2);
+      if (highSurrogate >= 0xd800 && highSurrogate <= 0xdbff) {
+        const pair = source.slice(pos - 2, pos);
+        if (/\p{L}/u.test(pair)) return null;
+      }
+    }
+  }
+  // Try multi-char operators first to avoid premature single-char match.
+  for (const op of OPERATOR_ATOM_MULTI) {
+    if (source.slice(pos + 1, pos + 1 + op.length) === op) {
+      return { start: pos, end: pos + 1 + op.length };
+    }
+  }
+  const next = source[pos + 1];
+  if (next !== undefined && OPERATOR_ATOM_SINGLE.has(next)) {
+    return { start: pos, end: pos + 2 };
   }
   return null;
 }

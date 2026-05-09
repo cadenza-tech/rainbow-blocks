@@ -136,9 +136,17 @@ export function skipNestedJuliaString(source: string, pos: number): number {
   return i;
 }
 
+// Returns true if the character could be the last char of a command macro prefix
+// (i.e., the backtick that follows it is part of a prefixed command macro call).
+// Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
+function isCommandMacroPrefixChar(c: string): boolean {
+  if (/[a-zA-Z0-9_]/.test(c)) return true;
+  return c.charCodeAt(0) > 127 && /\p{L}/u.test(c);
+}
+
 // Skips a backtick command string (for use inside interpolation/nested string scanning)
 export function skipBacktickString(source: string, pos: number): number {
-  const isPrefixed = pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1]);
+  const isPrefixed = pos > 0 && isCommandMacroPrefixChar(source[pos - 1]);
   // Check for triple backtick
   if (source.slice(pos, pos + 3) === '```') {
     let i = pos + 3;

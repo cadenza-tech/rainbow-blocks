@@ -301,8 +301,9 @@ export function matchPragmaDirective(source: string, pos: number): ExcludedRegio
   return { start: pos, end: lineEnd };
 }
 
-// Returns true when the `pragma directive arguments contain `protect begin` as
-// the first significant tokens (after whitespace), with optional trailing args.
+// Returns true when the `pragma directive arguments contain `protect begin` (or
+// `protect begin_protected`) as the first significant tokens (after whitespace),
+// with optional trailing args.
 function isPragmaProtectBegin(source: string, argStart: number, argEnd: number): boolean {
   let i = argStart;
   while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
@@ -310,9 +311,16 @@ function isPragmaProtectBegin(source: string, argStart: number, argEnd: number):
   i += 7;
   if (i >= argEnd || !(source[i] === ' ' || source[i] === '\t')) return false;
   while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
-  if (source.slice(i, i + 5) !== 'begin') return false;
-  i += 5;
-  // 'begin' must be followed by word boundary (space, tab, end of line/args, comma/semicolon/etc)
+  // Accept either `begin` or `begin_protected`. Try the longer form first so that
+  // `begin_protected` is not mistaken for `begin` followed by an identifier.
+  if (source.slice(i, i + 15) === 'begin_protected') {
+    i += 15;
+  } else if (source.slice(i, i + 5) === 'begin') {
+    i += 5;
+  } else {
+    return false;
+  }
+  // The matched word must be followed by a word boundary
   if (i < argEnd && /[a-zA-Z0-9_$]/.test(source[i])) return false;
   return true;
 }
@@ -339,7 +347,8 @@ function findPragmaProtectEnd(source: string, from: number): number {
   return -1;
 }
 
-// Returns true when the `pragma directive arguments are `protect end` (with optional whitespace and trailing args).
+// Returns true when the `pragma directive arguments are `protect end` (or
+// `protect end_protected`) with optional whitespace and trailing args.
 function isPragmaProtectEnd(source: string, argStart: number, argEnd: number): boolean {
   let i = argStart;
   while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
@@ -347,8 +356,15 @@ function isPragmaProtectEnd(source: string, argStart: number, argEnd: number): b
   i += 7;
   if (i >= argEnd || !(source[i] === ' ' || source[i] === '\t')) return false;
   while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
-  if (source.slice(i, i + 3) !== 'end') return false;
-  i += 3;
+  // Accept either `end` or `end_protected`. Try the longer form first so that
+  // `end_protected` is not mistaken for `end` followed by an identifier.
+  if (source.slice(i, i + 13) === 'end_protected') {
+    i += 13;
+  } else if (source.slice(i, i + 3) === 'end') {
+    i += 3;
+  } else {
+    return false;
+  }
   if (i < argEnd && /[a-zA-Z0-9_$]/.test(source[i])) return false;
   return true;
 }
@@ -364,15 +380,28 @@ export function matchMacroArgList(source: string, pos: number, parenStart: numbe
     const c = source[i];
     if (c === '"') {
       i++;
+      let bareNewline = false;
       while (i < source.length && source[i] !== '"') {
         if (source[i] === '\\' && i + 1 < source.length) {
           i += 2;
           continue;
         }
-        if (source[i] === '\n' || source[i] === '\r') break;
+        if (source[i] === '\n' || source[i] === '\r') {
+          bareNewline = true;
+          break;
+        }
         i++;
       }
-      if (i < source.length && source[i] === '"') i++;
+      if (i < source.length && source[i] === '"') {
+        i++;
+      } else if (bareNewline) {
+        // Unterminated string with bare newline: per Verilog semantics, a bare
+        // newline terminates the string. The macro argument list cannot validly
+        // continue past this point because the user's intent is unclear (and
+        // subsequent `"` chars would re-trigger string mode and swallow the
+        // closing `)`). End the macro region at the newline.
+        return { start: pos, end: i };
+      }
       continue;
     }
     if (c === '/' && i + 1 < source.length && source[i + 1] === '/') {
