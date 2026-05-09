@@ -5836,4 +5836,13 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: env var prefix with brace expansion value (var={a,b,c} if)', () => {
+    test('should detect if/fi after var={a,b,c} brace expansion assignment', () => {
+      // var={a,b,c} assigns brace expansion as value; if/fi must follow as command
+      const source = 'var={a,b,c} if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
