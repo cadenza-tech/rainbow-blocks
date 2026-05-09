@@ -28,6 +28,15 @@ const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
 };
 
 export class OctaveBlockParser extends MatlabBlockParser {
+  // Mirror of MatlabBlockParser.phantomSectionPositions for Octave's overridden matchBlocks.
+  // Populated by isValidBlockOpen below in lock-step with the parent's tracking, so that
+  // Octave's matchBlocks can apply the same phantom-end skip logic as MATLAB. The parent's
+  // phantomSectionPositions field is private so we cannot reuse it directly.
+  private octavePhantomSectionPositions: number[] = [];
+  // Octave classdef section keywords (matches MATLAB CLASSDEF_SECTION_KEYWORDS — kept
+  // local because the parent's static is private).
+  private static readonly OCTAVE_SECTION_KEYWORDS = new Set(['properties', 'methods', 'events', 'enumeration', 'arguments']);
+
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'function',
@@ -128,6 +137,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // Reject `do` immediately followed by `(` — `do(args)` is a function call, not a do/until block.
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
+      // Mirror MATLAB phantom-section tracking: when a section keyword (properties /
+      // methods / events / enumeration / arguments) at line-start is rejected because
+      // it is followed by `=` or compound assignment, the user likely wrote a stray
+      // `end` for it. Record the position so matchBlocks can skip one `end`.
+      if (
+        OctaveBlockParser.OCTAVE_SECTION_KEYWORDS.has(keyword) &&
+        this.isAtSectionKeywordLineStart(source, position) &&
+        !this.isInsideParensOrBrackets(source, position, excludedRegions)
+      ) {
+        this.octavePhantomSectionPositions.push(position);
+      }
       return false;
     }
     if (keyword === 'do') {
@@ -160,7 +180,53 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (keyword === 'arguments' && this.isArgumentsFunctionCall(source, position, excludedRegions)) {
       return false;
     }
-    return super.isValidBlockOpen(keyword, source, position, excludedRegions);
+    const result = super.isValidBlockOpen(keyword, source, position, excludedRegions);
+    // Mirror MATLAB phantom-section tracking for the operator/punctuation case: when a
+    // section keyword at line-start is followed by something other than newline / `(` /
+    // `;` / `,` / `:` / comment, the parent rejects it as a section opener and the user
+    // likely wrote a stray `end` for it. Replicate the parent's check here so Octave's
+    // matchBlocks can apply the phantom-end skip.
+    if (
+      !result &&
+      OctaveBlockParser.OCTAVE_SECTION_KEYWORDS.has(keyword) &&
+      this.isAtSectionKeywordLineStart(source, position) &&
+      !this.isInsideParensOrBrackets(source, position, excludedRegions) &&
+      this.isSectionKeywordRejectedByOperator(source, position, keyword, excludedRegions)
+    ) {
+      this.octavePhantomSectionPositions.push(position);
+    }
+    return result;
+  }
+
+  // Returns true when `position` lies at the start of its line (only whitespace before).
+  // Used by phantom section detection (mirrors MATLAB.isAtLineStartForSectionKeyword).
+  private isAtSectionKeywordLineStart(source: string, position: number): boolean {
+    const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
+    return !/\S/.test(source.slice(lineStart, position));
+  }
+
+  // Returns true when a line-start section keyword is followed by an operator /
+  // punctuation that the parent rejects as a section opener. Mirrors the conditions
+  // inside MatlabBlockParser.isValidBlockOpen lines 367-396.
+  private isSectionKeywordRejectedByOperator(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
+    let nextPos = position + keyword.length;
+    while (nextPos < source.length && (source[nextPos] === ' ' || source[nextPos] === '\t')) {
+      nextPos++;
+    }
+    if (nextPos >= source.length) return false;
+    const region = this.findExcludedRegionAt(nextPos, excludedRegions);
+    if (region) return false;
+    const nextChar = source[nextPos];
+    return (
+      nextChar !== '\n' &&
+      nextChar !== '\r' &&
+      nextChar !== '(' &&
+      nextChar !== '%' &&
+      nextChar !== ';' &&
+      nextChar !== ',' &&
+      nextChar !== ':' &&
+      !this.isCommentChar(nextChar)
+    );
   }
 
   // Returns true when `arguments(...)` looks like a function call rather than an
@@ -288,6 +354,8 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // Filter out middle keywords used as variable names (else = 5, case += 1, etc.)
   // and middle keywords inside parentheses/brackets/braces
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Reset phantom section positions for this parse (populated by isValidBlockOpen).
+    this.octavePhantomSectionPositions = [];
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((t) => {
       if (t.type !== 'block_middle') {
@@ -384,8 +452,22 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // Track stack depths at which an `arguments` opener was rejected so the matching
     // `end` (at the same depth) is skipped instead of closing an outer block.
     const pendingSkipDepths: number[] = [];
+    // Snapshot phantom section positions and process them in order. Each phantom
+    // represents a section keyword that was rejected at tokenize but where the user
+    // probably wrote a stray `end` to close it. We skip one `end` per phantom — but
+    // only when doing so doesn't leave a real opener unmatched (defensive: prefer
+    // pairing real openers with real closes).
+    const phantomPositions = [...this.octavePhantomSectionPositions];
+    let phantomCursor = 0;
+    // Pre-compute remaining block_close count from each token index forward.
+    const remainingCloses: number[] = new Array(tokens.length + 1);
+    remainingCloses[tokens.length] = 0;
+    for (let k = tokens.length - 1; k >= 0; k--) {
+      remainingCloses[k] = remainingCloses[k + 1] + (tokens[k].type === 'block_close' ? 1 : 0);
+    }
 
-    for (const token of tokens) {
+    for (let idx = 0; idx < tokens.length; idx++) {
+      const token = tokens[idx];
       switch (token.type) {
         case 'block_open':
           if (token.value.toLowerCase() === 'arguments') {
@@ -429,6 +511,21 @@ export class OctaveBlockParser extends MatlabBlockParser {
           if (pendingSkipDepths.length > 0 && pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length) {
             pendingSkipDepths.pop();
             break;
+          }
+          // Phantom section keyword skip (mirror of MatlabBlockParser.matchBlocks logic):
+          // when `properties = 5` (or `properties + 1`) was rejected at tokenize, the user
+          // likely wrote a stray `end`. If there's a phantom position between the most recent
+          // block_open's offset and this close's offset, AND there are enough remaining closes
+          // to still close every open block on the stack, skip this close as the phantom's
+          // matching `end`. Only applies to generic `end` (not Octave-specific typed closes
+          // like `endif`, `endfor` — those have a definite opener type).
+          if (token.value.toLowerCase() === 'end' && phantomCursor < phantomPositions.length && stack.length > 0) {
+            const topOffset = stack[stack.length - 1].token.startOffset;
+            const phantomOffset = phantomPositions[phantomCursor];
+            if (phantomOffset > topOffset && phantomOffset < token.startOffset && remainingCloses[idx + 1] >= stack.length) {
+              phantomCursor++;
+              break;
+            }
           }
           const closeValue = token.value.toLowerCase();
           let matchIndex = -1;
