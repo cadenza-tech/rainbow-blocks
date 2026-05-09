@@ -9,6 +9,32 @@ export interface BashValidationCallbacks {
   findExcludedRegionAt: (pos: number, regions: ExcludedRegion[]) => ExcludedRegion | null;
 }
 
+// Skips backward through one value character (or a balanced brace expansion {…}).
+// Returns the new scan position. The caller is responsible for advancing past
+// the value-char/brace boundary; this function only consumes one logical unit.
+// Returns the same position if no value char can be consumed at `scan - 1`.
+function skipValueCharBackward(source: string, scan: number): number {
+  if (scan <= 0) return scan;
+  const prev = source[scan - 1];
+  // Brace expansion {...}: skip to matching `{`
+  if (prev === '}') {
+    let depth = 1;
+    let p = scan - 2;
+    while (p >= 0 && depth > 0) {
+      if (source[p] === '}') depth++;
+      else if (source[p] === '{') depth--;
+      if (depth === 0) return p;
+      p--;
+    }
+    // Unmatched `}` -- stop here
+    return scan;
+  }
+  if (/[^\s;|&(){}`=]/.test(prev)) {
+    return scan - 1;
+  }
+  return scan;
+}
+
 // Skips whitespace and \<newline> line continuations backward from `pos`.
 // Returns the resulting position and whether any line continuation was crossed.
 function skipWhitespaceAndContinuationBackward(source: string, pos: number): { pos: number; crossedContinuation: boolean } {
@@ -354,9 +380,30 @@ export function isAtCommandPosition(
       }
     }
     let eqScan = i;
+    // If the char at `i` is itself a brace-expansion close `}`, jump past the whole {…} unit.
+    if (source[eqScan] === '}') {
+      let depth = 1;
+      let p = eqScan - 1;
+      while (p >= 0 && depth > 0) {
+        if (source[p] === '}') depth++;
+        else if (source[p] === '{') depth--;
+        if (depth === 0) {
+          eqScan = p;
+          break;
+        }
+        p--;
+      }
+    }
     if (source[eqScan] !== '=') {
-      while (eqScan > 0 && source[eqScan - 1] !== '=' && /[^\s;|&(){}`]/.test(source[eqScan - 1])) {
-        eqScan--;
+      // Skip backward through value chars (including balanced {…} brace expansions)
+      // until we hit `=` or a separator.
+      let guard = eqScan;
+      while (eqScan > 0 && source[eqScan - 1] !== '=') {
+        const next = skipValueCharBackward(source, eqScan);
+        if (next === eqScan) break;
+        eqScan = next;
+        if (eqScan === guard) break;
+        guard = eqScan;
       }
       eqScan = eqScan > 0 && source[eqScan - 1] === '=' ? eqScan - 1 : -1;
     }
@@ -367,8 +414,13 @@ export function isAtCommandPosition(
     }
     while (eqScan > 0) {
       let scan = eqScan - 1;
-      while (scan > 0 && source[scan - 1] !== '=' && /[^\s;|&(){}`]/.test(source[scan - 1])) {
-        scan--;
+      let guard = scan;
+      while (scan > 0 && source[scan - 1] !== '=') {
+        const next = skipValueCharBackward(source, scan);
+        if (next === scan) break;
+        scan = next;
+        if (scan === guard) break;
+        guard = scan;
       }
       if (scan > 0 && source[scan - 1] === '=') {
         eqScan = scan - 1;
