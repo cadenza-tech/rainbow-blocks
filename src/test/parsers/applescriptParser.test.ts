@@ -2815,5 +2815,35 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-09: multi-line record literal should suppress block_middle keywords', () => {
+    test('should not detect else inside multi-line record as block_middle', () => {
+      const source = 'if x > 0 then\n  set r to {\n    else: 5\n  }\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect else if inside multi-line record as block_middle', () => {
+      const source = 'if x > 0 then\n  set r to {\n    else if: 5\n  }\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect on error inside multi-line record as block_middle', () => {
+      const source = 'try\n  set r to {\n    on error: 5\n  }\n  beep\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect else inside multi-line record after preceding entry', () => {
+      const source = 'if x > 0 then\n  set r to {\n    a: 1,\n    else: 5\n  }\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   generateCommonTests(config);
 });
