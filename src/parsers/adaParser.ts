@@ -765,7 +765,12 @@ export class AdaBlockParser extends BaseBlockParser {
       }
 
       // 'and then' short-circuit: 'and' is not a keyword, so scan backward from 'then'
-      // skipping whitespace and excluded regions (comments between 'and' and 'then')
+      // skipping whitespace and excluded regions (comments between 'and' and 'then').
+      // Discard the 'then' token whenever the preceding word ends with 'and' — even
+      // when 'and' is preceded by a word character (e.g. `Test_and`, `1and`). These
+      // are invalid identifiers but the trailing 'then' would otherwise be tracked
+      // twice as an intermediate (once for the malformed `Test_and then` and once
+      // for the genuine if-`then` later on the same line).
       if (lowerValue === 'then') {
         let j = token.startOffset - 1;
         // Skip whitespace, newlines, and excluded regions backward
@@ -785,14 +790,11 @@ export class AdaBlockParser extends BaseBlockParser {
           }
           break;
         }
-        // Check if the word ending at j is 'and'
-        if (j >= 2 && source.slice(j - 2, j + 1).toLowerCase() === 'and') {
-          const beforeAnd = j - 3;
-          if (beforeAnd < 0 || !/[a-zA-Z0-9_]/.test(source[beforeAnd])) {
-            if (!this.isInExcludedRegion(j - 2, excludedRegions)) {
-              continue;
-            }
-          }
+        // Check if the word ending at j is 'and' (regardless of what precedes it,
+        // so malformed inputs like `Test_and then` are also collapsed to a single
+        // `then` intermediate).
+        if (j >= 2 && source.slice(j - 2, j + 1).toLowerCase() === 'and' && !this.isInExcludedRegion(j - 2, excludedRegions)) {
+          continue;
         }
       }
 
