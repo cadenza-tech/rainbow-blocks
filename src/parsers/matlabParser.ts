@@ -407,6 +407,13 @@ export class MatlabBlockParser extends BaseBlockParser {
         return false;
       }
     }
+    // Reject block opener used as a command-syntax argument (`clear if`, `clear for`,
+    // `disp while`, etc.). The leading identifier is a command and the keyword is a
+    // string argument, not a real block opener. Treating such keywords as block_open
+    // destroys outer block pairing.
+    if (this.isCommandSyntaxArgument(source, position, excludedRegions)) {
+      return false;
+    }
     // Reject any block opener inside parentheses or brackets
     if (this.isInsideParensOrBrackets(source, position, excludedRegions)) {
       return false;
