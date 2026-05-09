@@ -616,21 +616,54 @@ export class CrystalBlockParser extends BaseBlockParser {
   // as their first argument, so any block keyword in that slot is a property name and must
   // not be tokenized. Only triggers when the identifier follows `property end` style with
   // a `:`, `=`, `,`, or newline after the keyword to avoid breaking unrelated expressions.
+  // Skip spaces, tabs, and backslash line continuations (\<LF>, \<CR>, \<CRLF>) walking
+  // backwards from `i`. Returns the index of the first non-whitespace, non-continuation
+  // character, or -1 if the scan hits the start of the source.
+  private skipBackwardsWhitespaceAndContinuations(source: string, i: number): number {
+    let pos = i;
+    while (pos >= 0) {
+      if (source[pos] === ' ' || source[pos] === '\t') {
+        pos--;
+        continue;
+      }
+      // Detect backslash line continuation: `\<LF>`, `\<CR>`, or `\<CRLF>` immediately
+      // before the current position. The newline may be CRLF (2 chars) or single LF/CR.
+      // Walk back across the newline, then check for `\` before it.
+      let nlEnd = pos;
+      let nlStart = -1;
+      if (source[nlEnd] === '\n') {
+        if (nlEnd > 0 && source[nlEnd - 1] === '\r') {
+          nlStart = nlEnd - 1;
+        } else {
+          nlStart = nlEnd;
+        }
+      } else if (source[nlEnd] === '\r') {
+        nlStart = nlEnd;
+      }
+      if (nlStart >= 0 && nlStart > 0 && source[nlStart - 1] === '\\') {
+        pos = nlStart - 2;
+        continue;
+      }
+      break;
+    }
+    return pos;
+  }
+
   private isAfterPropertyMacro(source: string, position: number, endOffset: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    i = this.skipBackwardsWhitespaceAndContinuations(source, i);
     // Walk back across comma-separated identifier chains (e.g., `property foo, bar, end`).
     // For each preceding `, <identifier>` segment, skip the comma and the identifier so the
     // scan ultimately lands on the macro identifier itself.
     while (i >= 0 && source[i] === ',') {
       i--;
-      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+      i = this.skipBackwardsWhitespaceAndContinuations(source, i);
       if (i < 0) return false;
       // Allow trailing ! or ? on identifier names
       if (source[i] === '!' || source[i] === '?') i--;
       // Skip identifier characters
       while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
-      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+      i = this.skipBackwardsWhitespaceAndContinuations(source, i);
     }
     if (i < 0) return false;
     // Allow trailing ! or ? on the macro identifier (property!, getter?)
