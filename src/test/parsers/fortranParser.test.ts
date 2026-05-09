@@ -4982,6 +4982,23 @@ end select
     });
   });
 
+  suite('Regression: change team without parens is rejected', () => {
+    test('should not open team block when change team has no parens', () => {
+      // Fortran 2018: `change team (...)` is a block opener; bare `change team` without
+      // a parenthesized team-value is not a valid construct and must not pair with `end team`.
+      const source = 'change team\n  call sync_all\nend team';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still open team block when change team is followed by parens', () => {
+      const source = 'change team (t)\n  i = 1\nend team\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'team');
+    });
+  });
+
   suite('Regression: case default / rank default produce full token value', () => {
     test('should tokenize `case default` as a single 12-char token', () => {
       const source = `select case (x)
