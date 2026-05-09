@@ -598,8 +598,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   }
 
   // Checks if the keyword at [pos, endPos) is in a record-key position, e.g.
-  // `{else: 5}` or `{a: 1, else: 5}`. Such positions use the keyword as a
-  // property name in a record literal, not as a block keyword.
+  // `{else: 5}`, `{a: 1, else: 5}`, or a multi-line record:
+  //   {
+  //     end if: 5
+  //   }
+  // Such positions use the keyword as a property name in a record literal,
+  // not as a block keyword. Brace depth is tracked so that nested {} groups
+  // are skipped transparently and we only consider the most recent token at
+  // the keyword's own brace level.
   private isAtRecordKeyPosition(source: string, pos: number, endPos: number, excludedRegions: ExcludedRegion[]): boolean {
     // After the keyword, skip whitespace/¬continuations and require ':' (not '::').
     let after = endPos;
@@ -624,37 +630,49 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
     if (after >= source.length || source[after] !== ':') return false;
 
-    // Before the keyword, skip whitespace/¬continuations/excluded regions and
-    // require '{' or ',' as the immediately preceding non-whitespace token.
+    // Before the keyword, walk backward and find the most recent non-whitespace,
+    // non-newline, non-excluded character at the keyword's own brace level.
+    // Track {/} depth so that nested {} groups (e.g. {a: {x: 1}, else: 2}) are
+    // skipped transparently. Plain newlines (without ¬) are crossed because
+    // record literals may span multiple physical lines.
     let before = pos - 1;
+    let depth = 0;
     while (before >= 0) {
-      const ch = source[before];
-      if (ch === ' ' || ch === '\t') {
-        before--;
-        continue;
-      }
-      if (ch === '\n' || ch === '\r') {
-        // Allow continuation: scan back across newline if the preceding non-whitespace
-        // before the newline is U+00AC.
-        let probe = before;
-        if (source[probe] === '\n' && probe > 0 && source[probe - 1] === '\r') probe--;
-        probe--;
-        while (probe >= 0 && (source[probe] === ' ' || source[probe] === '\t')) probe--;
-        if (probe >= 0 && source[probe] === '¬') {
-          before = probe - 1;
-          continue;
-        }
-        return false;
-      }
       const region = this.findExcludedRegionAt(before, excludedRegions);
       if (region) {
         before = region.start - 1;
         continue;
       }
-      break;
+      const ch = source[before];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '¬') {
+        before--;
+        continue;
+      }
+      if (ch === '}') {
+        depth++;
+        before--;
+        continue;
+      }
+      if (ch === '{') {
+        if (depth === 0) {
+          // Found the enclosing brace at our level — keyword is a record key.
+          return true;
+        }
+        depth--;
+        before--;
+        continue;
+      }
+      if (depth > 0) {
+        // Inside a nested {} group; skip everything until we close it.
+        before--;
+        continue;
+      }
+      // depth === 0: this is the most recent token at the keyword's level.
+      // It must be a record-entry separator (',') for us to be in a record key
+      // position; any other character means we are not inside a record literal.
+      return ch === ',';
     }
-    if (before < 0) return false;
-    return source[before] === '{' || source[before] === ',';
+    return false;
   }
 
   // Checks whether the previous physical line ends with a `¬` continuation marker
