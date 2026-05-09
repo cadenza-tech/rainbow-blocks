@@ -72,6 +72,13 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
       continue;
     }
     if (ch === '\\' && i + 1 < source.length) {
+      // \\ is an escaped backslash: terminator gets a literal backslash, then continue parsing
+      if (source[i + 1] === '\\') {
+        terminator += '\\';
+        i += 2;
+        matched = true;
+        continue;
+      }
       const startWord = i + 1;
       let end = startWord;
       while (end < source.length && !/[\s'"\\]/.test(source[end])) end++;
