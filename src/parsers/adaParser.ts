@@ -872,10 +872,11 @@ export class AdaBlockParser extends BaseBlockParser {
               matchIndex = findLastOpenerByType(stack, endType, true);
             }
 
-            // If no compound match found, try simple end
-            if (matchIndex < 0 && stack.length > 0) {
-              matchIndex = stack.length - 1;
-            }
+            // No forced fallback to last opener: best-effort parsing prefers
+            // leaving compound ends unpaired (no color) over wrong color when
+            // no matching opener of the requested type exists. Per CLAUDE.md
+            // best-effort parsing principle #3: prefer no color over wrong
+            // color (anchor-set principle from VS Code Bracket Pair Colorization).
 
             if (matchIndex >= 0) {
               // Check if 'begin' is on the stack above the matched opener
