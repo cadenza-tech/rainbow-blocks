@@ -1751,5 +1751,19 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: phantom skip for arguments(obj) function call', () => {
+    test('should pair function with the OUTER end when arguments(obj); is rejected', () => {
+      // When `arguments(obj);` is rejected as an arguments-block opener (it is a
+      // function call, not a block), the stray `end` on the next line should be
+      // phantom-skipped so the outer function pairs with the OUTER end, not the
+      // inner one. Lines: 0 = function f(obj), 1 = arguments(obj);, 2 = inner end
+      // (phantom skip target), 3 = outer end.
+      const source = 'function f(obj)\n  arguments(obj);\n  end\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 3, 'function should pair with the LAST end');
+    });
+  });
+
   generateCommonTests(config);
 });
