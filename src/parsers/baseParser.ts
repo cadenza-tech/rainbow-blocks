@@ -283,8 +283,9 @@ export abstract class BaseBlockParser {
     return pos === 0 || source[pos - 1] === '\n' || source[pos - 1] === '\r';
   }
 
-  // Checks if a keyword match is adjacent to a non-ASCII Unicode letter
-  // JavaScript \b treats non-ASCII letters as non-word characters, causing false matches like `αend`
+  // Checks if a keyword match is adjacent to a non-ASCII Unicode identifier-continuation character
+  // JavaScript \b treats non-ASCII identifier characters as non-word characters, causing false matches like `αend`
+  // Recognizes Letter (L), Mark (M), Number (N), and Connector Punctuation (Pc) as identifier continuation
   // Handles surrogate pairs for characters outside the BMP (codepoints > U+FFFF)
   protected isAdjacentToUnicodeLetter(source: string, startOffset: number, keywordLength: number): boolean {
     if (startOffset > 0) {
@@ -293,8 +294,8 @@ export abstract class BaseBlockParser {
         // Handle surrogate pairs: low surrogate preceded by high surrogate
         if (startOffset >= 2 && before >= '\uDC00' && before <= '\uDFFF') {
           const cp = source.codePointAt(startOffset - 2);
-          if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) return true;
-        } else if (/\p{L}/u.test(before)) {
+          if (cp !== undefined && cp > 0xffff && /[\p{L}\p{M}\p{N}\p{Pc}]/u.test(String.fromCodePoint(cp))) return true;
+        } else if (/[\p{L}\p{M}\p{N}\p{Pc}]/u.test(before)) {
           return true;
         }
       }
@@ -306,8 +307,8 @@ export abstract class BaseBlockParser {
         // Handle surrogate pairs: high surrogate followed by low surrogate
         if (afterPos + 1 < source.length && after >= '\uD800' && after <= '\uDBFF') {
           const cp = source.codePointAt(afterPos);
-          if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) return true;
-        } else if (/\p{L}/u.test(after)) {
+          if (cp !== undefined && cp > 0xffff && /[\p{L}\p{M}\p{N}\p{Pc}]/u.test(String.fromCodePoint(cp))) return true;
+        } else if (/[\p{L}\p{M}\p{N}\p{Pc}]/u.test(after)) {
           return true;
         }
       }
