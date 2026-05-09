@@ -3009,5 +3009,68 @@ endmodule`;
     });
   });
 
+  suite('Regression: control keyword used as label name', () => {
+    test('should reject `wait` as block_open when used as label (wait : begin)', () => {
+      // Bug: `wait : begin` uses `wait` as a block label name, not as a control
+      // keyword. Without the fix, `wait` is tokenized as block_open and falsely
+      // pairs with the matching `end`.
+      const source = 'module m;\n  initial begin\n    wait : begin\n      x = 1;\n    end\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      // `wait` here is a label, not a block opener
+      const waitTokens = tokens.filter((t) => t.value === 'wait');
+      assert.strictEqual(waitTokens.length, 0, 'wait used as label should not be tokenized as block_open');
+      const pairs = parser.parse(source);
+      // No `wait` block in pairs
+      assert.strictEqual(pairs.find((p) => p.openKeyword.value === 'wait'), undefined);
+    });
+
+    test('should reject `if` as block_open when used as label (if : begin)', () => {
+      // Same bug: `if : begin` uses `if` as a label name.
+      const source = 'module m;\n  initial begin\n    if : begin\n      x = 1;\n    end\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const ifTokens = tokens.filter((t) => t.value === 'if');
+      assert.strictEqual(ifTokens.length, 0, 'if used as label should not be tokenized as block_open');
+    });
+
+    test('should reject `for` as block_open when used as label (for : begin)', () => {
+      const source = 'module m;\n  initial begin\n    for : begin\n      x = 1;\n    end\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const forTokens = tokens.filter((t) => t.value === 'for');
+      assert.strictEqual(forTokens.length, 0, 'for used as label should not be tokenized as block_open');
+    });
+
+    test('should still accept `wait fork;` valid construct', () => {
+      // Sanity check: existing valid constructs still work after the fix.
+      const source = 'module m;\n  initial begin\n    wait fork;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // wait fork; is rejected via isValidWaitOpen, so wait should not appear
+      assert.strictEqual(pairs.find((p) => p.openKeyword.value === 'wait'), undefined);
+    });
+
+    test('should still accept `if (cond) begin` valid construct', () => {
+      // Sanity check: `if (cond) begin ... end` is still valid block.
+      const source = 'module m;\n  initial begin\n    if (cond) begin\n      x = 1;\n    end\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if (cond) begin/end should still pair correctly');
+    });
+
+    test('should still accept `for (init; cond; incr) begin` valid construct', () => {
+      // Sanity check: for loop still works.
+      const source = 'module m;\n  initial begin\n    for (int i=0; i<10; i++) begin\n      x = i;\n    end\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'for loop should still pair correctly');
+    });
+
+    test('should still reject scope resolution `pkg::wait`', () => {
+      // Sanity check: pre-existing scope resolution rejection still works.
+      const source = 'module m;\n  initial begin\n    x = pkg::wait;\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const waitTokens = tokens.filter((t) => t.value === 'wait');
+      assert.strictEqual(waitTokens.length, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
