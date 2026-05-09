@@ -679,9 +679,13 @@ export class ErlangBlockParser extends BaseBlockParser {
   // In this case the keyword is a reserved-word reference, not a real block opener/closer.
   // Both conditions must hold:
   //   1. The keyword is immediately preceded by the body-introducing comma (only whitespace/comments between).
-  //   2. The keyword is immediately followed by ')' (only whitespace/comments between).
+  //   2. The keyword is followed by ')' (only whitespace/comments/stray braces between).
   // Without (1), a real block opener like `end` in `-define(M, fun(X) -> X end)` would be
   // misclassified as bare just because it precedes ')'.
+  // Stray '{'/'}' characters between the keyword and ')' are skipped as junk: they only
+  // appear in malformed input like `-define(M, end}).`, where the body is invalid Erlang
+  // anyway. Skipping them lets us still classify the keyword as bare and avoid pairing it
+  // with a later real block closer.
   private isBareKeywordInDefineBody(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     // Backward: nearest non-whitespace/comment char must be ',' (the -define body-introducing comma)
     let b = pos - 1;
@@ -701,7 +705,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (b < 0 || source[b] !== ',') {
       return false;
     }
-    // Forward: nearest non-whitespace/comment char must be ')' (the -define closing paren)
+    // Forward: nearest non-whitespace/comment/brace char must be ')' (the -define closing paren)
     let keywordEnd = pos;
     while (keywordEnd < source.length && /[a-zA-Z0-9_]/.test(source[keywordEnd])) {
       keywordEnd++;
@@ -716,6 +720,11 @@ export class ErlangBlockParser extends BaseBlockParser {
       const region = this.findExcludedRegionAt(i, excludedRegions);
       if (region) {
         i = region.end;
+        continue;
+      }
+      // Stray '{'/'}' from malformed bodies like `-define(M, end}).` are skipped as junk
+      if (ch === '{' || ch === '}') {
+        i++;
         continue;
       }
       return ch === ')';
