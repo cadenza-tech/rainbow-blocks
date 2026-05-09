@@ -3985,6 +3985,21 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: quoted heredoc identifier with non-ASCII characters', () => {
+    test('should match quoted heredoc terminator with Unicode identifier', () => {
+      const source = 'x = <<-"αβγ"\nif false\nend\nαβγ\nputs x';
+      const pairs = parser.parse(source);
+      // The if/end on lines 1-2 are inside the heredoc body and should be excluded
+      assertNoBlocks(pairs);
+    });
+
+    test('should match double-quoted heredoc with Unicode identifier and code after', () => {
+      const source = 'x = <<-"αβγ"\nhello\nαβγ\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: property with multiple comma-separated names', () => {
     test('should not detect end as block_close in property foo, end', () => {
       const source = 'class Foo\n  property foo, end\nend';
