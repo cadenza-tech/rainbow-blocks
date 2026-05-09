@@ -344,7 +344,7 @@ export function isAtCommandPosition(
   }
 
   // Environment variable prefix: VAR=value before a command keyword
-  // Handles: FOO=bar if, A=1 B=2 if, FOO="quoted" if, FOO= if
+  // Handles: FOO=bar if, A=1 B=2 if, FOO="quoted" if, FOO= if, A=B=C if
   // Requires whitespace between value and command keyword (e.g., `a=if` is `VAR=value`, not a command)
   if (i >= 0) {
     if (position > 0) {
@@ -360,11 +360,24 @@ export function isAtCommandPosition(
       }
       eqScan = eqScan > 0 && source[eqScan - 1] === '=' ? eqScan - 1 : -1;
     }
-    // Scan backward past consecutive '=' to find the first one (assignment operator)
-    if (eqScan >= 0 && source[eqScan] === '=') {
-      while (eqScan > 0 && source[eqScan - 1] === '=') {
-        eqScan--;
+    // Scan backward through value-then-= chains (e.g., A=B=C: walk past B and the second =)
+    // so eqScan ends up at the leftmost = of the chain (the actual assignment operator)
+    while (eqScan > 0 && source[eqScan - 1] === '=') {
+      eqScan--;
+    }
+    while (eqScan > 0) {
+      let scan = eqScan - 1;
+      while (scan > 0 && source[scan - 1] !== '=' && /[^\s;|&(){}`]/.test(source[scan - 1])) {
+        scan--;
       }
+      if (scan > 0 && source[scan - 1] === '=') {
+        eqScan = scan - 1;
+        while (eqScan > 0 && source[eqScan - 1] === '=') {
+          eqScan--;
+        }
+        continue;
+      }
+      break;
     }
     if (eqScan >= 0 && source[eqScan] === '=') {
       // Skip past += compound assignment operator
