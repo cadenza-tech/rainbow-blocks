@@ -3970,6 +3970,21 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: property macro with backslash line continuation', () => {
+    test('should not detect end as block_close when separated from property by line continuation', () => {
+      const source = 'class Foo\n  property \\\n    end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not detect end with CRLF line continuation', () => {
+      const source = 'class Foo\r\n  property \\\r\n    end : Int32 = 0\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: property with multiple comma-separated names', () => {
     test('should not detect end as block_close in property foo, end', () => {
       const source = 'class Foo\n  property foo, end\nend';
