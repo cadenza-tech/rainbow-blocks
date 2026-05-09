@@ -401,12 +401,14 @@ export class CobolBlockParser extends BaseBlockParser {
       });
     }
 
-    // Filter WHEN/ELSE used as data names (e.g., MOVE ELSE TO Y, ADD WHEN TO Y).
+    // Filter WHEN/ELSE used as data names (e.g., MOVE ELSE TO Y, ADD WHEN TO Y, COMPUTE Y = X + ELSE).
     return tokens.filter((token) => {
       if (token.type !== 'block_middle') return true;
       const lower = token.value.toLowerCase();
       if (lower !== 'when' && lower !== 'else') return true;
-      return !this.isPrecedingWordDataNameVerb(source, token.startOffset);
+      if (this.isPrecedingWordDataNameVerb(source, token.startOffset)) return false;
+      if (this.isInExpressionContext(source, token.startOffset)) return false;
+      return true;
     });
   }
 
@@ -424,6 +426,35 @@ export class CobolBlockParser extends BaseBlockParser {
     while (wordStart > 0 && /[a-zA-Z0-9_-]/.test(source[wordStart - 1])) wordStart--;
     const word = source.slice(wordStart, wordEnd).toUpperCase();
     return DATA_NAME_VERBS.has(word);
+  }
+
+  // Returns true when the keyword is preceded by an expression-context character
+  // (arithmetic operator, separator, or open parenthesis), indicating that the
+  // keyword is used as an operand/data name rather than a control-flow intermediate.
+  // Examples: `COMPUTE Y = X + ELSE`, `CALL "P" USING A, ELSE`, `(ELSE + 1)`.
+  private isInExpressionContext(source: string, position: number): boolean {
+    let i = position - 1;
+    // Skip whitespace including newlines (continuation across lines is permitted).
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) i--;
+    if (i < 0) return false;
+    const ch = source[i];
+    // Arithmetic operators: + - * / = < >
+    // Separators: , ;
+    // Parentheses: ( )
+    // Note: `**` is two `*` characters, so checking `*` covers it.
+    return (
+      ch === '+' ||
+      ch === '-' ||
+      ch === '*' ||
+      ch === '/' ||
+      ch === '=' ||
+      ch === '<' ||
+      ch === '>' ||
+      ch === ',' ||
+      ch === ';' ||
+      ch === '(' ||
+      ch === ')'
+    );
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
