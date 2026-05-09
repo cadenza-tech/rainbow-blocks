@@ -84,9 +84,9 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
       matched = true;
       continue;
     }
-    if (matched ? /[A-Za-z0-9_\-.+:%,=]/.test(ch) : /[A-Za-z_0-9.+:%,=]/.test(ch)) {
+    if (matched ? /[A-Za-z0-9_\-.+:%,=!*?]/.test(ch) : /[A-Za-z_0-9.+:%,=!*?]/.test(ch)) {
       const start = i;
-      while (i < source.length && /[A-Za-z0-9_\-.+:%,=]/.test(source[i])) i++;
+      while (i < source.length && /[A-Za-z0-9_\-.+:%,=!*?]/.test(source[i])) i++;
       terminator += source.slice(start, i);
       matched = true;
       continue;
