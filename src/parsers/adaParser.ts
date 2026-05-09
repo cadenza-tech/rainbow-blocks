@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import {
+  isAdaWhitespace,
   isAdaWordAt,
   isOrElseShortCircuit,
   matchAdaString,
@@ -700,14 +701,14 @@ export class AdaBlockParser extends BaseBlockParser {
         const orToken = filtered[filtered.length - 1];
         // In select blocks, 'or' is preceded by ';' (statement-level keyword, not short-circuit)
         let prevPos = orToken.startOffset - 1;
-        while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+        while (prevPos >= 0 && isAdaWhitespace(source[prevPos])) {
           prevPos--;
         }
         while (prevPos >= 0 && this.isInExcludedRegion(prevPos, excludedRegions)) {
           const region = this.findExcludedRegionAt(prevPos, excludedRegions);
           if (region) {
             prevPos = region.start - 1;
-            while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+            while (prevPos >= 0 && isAdaWhitespace(source[prevPos])) {
               prevPos--;
             }
           } else {
@@ -738,14 +739,14 @@ export class AdaBlockParser extends BaseBlockParser {
         const nextIsElse = nextToken !== undefined && nextToken.value.toLowerCase() === 'else';
         if (!nextIsElse) {
           let prevPos = token.startOffset - 1;
-          while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+          while (prevPos >= 0 && isAdaWhitespace(source[prevPos])) {
             prevPos--;
           }
           while (prevPos >= 0 && this.isInExcludedRegion(prevPos, excludedRegions)) {
             const region = this.findExcludedRegionAt(prevPos, excludedRegions);
             if (region) {
               prevPos = region.start - 1;
-              while (prevPos >= 0 && (source[prevPos] === ' ' || source[prevPos] === '\t' || source[prevPos] === '\n' || source[prevPos] === '\r')) {
+              while (prevPos >= 0 && isAdaWhitespace(source[prevPos])) {
                 prevPos--;
               }
             } else {
@@ -778,7 +779,7 @@ export class AdaBlockParser extends BaseBlockParser {
             }
             continue;
           }
-          if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+          if (isAdaWhitespace(source[j])) {
             j--;
             continue;
           }

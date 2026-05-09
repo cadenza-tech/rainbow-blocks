@@ -2,6 +2,20 @@
 
 import type { ExcludedRegion } from '../types';
 
+// Whitespace characters recognized by the Ada parser. Covers Ada LRM 2.1
+// format_effector (HT, VT, FF, CR, LF, NEL) and the Unicode Zs category
+// (NBSP, U+1680, U+2000-200A, U+202F, U+205F, U+3000), plus Unicode line
+// and paragraph separators (LS U+2028, PS U+2029). Kept in sync with the
+// separator class in COMPOUND_END_PATTERN (adaParser.ts).
+export function isAdaWhitespace(ch: string): boolean {
+  if (ch === ' ' || ch === '\t' || ch === '\v' || ch === '\f' || ch === '\r' || ch === '\n') return true;
+  const code = ch.charCodeAt(0);
+  if (code === 0x0085 || code === 0x00a0 || code === 0x1680) return true;
+  if (code >= 0x2000 && code <= 0x200a) return true;
+  if (code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x3000) return true;
+  return false;
+}
+
 // Matches an Ada double-quoted string with "" escape sequences
 // Ada strings cannot span multiple lines
 export function matchAdaString(source: string, pos: number): ExcludedRegion {
@@ -73,7 +87,7 @@ export function isOrElseShortCircuit(source: string, orEnd: number, elseStart: n
   for (let i = orEnd; i < elseStart; i++) {
     if (isInExcluded(i)) continue;
     const ch = source[i];
-    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
+    if (isAdaWhitespace(ch)) continue;
     // Ada comment starts with '--', skip to end of line
     if (ch === '-' && i + 1 < source.length && source[i + 1] === '-') {
       while (i < elseStart && source[i] !== '\n' && source[i] !== '\r') i++;
@@ -120,7 +134,7 @@ export function scanForwardToIs(
 export function skipAdaWhitespaceAndComments(source: string, pos: number): number {
   let k = pos;
   while (k < source.length) {
-    if (source[k] === ' ' || source[k] === '\t' || source[k] === '\r' || source[k] === '\n') {
+    if (isAdaWhitespace(source[k])) {
       k++;
       continue;
     }
