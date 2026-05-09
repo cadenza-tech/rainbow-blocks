@@ -1339,6 +1339,33 @@ end`;
     });
   });
 
+  suite('Regression: trailing-dot heuristic must reject second dot when number already has one', () => {
+    test('should treat 3.14.end as field access (3.14 already has a decimal point)', () => {
+      // Bug: the walk-back heuristic stopped at `.`, so for `3.14.end` it only
+      // saw `14` (digit-only) and accepted it as a numeric prefix. But `3.14.`
+      // has TWO decimal points, which is invalid Lua. The trailing `.` is
+      // field access, so `end` after it is not a real keyword.
+      // Fix: extend the walk through `.` so we see the full numeric context
+      // (`3.14`); the validation regex then rejects it for having an embedded `.`.
+      const pairs = parser.parse('function f()\n  return 3.14.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat 0.5.end as field access (already has decimal point)', () => {
+      const pairs = parser.parse('function f()\n  return 0.5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat .5.end as field access (already has decimal point)', () => {
+      // `.5` is a valid Lua decimal (= 0.5), but `.5.` adds a second dot.
+      const pairs = parser.parse('function f()\n  return x = .5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
     test('should pair standalone do/end and outer function/end when goto for precedes do', () => {
       // Bug: outer loop-keyword scan in isDoPartOfLoop did not check isAfterGoto.
