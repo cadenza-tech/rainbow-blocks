@@ -7,6 +7,7 @@ import {
   matchAtomLiteral,
   matchElixirCharlist,
   matchElixirString,
+  matchOperatorAtom,
   matchSigil,
   matchTripleQuotedString,
   skipNestedSigil,
@@ -14,20 +15,10 @@ import {
   skipNestedTripleQuotedString
 } from './elixirHelpers';
 
-// Definition keywords that should not be treated as block opens after '..' range operator
-const DEFINITION_KEYWORDS = new Set([
-  'def',
-  'defp',
-  'defmodule',
-  'defmacro',
-  'defmacrop',
-  'defguard',
-  'defguardp',
-  'defprotocol',
-  'defimpl',
-  'fn',
-  'quote'
-]);
+// Definition keywords that should not be treated as block opens after '..' range operator.
+// Note: fn and quote are excluded because they are value-producing expression keywords
+// (e.g., 1..fn -> 1 end and 1..quote do :a end remain valid block expressions).
+const DEFINITION_KEYWORDS = new Set(['def', 'defp', 'defmodule', 'defmacro', 'defmacrop', 'defguard', 'defguardp', 'defprotocol', 'defimpl']);
 
 export class ElixirBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -104,9 +95,16 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
     }
 
-    // Atom literal
+    // Atom literal (letter/underscore/quote-prefixed)
     if (char === ':' && isAtomStart(source, pos)) {
       return matchAtomLiteral(source, pos, skipInterpolationBound);
+    }
+
+    // Operator atom (e.g., :+, :-, :==, :->) — must be tried after the letter-atom check
+    // so that :foo isn't shadowed.
+    if (char === ':') {
+      const opAtom = matchOperatorAtom(source, pos);
+      if (opAtom) return opAtom;
     }
 
     return null;
@@ -497,19 +495,21 @@ export class ElixirBlockParser extends BaseBlockParser {
 
       const char = source[i];
 
-      // Track parentheses depth
+      // Track parentheses depth. Clamp depths at 0 on closers so unbalanced source
+      // (e.g., a stray `)` from a typo) does not push depth negative and break the
+      // depth==0 checks that guard "do" detection.
       if (char === '(') {
         parenDepth++;
       } else if (char === ')') {
-        parenDepth--;
+        if (parenDepth > 0) parenDepth--;
       } else if (char === '[') {
         bracketDepth++;
       } else if (char === ']') {
-        bracketDepth--;
+        if (bracketDepth > 0) bracketDepth--;
       } else if (char === '{') {
         braceDepth++;
       } else if (char === '}') {
-        braceDepth--;
+        if (braceDepth > 0) braceDepth--;
       }
 
       // Count newlines outside all brackets; stop after 5 lines
@@ -671,14 +671,16 @@ export class ElixirBlockParser extends BaseBlockParser {
 
   // Checks if the parentheses starting at pos contain a comma at depth 0
   // Used to distinguish function call form if(cond, do: val) from block form if(true).
-  // Tracks (), {}, and [] depths independently so commas inside map/list/tuple
-  // literals inside the condition (e.g. if(%{a: 1, b: 2}) do) are not mistaken
-  // for argument separators. Skips excluded regions (strings, comments, sigils).
+  // Tracks (), {}, [] depths independently so commas inside map/list/tuple literals
+  // inside the condition (e.g. if(%{a: 1, b: 2}) do) are not mistaken for argument
+  // separators. Tracks fn-end nesting so commas inside fn parameter lists (e.g.
+  // if(fn x, y -> ... end) do) are not counted either. Skips excluded regions.
   private hasCommaInParens(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     if (pos >= source.length || source[pos] !== '(') return false;
     let parenDepth = 1;
     let braceDepth = 0;
     let bracketDepth = 0;
+    let fnDepth = 0;
     let i = pos + 1;
     while (i < source.length && parenDepth > 0) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -687,13 +689,47 @@ export class ElixirBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[i];
+      // Track fn-end nesting so commas inside fn parameter lists don't count.
+      // fn must be a standalone keyword: not preceded by identifier chars, ., @, or
+      // single &, and not followed by identifier-continuation chars or '('.
+      if (
+        source.slice(i, i + 2) === 'fn' &&
+        (i === 0 ||
+          (!/[a-zA-Z0-9_]/.test(source[i - 1]) &&
+            source[i - 1] !== '.' &&
+            source[i - 1] !== '@' &&
+            !(source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
+        (i + 2 >= source.length || (!/[a-zA-Z0-9_:?!]/.test(source[i + 2]) && source[i + 2] !== '(')) &&
+        !this.isAdjacentToUnicodeLetter(source, i, 2)
+      ) {
+        fnDepth++;
+        i += 2;
+        continue;
+      }
+      // 'end' closes a tracked fn nest; only consume when actually closing one.
+      if (fnDepth > 0 && source.slice(i, i + 3) === 'end') {
+        const beforeEnd = i > 0 ? source[i - 1] : ' ';
+        const afterEnd = source[i + 3];
+        if (
+          !/[a-zA-Z0-9_]/.test(beforeEnd) &&
+          beforeEnd !== '.' &&
+          beforeEnd !== '@' &&
+          !(beforeEnd === '&' && (i < 2 || source[i - 2] !== '&')) &&
+          (afterEnd === undefined || !/[a-zA-Z0-9_:?!]/.test(afterEnd)) &&
+          !this.isAdjacentToUnicodeLetter(source, i, 3)
+        ) {
+          fnDepth--;
+          i += 3;
+          continue;
+        }
+      }
       if (ch === '(') parenDepth++;
       else if (ch === ')') parenDepth--;
       else if (ch === '{') braceDepth++;
       else if (ch === '}') braceDepth--;
       else if (ch === '[') bracketDepth++;
       else if (ch === ']') bracketDepth--;
-      else if (parenDepth === 1 && braceDepth === 0 && bracketDepth === 0 && ch === ',') return true;
+      else if (parenDepth === 1 && braceDepth === 0 && bracketDepth === 0 && fnDepth === 0 && ch === ',') return true;
       i++;
     }
     return false;
@@ -846,14 +882,20 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
       if (source[i] === '\n' || source[i] === '\r') break;
 
-      // Track bracket depth
+      // Track bracket depth. Clamp depths at 0 on closers so unbalanced source
+      // (or scans starting inside an existing bracket pair) does not push depth
+      // negative and break the depth==0 checks that gate "do" detection.
       const ch = source[i];
       if (ch === '(') parenDepth++;
-      else if (ch === ')') parenDepth--;
-      else if (ch === '[') bracketDepth++;
-      else if (ch === ']') bracketDepth--;
-      else if (ch === '{') braceDepth++;
-      else if (ch === '}') braceDepth--;
+      else if (ch === ')') {
+        if (parenDepth > 0) parenDepth--;
+      } else if (ch === '[') bracketDepth++;
+      else if (ch === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+      } else if (ch === '{') braceDepth++;
+      else if (ch === '}') {
+        if (braceDepth > 0) braceDepth--;
+      }
 
       // Only look for "do" and inner blocks outside all brackets
       if (parenDepth !== 0 || bracketDepth !== 0 || braceDepth !== 0) {

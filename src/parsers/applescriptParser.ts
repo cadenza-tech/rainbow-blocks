@@ -38,6 +38,12 @@ const COMPOUND_KEYWORDS = [
   'end if'
 ];
 
+// Whitespace characters allowed as line-leading indentation. Includes ASCII space/tab
+// and common Unicode whitespace (NBSP U+00A0, ZWSP U+200B, EN/EM/HAIR spaces U+2000-U+200A,
+// LSEP/PSEP U+2028/U+2029, NNBSP U+202F, MMSP U+205F, IDEO SPACE U+3000) so that
+// AppleScript files indented with non-ASCII whitespace are parsed correctly.
+const LINE_LEADING_WHITESPACE_PATTERN = /^[ \t\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]*$/;
+
 export class ApplescriptBlockParser extends BaseBlockParser {
   // Source captured during tokenize for use in matchBlocks (handler-name lookup).
   private _currentSource = '';
@@ -380,10 +386,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       const type = this.getTokenType(keyword);
 
-      // Reject compound block openers followed by `(` (with optional whitespace) — these
-      // are function call forms (e.g., `with timeout(5)`, `with timeout (5)`) rather than
-      // block openers.
-      if (type === 'block_open') {
+      // Reject compound block openers/middles followed by `(` (with optional whitespace) — these
+      // are function call forms (e.g., `with timeout(5)`, `with timeout (5)`, `on error()`)
+      // rather than block keywords.
+      if (type === 'block_open' || type === 'block_middle') {
         let parenScan = flexMatch;
         while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
         if (parenScan < source.length && source[parenScan] === '(') {
@@ -392,10 +398,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
 
       // Reject compound block closers not at physical line start (covers mid-line
-      // occurrences of `end tell`, `end if`, etc. inside expressions). Continuation
-      // lines from a previous physical line are still allowed.
+      // occurrences of `end tell`, `end if`, etc. inside expressions). Also reject
+      // compound closers that appear on a continuation line of a previous statement
+      // (e.g. `set x to 5 ¬\n  end tell` — the trailing `end tell` is part of the
+      // expression, not a block close).
       if (type === 'block_close') {
         if (!this.isAtPhysicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: flexMatch };
+        }
+        if (this.isOnContinuationLine(source, i, excludedRegions)) {
           return { nextPos: flexMatch };
         }
       }
@@ -407,6 +418,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       // Check if compound middle keyword is used as a variable name
       if (type === 'block_middle' && isKeywordAsVariableName(source, i, source.slice(i, flexMatch), excludedRegions, this.helperCallbacks)) {
+        return { nextPos: flexMatch };
+      }
+
+      // Reject compound block_middle in record key position (e.g., `{else if: 5}`)
+      if (type === 'block_middle' && this.isAtRecordKeyPosition(source, i, flexMatch, excludedRegions)) {
         return { nextPos: flexMatch };
       }
 
@@ -543,10 +559,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return { nextPos: endPos };
       }
 
-      // Bare 'end' is only a block close at physical line start (allowing
-      // continuation from a previous line via ¬)
+      // Bare 'end' is only a block close at physical line start. Also reject when
+      // the previous physical line ends with `¬` (continuation), e.g.
+      // `set x to 5 ¬\n  end` — the trailing `end` is part of the expression,
+      // not a block close.
       if (type === 'block_close' && keyword === 'end') {
         if (!this.isAtPhysicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: endPos };
+        }
+        if (this.isOnContinuationLine(source, i, excludedRegions)) {
           return { nextPos: endPos };
         }
       }
@@ -561,6 +582,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return { nextPos: endPos };
       }
 
+      // Reject single block_middle in record key position (e.g., `{else: 5}`)
+      if (type === 'block_middle' && this.isAtRecordKeyPosition(source, i, endPos, excludedRegions)) {
+        return { nextPos: endPos };
+      }
+
       const { line, column } = this.getLineAndColumn(i, newlinePositions);
       return {
         nextPos: endPos,
@@ -569,6 +595,97 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     return null;
+  }
+
+  // Checks if the keyword at [pos, endPos) is in a record-key position, e.g.
+  // `{else: 5}` or `{a: 1, else: 5}`. Such positions use the keyword as a
+  // property name in a record literal, not as a block keyword.
+  private isAtRecordKeyPosition(source: string, pos: number, endPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    // After the keyword, skip whitespace/¬continuations and require ':' (not '::').
+    let after = endPos;
+    while (after < source.length) {
+      const ch = source[after];
+      if (ch === ' ' || ch === '\t') {
+        after++;
+        continue;
+      }
+      if (ch === '¬') {
+        after++;
+        if (after < source.length && source[after] === '\r') after++;
+        if (after < source.length && source[after] === '\n') after++;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(after, excludedRegions);
+      if (region) {
+        after = region.end;
+        continue;
+      }
+      break;
+    }
+    if (after >= source.length || source[after] !== ':') return false;
+
+    // Before the keyword, skip whitespace/¬continuations/excluded regions and
+    // require '{' or ',' as the immediately preceding non-whitespace token.
+    let before = pos - 1;
+    while (before >= 0) {
+      const ch = source[before];
+      if (ch === ' ' || ch === '\t') {
+        before--;
+        continue;
+      }
+      if (ch === '\n' || ch === '\r') {
+        // Allow continuation: scan back across newline if the preceding non-whitespace
+        // before the newline is U+00AC.
+        let probe = before;
+        if (source[probe] === '\n' && probe > 0 && source[probe - 1] === '\r') probe--;
+        probe--;
+        while (probe >= 0 && (source[probe] === ' ' || source[probe] === '\t')) probe--;
+        if (probe >= 0 && source[probe] === '¬') {
+          before = probe - 1;
+          continue;
+        }
+        return false;
+      }
+      const region = this.findExcludedRegionAt(before, excludedRegions);
+      if (region) {
+        before = region.start - 1;
+        continue;
+      }
+      break;
+    }
+    if (before < 0) return false;
+    return source[before] === '{' || source[before] === ',';
+  }
+
+  // Checks whether the previous physical line ends with a `¬` continuation marker
+  // (i.e. the keyword at `pos` lives on a continuation of the previous statement).
+  // Used to suppress close keywords like `end tell` that appear at the start of a
+  // physical line but are actually mid-statement (e.g. `set x to 5 ¬\n  end tell`).
+  private isOnContinuationLine(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    if (lineStart === 0) return false;
+    let prevEnd = lineStart - 1;
+    if (prevEnd >= 0 && source[prevEnd] === '\n') prevEnd--;
+    if (prevEnd >= 0 && source[prevEnd] === '\r') prevEnd--;
+    while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+      prevEnd--;
+    }
+    // Skip excluded regions backward (e.g., single-line comments like "-- comment")
+    while (prevEnd >= 0) {
+      const region = this.findExcludedRegionAt(prevEnd, excludedRegions);
+      if (region) {
+        prevEnd = region.start - 1;
+        while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+          prevEnd--;
+        }
+        continue;
+      }
+      break;
+    }
+    return prevEnd >= 0 && source[prevEnd] === '¬' && !this.isInExcludedRegion(prevEnd, excludedRegions);
   }
 
   // Checks if a keyword is at the start of a physical line (only whitespace
@@ -588,7 +705,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const relStart = overlapStart - lineStart;
       beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
     }
-    return /^[ \t]*$/.test(beforeText);
+    return LINE_LEADING_WHITESPACE_PATTERN.test(beforeText);
   }
 
   // Checks if a keyword is at the start of a logical line (allowing block comments before)
@@ -730,7 +847,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const relStart = overlapStart - lineStart;
       beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
     }
-    return /^[ \t]*$/.test(beforeText);
+    return LINE_LEADING_WHITESPACE_PATTERN.test(beforeText);
   }
 
   // Matches blocks with specific pairing for compound end keywords

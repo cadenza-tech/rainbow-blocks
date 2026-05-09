@@ -3,7 +3,7 @@
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import type { CobolHelperCallbacks } from './cobolHelpers';
-import { isInPseudoTextContext, matchExecBlock, matchPseudoText } from './cobolHelpers';
+import { isInPseudoTextContext, matchExecBlock, matchPseudoText, skipBackwardWhitespaceAndComments } from './cobolHelpers';
 import { findLastOpenerByType } from './parserUtils';
 
 // COBOL verbs that take data-name operands. When a reserved word like WHEN/ELSE
@@ -414,12 +414,17 @@ export class CobolBlockParser extends BaseBlockParser {
 
   // Returns true when the immediately preceding word on the same line is a COBOL verb
   // that takes data names as operands (so the keyword is being used as an identifier,
-  // not as a control-flow intermediate).
+  // not as a control-flow intermediate). Skips intervening *> inline comments,
+  // fixed-format column-7 comment lines, and >> compiler directive lines so multi-line
+  // statements like
+  //   MOVE
+  //   *> comment
+  //   ELSE TO Y
+  // are recognized as data-name verb contexts. String literals are not skipped, since a
+  // string source operand consumes the data-name slot (e.g., DISPLAY "yes"\nELSE leaves
+  // ELSE as an IF intermediate, not a data name).
   private isPrecedingWordDataNameVerb(source: string, position: number): boolean {
-    let i = position - 1;
-    // Skip whitespace including newlines so multi-line statements (e.g., `MOVE\n  ELSE TO X`)
-    // are recognized as data-name verb contexts.
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) i--;
+    const i = skipBackwardWhitespaceAndComments(source, position - 1, this.helperCallbacks);
     if (i < 0) return false;
     const wordEnd = i + 1;
     let wordStart = i;

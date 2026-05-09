@@ -200,12 +200,18 @@ export class AdaBlockParser extends BaseBlockParser {
           // Reject `:= do` (no expression between assignment and do) and `do;`
           // (no extended-return body) — both are malformed. Skip excluded regions
           // (comments / strings) when scanning backward so a comment ending in `:=`
-          // is not confused with a real assignment operator.
+          // is not confused with a real assignment operator. Track whether the
+          // backward scan crossed any excluded region (string/character literal)
+          // so that `return X : T := "expr" do` is not misclassified as `:= do`:
+          // the literal between := and do is a real expression and must not be
+          // ignored.
           let pb = i - 1;
+          let crossedExcludedRegion = false;
           while (pb >= 0) {
             if (this.isInExcludedRegion(pb, excludedRegions)) {
               const region = this.findExcludedRegionAt(pb, excludedRegions);
               if (region) {
+                crossedExcludedRegion = true;
                 pb = region.start - 1;
                 continue;
               }
@@ -218,6 +224,7 @@ export class AdaBlockParser extends BaseBlockParser {
             break;
           }
           if (
+            !crossedExcludedRegion &&
             pb >= 1 &&
             source[pb - 1] === ':' &&
             source[pb] === '=' &&

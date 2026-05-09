@@ -424,6 +424,12 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (this.isAfterDefKeyword(source, token.startOffset)) {
         return false;
       }
+      // Filter out keywords used as property/getter/setter macro arguments
+      // (e.g., `property end : Int32 = 0`). These macros take a name argument,
+      // so any block keyword in the name slot is a property name, not a block.
+      if (this.isAfterPropertyMacro(source, token.startOffset, token.endOffset)) {
+        return false;
+      }
       // Filter out tokens immediately followed by colon (named tuple key)
       if (source[token.endOffset] === ':') {
         return false;
@@ -602,6 +608,38 @@ export class CrystalBlockParser extends BaseBlockParser {
       return defStart === 0 || !/[a-zA-Z0-9_]/.test(source[defStart - 1]);
     }
     return false;
+  }
+
+  // Returns true when the token at `position` immediately follows the property-declaration
+  // macro identifiers (`property`, `getter`, `setter`, and bang/question variants) with
+  // at most spaces/tabs between. These macros take a name (and optional `: Type = default`)
+  // as their first argument, so any block keyword in that slot is a property name and must
+  // not be tokenized. Only triggers when the identifier follows `property end` style with
+  // a `:`, `=`, `,`, or newline after the keyword to avoid breaking unrelated expressions.
+  private isAfterPropertyMacro(source: string, position: number, endOffset: number): boolean {
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0) return false;
+    // Allow trailing ! or ? on the macro identifier (property!, getter?)
+    if (source[i] === '!' || source[i] === '?') i--;
+    // Walk back to start of identifier
+    const identEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const identStart = i + 1;
+    const ident = source.slice(identStart, identEnd);
+    if (ident !== 'property' && ident !== 'getter' && ident !== 'setter') return false;
+    // Macro identifier must be at start of statement: preceded by line start, semicolon,
+    // or whitespace following one of those. Reject method calls like `obj.property`.
+    if (identStart > 0) {
+      const prevChar = source[identStart - 1];
+      if (prevChar === '.' || prevChar === ':' || prevChar === '@' || prevChar === '$') return false;
+    }
+    // Confirm this is a declaration form: name should be followed by `:`, `=`, `,`, or end of line.
+    let j = endOffset;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length) return true;
+    const next = source[j];
+    return next === ':' || next === '=' || next === ',' || next === '\n' || next === '\r';
   }
 
   // Validates block open keywords, excluding postfix conditionals and loop do

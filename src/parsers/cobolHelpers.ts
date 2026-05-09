@@ -35,7 +35,7 @@ function isOnExcludedLine(source: string, pos: number, callbacks: CobolHelperCal
 // and *> inline comments so the backward scan lands on real statement content.
 // Used by pseudo-text context detection where COPY REPLACING ... ==X== may have
 // intervening comments or directives.
-function skipBackwardWhitespaceAndComments(source: string, startPos: number, callbacks: CobolHelperCallbacks): number {
+export function skipBackwardWhitespaceAndComments(source: string, startPos: number, callbacks: CobolHelperCallbacks): number {
   let j = startPos;
   while (j >= 0) {
     while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {

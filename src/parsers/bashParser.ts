@@ -366,10 +366,25 @@ export class BashBlockParser extends BaseBlockParser {
     return region !== null && region.start === afterPos;
   }
 
-  // Checks if keyword is part of a hyphenated command name (done-handler, fi-nalize)
+  // Checks if keyword is part of a fused command name (done-handler, fi.suffix, done#tag, fi:, fi/path, etc.)
+  // Real bash treats `done` and `#tag` as a single word `done#tag` because `#` only starts a comment
+  // when preceded by whitespace or a command separator. Similarly for other non-word but non-shell-meta
+  // characters like `.`, `:`, `~`, `,`, `@`, `%`, `^`, `!`, `/`. Excludes characters that are
+  // shell metacharacters or already handled (=, [, +) or word-boundary chars (whitespace, ;, |, &, etc).
   private isFollowedByHyphen(source: string, position: number, keyword: string): boolean {
     const afterPos = position + keyword.length;
-    return afterPos < source.length && source[afterPos] === '-';
+    if (afterPos >= source.length) return false;
+    const ch = source[afterPos];
+    // Hyphen (existing case)
+    if (ch === '-') return true;
+    // Other non-word, non-shell-meta chars that fuse with the preceding word in bash
+    // Exclude: shell metacharacters (\s ; | & ( ) { } < > $ ` " ' \), word-boundary handled (=, [, +)
+    // and characters already covered by isFollowedByEquals
+    // The set: # . : ~ , @ % ^ ! /
+    if (ch === '#' || ch === '.' || ch === ':' || ch === '~' || ch === ',' || ch === '@' || ch === '%' || ch === '^' || ch === '!' || ch === '/') {
+      return true;
+    }
+    return false;
   }
 
   // Checks if [[ at given position is at command position (not an argument like echo [[)
@@ -496,6 +511,11 @@ export class BashBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Skip { } inside [[ ]] conditional expressions; they are string operands, not block tokens
+      if (this.isInsideDoubleBracket(source, i, excludedRegions)) {
+        continue;
+      }
+
       // Command grouping '{' must be followed by whitespace, newline, or '(' (subshell starter)
       // Bash accepts `{(echo);}` without whitespace because the lexer can disambiguate.
       if (char === '{') {
@@ -505,35 +525,49 @@ export class BashBlockParser extends BaseBlockParser {
         }
         if (!this.isAtCommandPosition(source, i, excludedRegions)) {
           // Allow { in function definitions: "function name {" or "name() {"
-          let j = i - 1;
-          while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+          // Also handle "coproc {" (anonymous coproc) and "coproc NAME {" (named coproc)
+          // Skip whitespace and \<newline> line continuations between { and the preceding token
+          let j = skipWhitespaceAndContinuationBackwardLocal(source, i - 1);
           let isFuncDef = false;
           if (j >= 0 && source[j] === ')') {
             // name() { ... }
             isFuncDef = true;
           } else if (j >= 0 && /[^\s;|&(){}<>$`"'\\#]/.test(source[j])) {
-            // Check for "function name {" (Bash allows hyphens, dots, colons, etc. in function names)
+            // Walk back through the preceding word
+            const wordEnd = j;
             while (j >= 0 && /[^\s;|&(){}<>$`"'\\#]/.test(source[j])) j--;
-            let k = j;
-            // Skip whitespace and \<newline> line continuations between the name and the keyword
-            k = skipWhitespaceAndContinuationBackwardLocal(source, k);
+            const wordStart = j + 1;
+            const word = source.slice(wordStart, wordEnd + 1);
+            // Case: the preceding word IS `coproc` (anonymous coprocess: `coproc { ... }`)
             if (
-              k >= 7 &&
-              source.slice(k - 7, k + 1) === 'function' &&
-              (k - 8 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 8])) &&
-              this.isAtCommandPosition(source, k - 7, excludedRegions)
+              word === 'coproc' &&
+              (wordStart === 0 || !/[a-zA-Z0-9_]/.test(source[wordStart - 1])) &&
+              this.isAtCommandPosition(source, wordStart, excludedRegions)
             ) {
               isFuncDef = true;
             }
-            // coproc NAME { ... } (Bash 4+ named coprocess)
-            if (
-              !isFuncDef &&
-              k >= 5 &&
-              source.slice(k - 5, k + 1) === 'coproc' &&
-              (k - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 6])) &&
-              this.isAtCommandPosition(source, k - 5, excludedRegions)
-            ) {
-              isFuncDef = true;
+            // Otherwise treat the word as a NAME and look for `function` or `coproc` before it
+            if (!isFuncDef) {
+              // Skip whitespace and \<newline> line continuations between the name and the keyword
+              const k = skipWhitespaceAndContinuationBackwardLocal(source, j);
+              if (
+                k >= 7 &&
+                source.slice(k - 7, k + 1) === 'function' &&
+                (k - 8 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 8])) &&
+                this.isAtCommandPosition(source, k - 7, excludedRegions)
+              ) {
+                isFuncDef = true;
+              }
+              // coproc NAME { ... } (Bash 4+ named coprocess)
+              if (
+                !isFuncDef &&
+                k >= 5 &&
+                source.slice(k - 5, k + 1) === 'coproc' &&
+                (k - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 6])) &&
+                this.isAtCommandPosition(source, k - 5, excludedRegions)
+              ) {
+                isFuncDef = true;
+              }
             }
           }
           if (!isFuncDef) {
