@@ -295,8 +295,11 @@ export function matchPragmaDirective(source: string, pos: number): ExcludedRegio
     if (protectEnd !== -1) {
       return { start: pos, end: protectEnd };
     }
-    // No matching end: exclude through end of source (defensive)
-    return { start: pos, end: source.length };
+    // No matching end: fall back to single-line exclusion. The user may be editing
+    // an unfinished protected region; excluding the entire remainder of the file
+    // would suppress all subsequent block parsing. Per the best-effort parsing
+    // principle, only exclude the `pragma directive line itself.
+    return { start: pos, end: lineEnd };
   }
   return { start: pos, end: lineEnd };
 }
