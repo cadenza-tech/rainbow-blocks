@@ -406,6 +406,13 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (this.isUsedAsRhsIdentifier(source, position, keyword, excludedRegions)) {
         return false;
       }
+      // Reject block opener immediately preceded by a binary expression operator
+      // (`x == for;`, `~for;`, `x === if;`, etc.). Block openers are only valid at
+      // statement start, never as operands in an expression. Treating them as block_open
+      // in operand context destroys outer block pairing.
+      if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
+        return false;
+      }
     }
     // Reject block opener used as a command-syntax argument (`clear if`, `clear for`,
     // `disp while`, etc.). The leading identifier is a command and the keyword is a
