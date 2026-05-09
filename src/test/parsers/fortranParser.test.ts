@@ -4982,6 +4982,35 @@ end select
     });
   });
 
+  suite('Regression: select case / rank / type with empty parens is rejected', () => {
+    test('should not open select block when select case has empty parens', () => {
+      const source = 'select case ()\n  case (1)\n    x = 1\nend select';
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select case with empty parens is invalid; should not open');
+    });
+
+    test('should not open select block when select rank has empty parens', () => {
+      const source = 'select rank ()\n  rank (0)\n    x = 1\nend select';
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select rank with empty parens is invalid; should not open');
+    });
+
+    test('should not open select block when select type has empty parens', () => {
+      const source = 'select type ()\nend select';
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select type with empty parens is invalid; should not open');
+    });
+
+    test('should still open select block when select case has non-empty parens', () => {
+      const source = 'select case (x)\n  case (1)\n    y = 1\nend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+  });
+
   suite('Regression: where / forall with empty parens is rejected', () => {
     test('should not open where block when where has empty parens', () => {
       // `where (mask)` requires a mask expression. Empty parens is invalid.
