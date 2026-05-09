@@ -134,7 +134,8 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     // 'team' is only a block opener as part of 'change team (...)' (Fortran 2018).
-    // A bare 'team' is a regular identifier.
+    // A bare 'team' is a regular identifier. The team-value must be parenthesized
+    // (`change team (TEAM_VALUE)`); without parens it is not a valid construct.
     if (lowerKeyword === 'team') {
       const lineStart = findLineStart(source, position);
       const before = source.slice(lineStart, position);
@@ -142,6 +143,12 @@ export class FortranBlockParser extends BaseBlockParser {
       // Also accept 'change &\n  team' across continuation line(s)
       const continuationMatch = isPrecedingContinuationKeyword(source, position, 'change');
       if (!sameLineMatch && !continuationMatch) {
+        return false;
+      }
+      // Require parenthesized team-value: `change team (...)`. Reject bare `change team`.
+      let afterTeam = source.slice(position + keyword.length);
+      afterTeam = collapseContinuationLines(afterTeam);
+      if (!/^[ \t]*\(/.test(afterTeam)) {
         return false;
       }
     }
