@@ -4101,6 +4101,47 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: definition keywords should not be treated as values via chained do/end heuristic', () => {
+    // The chained heuristic in isKeywordUsedAsValue ("<this_kw> <ident> do\nend" pattern)
+    // must not apply when this_kw is a definition keyword (def, defp, defmacro, defguard,
+    // defmodule, etc.). Definition keywords always start their own block, so a following
+    // `def foo do\nend` should never make a preceding defguard/def/etc. be treated as a
+    // value (which would steal the do for the outer block).
+    test('should not pair defguard with outer end when followed by def foo do/end', () => {
+      // Bug: defguard one-liner followed by `def foo do\nend` previously caused defguard
+      // to be incorrectly paired with the outer `end`, leaving defmodule as orphan.
+      // Expected: defmodule/outer-end and def/inner-end (2 pairs).
+      const source = 'defmodule MyMod do\n  defguard is_thing(x) when is_integer(x)\n  def foo do\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defmodulePair = findBlock(pairs, 'defmodule');
+      assert.strictEqual(defmodulePair.closeKeyword.value, 'end');
+      assert.strictEqual(defmodulePair.openKeyword.line, 0);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword.value, 'end');
+      assert.strictEqual(defPair.openKeyword.line, 2);
+    });
+    test('should not pair def with outer end when followed by another def foo do/end', () => {
+      // Same pattern with `def` instead of `defguard` (def one-liner is unusual but
+      // still must not steal the inner def's do).
+      const source = 'defmodule MyMod do\n  def is_thing(x), do: is_integer(x)\n  def foo do\n  end\nend';
+      const pairs = parser.parse(source);
+      // Expect: defmodule/outer-end and def(foo)/inner-end
+      assertBlockCount(pairs, 2);
+      const defmodulePair = findBlock(pairs, 'defmodule');
+      assert.strictEqual(defmodulePair.closeKeyword.value, 'end');
+    });
+    test('should not pair defmacro with outer end when followed by def foo do/end', () => {
+      const source = 'defmodule MyMod do\n  defmacro my_macro(arg) when is_atom(arg)\n  def foo do\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defmodulePair = findBlock(pairs, 'defmodule');
+      assert.strictEqual(defmodulePair.closeKeyword.value, 'end');
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword.value, 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: invalid sigil delimiters should be rejected', () => {
     // Per Elixir spec, valid sigil delimiters are paired (), [], {}, <> or single
     // ASCII chars from the whitelist: / | " '. Other characters like _, $, @, ^, ~
