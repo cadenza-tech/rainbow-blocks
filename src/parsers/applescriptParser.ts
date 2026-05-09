@@ -4,7 +4,6 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import type { ApplescriptHelperCallbacks } from './applescriptHelpers';
 import { findLogicalLineEnd, findLogicalLineStart, isInsideIfCondition, isKeywordAsVariableName, matchCompoundKeyword } from './applescriptHelpers';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType } from './parserUtils';
 
 // Mapping from compound end keywords to their opening keywords
 const END_KEYWORD_MAP: Readonly<Record<string, string>> = {
@@ -104,8 +103,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
     // 'tell ... to action' on one line is a one-liner, not a block
     if (keyword === 'tell') {
-      // Reject `tell(` function-call form (e.g., `set x to tell()`)
-      if (source[position + keyword.length] === '(') {
+      // Reject `tell(` function-call form (e.g., `set x to tell()`, `tell ()`).
+      // Allow optional whitespace between the keyword and `(` to mirror the
+      // compound-keyword handling (`with timeout (5)`).
+      let parenScan = position + keyword.length;
+      while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+      if (parenScan < source.length && source[parenScan] === '(') {
         return false;
       }
       if (this.isTellToOneLiner(source, position, excludedRegions)) {
@@ -121,8 +124,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // Reject block keywords used as condition values in 'if ... then' pattern
     // (repeat, try, considering, ignoring are affected; script/on/to are already protected by isAtLogicalLineStart)
     if (keyword === 'repeat' || keyword === 'try' || keyword === 'considering' || keyword === 'ignoring') {
-      // Reject function-call form (e.g., `repeat()`)
-      if (source[position + keyword.length] === '(') {
+      // Reject function-call form (e.g., `repeat()`, `repeat ()`). Allow
+      // optional whitespace between the keyword and `(`.
+      let parenScan = position + keyword.length;
+      while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+      if (parenScan < source.length && source[parenScan] === '(') {
         return false;
       }
       if (isInsideIfCondition(source, position, keyword.length, excludedRegions, this.helperCallbacks)) {
@@ -771,15 +777,26 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           // Check for specific end keyword (end tell, end if, etc.)
           const expectedOpener = END_KEYWORD_MAP[closeValue];
           if (expectedOpener) {
-            matchIndex = findLastOpenerByType(stack, expectedOpener);
-            // Fall back to top `on`/`to` handler only when the handler name matches
-            // the close keyword's type (e.g., `on tell()` ... `end tell` legitimately
-            // pairs the on-handler with end tell because the handler is named `tell`).
-            if (matchIndex < 0 && stack.length > 0) {
-              const topBlock = stack[stack.length - 1];
-              const topValue = topBlock.token.value;
-              if ((topValue === 'on' || topValue === 'to') && this.handlerName(topBlock) === expectedOpener) {
-                matchIndex = stack.length - 1;
+            // Compound openers like `with transaction` map their close keyword to
+            // the full opener string. Handler-name fallbacks (e.g. `on transaction()`)
+            // store only the last word as the handler name, so use the last word for
+            // handler-name comparison.
+            const handlerNameTarget = expectedOpener.includes(' ') ? (expectedOpener.split(' ').pop() as string) : expectedOpener;
+            // Walk the stack from the most recently pushed opener back to the bottom
+            // and pair with the first opener that matches either by direct keyword
+            // (e.g., `tell`) or by handler-name fallback (e.g., `on tell()` / `to tell()`).
+            // This ensures LIFO pairing when a handler named like a block keyword is
+            // nested inside an outer block of the same type.
+            for (let i = stack.length - 1; i >= 0; i--) {
+              const block = stack[i];
+              const value = block.token.value;
+              if (value === expectedOpener) {
+                matchIndex = i;
+                break;
+              }
+              if ((value === 'on' || value === 'to') && this.handlerName(block) === handlerNameTarget) {
+                matchIndex = i;
+                break;
               }
             }
           } else {
