@@ -150,12 +150,35 @@ export class CrystalBlockParser extends BaseBlockParser {
             }
             j++;
           }
-          // Skip the closing quote itself
           if (j < source.length && source[j] === quoteType) {
-            j++;
+            // Found the closing quote on the same line: register from the
+            // opening quote through the closing quote.
+            regions.push({ start: quoteStart, end: j + 1 });
+            i = j + 1;
+          } else {
+            // Closing quote not on the same line. Scan forward across lines to see
+            // if a matching quote exists later. If so, register the entire span
+            // from `<<-"` through that quote (inclusive) as excluded so the orphan
+            // quote does not get mis-detected as a regular string opener that
+            // swallows downstream code. If no matching quote exists in the rest
+            // of the source, fall back to excluding only the lone `"` itself —
+            // the rest of the source is parsed normally.
+            let k = j;
+            while (k < source.length && source[k] !== quoteType) {
+              if (source[k] === '\\' && k + 1 < source.length) {
+                k += 2;
+                continue;
+              }
+              k++;
+            }
+            if (k < source.length && source[k] === quoteType) {
+              regions.push({ start: i, end: k + 1 });
+              i = k + 1;
+            } else {
+              regions.push({ start: quoteStart, end: j });
+              i = j;
+            }
           }
-          regions.push({ start: quoteStart, end: j });
-          i = j;
         } else {
           i++;
         }
