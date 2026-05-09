@@ -93,8 +93,11 @@ export class RubyBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
-            // 'in' is a syntactic separator in 'for x in collection', not a section boundary
-            if (token.value === 'in' && stack[stack.length - 1].token.value === 'for') {
+            // 'in' is only a true intermediate inside `case` (Ruby 3.0+ pattern matching).
+            // In `for x in collection` it is a syntactic separator (skip).
+            // In `if/unless/while/until/begin/...` it is the pattern-matching operator
+            // (Ruby 3.0+, e.g. `if x in 1`), also not a section boundary -- skip.
+            if (token.value === 'in' && stack[stack.length - 1].token.value !== 'case') {
               break;
             }
             stack[stack.length - 1].intermediates.push(token);
