@@ -2845,5 +2845,30 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-09: multi-line record literal should suppress block_close keywords', () => {
+    test('should not treat end if inside multi-line record as block_close (after { and newline)', () => {
+      const source = 'if true then\n  set x to {\n    end if: 5\n  }\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // The outer end if at the very end (line 4) should be the close keyword,
+      // not the inner end if (line 2) used as a record key.
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end if at line 4');
+    });
+
+    test('should not treat end tell inside multi-line record as block_close', () => {
+      const source = 'tell application "Finder"\n  set x to {\n    end tell: 5\n  }\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end tell at line 4');
+    });
+
+    test('should not treat end if as block_close after multi-line record with comma', () => {
+      const source = 'if true then\n  set x to {a: 1,\n    end if: 5\n  }\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end if at line 4');
+    });
+  });
+
   generateCommonTests(config);
 });
