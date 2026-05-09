@@ -2823,6 +2823,76 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-10: try block intermediate validation', () => {
+    test('should reject duplicate finally in try block', () => {
+      const source = `try
+  Foo;
+finally
+  Bar;
+finally
+  Baz;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      // Only the first 'finally' should be intermediate; the second is malformed and skipped
+      assertIntermediates(pairs[0], ['finally']);
+    });
+
+    test('should reject duplicate except in try block', () => {
+      const source = `try
+  Foo;
+except
+  Bar;
+except
+  Baz;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['except']);
+    });
+
+    test('should reject finally after except in try block', () => {
+      const source = `try
+  Foo;
+except
+  Bar;
+finally
+  Baz;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      // finally and except are mutually exclusive; only the first one is kept
+      assertIntermediates(pairs[0], ['except']);
+    });
+
+    test('should reject except after finally in try block', () => {
+      const source = `try
+  Foo;
+finally
+  Bar;
+except
+  Baz;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['finally']);
+    });
+
+    test('should still allow Delphi try-except-else (existing behavior)', () => {
+      const source = `try
+  RiskyOperation;
+except
+  on E: ECustomError do
+    HandleCustom(E);
+else
+  HandleOther;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['except', 'else']);
+    });
+  });
+
   suite('Regression 2026-05-09: field-access dot followed by newline', () => {
     test('should not treat end as block close when preceded by field-access dot across newline', () => {
       const source = `begin
