@@ -373,25 +373,23 @@ end if;`;
       assertNoBlocks(pairs);
     });
 
-    test('should handle unmatched end loop without for/while/loop opener', () => {
-      // Tests findLastOpenerForLoop returning -1 (lines 358-359)
-      // and fallback to last opener (lines 276-277)
+    test('should leave end loop unpaired without for/while/loop opener', () => {
+      // Best-effort parsing: when end loop has no matching opener, leave both
+      // sides unpaired rather than force-pairing with the last opener.
+      // (CLAUDE.md best-effort parsing #3: prefer no color over wrong color.)
       const source = `if Condition then
   X := 1;
 end loop;`;
       const pairs = parser.parse(source);
-      // end loop doesn't match if, but falls back to last opener
-      assertSingleBlock(pairs, 'if', 'end loop');
+      assertNoBlocks(pairs);
     });
 
-    test('should handle compound end with different type', () => {
-      // Tests findLastOpenerByType returning -1 and fallback (lines 276-277)
+    test('should leave compound end unpaired when type does not match any opener', () => {
       const source = `if Condition then
   X := 1;
 end procedure;`;
       const pairs = parser.parse(source);
-      // end procedure doesn't match if, but fallback to last opener
-      assertSingleBlock(pairs, 'if', 'end procedure');
+      assertNoBlocks(pairs);
     });
 
     test('should handle multi-line for loop', () => {
@@ -2881,6 +2879,45 @@ end if;`;
       const secondIf = pairs.find((p) => p !== firstIf && p.openKeyword.value.toLowerCase() === 'if');
       assert.ok(secondIf, 'second if block (independent) should also be paired');
       assert.match(secondIf.closeKeyword.value.toLowerCase(), /^end\s+if$/);
+    });
+  });
+
+  suite('Regression 2026-05-09: compound end forced fallback removal', () => {
+    test('should not force-pair if with end loop when no for/while/loop opener exists', () => {
+      // Two opens but mismatched compound ends: outer `if` + inner `if` + `end loop` + `end if`.
+      // Expected: end loop must not force-match an `if` opener (no forced fallback);
+      // the LIFO close `end if` pairs with the most recent `if` (the inner one).
+      // The outer if and end loop are left as orphans (best-effort parsing:
+      // prefer no color over wrong color).
+      const source = `if A then
+  if B then
+    null;
+end loop;
+end if;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const innerIf = pairs[0];
+      assert.strictEqual(innerIf.openKeyword.value.toLowerCase(), 'if');
+      assert.match(innerIf.closeKeyword.value.toLowerCase(), /^end\s+if$/);
+      // The paired if must be the inner one (not the outer one which is left as orphan).
+      assert.strictEqual(innerIf.openKeyword.startOffset, 12);
+    });
+
+    test('should leave end loop unpaired when the only opener is an if', () => {
+      // Single opener that does not match end loop: must produce zero pairs.
+      const source = `if Condition then
+  X := 1;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should leave end procedure unpaired when the only opener is an if', () => {
+      const source = `if Condition then
+  X := 1;
+end procedure;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
     });
   });
 
