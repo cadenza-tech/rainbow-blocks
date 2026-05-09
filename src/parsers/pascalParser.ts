@@ -75,7 +75,16 @@ export class PascalBlockParser extends BaseBlockParser {
     // Case label: case X of begin: Foo; end / case X of try: Foo; end
     // A keyword used as a case-label has '...of'/'...;'/'...,' before and ':' after.
     // (Excluding ':=' assignment.)
-    if (keyword === 'begin' || keyword === 'try' || keyword === 'record' || keyword === 'case' || keyword === 'repeat') {
+    if (
+      keyword === 'begin' ||
+      keyword === 'try' ||
+      keyword === 'record' ||
+      keyword === 'case' ||
+      keyword === 'repeat' ||
+      keyword === 'object' ||
+      keyword === 'interface' ||
+      keyword === 'class'
+    ) {
       if (this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
         return false;
       }
@@ -400,10 +409,12 @@ export class PascalBlockParser extends BaseBlockParser {
   }
 
   // Returns true when the keyword at `position` is used as a case-label rather than a
-  // block opener. Case labels look like `of begin:`, `; try:`, `, record:`, etc.
+  // block opener. Case labels look like `of begin:`, `; try:`, `, record:`, or
+  // `; Foo = object:` (a constant-equality style label).
   // The check requires:
   //  (1) the next non-whitespace character after the keyword is ':' (and not ':=' assign),
-  //  (2) the previous non-whitespace, non-comment token is `of`, `;`, or `,`.
+  //  (2) walking backward past an optional `= identifier`, the next token must be `of`,
+  //      `;`, or `,` (case-label boundary).
   private isUsedAsCaseLabel(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // (1) Forward check: must be followed by ':' (not ':=')
     let fp = position + keyword.length;
@@ -425,8 +436,39 @@ export class PascalBlockParser extends BaseBlockParser {
     // ':=' is assignment, not a case-label colon
     if (fp + 1 < source.length && source[fp + 1] === '=') return false;
 
-    // (2) Backward check: previous non-whitespace, non-comment token must be 'of', ';', or ','
-    let bp = position - 1;
+    // (2) Backward check: previous non-whitespace, non-comment token must be 'of', ';',
+    //     or ','. If it is `=` (constant-equality case label like `Foo = object:`),
+    //     also accept and skip past the preceding identifier before re-checking.
+    let bp = this.skipBackwardWhitespace(source, position - 1, excludedRegions);
+    if (bp < 0) return false;
+
+    // Handle `Foo = keyword:` pattern: skip back over `=` and the preceding identifier.
+    // Reject `:=` (assignment), `>=`/`<=` (comparison), `+=`/`-=`/`*=`/`/=` (compound assigns).
+    if (source[bp] === '=' && (bp === 0 || ![':', '>', '<', '+', '-', '*', '/', '='].includes(source[bp - 1]))) {
+      // Skip past the '=' and any whitespace/comments
+      let ip = this.skipBackwardWhitespace(source, bp - 1, excludedRegions);
+      // Skip past an identifier preceding the '=' (e.g. the `Z` in `Z = object:`)
+      while (ip >= 0 && /[a-zA-Z0-9_]/.test(source[ip])) ip--;
+      bp = this.skipBackwardWhitespace(source, ip, excludedRegions);
+      if (bp < 0) return false;
+    }
+
+    const prev = source[bp];
+    if (prev === ';' || prev === ',') return true;
+    // Check for 'of' (word ending at bp)
+    if (/[a-zA-Z]/.test(prev)) {
+      let ws = bp;
+      while (ws >= 0 && /[a-zA-Z0-9_]/.test(source[ws])) ws--;
+      const word = source.slice(ws + 1, bp + 1).toLowerCase();
+      if (word === 'of') return true;
+    }
+    return false;
+  }
+
+  // Skip backward over whitespace and excluded regions starting from `start` (inclusive);
+  // returns the index of the first non-whitespace, non-comment character, or -1 if none.
+  private skipBackwardWhitespace(source: string, start: number, excludedRegions: ExcludedRegion[]): number {
+    let bp = start;
     while (bp >= 0) {
       if (this.isInExcludedRegion(bp, excludedRegions)) {
         const region = this.findExcludedRegionAt(bp, excludedRegions);
@@ -441,17 +483,7 @@ export class PascalBlockParser extends BaseBlockParser {
       }
       break;
     }
-    if (bp < 0) return false;
-    const prev = source[bp];
-    if (prev === ';' || prev === ',') return true;
-    // Check for 'of' (word ending at bp)
-    if (/[a-zA-Z]/.test(prev)) {
-      let ws = bp;
-      while (ws >= 0 && /[a-zA-Z0-9_]/.test(source[ws])) ws--;
-      const word = source.slice(ws + 1, bp + 1).toLowerCase();
-      if (word === 'of') return true;
-    }
-    return false;
+    return bp;
   }
 
   // Returns true when the position is inside a generic constraint angle bracket, e.g.
