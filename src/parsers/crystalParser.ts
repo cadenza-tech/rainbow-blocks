@@ -619,6 +619,19 @@ export class CrystalBlockParser extends BaseBlockParser {
   private isAfterPropertyMacro(source: string, position: number, endOffset: number): boolean {
     let i = position - 1;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    // Walk back across comma-separated identifier chains (e.g., `property foo, bar, end`).
+    // For each preceding `, <identifier>` segment, skip the comma and the identifier so the
+    // scan ultimately lands on the macro identifier itself.
+    while (i >= 0 && source[i] === ',') {
+      i--;
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+      if (i < 0) return false;
+      // Allow trailing ! or ? on identifier names
+      if (source[i] === '!' || source[i] === '?') i--;
+      // Skip identifier characters
+      while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    }
     if (i < 0) return false;
     // Allow trailing ! or ? on the macro identifier (property!, getter?)
     if (source[i] === '!' || source[i] === '?') i--;
