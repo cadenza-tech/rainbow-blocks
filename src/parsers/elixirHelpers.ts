@@ -13,6 +13,61 @@ const SIGIL_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
   '<': '>'
 };
 
+// Reserved words that should not be consumed as sigil modifiers.
+// Sigil modifiers in Elixir are typically short lowercase letter sequences (e.g., `u`, `i`, `m`)
+// and never overlap with reserved keywords. When the modifier scanner encounters one of these
+// words, it must stop before the word to avoid consuming actual code.
+const SIGIL_MODIFIER_RESERVED_WORDS = new Set([
+  'end',
+  'def',
+  'defp',
+  'defmodule',
+  'defmacro',
+  'defmacrop',
+  'defguard',
+  'defguardp',
+  'defprotocol',
+  'defimpl',
+  'do',
+  'fn',
+  'if',
+  'unless',
+  'case',
+  'cond',
+  'for',
+  'with',
+  'receive',
+  'try',
+  'quote',
+  'else',
+  'rescue',
+  'catch',
+  'after'
+]);
+
+// Skips letters that follow a sigil closing delimiter as sigil modifiers, but stops before
+// any reserved word so that words like `end`, `def`, or `do` are not absorbed as modifiers.
+function skipSigilModifiers(source: string, pos: number): number {
+  if (pos >= source.length || !/[a-zA-Z]/.test(source[pos])) {
+    return pos;
+  }
+  // Gather the contiguous letter run starting at pos.
+  let runEnd = pos;
+  while (runEnd < source.length && /[a-zA-Z]/.test(source[runEnd])) {
+    runEnd++;
+  }
+  const word = source.slice(pos, runEnd);
+  // If the entire run is a reserved word AND not followed by an identifier-continuation
+  // char (digit, underscore, ?, !), stop before the run.
+  const after = source[runEnd];
+  const isWordBoundary = after === undefined || (!/[a-zA-Z0-9_]/.test(after) && after !== '?' && after !== '!');
+  if (isWordBoundary && SIGIL_MODIFIER_RESERVED_WORDS.has(word)) {
+    return pos;
+  }
+  // Otherwise, the entire letter run is part of the modifier sequence.
+  return runEnd;
+}
+
 // Returns matching close delimiter for sigils. Per Elixir spec, valid sigil delimiters
 // are paired ASCII brackets (defined in SIGIL_PAIRED_DELIMITERS) or single ASCII non-alphanumeric
 // chars: / | " ' . Unicode letters/symbols are NOT valid sigil delimiters; treating them as
@@ -174,6 +229,16 @@ function isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
   return i < 0 || source[i] === '\n' || source[i] === '\r';
 }
 
+// Checks if position immediately after a heredoc terminator (""" or ''') is NOT followed
+// by an identifier character. The Elixir heredoc terminator must end as a token:
+// `"""def` is not a terminator because `def` would be an identifier-suffix,
+// but `"""}` (closing interpolation) or `""" <> "x"` (operator) is OK.
+function isLineEndAfterTerminator(source: string, pos: number): boolean {
+  if (pos >= source.length) return true;
+  const ch = source[pos];
+  return !/[a-zA-Z0-9_]/.test(ch);
+}
+
 // Matches triple-quoted string (heredoc) with #{} interpolation for """ and '''
 export function matchTripleQuotedString(source: string, pos: number, delimiter: string, skipInterpolation: SkipInterpolationFn): ExcludedRegion {
   // Both """ and ''' support interpolation in Elixir
@@ -195,7 +260,10 @@ export function matchTripleQuotedString(source: string, pos: number, delimiter: 
       i = skipInterpolation(source, i + 2);
       continue;
     }
-    if (source.slice(i, i + 3) === delimiter && (!isHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
+    if (
+      source.slice(i, i + 3) === delimiter &&
+      (!isHeredoc || (isAtLineStartAllowingWhitespace(source, i) && isLineEndAfterTerminator(source, i + 3)))
+    ) {
       return { start: pos, end: i + 3 };
     }
     i++;
@@ -219,7 +287,10 @@ export function skipNestedTripleQuotedString(source: string, pos: number, delimi
       i = skipInterpolation(source, i + 2);
       continue;
     }
-    if (source.slice(i, i + 3) === delimiter && (!isHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
+    if (
+      source.slice(i, i + 3) === delimiter &&
+      (!isHeredoc || (isAtLineStartAllowingWhitespace(source, i) && isLineEndAfterTerminator(source, i + 3)))
+    ) {
       return i + 3;
     }
     i++;
@@ -301,10 +372,8 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
       }
       if (source.slice(j, j + 3) === tripleDelim && (!isHeredoc || isAtLineStartAllowingWhitespace(source, j))) {
         j += 3;
-        // Skip optional modifiers
-        while (j < source.length && /[a-zA-Z]/.test(source[j])) {
-          j++;
-        }
+        // Skip optional modifiers (stop before reserved words like end/do/def)
+        j = skipSigilModifiers(source, j);
         return j;
       }
       j++;
@@ -336,10 +405,8 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
     i++;
   }
 
-  // Skip optional modifiers
-  while (i < source.length && /[a-zA-Z]/.test(source[i])) {
-    i++;
-  }
+  // Skip optional modifiers (stop before reserved words like end/do/def)
+  i = skipSigilModifiers(source, i);
 
   return i;
 }
@@ -396,11 +463,8 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
         continue;
       }
       if (source.slice(i, i + 3) === tripleDelim && (!isSigilHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
-        // Skip optional modifiers after closing
-        let end = i + 3;
-        while (end < source.length && /[a-zA-Z]/.test(source[end])) {
-          end++;
-        }
+        // Skip optional modifiers after closing (stop before reserved words like end/do/def)
+        const end = skipSigilModifiers(source, i + 3);
         return { start: pos, end };
       }
       i++;
@@ -434,10 +498,8 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
     i++;
   }
 
-  // Skip optional modifiers after closing delimiter
-  while (i < source.length && /[a-zA-Z]/.test(source[i])) {
-    i++;
-  }
+  // Skip optional modifiers after closing delimiter (stop before reserved words like end/do/def)
+  i = skipSigilModifiers(source, i);
 
   return { start: pos, end: i };
 }

@@ -381,6 +381,15 @@ export class ElixirBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Reject middle keywords used as map keys: `%{else => 1}`, `%{rescue => 1}`, etc.
+      // Pattern: <middle_keyword> followed by whitespace and `=>`.
+      if (token.type === 'block_middle' && token.endOffset < source.length) {
+        let p = token.endOffset;
+        while (p < source.length && (source[p] === ' ' || source[p] === '\t')) p++;
+        if (p + 1 < source.length && source[p] === '=' && source[p + 1] === '>') {
+          return false;
+        }
+      }
       return true;
     });
   }
@@ -783,6 +792,12 @@ export class ElixirBlockParser extends BaseBlockParser {
             }
           }
         }
+      }
+      // Chained pattern: "<this_kw> <next_word> <rest> do" where <next_word> is a block
+      // keyword used as a value (e.g., "if for case do :ok end" or "if case x do :ok end").
+      // Recursively check if the next identifier is used as a value, treating it as a chain.
+      if (this.isBlockKeywordAt(source, j) && this.isKeywordUsedAsValue(source, wordEnd)) {
+        return true;
       }
     }
     return false;
