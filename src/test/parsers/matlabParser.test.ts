@@ -1945,6 +1945,52 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: command-syntax with intermediate block_keyword args', () => {
+    test('should not treat case after disp end as block_middle in switch', () => {
+      // `disp end case` is command-syntax: `disp` is command, `end` and `case` are
+      // string arguments. The second `case` must NOT be treated as a real switch-case
+      // intermediate. Without this fix the `end` blocks command-syntax detection for
+      // `case`.
+      const source = 'switch x\n  case 1\n    disp end case\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      // Only the real `case 1` should be in intermediates.
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should not treat catch after clear end as block_middle in try', () => {
+      const source = 'try\n  x = 1;\n  clear end catch\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      // `catch` after `clear end` is a command-syntax string argument, not a real catch.
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should not treat else after disp end as block_middle in if', () => {
+      const source = 'if x\n  disp end else\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should still preserve real case 1, case 2 in switch', () => {
+      // Sanity check: real cases must continue to work.
+      const source = 'switch x\n  case 1\n    y = 1;\n  case 2\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case', 'case']);
+    });
+
+    test('should still preserve real catch after if-end inside try', () => {
+      // Sanity check: real if/end inside try followed by real catch should still work.
+      const source = 'try\n  if x\n  end\ncatch e\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+  });
+
   suite('Regression 2026-05-09: function handle @ with whitespace before keyword', () => {
     test('should not treat for after @ space as block_open', () => {
       // `@ for x` is technically invalid MATLAB (function handle requires no space after @),
