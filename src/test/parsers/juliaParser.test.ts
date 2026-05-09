@@ -3783,5 +3783,34 @@ end`;
     });
   });
 
+  suite('Regression: end after <: or >: in where clause is not block_close', () => {
+    test('should treat where T<:end as invalid syntax (end is not block_close)', () => {
+      // Bug: `where T<:end` is invalid syntax in Julia (end is not a type). The end token
+      // should not be treated as block_close. Previously, end was classified as block_close,
+      // causing function..where T<: pair to form and the trailing real end becomes orphan.
+      const source = 'function f(x::T) where T<:end\n  return x\nend';
+      const pairs = parser.parse(source);
+      // The first `end` (after `<:`) is invalid and should not pair with function.
+      // The second `end` (on the last line) pairs with function.
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      // Ensure the closing end is the last one (line 2, 0-indexed)
+      const sourceLines = source.split('\n');
+      const lastEndLine = sourceLines.length - 1;
+      assert.strictEqual(block.closeKeyword?.line, lastEndLine);
+    });
+
+    test('should treat where T>:end as invalid syntax (end is not block_close)', () => {
+      // Bug: same for >: (supertype operator).
+      const source = 'function f(x::T) where T>:end\n  return x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      const sourceLines = source.split('\n');
+      const lastEndLine = sourceLines.length - 1;
+      assert.strictEqual(block.closeKeyword?.line, lastEndLine);
+    });
+  });
+
   generateCommonTests(config);
 });
