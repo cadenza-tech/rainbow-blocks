@@ -2870,5 +2870,43 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-09: handler declaration probe should accept pipe identifiers and Unicode whitespace', () => {
+    test('should recognize on |my handler|() as handler declaration', () => {
+      const source = 'on |my handler|()\n  beep\nend |my handler|';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should recognize to |my handler|() as handler declaration', () => {
+      const source = 'to |my handler|()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+
+    test('should recognize on followed by NBSP-separated identifier', () => {
+      const source = 'on\u00A0myHandler()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should recognize on with continuation before identifier', () => {
+      const source = 'on ¬\n  myHandler()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should recognize on with block comment between keyword and identifier', () => {
+      const source = 'on (* handler doc *) myHandler()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should recognize to with block comment between keyword and identifier', () => {
+      const source = 'to (* handler doc *) doSomething()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
