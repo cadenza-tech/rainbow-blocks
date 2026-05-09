@@ -4,8 +4,20 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 
 export class MatlabBlockParser extends BaseBlockParser {
+  // Positions of classdef section keywords (properties / methods / events / enumeration /
+  // arguments) that appear at line-start but were rejected at tokenize because of a
+  // form like `properties = 5` or `properties + 1`. The user likely wrote a stray `end`
+  // intending to close a section block, so matchBlocks skips one `end` per recorded
+  // position to avoid pairing it with an outer `classdef`/`function` block. Populated
+  // by tokenize, consumed by matchBlocks. Not thread-safe, but parse() is synchronous.
+  private phantomSectionPositions: number[] = [];
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Reject end preceded by `@` (function handle prefix: `@end`, `h = @end;`).
+    // The `@` puts the keyword in identifier-reference context, so it is not a block close.
+    if (this.isPrecededByAtSign(source, position)) {
+      return false;
+    }
     // Reject end preceded by dot (struct field access like s.end or s . end)
     if (this.isPrecededByDot(source, position, excludedRegions)) {
       return false;
@@ -14,10 +26,14 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
       return false;
     }
-    // Reject end immediately followed by a single `.` that is NOT part of `..` (line
-    // continuation marker prefix). `end.field` is struct field-access syntax, not a block
-    // close — the `end` is an identifier in expression context.
-    const afterPos = position + keyword.length;
+    // Reject end followed by a single `.` (possibly preceded by whitespace) that is NOT
+    // part of `..` (line continuation marker prefix). `end.field` and `end .field` are
+    // both struct field-access syntax, not block close — the `end` is an identifier in
+    // expression context. Whitespace skip handles `end .x = 1` and `end\t.x = 1` forms.
+    let afterPos = position + keyword.length;
+    while (afterPos < source.length && (source[afterPos] === ' ' || source[afterPos] === '\t')) {
+      afterPos++;
+    }
     if (source[afterPos] === '.' && source[afterPos + 1] !== '.') {
       return false;
     }
@@ -35,7 +51,7 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Reject end used as a command-syntax argument (`disp end` → `disp('end')`). The pattern
     // is `<identifier> <whitespace> end` at statement start where the identifier is not a
     // recognized keyword. Treating such `end` as block close destroys outer block pairing.
-    if (keyword === 'end' && this.isCommandSyntaxArgument(source, position)) {
+    if (keyword === 'end' && this.isCommandSyntaxArgument(source, position, excludedRegions)) {
       return false;
     }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
@@ -43,38 +59,82 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Returns true when `end` at position is the argument of a command-syntax invocation,
-  // e.g. `disp end`. Detection is conservative: requires the preceding non-whitespace to
-  // form an identifier that begins at statement start (line start, or after `;`/`,`) and
-  // is not one of the recognized block keywords.
-  private isCommandSyntaxArgument(source: string, position: number): boolean {
+  // e.g. `disp end`. Detection collects the full logical line preceding `end` (following
+  // `...` and Octave `\` line continuations) and checks whether the line begins with a
+  // non-keyword identifier. This handles:
+  //   * Single-arg forms: `disp end`
+  //   * Multi-arg forms: `clear all end` (the leading `clear` is the command, `all` and
+  //     `end` are string arguments)
+  //   * Line continuation forms: `disp ...\n end` and `disp \\\n end`
+  // Treats a leading UTF-8/UTF-16 BOM (U+FEFF) as whitespace so files saved with a
+  // byte-order mark still recognise command-syntax at the very first statement.
+  private isCommandSyntaxArgument(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
+    // Require at least one space/tab between the previous token and `end` (so `xend` is
+    // not detected — but adjacency is already handled by the keyword regex word boundary).
+    if (position <= 0 || (source[position - 1] !== ' ' && source[position - 1] !== '\t')) return false;
+    // Walk backward, skipping whitespace and `...`/`\` line-continuation regions (which
+    // include the trailing newline), looking for the leading identifier of the command.
+    // We must encounter at least one identifier (the command itself) at statement start.
     let i = position - 1;
-    // Require at least one space/tab between the identifier and `end`
-    if (i < 0 || (source[i] !== ' ' && source[i] !== '\t')) return false;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
-    if (i < 0) return false;
-    // Must end with an identifier character
-    const idEnd = i;
-    if (!/[a-zA-Z0-9_]/.test(source[idEnd])) return false;
-    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
-    const idStart = i + 1;
-    const ident = source.slice(idStart, idEnd + 1);
-    // Identifier must start with letter or underscore
-    if (!/^[a-zA-Z_]/.test(ident)) return false;
-    // Skip recognized block keywords — `if end`, `for end`, `function end` etc. are not
-    // command syntax (they are syntax errors, but treating `end` as a block close in such
-    // pathological inputs is at least consistent with the rest of the parser's behavior).
-    if (MatlabBlockParser.ALL_BLOCK_KEYWORDS.has(ident.toLowerCase())) return false;
-    // The identifier must begin at statement start: line start (only whitespace before)
-    // or after a `;`/`,` separator on the same line.
-    let j = idStart - 1;
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
-    if (j < 0) return true;
-    const ch = source[j];
-    return ch === '\n' || ch === '\r' || ch === ';' || ch === ',';
+    while (i >= 0) {
+      // Skip space/tab
+      if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      // Skip line-continuation excluded regions: `...<NL>` or `\<NL>`. The continuation
+      // region ends just past the last `.` (or `\`), i.e. at the newline position. So
+      // when i is on the newline itself, we detect a region whose `end == i` and whose
+      // start is `.`/`\\`. When i is inside the continuation (e.g. at one of the dots),
+      // a region containing i directly will be found.
+      if (excludedRegions) {
+        let region = this.findExcludedRegionAt(i, excludedRegions);
+        if (!region && i >= 0) {
+          // Walk past CRLF newline pair: when source[i] === '\n' and source[i-1] === '\r',
+          // treat them as one logical line ending. Continuation region ends at the `\r`.
+          let nlStart = i;
+          if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') nlStart = i - 1;
+          const candidate = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+          if (candidate && candidate.end === nlStart) region = candidate;
+        }
+        if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      // Newlines outside an excluded continuation are not legal in a command-syntax chain.
+      if (source[i] === '\n' || source[i] === '\r') return false;
+      // Must end with an identifier character at this position.
+      if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+      const idEnd = i;
+      while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+      const idStart = i + 1;
+      const ident = source.slice(idStart, idEnd + 1);
+      // Identifier must start with letter or underscore (not a digit).
+      if (!/^[a-zA-Z_]/.test(ident)) return false;
+      // A recognised block keyword (`if`, `for`, etc.) breaks the command-syntax chain.
+      if (this.getAllBlockKeywords().has(ident.toLowerCase())) return false;
+      // Check what precedes this identifier. If it is statement-start (newline / `;` /
+      // `,` / file start with optional BOM), this identifier is the leading command and
+      // we accept the chain. BOM (U+FEFF) is treated as whitespace.
+      let j = idStart - 1;
+      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\u{FEFF}')) j--;
+      if (j < 0) return true;
+      const ch = source[j];
+      if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') {
+        return true;
+      }
+      // Otherwise, the preceding non-space char should be either another identifier
+      // (multi-arg form) or a line continuation. Continue walking back.
+      i = j;
+    }
+    return false;
   }
 
-  // All recognized block keywords (open + close + middle), used to filter command-syntax detection.
-  private static readonly ALL_BLOCK_KEYWORDS = new Set([
+  // MATLAB-specific block keywords (open + close + middle), used to filter
+  // command-syntax detection. `do` is intentionally excluded — it is an Octave
+  // keyword, not a MATLAB one, so MATLAB code may use `do` as an identifier.
+  private static readonly MATLAB_BLOCK_KEYWORDS = new Set([
     'function',
     'if',
     'for',
@@ -94,28 +154,15 @@ export class MatlabBlockParser extends BaseBlockParser {
     'elseif',
     'case',
     'otherwise',
-    'catch',
-    // Octave-specific block-close keywords (subclass adds them, but listing here keeps
-    // detection consistent if MATLAB code happens to use these identifiers as commands).
-    'endfunction',
-    'endif',
-    'endfor',
-    'endwhile',
-    'endswitch',
-    'endtry_catch',
-    'endparfor',
-    'endspmd',
-    'endclassdef',
-    'endmethods',
-    'endproperties',
-    'endevents',
-    'endenumeration',
-    'until',
-    'do',
-    'unwind_protect',
-    'unwind_protect_cleanup',
-    'end_unwind_protect'
+    'catch'
   ]);
+
+  // Returns the set of recognised block keywords for this language. Subclasses
+  // (Octave) override to add language-specific keywords like `do`, `until`,
+  // `endfunction`, `unwind_protect`, etc.
+  protected getAllBlockKeywords(): Set<string> {
+    return MatlabBlockParser.MATLAB_BLOCK_KEYWORDS;
+  }
 
   // Returns true when `end` at position is preceded by an expression operator that makes
   // `end` an operand outside any array-indexing context. Such uses (`x = end`, `x = 1:end`,
@@ -161,7 +208,8 @@ export class MatlabBlockParser extends BaseBlockParser {
     const ch = source[i];
     // Operators that put `end` in an expression context.
     // `\` is MATLAB's left-division operator; treat it like other binary operators.
-    if ('+*/^<>&|~:\\'.includes(ch)) return true;
+    // `!` is logical-NOT (Octave) / a unary operator; `!end` puts `end` in operand context.
+    if ('+*/^<>&|~:\\!'.includes(ch)) return true;
     // `=` marks an operator. Both single `=` (assignment) and compound comparison operators
     // (`==`, `>=`, `<=`, `!=`, `~=`) put `end` in expression context (operand): `end` on the
     // RHS / after a comparison is invalid outside indexing, so return true to reject the
@@ -179,7 +227,7 @@ export class MatlabBlockParser extends BaseBlockParser {
       const prev = source[j];
       if (/[a-zA-Z0-9_)\]}]/.test(prev)) return true;
       if (prev === '=' || prev === '(' || prev === ',' || prev === ';' || prev === '[' || prev === '{') return true;
-      if ('+*/^<>&|~:\\'.includes(prev)) return true;
+      if ('+*/^<>&|~:\\!'.includes(prev)) return true;
       return false;
     }
     return false;
@@ -264,6 +312,13 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Classdef section keywords that can also be used as function calls
   private static readonly CLASSDEF_SECTION_KEYWORDS = new Set(['properties', 'methods', 'events', 'enumeration', 'arguments']);
 
+  // Returns true when `position` lies at the start of its line (only whitespace before).
+  // Used by phantom section detection to identify cases where a stray `end` is likely.
+  private isAtLineStartForSectionKeyword(source: string, position: number): boolean {
+    const lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
+    return !/\S/.test(source.slice(lineStart, position));
+  }
+
   // Reject struct field access for block openers (s.if, s.for, s . if, etc)
   // Reject classdef section keywords used as function calls (properties(obj))
   // Reject keywords used as function handles (@if, @while, @function)
@@ -284,6 +339,13 @@ export class MatlabBlockParser extends BaseBlockParser {
         afterPos++;
       }
       if (afterPos < source.length && source[afterPos] === '=' && (afterPos + 1 >= source.length || source[afterPos + 1] !== '=')) {
+        // Phantom: if this section keyword is at line-start, the user may have written
+        // a stray `end` for it. Record the position so matchBlocks can absorb the
+        // stray close. Inside parens/brackets is checked next; we don't want to record
+        // phantoms there because no `end` would be expected.
+        if (this.isAtLineStartForSectionKeyword(source, position) && !this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+          this.phantomSectionPositions.push(position);
+        }
         return false;
       }
       // Reject classdef section keywords inside parentheses or brackets
@@ -325,6 +387,9 @@ export class MatlabBlockParser extends BaseBlockParser {
             nextChar !== ':' &&
             !this.isCommentChar(nextChar)
           ) {
+            // Phantom: line-start section keyword with operator/punctuation after.
+            // The user likely wrote a stray `end` for this section. Record it.
+            this.phantomSectionPositions.push(position);
             return false;
           }
         }
@@ -428,9 +493,13 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Filter out block_middle keywords that are struct field access (s.else, s . case),
-  // used as variable names (e.g., `case = 5`, `else = 1`), or appear inside parens/brackets/
-  // braces (e.g., `foo(case)` where `case` is a name argument).
+  // used as variable names (e.g., `case = 5`, `else = 1`), appear inside parens/brackets/
+  // braces (e.g., `foo(case)` where `case` is a name argument), or are used as
+  // function calls (e.g., `y = case(value)`) or command-syntax arguments (`clear case`).
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Reset phantom positions for this parse — they accumulate via isValidBlockOpen
+    // side effects below.
+    this.phantomSectionPositions = [];
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       if (this.isPrecededByDot(source, token.startOffset, excludedRegions)) {
@@ -441,6 +510,18 @@ export class MatlabBlockParser extends BaseBlockParser {
           return false;
         }
         if (this.isInsideParensOrBrackets(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+        // Reject block_middle keywords used as function calls in expression context
+        // (`y = case(value)`, `z = otherwise(x)`). Treating these as intermediates
+        // would corrupt switch-case structure.
+        if (this.isKeywordUsedAsFunctionCall(source, token.startOffset, token.value)) {
+          return false;
+        }
+        // Reject block_middle keywords used as command-syntax arguments (`clear case`,
+        // `disp otherwise`). The leading identifier is a command and the keyword is a
+        // string argument, not a real intermediate keyword.
+        if (this.isCommandSyntaxArgument(source, token.startOffset, excludedRegions)) {
           return false;
         }
       }
@@ -456,8 +537,22 @@ export class MatlabBlockParser extends BaseBlockParser {
     // `end` (which appears at the same depth) can be skipped without consuming a
     // legitimate inner block's close.
     const pendingSkipDepths: number[] = [];
+    // Snapshot phantom section positions and process them in order. Each phantom
+    // represents a section keyword that was rejected at tokenize but where the user
+    // probably wrote a stray `end` to close it. We skip one `end` per phantom — but
+    // only when doing so doesn't leave a real opener unmatched (defensive: prefer
+    // pairing real openers with real closes).
+    const phantomPositions = [...this.phantomSectionPositions];
+    let phantomCursor = 0;
+    // Pre-compute remaining block_close count from each token index forward.
+    const remainingCloses: number[] = new Array(tokens.length + 1);
+    remainingCloses[tokens.length] = 0;
+    for (let k = tokens.length - 1; k >= 0; k--) {
+      remainingCloses[k] = remainingCloses[k + 1] + (tokens[k].type === 'block_close' ? 1 : 0);
+    }
 
-    for (const token of tokens) {
+    for (let idx = 0; idx < tokens.length; idx++) {
+      const token = tokens[idx];
       switch (token.type) {
         case 'block_open':
           // Classdef section keywords (properties/methods/events/enumeration)
@@ -510,6 +605,21 @@ export class MatlabBlockParser extends BaseBlockParser {
           if (pendingSkipDepths.length > 0 && pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length) {
             pendingSkipDepths.pop();
             break;
+          }
+          // Phantom section keyword skip: when `properties = 5` (or `properties + 1`)
+          // was rejected at tokenize, the user likely wrote a stray `end`. If there's
+          // a phantom position between the most recent block_open's offset and this
+          // close's offset, AND there are enough remaining closes to still close every
+          // open block on the stack, skip this close as the phantom's matching `end`.
+          if (phantomCursor < phantomPositions.length && stack.length > 0) {
+            const topOffset = stack[stack.length - 1].token.startOffset;
+            const phantomOffset = phantomPositions[phantomCursor];
+            // remainingCloses[idx] includes the current close; we need
+            // remainingCloses[idx + 1] >= stack.length to still close every opener.
+            if (phantomOffset > topOffset && phantomOffset < token.startOffset && remainingCloses[idx + 1] >= stack.length) {
+              phantomCursor++;
+              break;
+            }
           }
           const openBlock = stack.pop();
           if (openBlock) {

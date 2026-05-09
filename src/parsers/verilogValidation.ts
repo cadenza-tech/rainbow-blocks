@@ -28,6 +28,61 @@ const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
   program: ['extern']
 };
 
+// Validates 'wait': rejects `wait fork;` statement (SystemVerilog statement that
+// blocks until all forked processes complete; not a control-keyword that opens a
+// begin block). The `wait` keyword in `wait fork;` must NOT trigger CONTROL_KEYWORD
+// chain consumption, otherwise it falsely pairs with a subsequent `end`.
+// Returns true when this `wait` should be treated as a valid block-opener (i.e.,
+// it is NOT the `wait fork;` form), false when it should be rejected.
+export function isValidWaitOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  // Scan forward past 'wait' to detect `fork ;` form.
+  let i = position + 4; // length of 'wait'
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t') {
+      i++;
+      continue;
+    }
+    // Skip excluded regions (comments)
+    let inExcluded = false;
+    for (const region of excludedRegions) {
+      if (i >= region.start && i < region.end) {
+        i = region.end;
+        inExcluded = true;
+        break;
+      }
+    }
+    if (inExcluded) continue;
+    break;
+  }
+  // Check 'fork' as the next token
+  if (source.slice(i, i + 4) !== 'fork') return true;
+  const afterFork = i + 4;
+  if (afterFork < source.length && /[a-zA-Z0-9_$]/.test(source[afterFork])) return true;
+  // Skip whitespace/comments after 'fork'
+  let j = afterFork;
+  while (j < source.length) {
+    const ch = source[j];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      j++;
+      continue;
+    }
+    let inExcluded = false;
+    for (const region of excludedRegions) {
+      if (j >= region.start && j < region.end) {
+        j = region.end;
+        inExcluded = true;
+        break;
+      }
+    }
+    if (inExcluded) continue;
+    break;
+  }
+  // `wait fork;` is the rejected form
+  if (j < source.length && source[j] === ';') return false;
+  return true;
+}
+
 // Validates 'fork': rejects 'disable fork' and 'wait fork' statements
 export function isValidForkOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   let j = position - 1;

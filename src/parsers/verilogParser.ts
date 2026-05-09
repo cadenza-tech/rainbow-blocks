@@ -22,6 +22,7 @@ import {
   isPrecededByLabelColon,
   isPrecededByModifierKeyword,
   isValidForkOpen,
+  isValidWaitOpen,
   scanForBeginAfterControl
 } from './verilogValidation';
 
@@ -230,7 +231,21 @@ export class VerilogBlockParser extends BaseBlockParser {
     for (const argMatch of source.matchAll(directiveArgPattern)) {
       if (this.isInExcludedRegion(argMatch.index, excludedRegions)) continue;
       let argStart = argMatch.index + argMatch[0].length;
-      while (argStart < source.length && (source[argStart] === ' ' || source[argStart] === '\t')) argStart++;
+      // Skip whitespace (space/tab) and excluded regions (block comments) between
+      // the directive and the macro name. Per IEEE 1800-2017, block comments are
+      // valid whitespace, so `\`ifdef /* comment */ MACRO` is a valid directive form.
+      while (argStart < source.length) {
+        if (source[argStart] === ' ' || source[argStart] === '\t') {
+          argStart++;
+          continue;
+        }
+        const region = this.findExcludedRegionAt(argStart, excludedRegions);
+        if (region) {
+          argStart = region.end;
+          continue;
+        }
+        break;
+      }
       let argEnd = argStart;
       while (argEnd < source.length && /[a-zA-Z0-9_]/.test(source[argEnd])) argEnd++;
       if (argEnd > argStart) {
@@ -287,8 +302,9 @@ export class VerilogBlockParser extends BaseBlockParser {
         if (token.startOffset > 0 && source[token.startOffset - 1] === '`') {
           return false;
         }
-        // Reject scope-resolved `pkg::default` (it's a qualified identifier, not a case label)
-        if (token.startOffset >= 2 && source[token.startOffset - 1] === ':' && source[token.startOffset - 2] === ':') {
+        // Reject scope-resolved `pkg::default` (it's a qualified identifier, not a case label).
+        // Also handles whitespace-separated `pkg :: default`.
+        if (isPrecededByScopeResolution(source, token.startOffset)) {
           return false;
         }
         // Reject default inside `'{...}` assignment pattern
@@ -311,25 +327,12 @@ export class VerilogBlockParser extends BaseBlockParser {
         }
         return j < source.length && source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== ':');
       }
-      // Reject block_open/block_close keywords used as field names in `'{key: value}`
+      // Reject block_open/block_close keywords inside `'{...}` assignment patterns.
+      // These are field name positions or expressions that can never legitimately
+      // open or close a block, regardless of whether a `:` follows.
       if (token.type === 'block_open' || token.type === 'block_close') {
         if (this.isInsideAssignmentPattern(source, token.startOffset, excludedRegions)) {
-          let j = token.endOffset;
-          while (j < source.length) {
-            if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
-              j++;
-              continue;
-            }
-            const region = this.findExcludedRegionAt(j, excludedRegions);
-            if (region) {
-              j = region.end;
-              continue;
-            }
-            break;
-          }
-          if (j < source.length && source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== ':')) {
-            return false;
-          }
+          return false;
         }
       }
       return true;
@@ -441,8 +444,9 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject keywords preceded by :: (scope resolution operator like pkg::begin)
-    if (position >= 2 && source[position - 1] === ':' && source[position - 2] === ':') {
+    // Reject keywords preceded by :: (scope resolution operator like pkg::begin),
+    // including whitespace-separated forms like `pkg :: begin`.
+    if (isPrecededByScopeResolution(source, position)) {
       return false;
     }
 
@@ -462,6 +466,16 @@ export class VerilogBlockParser extends BaseBlockParser {
         return false;
       }
       // Fall through to label colon and other checks below
+    }
+
+    // Reject `wait fork;` — this is a SystemVerilog statement (wait for forked
+    // processes), not a control keyword opening a block. Without this check the
+    // generic CONTROL_KEYWORDS chain finds `fork` after `wait` and falsely treats
+    // `wait` as opening a block that pairs with a subsequent `end`.
+    if (keyword === 'wait') {
+      if (!isValidWaitOpen(source, position, excludedRegions)) {
+        return false;
+      }
     }
 
     // Reject 'property' or 'sequence' when preceded by assertion verbs

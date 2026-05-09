@@ -69,6 +69,56 @@ export class OctaveBlockParser extends MatlabBlockParser {
     blockMiddle: ['else', 'elseif', 'case', 'otherwise', 'catch', 'unwind_protect_cleanup']
   };
 
+  // Octave-specific block keywords for command-syntax filtering. Includes MATLAB
+  // base keywords plus Octave-only ones (do, until, endfunction, ...).
+  private static readonly OCTAVE_BLOCK_KEYWORDS = new Set([
+    'function',
+    'if',
+    'for',
+    'while',
+    'switch',
+    'try',
+    'parfor',
+    'spmd',
+    'classdef',
+    'methods',
+    'properties',
+    'events',
+    'enumeration',
+    'arguments',
+    'end',
+    'else',
+    'elseif',
+    'case',
+    'otherwise',
+    'catch',
+    // Octave-specific
+    'do',
+    'until',
+    'unwind_protect',
+    'unwind_protect_cleanup',
+    'endfunction',
+    'endif',
+    'endfor',
+    'endwhile',
+    'endswitch',
+    'end_try_catch',
+    'endparfor',
+    'end_unwind_protect',
+    'endclassdef',
+    'endmethods',
+    'endproperties',
+    'endevents',
+    'endenumeration',
+    'endarguments',
+    'endspmd'
+  ]);
+
+  // Override to use Octave-specific keyword set (includes `do`, `until`, etc).
+  protected override getAllBlockKeywords(): Set<string> {
+    return OctaveBlockParser.OCTAVE_BLOCK_KEYWORDS;
+  }
+
   // Octave uses # as a comment character in addition to %
   protected override isCommentChar(char: string): boolean {
     return char === '#' || char === '%';
