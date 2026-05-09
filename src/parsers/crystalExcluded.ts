@@ -350,6 +350,15 @@ function skipMacroString(source: string, pos: number, quote: string): number {
           i++;
           continue;
         }
+        // Line comment inside interpolation: skip to end of line. `#{` is nested
+        // interpolation (not a comment) and is handled by the nested-string branch
+        // above when needed; here a bare `#` starts a comment.
+        if (source[i] === '#' && (i + 1 >= source.length || source[i + 1] !== '{')) {
+          while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+            i++;
+          }
+          continue;
+        }
         if (source[i] === '{') {
           depth++;
         } else if (source[i] === '}') {
