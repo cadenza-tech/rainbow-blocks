@@ -69,12 +69,14 @@ export class LuaBlockParser extends BaseBlockParser {
       // .. is string concatenation operator, not field access
       if (i >= 1 && source[i - 1] === '.') return false;
       // Trailing dot after a number literal (decimal or hex) is not field access.
-      // We walk back through identifier-like characters and validate the swept
-      // range as a Lua number prefix. `1A`, `1e5`, `0xZ` etc. do not match the
-      // valid prefix grammar, so a trailing `.` after them is field access.
+      // We walk back through identifier-like characters AND `.` to capture the
+      // full numeric context, then validate it as a Lua number prefix. The
+      // validation regex disallows `.` in the swept range, so numbers that
+      // already contain a decimal point (e.g., `3.14.end`, `1.5e2.end`) are
+      // rejected because adding another `.` would be invalid Lua syntax.
       if (i >= 1 && /[0-9a-fA-F]/.test(source[i - 1])) {
         let k = i - 1;
-        while (k > 0 && /[a-zA-Z0-9_]/.test(source[k - 1])) {
+        while (k > 0 && /[a-zA-Z0-9_.]/.test(source[k - 1])) {
           k--;
         }
         if (LUA_NUMBER_TRAILING_DOT_PREFIX.test(source.slice(k, i))) {
