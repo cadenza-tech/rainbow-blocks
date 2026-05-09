@@ -1945,6 +1945,67 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: block_open after binary operator is not block_open', () => {
+    test('should not treat for after == as block_open', () => {
+      // `x == for;` — `for` is on the RHS of a comparison, an operand context. Treating it
+      // as a real block opener would consume the next `end` and break outer pairing.
+      const source = 'function f\n  x == for;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat parfor after + as block_open', () => {
+      const source = 'function f\n  x = parfor + 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat for after ~ (logical NOT) as block_open', () => {
+      const source = 'function f\n  ~for;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat if after === (triple equals) as block_open', () => {
+      // Triple equals (===) is invalid MATLAB but should still place if in operand context.
+      const source = 'function f\n  x === if;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat while after >= as block_open', () => {
+      const source = 'function f\n  x >= while;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat switch after <= as block_open', () => {
+      const source = 'function f\n  x <= switch;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat try after ~= as block_open', () => {
+      const source = 'function f\n  x ~= try;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat for after * as block_open', () => {
+      const source = 'function f\n  x = a * for;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat top-level for at line start as block opener', () => {
+      // Sanity check: real for at statement start should still be recognized.
+      const source = 'for i = 1:5\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: command-syntax argument is not block_open', () => {
     test('should treat clear if as command-syntax (if is string argument)', () => {
       // `clear if` is command-syntax: `clear` is a command and `if` is its string argument.
