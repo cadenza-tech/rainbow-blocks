@@ -66,6 +66,47 @@ function isPrecededByScopeResolution(source: string, position: number): boolean 
   return i >= 1 && source[i] === ':' && source[i - 1] === ':';
 }
 
+// Returns true when a keyword starting at `position` (length `keywordLength`) is followed
+// by a single `:` (not `::`), indicating the keyword is being used as a label name.
+// e.g., `wait : begin`, `if : begin`. Skips whitespace and block comments only.
+// Does NOT skip escaped identifiers (`\name`) because they are label names — they
+// represent a separate token between the keyword and the label colon
+// (e.g., `always \my_label :` is `<keyword> <label> :`, not `<label> :`).
+function isFollowedByLabelColon(
+  source: string,
+  position: number,
+  keywordLength: number,
+  excludedRegions: ExcludedRegion[]
+): boolean {
+  let i = position + keywordLength;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      i++;
+      continue;
+    }
+    // Skip block comments only (regions starting with `/*`). Other excluded regions
+    // such as escaped identifiers (`\name`) and strings are real tokens that break
+    // the `<keyword> :` adjacency and must not be skipped.
+    let skipped = false;
+    for (const region of excludedRegions) {
+      if (i >= region.start && i < region.end) {
+        if (source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*') {
+          i = region.end;
+          skipped = true;
+        }
+        break;
+      }
+    }
+    if (skipped) continue;
+    break;
+  }
+  if (i >= source.length || source[i] !== ':') return false;
+  // Reject `::` (scope resolution operator)
+  if (i + 1 < source.length && source[i + 1] === ':') return false;
+  return true;
+}
+
 // Control keywords that can precede begin and are closed together with it
 const CONTROL_KEYWORDS = [
   'always',
@@ -527,6 +568,14 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject keywords used as block labels (e.g., begin : module, fork : begin)
     if (isPrecededByLabelColon(source, position, excludedRegions, this.keywords, this.validationCallbacks)) {
+      return false;
+    }
+
+    // Reject control keywords used as a label name (e.g., `wait : begin`, `if : begin`).
+    // The keyword is the label, not a control-keyword opener. Restrict to CONTROL_KEYWORDS
+    // because non-control block openers (e.g., `module`, `class`) followed by `:` are not
+    // typical label patterns and may have legitimate syntax meanings (e.g., parameter `:`).
+    if (CONTROL_KEYWORDS.includes(keyword) && isFollowedByLabelColon(source, position, keyword.length, excludedRegions)) {
       return false;
     }
 
