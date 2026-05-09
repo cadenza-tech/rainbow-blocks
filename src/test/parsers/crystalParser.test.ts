@@ -4000,6 +4000,16 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: failed heredoc with quote not closed on opener line', () => {
+    test('should not let orphan quote swallow downstream code', () => {
+      const source = 'x = <<-"\nclass Foo\nend\n"\nif true\nend';
+      const pairs = parser.parse(source);
+      // Only the if/end pair on lines 4-5 should be detected. The malformed
+      // <<-" opener must not produce a stray string region that captures code.
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: property with multiple comma-separated names', () => {
     test('should not detect end as block_close in property foo, end', () => {
       const source = 'class Foo\n  property foo, end\nend';
