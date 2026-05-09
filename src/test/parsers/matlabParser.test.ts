@@ -1945,5 +1945,88 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: command-syntax argument is not block_open', () => {
+    test('should treat clear if as command-syntax (if is string argument)', () => {
+      // `clear if` is command-syntax: `clear` is a command and `if` is its string argument.
+      // The `if` here must not be tokenized as block_open; otherwise the inner `if/end`
+      // pair is broken and the outer `function/end` pairing is destroyed.
+      // Lines: 0 = function f, 1 = clear if, 2 = if x, 3 = end (inner), 4 = outer end.
+      const source = 'function f\n  clear if\n  if x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.openKeyword.line, 2, 'if should be the line-2 if, not the command-syntax arg');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+
+    test('should treat clear for as command-syntax (for is string argument)', () => {
+      const source = 'function f\n  clear for\n  for i = 1:5\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.line, 2);
+    });
+
+    test('should treat disp while as command-syntax (while is string argument)', () => {
+      const source = 'function f\n  disp while\n  while x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should treat clear switch as command-syntax (switch is string argument)', () => {
+      const source = 'function f\n  clear switch\n  switch x\n    case 1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 5);
+    });
+
+    test('should treat clear try as command-syntax (try is string argument)', () => {
+      const source = 'function f\n  clear try\n  try\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 5);
+    });
+
+    test('should treat clear function as command-syntax (function is string argument)', () => {
+      const source = 'function outer()\n  clear function\n  if x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      // outer function should pair with the LAST end (line 4), not the inner end (line 3)
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should treat clear classdef as command-syntax (classdef is string argument)', () => {
+      const source = 'function f\n  clear classdef\n  if x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should treat clear parfor as command-syntax (parfor is string argument)', () => {
+      const source = 'function f\n  clear parfor\n  parfor i = 1:5\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should still treat top-level if at line start as block opener', () => {
+      // Sanity check: real if at statement start should still be recognized.
+      const source = 'if x\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
