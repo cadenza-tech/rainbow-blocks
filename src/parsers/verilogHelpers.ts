@@ -279,12 +279,78 @@ export function matchUndefDirective(source: string, pos: number): ExcludedRegion
 
 // Excludes `pragma directive contents to end of line. Pragma arguments may contain
 // keyword-like tokens (e.g. `pragma protect begin / end) that must not be tokenized.
+// Special case: `pragma protect begin opens a protected region that extends to the
+// matching `pragma protect end (IEEE 1800-2017 §28.10). The entire region between
+// them is excluded so block keywords inside protected source are not tokenized.
 export function matchPragmaDirective(source: string, pos: number): ExcludedRegion {
   let i = pos + 7;
   while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
     i++;
   }
-  return { start: pos, end: i };
+  const lineEnd = i;
+  // Check whether this `pragma directive is `pragma protect begin (with optional whitespace).
+  // If so, extend the excluded region through the matching `pragma protect end line.
+  if (isPragmaProtectBegin(source, pos + 7, lineEnd)) {
+    const protectEnd = findPragmaProtectEnd(source, lineEnd);
+    if (protectEnd !== -1) {
+      return { start: pos, end: protectEnd };
+    }
+    // No matching end: exclude through end of source (defensive)
+    return { start: pos, end: source.length };
+  }
+  return { start: pos, end: lineEnd };
+}
+
+// Returns true when the `pragma directive arguments contain `protect begin` as
+// the first significant tokens (after whitespace), with optional trailing args.
+function isPragmaProtectBegin(source: string, argStart: number, argEnd: number): boolean {
+  let i = argStart;
+  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  if (source.slice(i, i + 7) !== 'protect') return false;
+  i += 7;
+  if (i >= argEnd || !(source[i] === ' ' || source[i] === '\t')) return false;
+  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  if (source.slice(i, i + 5) !== 'begin') return false;
+  i += 5;
+  // 'begin' must be followed by word boundary (space, tab, end of line/args, comma/semicolon/etc)
+  if (i < argEnd && /[a-zA-Z0-9_$]/.test(source[i])) return false;
+  return true;
+}
+
+// Searches for `pragma protect end (with optional whitespace) starting from `from`.
+// Returns the position immediately after the matching directive line (i.e., the position
+// of the line terminator), or -1 if not found.
+function findPragmaProtectEnd(source: string, from: number): number {
+  const pattern = /`pragma\b/g;
+  pattern.lastIndex = from;
+  let match: RegExpExecArray | null = pattern.exec(source);
+  while (match !== null) {
+    const lineStart = match.index + match[0].length;
+    let lineEnd = lineStart;
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+      lineEnd++;
+    }
+    if (isPragmaProtectEnd(source, lineStart, lineEnd)) {
+      return lineEnd;
+    }
+    pattern.lastIndex = lineEnd;
+    match = pattern.exec(source);
+  }
+  return -1;
+}
+
+// Returns true when the `pragma directive arguments are `protect end` (with optional whitespace and trailing args).
+function isPragmaProtectEnd(source: string, argStart: number, argEnd: number): boolean {
+  let i = argStart;
+  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  if (source.slice(i, i + 7) !== 'protect') return false;
+  i += 7;
+  if (i >= argEnd || !(source[i] === ' ' || source[i] === '\t')) return false;
+  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  if (source.slice(i, i + 3) !== 'end') return false;
+  i += 3;
+  if (i < argEnd && /[a-zA-Z0-9_$]/.test(source[i])) return false;
+  return true;
 }
 
 // Excludes a `MACRO(arg, arg, ...) macro invocation including the argument list.

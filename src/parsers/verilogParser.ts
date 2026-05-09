@@ -76,9 +76,11 @@ const CONTROL_KEYWORDS = [
   'if',
   'else',
   'for',
+  'foreach',
   'while',
   'repeat',
-  'forever'
+  'forever',
+  'wait'
 ];
 
 // SystemVerilog data type and qualifier keywords. When one of these immediately precedes
@@ -168,9 +170,11 @@ export class VerilogBlockParser extends BaseBlockParser {
       'if',
       'else',
       'for',
+      'foreach',
       'while',
       'repeat',
       'forever',
+      'wait',
       // SystemVerilog constructs
       'class',
       'interface',
@@ -640,11 +644,16 @@ export class VerilogBlockParser extends BaseBlockParser {
     // block keywords (begin/end, case/endcase, etc.) inside macro args are not
     // mistakenly tokenized. Specific directives (`define/`undef/`pragma/`include)
     // are matched by the dedicated handlers above and do not reach this branch.
+    // Per IEEE 1800-2017 §22.5.1, whitespace (space/tab) is permitted between the
+    // macro identifier and the opening paren of the actual argument list. Newlines
+    // are NOT permitted because the argument list must start on the same logical line.
     if (char === '`' && pos + 1 < source.length && /[a-zA-Z_]/.test(source[pos + 1])) {
       let j = pos + 1;
       while (j < source.length && /[a-zA-Z0-9_$]/.test(source[j])) j++;
-      if (j < source.length && source[j] === '(') {
-        return matchMacroArgList(source, pos, j);
+      let parenScan = j;
+      while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+      if (parenScan < source.length && source[parenScan] === '(') {
+        return matchMacroArgList(source, pos, parenScan);
       }
     }
 

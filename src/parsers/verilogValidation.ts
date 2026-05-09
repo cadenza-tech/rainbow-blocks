@@ -12,8 +12,10 @@ export interface VerilogValidationCallbacks {
 // Assertion verb keywords that can precede 'property' or 'sequence'
 const ASSERTION_VERBS = ['assert', 'assume', 'cover', 'expect', 'restrict'];
 
-// Qualifier keywords that can appear between 'extern' and the target keyword
-const QUALIFIER_KEYWORDS = new Set(['protected', 'local', 'static', 'virtual', 'forkjoin']);
+// Qualifier keywords that can appear between 'extern' and the target keyword.
+// Note: 'const' and 'pure' cannot precede `extern function`/`extern task` per
+// IEEE 1800-2017 grammar (LRM A.1.6 / A.2.6), so they are not included here.
+const QUALIFIER_KEYWORDS = new Set(['protected', 'local', 'static', 'automatic', 'virtual', 'forkjoin']);
 
 // Modifier keywords that indicate non-block usage per keyword
 const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
