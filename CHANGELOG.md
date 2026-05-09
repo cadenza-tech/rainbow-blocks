@@ -5,6 +5,68 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.45] - 2026-05-10
+
+### Fixed
+
+- Ada: Recognize Unicode whitespace (NBSP, VT, FF, U+0085, U+1680, U+2000-200A, U+2028, U+2029, U+202F, U+205F, U+3000) in `or else`/`and then` short-circuit detection
+- Ada: Avoid forced fallback to last opener for unmatched compound end (`end loop`/`end procedure` etc.) - leave them unpaired per anchor-set principle
+- Ada: Collapse malformed `Test_and then`/`1and then` short-circuit to a single `then` intermediate
+- AppleScript: Skip `block_middle` keywords (`else`, `else if`, `on error`) inside multi-line record literals via brace-depth-aware `isAtRecordKeyPosition`
+- AppleScript: Skip `block_close` keywords (`end if`, `end tell`, etc.) inside multi-line record literals to prevent early closure of enclosing blocks
+- AppleScript: Accept pipe identifiers (`|my handler|`) and Unicode whitespace, `¬\<NL>` continuation, and block comments in handler declaration probe
+- Bash: Accept `!`, `*`, `?` as heredoc terminator characters (`<<!`, `<<*`, `<<?`)
+- Bash: Recognize escaped backslash (`<<\\EOF`) in heredoc delimiter
+- Bash: Support line continuation (`<<\<NL>EOF`) in heredoc delimiter
+- Bash: Handle chained equals in env var prefix (`A=B=C cmd`) for command-position detection
+- Bash: Skip brace expansion when scanning env var prefix (`var={a,b,c} cmd`)
+- COBOL: Skip reserved-word filenames in `COPY` statement as `block_open` (e.g., `COPY IF.` no longer pairs with subsequent `END-IF`)
+- COBOL: Skip excluded regions (`*>` inline comments, `>>` directives) in expression-context backward scan when filtering ELSE/WHEN
+- Crystal: Recognize `class_property`, `class_getter`, `class_setter` macros in `isAfterPropertyMacro`
+- Crystal: Skip keywords as comma-separated property names (`property foo, end`)
+- Crystal: Disable escape handling when backslash is percent-literal delimiter in macro templates
+- Crystal: Skip backtick literals inside macro string interpolation depth tracking
+- Crystal: Skip line comments inside macro string interpolation depth tracking
+- Crystal: Skip backslash line continuations in property macro detection
+- Crystal: Recognize quoted heredoc identifiers with Unicode characters (`<<-"αβγ"`)
+- Crystal: Handle orphan closing quote in failed heredoc opener across multiple lines
+- Elixir: Skip chained `do/end` value heuristic for definition keywords (`def`/`defp`/`defmacro`/`defguard`/`defmodule`) so they no longer become `block_open` when followed by another `def foo do/end` pattern
+- Erlang: Skip stray braces in `-define` body forward scan when looking for closing `)`
+- Fortran: Validate continuation-form compound end with full match length (not normalized keyword length) so `end &\n if = 5` is correctly rejected as block_close
+- Fortran: Tokenize `case default` and `rank default` as compound intermediates
+- Fortran: Reject `change team` without parenthesized team-value
+- Fortran: Reject `where` and `forall` with empty parens
+- Fortran: Reject `select case`, `rank`, and `type` with empty parens
+- Julia: Treat string/char/symbol/command literals as value expressions before generator `for` (e.g., `g("x" for i in 1:10)` is now correctly recognized as generator)
+- Julia: Recognize BMP-outside Unicode characters (surrogate pairs) as string macro prefix
+- Julia: Skip `end` as `block_close` after `<:` and `>:` subtype operators
+- Lua: Skip `goto`-target keywords (`goto for`/`goto while`) in `isDoPartOfLoop` outer scan
+- Lua: Cache for/while positions to avoid super-quadratic `isDoPartOfLoop` performance
+- Lua: Validate trailing-dot numeric prefix to reject invalid identifiers like `1A.end`
+- Lua: Extend trailing-dot walk through `.` to reject numbers with double decimal (`1.5e2.end`)
+- MATLAB: Skip `block_open` keywords used as command-syntax arguments (`clear if`, `disp for`)
+- MATLAB: Skip `block_open` keywords preceded by binary operators (`x == for`, `x = parfor + 1`)
+- MATLAB: Skip `block_middle` keywords used as RHS identifiers (`y = case;`)
+- MATLAB: Treat function handles with whitespace after `@` as exclusion (`@ for`)
+- MATLAB: Walk past block keywords in multi-arg command-syntax detection (`disp end case`)
+- Octave: Inherit phantom section end skip logic in `matchBlocks` (classdef with stray `properties = 5; end`)
+- Octave: Phantom-skip stray `end` after rejected `arguments(obj)` call
+- Octave: Reject `do` as command-syntax argument (`disp do; do ... until ...`)
+- Octave: Allow VT and FF as whitespace around block comment delimiters (MATLAB-symmetric)
+- Octave: Reject duplicate `unwind_protect_cleanup` in same `unwind_protect` block
+- Pascal: Skip `until` used as case label inside `repeat` block
+- Pascal: Skip `end` used as case label inside `case-of` block
+- Pascal: Skip `object`, `interface`, and `class` in case label after `=` (`Z = object: ...`)
+- Pascal: Reject duplicate and mutually exclusive `try` intermediates (`finally`+`finally`, `finally`+`except`)
+- Ruby: Verify heredoc via `matchHeredoc` when filtering keywords after `<<` (no longer drops `if`/`end` after `1<<if cond`)
+- Ruby: Treat pattern-match `in` as intermediate only inside `case` (Ruby 3.0+ `if x in 1` no longer adds `in` to if intermediates)
+- Verilog: Skip packed dimensions (`[N:M]`) and block comments before data type identifier filter
+- Verilog: Reject control keywords (`wait`, `if`, `for`, etc.) used as label names (`wait : begin`)
+- Verilog: Limit unterminated `pragma protect begin` to single line excluded region (preserves downstream code parsing)
+- Verilog: Suppress block keywords inside generic brace expressions (`{begin: 1}`)
+- VHDL: Skip `is` in `attribute_specification` with entity_class on separate line
+- VHDL: Allow newlines between `null` and semicolon in null procedure declaration
+
 ## [1.1.44] - 2026-05-09
 
 ### Fixed
@@ -1723,6 +1785,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.45]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.44...v1.1.45
 [1.1.44]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.43...v1.1.44
 [1.1.43]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.42...v1.1.43
 [1.1.42]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.41...v1.1.42
