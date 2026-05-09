@@ -368,11 +368,12 @@ export class VerilogBlockParser extends BaseBlockParser {
         }
         return j < source.length && source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== ':');
       }
-      // Reject block_open/block_close keywords inside `'{...}` assignment patterns.
-      // These are field name positions or expressions that can never legitimately
-      // open or close a block, regardless of whether a `:` follows.
+      // Reject block_open/block_close keywords inside any `{...}` brace expression.
+      // This covers `'{...}` assignment patterns, `{a, b, c}` concatenation, streaming
+      // operators, and any other brace context where reserved-word block keywords
+      // cannot legitimately open or close a block.
       if (token.type === 'block_open' || token.type === 'block_close') {
-        if (this.isInsideAssignmentPattern(source, token.startOffset, excludedRegions)) {
+        if (this.isInsideBraceExpression(source, token.startOffset, excludedRegions)) {
           return false;
         }
       }
@@ -506,6 +507,30 @@ export class VerilogBlockParser extends BaseBlockParser {
         if (braceDepth === 0) {
           // Innermost unmatched `{` — check for preceding `'`
           return i > 0 && source[i - 1] === "'";
+        }
+        braceDepth--;
+      }
+    }
+    return false;
+  }
+
+  // Detects whether position is inside any `{...}` brace expression, regardless of
+  // whether the brace is preceded by an apostrophe. This includes concatenation
+  // operators (`{a, b, c}`), streaming operators, and any expression context where
+  // SystemVerilog block keywords cannot legitimately appear as control-flow openers.
+  // Walks back tracking brace depth; returns true at the innermost unmatched `{`.
+  private isInsideBraceExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let braceDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '}') {
+        braceDepth++;
+      } else if (ch === '{') {
+        if (braceDepth === 0) {
+          return true;
         }
         braceDepth--;
       }
