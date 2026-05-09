@@ -382,11 +382,18 @@ export class PascalBlockParser extends BaseBlockParser {
   // Reject any close keyword (end/until) immediately after `.` (field/property access),
   // `@` (address-of operator like `@end`), `&` (FreePascal escaped-keyword identifier),
   // `$` (hex-literal prefix like `$end`), or `#` (character-constant prefix like `#end`).
-  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  // Also reject `until` used as a case-label inside `case ... of`.
+  protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isPrecededByFieldDot(source, position, excludedRegions)) return false;
     if (position > 0) {
       const prev = source[position - 1];
       if (prev === '@' || prev === '&' || prev === '$' || prev === '#') return false;
+    }
+    // Case label: `case X of until: foo;` — `until` belongs to the case label expression,
+    // not a block close. Without this check, the inner `until` consumes the outer `repeat`
+    // and breaks repeat-until pairing.
+    if (keyword === 'until' && this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
+      return false;
     }
     return true;
   }
