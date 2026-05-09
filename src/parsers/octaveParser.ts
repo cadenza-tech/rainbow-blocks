@@ -81,15 +81,85 @@ export class OctaveBlockParser extends MatlabBlockParser {
       return false;
     }
     if (keyword === 'do') {
-      // Skip whitespace between `do` and `(` so `do (args)` is also rejected as a
-      // function-call form, not a do/until block.
+      // Skip whitespace and line continuations (... or \) between `do` and `(` so
+      // `do (args)`, `do ...\n(args)`, and `do \\\n(args)` are also rejected as a
+      // function-call form, not a do/until block. Also reject `do[...]` and `do{...}`
+      // (indexing / cell-access forms) for the same reason.
       let j = position + keyword.length;
-      while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
-      if (source[j] === '(') {
+      while (j < source.length) {
+        if (source[j] === ' ' || source[j] === '\t') {
+          j++;
+          continue;
+        }
+        const lineCont = source.slice(j).match(LINE_CONTINUATION_PATTERN);
+        if (lineCont) {
+          j += lineCont[0].length;
+          continue;
+        }
+        const bsCont = source.slice(j).match(BACKSLASH_CONTINUATION_PATTERN);
+        if (bsCont) {
+          j += bsCont[0].length;
+          continue;
+        }
+        break;
+      }
+      if (j < source.length && (source[j] === '(' || source[j] === '[' || source[j] === '{')) {
         return false;
       }
     }
+    if (keyword === 'arguments' && this.isArgumentsFunctionCall(source, position, excludedRegions)) {
+      return false;
+    }
     return super.isValidBlockOpen(keyword, source, position, excludedRegions);
+  }
+
+  // Returns true when `arguments(...)` looks like a function call rather than an
+  // arguments block attribute list. Heuristics:
+  //   * Followed by `;` after `)` → almost always a function call (`arguments(obj);`).
+  //   * Inside the parens, the content is something other than the recognised
+  //     argument attribute keywords (Input / Output / Repeating, optionally with
+  //     trailing whitespace/comma) → treat as a function call.
+  // Empty parens `arguments()` and the recognised attributes preserve normal
+  // block-opener semantics so existing MATLAB-style attribute lists keep working.
+  private isArgumentsFunctionCall(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position + 'arguments'.length;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== '(') return false;
+    // Find the matching `)` ignoring excluded regions and tracking nesting.
+    let depth = 1;
+    let k = j + 1;
+    while (k < source.length && depth > 0) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        if (region) {
+          k = region.end;
+          continue;
+        }
+      }
+      const ch = source[k];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (depth === 0) break;
+      k++;
+    }
+    if (depth !== 0) return false;
+    const inner = source.slice(j + 1, k).trim();
+    // Pattern 1: trailing `;` after `)` (statement-call form, e.g. `arguments(obj);`)
+    let after = k + 1;
+    while (after < source.length && (source[after] === ' ' || source[after] === '\t' || source[after] === '\v' || source[after] === '\f')) after++;
+    if (after < source.length && source[after] === ';') {
+      return true;
+    }
+    // Pattern 2: inner does not look like attribute keywords. Recognised attribute
+    // forms are `Input` / `Output` / `Repeating` (case-insensitive), optionally
+    // followed by `,` and another attribute. Empty parens are also treated as
+    // attribute form (block opener) for backwards compatibility.
+    if (inner.length === 0) return false;
+    const attrPattern = /^(?:input|output|repeating)(?:\s*,\s*(?:input|output|repeating))*$/i;
+    if (!attrPattern.test(inner)) {
+      return true;
+    }
+    return false;
   }
 
   // Reject block close keywords used as variable names (end = 5, endif = 1, etc.)
@@ -103,7 +173,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // closing a block.
     const lowerKw = keyword.toLowerCase();
     const isTypedClose = (lowerKw !== 'end' && lowerKw.startsWith('end')) || lowerKw === 'until';
-    if (isTypedClose && !this.isAtStatementLeadingPosition(source, position)) {
+    if (isTypedClose && !this.isAtStatementLeadingPosition(source, position, excludedRegions)) {
       return false;
     }
     // Typed-end keywords (endif/endfor/endwhile/...) must be the only token on their
@@ -112,7 +182,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // `until` is excluded because it requires a condition expression (`until cond`).
     if (isTypedClose && lowerKw !== 'until') {
       let after = position + keyword.length;
-      while (after < source.length && (source[after] === ' ' || source[after] === '\t')) after++;
+      while (after < source.length && (source[after] === ' ' || source[after] === '\t' || source[after] === '\v' || source[after] === '\f')) after++;
       if (after < source.length) {
         const ch = source[after];
         if (ch !== '\n' && ch !== '\r' && ch !== ';' && ch !== ',' && ch !== '%' && ch !== '#') {
@@ -127,9 +197,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // a `;`/`,` separator, or at the beginning of the source). When the previous line
   // ended with a `...` or `\` continuation, the current line is logically a continuation
   // of the previous statement, so a typed-end keyword there is mid-expression, not leading.
-  private isAtStatementLeadingPosition(source: string, position: number): boolean {
+  // `...` or `\` appearing inside an excluded region (comment / string) is not a real
+  // continuation — it is just text — so it is ignored.
+  private isAtStatementLeadingPosition(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\v' || source[i] === '\f')) i--;
     if (i < 0) return true;
     const ch = source[i];
     if (ch === ';' || ch === ',') return true;
@@ -139,12 +211,24 @@ export class OctaveBlockParser extends MatlabBlockParser {
       let nlEnd = i;
       if (ch === '\n' && i > 0 && source[i - 1] === '\r') nlEnd = i - 1;
       let scan = nlEnd - 1;
-      while (scan >= 0 && (source[scan] === ' ' || source[scan] === '\t')) scan--;
+      while (scan >= 0 && (source[scan] === ' ' || source[scan] === '\t' || source[scan] === '\v' || source[scan] === '\f')) scan--;
       if (scan >= 2 && source[scan] === '.' && source[scan - 1] === '.' && source[scan - 2] === '.') {
-        return false;
+        // `...` is recorded as an excluded region whose `start` is the first `.` of the
+        // continuation. If we find a region containing `scan - 2` whose start is *before*
+        // `scan - 2`, the `...` is text inside a comment/string, not a real continuation.
+        const region = excludedRegions ? this.findExcludedRegionAt(scan - 2, excludedRegions) : null;
+        if (!region || region.start === scan - 2) {
+          return false;
+        }
       }
       if (scan >= 0 && source[scan] === '\\') {
-        return false;
+        // Same logic as `...` above: a real backslash continuation has its excluded
+        // region starting exactly at the `\`. A `\` text inside an earlier comment/string
+        // has a region that started before this position.
+        const region = excludedRegions ? this.findExcludedRegionAt(scan, excludedRegions) : null;
+        if (!region || region.start === scan) {
+          return false;
+        }
       }
       return true;
     }
