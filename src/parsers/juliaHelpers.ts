@@ -608,14 +608,46 @@ export function hasCommaAtDepthZero(source: string, start: number, end: number, 
   return false;
 }
 
-// Checks if there is only whitespace (or excluded regions like comments) between two positions
+// Finds the excluded region containing pos using binary search; returns null if not found
+function findExcludedRegionAt(pos: number, regions: ExcludedRegion[]): ExcludedRegion | null {
+  let left = 0;
+  let right = regions.length - 1;
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const region = regions[mid];
+    if (pos >= region.start && pos < region.end) {
+      return region;
+    }
+    if (pos < region.start) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
+    }
+  }
+  return null;
+}
+
+// Checks if there is only whitespace (or comment-style excluded regions) between two positions.
+// Comments are treated as whitespace-equivalent. String/char/symbol/command literals are
+// value-bearing expressions and cause this to return false (they should NOT be considered
+// whitespace, e.g., `("x" for i in iter)` is a generator with a value before `for`).
 export function isOnlyWhitespaceBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[] = []): boolean {
-  for (let i = start; i < end; i++) {
-    if (isInExcludedRegion(i, excludedRegions)) {
+  let i = start;
+  while (i < end) {
+    const region = findExcludedRegionAt(i, excludedRegions);
+    if (region) {
+      // Comments start with '#' (single-line `#` or multi-line `#=`); treat as whitespace.
+      // All other excluded regions (strings, char literals, symbols, command literals)
+      // are value expressions and disqualify the range from being "only whitespace".
+      if (source[region.start] !== '#') {
+        return false;
+      }
+      i = region.end;
       continue;
     }
     const ch = source[i];
     if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') return false;
+    i++;
   }
   return true;
 }
