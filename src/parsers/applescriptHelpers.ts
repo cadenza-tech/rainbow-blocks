@@ -10,7 +10,7 @@ export interface ApplescriptHelperCallbacks {
 
 // Detects Unicode whitespace characters that may separate words in compound keywords:
 // NBSP (U+00A0), EN/EM/IDEOGRAPHIC SPACEs, and zero-width space.
-function isUnicodeWhitespace(ch: string): boolean {
+export function isUnicodeWhitespace(ch: string): boolean {
   if (ch === undefined) return false;
   const code = ch.charCodeAt(0);
   return (

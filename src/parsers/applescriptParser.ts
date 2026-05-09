@@ -2,7 +2,14 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import type { ApplescriptHelperCallbacks } from './applescriptHelpers';
-import { findLogicalLineEnd, findLogicalLineStart, isInsideIfCondition, isKeywordAsVariableName, matchCompoundKeyword } from './applescriptHelpers';
+import {
+  findLogicalLineEnd,
+  findLogicalLineStart,
+  isInsideIfCondition,
+  isKeywordAsVariableName,
+  isUnicodeWhitespace,
+  matchCompoundKeyword
+} from './applescriptHelpers';
 import { BaseBlockParser } from './baseParser';
 
 // Mapping from compound end keywords to their opening keywords
@@ -537,10 +544,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         // 'to' and 'on' as handler-definition openers must be followed by an identifier
         // (the handler name). Reject `to 5`, `to "string"`, etc., which are typos or
         // continuations of the previous statement, not handler declarations.
+        // The probe skips ASCII space/tab, Unicode whitespace, `¬<newline>` line
+        // continuations, and block comments `(* ... *)` between the keyword and the
+        // identifier. A pipe-delimited identifier `|name|` is accepted as a valid
+        // identifier start; bare Unicode letters (e.g. `Ωfoo`) are rejected because
+        // AppleScript requires non-ASCII identifiers to be enclosed in pipes.
         if (keyword === 'to' || keyword === 'on') {
-          let probe = endPos;
-          while (probe < source.length && (source[probe] === ' ' || source[probe] === '\t')) probe++;
-          if (probe >= source.length || !/[a-zA-Z_]/.test(source[probe])) {
+          const probe = this.skipHandlerProbeWhitespace(source, endPos, excludedRegions);
+          if (probe >= source.length || !this.isHandlerIdentifierStart(source[probe])) {
             return { nextPos: endPos };
           }
         }
@@ -985,5 +996,49 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       i++;
     }
     return false;
+  }
+
+  // Skips whitespace between a handler-opening keyword (`on`/`to`) and the handler
+  // name. Handles ASCII space/tab, Unicode whitespace (NBSP etc.), `¬<newline>`
+  // line continuations, and block comments `(* ... *)`. Returns the position of
+  // the next non-skippable character.
+  private skipHandlerProbeWhitespace(source: string, pos: number, excludedRegions: ExcludedRegion[]): number {
+    let probe = pos;
+    while (probe < source.length) {
+      const ch = source[probe];
+      if (ch === ' ' || ch === '\t' || isUnicodeWhitespace(ch)) {
+        probe++;
+        continue;
+      }
+      // Line continuation: `¬` followed by optional whitespace, then a newline
+      if (ch === '¬') {
+        let next = probe + 1;
+        while (next < source.length && (source[next] === ' ' || source[next] === '\t')) next++;
+        if (next < source.length && (source[next] === '\r' || source[next] === '\n')) {
+          if (source[next] === '\r') next++;
+          if (next < source.length && source[next] === '\n') next++;
+          probe = next;
+          continue;
+        }
+        break;
+      }
+      // Block comment `(* ... *)` produced by tryMatchExcludedRegion
+      const region = this.findExcludedRegionAt(probe, excludedRegions);
+      if (region && source[region.start] === '(' && region.start + 1 < source.length && source[region.start + 1] === '*') {
+        probe = region.end;
+        continue;
+      }
+      break;
+    }
+    return probe;
+  }
+
+  // Returns true when `ch` may legitimately start a handler-name identifier
+  // following an `on`/`to` keyword: ASCII letter/underscore (`foo`, `_x`) or
+  // pipe-delimited identifier (`|my handler|`). Bare Unicode letters are
+  // rejected because AppleScript requires them to be wrapped in pipes.
+  private isHandlerIdentifierStart(ch: string): boolean {
+    if (ch === '|') return true;
+    return /[a-zA-Z_]/.test(ch);
   }
 }
