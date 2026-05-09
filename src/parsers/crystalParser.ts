@@ -139,8 +139,15 @@ export class CrystalBlockParser extends BaseBlockParser {
           const quoteType = source[i + 3];
           const quoteStart = i + 3;
           let j = i + 4;
-          // Scan forward to skip the closing quote on the same line
+          // Scan forward to skip the closing quote on the same line.
+          // Honor backslash escapes (e.g. `\"`) so the actual closing quote is
+          // consumed; otherwise the trailing quote stays orphaned and is later
+          // mis-detected as a regular string opener that swallows downstream code.
           while (j < source.length && source[j] !== quoteType && source[j] !== '\n' && source[j] !== '\r') {
+            if (source[j] === '\\' && j + 1 < source.length && source[j + 1] !== '\n' && source[j + 1] !== '\r') {
+              j += 2;
+              continue;
+            }
             j++;
           }
           // Skip the closing quote itself
