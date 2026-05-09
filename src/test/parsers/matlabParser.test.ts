@@ -1945,6 +1945,53 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: block_middle as RHS identifier is not intermediate', () => {
+    test('should not treat case as intermediate when used as RHS identifier in switch', () => {
+      // `y = case;` — `case` is on the RHS of an assignment, an operand context.
+      // Treating it as a switch-case intermediate would corrupt the switch structure.
+      const source = 'switch x\n  y = case;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case = RHS should not register as intermediate');
+    });
+
+    test('should not treat otherwise as intermediate when used as RHS identifier in switch', () => {
+      const source = 'switch x\n  y = otherwise;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should not treat else as intermediate when used as RHS identifier in if', () => {
+      const source = 'if x\n  y = else;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should not treat elseif as intermediate when used as RHS identifier in if', () => {
+      const source = 'if x\n  y = elseif;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should not treat catch as intermediate when used as RHS identifier in try', () => {
+      const source = 'try\n  y = catch;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should still treat real case 1 as intermediate', () => {
+      // Sanity check: real case at statement start should still be recognized.
+      const source = 'switch x\n  case 1\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+  });
+
   suite('Regression 2026-05-09: block_open after binary operator is not block_open', () => {
     test('should not treat for after == as block_open', () => {
       // `x == for;` — `for` is on the RHS of a comparison, an operand context. Treating it
