@@ -566,6 +566,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
               if (topOpener !== 'try') break;
             } else if (middleValue === 'unwind_protect_cleanup') {
               if (topOpener !== 'unwind_protect') break;
+              // Octave allows at most one unwind_protect_cleanup per unwind_protect block.
+              // A duplicate is a syntax error and must not be recorded as an intermediate.
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawCleanup = intermediates.some((t) => t.value.toLowerCase() === 'unwind_protect_cleanup');
+              if (sawCleanup) break;
             }
             stack[stack.length - 1].intermediates.push(token);
           }
