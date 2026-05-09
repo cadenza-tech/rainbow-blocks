@@ -126,6 +126,11 @@ export class LuaBlockParser extends BaseBlockParser {
         if (this.isPrecededByDotOrColon(source, absolutePos, excludedRegions)) {
           continue;
         }
+        // Skip keywords used as the target of `goto <label>`; they are label
+        // names, not block keywords, and must not affect loop scope tracking.
+        if (this.isAfterGoto(source, absolutePos, excludedRegions)) {
+          continue;
+        }
         const word = innerMatch[1];
         // Track non-loop block openers (function, if, repeat) that can contain standalone do
         if (word === 'function' || word === 'if' || word === 'repeat') {
