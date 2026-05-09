@@ -5827,4 +5827,13 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: env var prefix with chained equals (A=B=C if)', () => {
+    test('should detect if/fi after A=B=C env var prefix', () => {
+      // A=B=C is a single env var assignment where the value is "B=C"
+      const source = 'A=B=C if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
