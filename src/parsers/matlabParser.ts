@@ -14,6 +14,13 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
       return false;
     }
+    // Reject end immediately followed by a single `.` that is NOT part of `..` (line
+    // continuation marker prefix). `end.field` is struct field-access syntax, not a block
+    // close — the `end` is an identifier in expression context.
+    const afterPos = position + keyword.length;
+    if (source[afterPos] === '.' && source[afterPos + 1] !== '.') {
+      return false;
+    }
     // Reject end immediately after `:` on a for-loop header line. Such `end` is part of
     // the loop's range expression (e.g., `for i = 1:end`) — array-index `end`, not block close.
     if (this.isEndInForHeaderRange(source, position, excludedRegions)) {
@@ -22,31 +29,144 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Reject end immediately preceded by a binary expression operator (+, -, *, /, ^, <, >, etc.).
     // Such forms (`x = 1 + end`, `if x < end then`) are invalid MATLAB/Octave outside of array
     // indexing, but parsing them as block close destroys outer block pairing.
-    if (keyword === 'end' && this.isPrecededByBinaryOperator(source, position)) {
+    if (keyword === 'end' && this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
+      return false;
+    }
+    // Reject end used as a command-syntax argument (`disp end` → `disp('end')`). The pattern
+    // is `<identifier> <whitespace> end` at statement start where the identifier is not a
+    // recognized keyword. Treating such `end` as block close destroys outer block pairing.
+    if (keyword === 'end' && this.isCommandSyntaxArgument(source, position)) {
       return false;
     }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
 
+  // Returns true when `end` at position is the argument of a command-syntax invocation,
+  // e.g. `disp end`. Detection is conservative: requires the preceding non-whitespace to
+  // form an identifier that begins at statement start (line start, or after `;`/`,`) and
+  // is not one of the recognized block keywords.
+  private isCommandSyntaxArgument(source: string, position: number): boolean {
+    let i = position - 1;
+    // Require at least one space/tab between the identifier and `end`
+    if (i < 0 || (source[i] !== ' ' && source[i] !== '\t')) return false;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    if (i < 0) return false;
+    // Must end with an identifier character
+    const idEnd = i;
+    if (!/[a-zA-Z0-9_]/.test(source[idEnd])) return false;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const idStart = i + 1;
+    const ident = source.slice(idStart, idEnd + 1);
+    // Identifier must start with letter or underscore
+    if (!/^[a-zA-Z_]/.test(ident)) return false;
+    // Skip recognized block keywords — `if end`, `for end`, `function end` etc. are not
+    // command syntax (they are syntax errors, but treating `end` as a block close in such
+    // pathological inputs is at least consistent with the rest of the parser's behavior).
+    if (MatlabBlockParser.ALL_BLOCK_KEYWORDS.has(ident.toLowerCase())) return false;
+    // The identifier must begin at statement start: line start (only whitespace before)
+    // or after a `;`/`,` separator on the same line.
+    let j = idStart - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+    if (j < 0) return true;
+    const ch = source[j];
+    return ch === '\n' || ch === '\r' || ch === ';' || ch === ',';
+  }
+
+  // All recognized block keywords (open + close + middle), used to filter command-syntax detection.
+  private static readonly ALL_BLOCK_KEYWORDS = new Set([
+    'function',
+    'if',
+    'for',
+    'while',
+    'switch',
+    'try',
+    'parfor',
+    'spmd',
+    'classdef',
+    'methods',
+    'properties',
+    'events',
+    'enumeration',
+    'arguments',
+    'end',
+    'else',
+    'elseif',
+    'case',
+    'otherwise',
+    'catch',
+    // Octave-specific block-close keywords (subclass adds them, but listing here keeps
+    // detection consistent if MATLAB code happens to use these identifiers as commands).
+    'endfunction',
+    'endif',
+    'endfor',
+    'endwhile',
+    'endswitch',
+    'endtry_catch',
+    'endparfor',
+    'endspmd',
+    'endclassdef',
+    'endmethods',
+    'endproperties',
+    'endevents',
+    'endenumeration',
+    'until',
+    'do',
+    'unwind_protect',
+    'unwind_protect_cleanup',
+    'end_unwind_protect'
+  ]);
+
   // Returns true when `end` at position is preceded by an expression operator that makes
   // `end` an operand outside any array-indexing context. Such uses (`x = end`, `x = 1:end`,
   // `x = ~end`, `for i = end-1:5`) are invalid MATLAB outside indexing; treating them as
   // block_close destroys outer block pairing. The for-header range check (isEndInForHeaderRange)
   // is invoked before this and handles legitimate `for i = N:end` / `for i = end:N` cases.
-  private isPrecededByBinaryOperator(source: string, position: number): boolean {
+  private isPrecededByBinaryOperator(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    while (i >= 0) {
+      // Skip excluded regions backward for line continuations (... in MATLAB and \ in Octave).
+      // The continuation region spans from the marker through the trailing newline; jumping
+      // to region.start - 1 lands us on the character that immediately precedes the
+      // continuation on the previous logical line.
+      if (excludedRegions) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      if (source[i] === ' ' || source[i] === '\t') {
+        i--;
+        continue;
+      }
+      // A bare newline reached during backward scan may sit immediately after a `...`
+      // (or `\`) line continuation. matchSingleLineComment for `...` ends at the newline
+      // start, so an excluded region whose end == nlStart and which begins with `.` or `\`
+      // signals a continuation; in that case we keep walking past the prior logical line.
+      if ((source[i] === '\n' || source[i] === '\r') && excludedRegions) {
+        let nlStart = i;
+        if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') {
+          nlStart = i - 1;
+        }
+        const regionBeforeNl = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+        if (regionBeforeNl?.end === nlStart && (source[regionBeforeNl.start] === '.' || source[regionBeforeNl.start] === '\\')) {
+          i = regionBeforeNl.start - 1;
+          continue;
+        }
+      }
+      break;
+    }
     if (i < 0) return false;
     const ch = source[i];
     // Operators that put `end` in an expression context.
     // `\` is MATLAB's left-division operator; treat it like other binary operators.
     if ('+*/^<>&|~:\\'.includes(ch)) return true;
-    // `=` (single equals, not `==`/`>=`/`<=`/`!=`/`~=`) marks an assignment; `end` on the
-    // RHS is invalid outside indexing.
+    // `=` marks an operator. Both single `=` (assignment) and compound comparison operators
+    // (`==`, `>=`, `<=`, `!=`, `~=`) put `end` in expression context (operand): `end` on the
+    // RHS / after a comparison is invalid outside indexing, so return true to reject the
+    // bogus block_close.
     if (ch === '=') {
-      const prev = i > 0 ? source[i - 1] : '';
-      if (prev === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~') return false;
       return true;
     }
     // `-` could be unary; treat it as a value-context marker (i.e. end is operand) when
@@ -661,11 +781,13 @@ export class MatlabBlockParser extends BaseBlockParser {
     return null;
   }
 
-  // Checks if %{ is alone on the line (no trailing non-whitespace content)
+  // Checks if %{ is alone on the line (no trailing non-whitespace content).
+  // Treats space, tab, vertical tab (\v = \x0B), and form feed (\f = \x0C) as whitespace.
   private isBlockCommentStart(source: string, pos: number): boolean {
     let i = pos + 2;
     while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-      if (source[i] !== ' ' && source[i] !== '\t') {
+      const ch = source[i];
+      if (ch !== ' ' && ch !== '\t' && ch !== '\v' && ch !== '\f') {
         return false;
       }
       i++;
@@ -690,11 +812,12 @@ export class MatlabBlockParser extends BaseBlockParser {
       // Look for %} at the start of a line (allowing leading whitespace, no trailing content)
       if (source[i] === '%' && i + 1 < source.length && source[i + 1] === '}') {
         if (this.isAtLineStartWithWhitespace(source, i)) {
-          // Verify no trailing content after %}
+          // Verify no trailing content after %} (whitespace includes space, tab, \v, \f)
           let trailingPos = i + 2;
           let hasTrailingContent = false;
           while (trailingPos < source.length && source[trailingPos] !== '\n' && source[trailingPos] !== '\r') {
-            if (source[trailingPos] !== ' ' && source[trailingPos] !== '\t') {
+            const tch = source[trailingPos];
+            if (tch !== ' ' && tch !== '\t' && tch !== '\v' && tch !== '\f') {
               hasTrailingContent = true;
               break;
             }
