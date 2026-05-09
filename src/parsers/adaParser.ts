@@ -165,9 +165,20 @@ export class AdaBlockParser extends BaseBlockParser {
   // Scans forward from after 'return' to detect extended-return form: ': TYPE ... do'
   private isExtendedReturn(source: string, start: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = skipAdaWhitespaceAndComments(source, start);
-    const identMatch = source.slice(i).match(/^[a-zA-Z_]\w*/);
-    if (!identMatch) return false;
-    i += identMatch[0].length;
+    // Ada identifiers may start with a letter (ASCII or Unicode) or underscore,
+    // and may contain letters, digits (ASCII or Unicode), and underscores.
+    // Use isAdaWordAt-style matching: ASCII word chars + any non-ASCII char (>127)
+    // is treated as part of the identifier.
+    const identStart = i;
+    const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+    if (i >= source.length) return false;
+    const firstCh = source[i];
+    // First char must be a letter (ASCII or Unicode) or underscore — not a digit.
+    if (!(/[a-zA-Z_]/.test(firstCh) || firstCh.charCodeAt(0) > 127)) return false;
+    while (i < source.length && isWordChar(source[i])) {
+      i++;
+    }
+    if (i === identStart) return false;
     i = skipAdaWhitespaceAndComments(source, i);
     if (source[i] !== ':' || source[i + 1] === '=') return false;
     i++;
@@ -261,6 +272,39 @@ export class AdaBlockParser extends BaseBlockParser {
       if (!this.isInExcludedRegion(pos, excludedRegions)) {
         const fullMatch = match[0];
         if (this.isAdjacentToUnicodeLetter(source, pos, fullMatch.length)) {
+          match = COMPOUND_END_PATTERN.exec(source);
+          continue;
+        }
+        // Reject false compound matches that span across an unrelated
+        // statement boundary (e.g., `end\n  if Cond then ...`). After the
+        // type keyword, an end statement is terminated by `;`, optionally
+        // preceded by a designator (identifier, possibly qualified with
+        // dots: `end procedure Foo;`, `end loop Outer;`,
+        // `end package Pkg.Inner;`). Anything else (e.g., another
+        // keyword like `then` after `Cond`) indicates the type keyword
+        // belongs to a separate construct.
+        const lookaheadStart = pos + fullMatch.length;
+        let lookahead = skipAdaWhitespaceAndComments(source, lookaheadStart);
+        const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+        // Skip optional designator: identifier (.identifier)*
+        while (lookahead < source.length) {
+          if (source[lookahead] === ';') break;
+          // Identifier must start with letter or underscore
+          const startCh = source[lookahead];
+          if (!(/[a-zA-Z_]/.test(startCh) || startCh.charCodeAt(0) > 127)) break;
+          while (lookahead < source.length && isWordChar(source[lookahead])) {
+            lookahead++;
+          }
+          lookahead = skipAdaWhitespaceAndComments(source, lookahead);
+          // Allow qualified names: '.' followed by another identifier
+          if (lookahead < source.length && source[lookahead] === '.') {
+            lookahead++;
+            lookahead = skipAdaWhitespaceAndComments(source, lookahead);
+            continue;
+          }
+          break;
+        }
+        if (lookahead >= source.length || source[lookahead] !== ';') {
           match = COMPOUND_END_PATTERN.exec(source);
           continue;
         }
