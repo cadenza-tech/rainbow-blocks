@@ -1245,6 +1245,55 @@ end`;
     });
   });
 
+  suite('Regression: isDoPartOfLoop should cache loop positions per source', () => {
+    test('should cache loop positions after parse (not recompute per do keyword)', () => {
+      // Bug: isDoPartOfLoop rebuilt loopMatches via matchAll(prefix) on every
+      // `do` keyword, yielding super-quadratic total work as the prefix grew.
+      // The fix caches the filtered for/while position list per source; each
+      // call to isDoPartOfLoop then binary-searches the cached positions in
+      // O(log L) instead of rescanning the prefix in O(L).
+      // We verify the cache is populated and contains every for/while in the
+      // source. This pins the contract behind the perf fix without relying on
+      // wall-clock timing assertions (V8 JIT can mask the quadratic behavior
+      // in the test env, making timing-based assertions unreliable).
+      const source = 'for i = 1, 10 do print(i) end\nwhile cond do break end\ndo x = 1 end';
+      parser.parse(source);
+      type CacheT = { source: string; positions: number[]; lengths: number[] } | null;
+      const cache = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
+      assert.ok(cache !== null, 'loopPositionCache must be populated after parse');
+      assert.strictEqual(cache.source, source, 'cache must be keyed by source string');
+      // The source contains exactly two for/while keywords (one for, one while)
+      assert.strictEqual(cache.positions.length, 2, 'cache must hold both loop keywords');
+      assert.strictEqual(cache.lengths[0], 3, 'first match is `for`');
+      assert.strictEqual(cache.lengths[1], 5, 'second match is `while`');
+    });
+
+    test('should reuse cache across repeat parses of the same source', () => {
+      const source = 'for i = 1, 10 do x = 1 end';
+      parser.parse(source);
+      type CacheT = { source: string; positions: number[]; lengths: number[] } | null;
+      const cache1 = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
+      assert.ok(cache1 !== null && cache1 !== undefined, 'cache must be populated after first parse');
+      parser.parse(source);
+      const cache2 = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
+      // Same source -> cache must be reused (object identity preserved)
+      assert.strictEqual(cache1, cache2, 'parsing the same source twice must reuse the cache');
+    });
+
+    test('should rebuild cache when source changes', () => {
+      const sourceA = 'for i = 1, 10 do x = 1 end';
+      const sourceB = 'while cond do x = 1 end';
+      parser.parse(sourceA);
+      type CacheT = { source: string; positions: number[]; lengths: number[] } | null;
+      const cacheA = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
+      parser.parse(sourceB);
+      const cacheB = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
+      assert.notStrictEqual(cacheA, cacheB, 'changing source must invalidate the cache');
+      assert.strictEqual(cacheB!.source, sourceB);
+      assert.strictEqual(cacheB!.lengths[0], 5, 'cache for sourceB must reflect `while`');
+    });
+  });
+
   suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
     test('should pair standalone do/end and outer function/end when goto for precedes do', () => {
       // Bug: outer loop-keyword scan in isDoPartOfLoop did not check isAfterGoto.
