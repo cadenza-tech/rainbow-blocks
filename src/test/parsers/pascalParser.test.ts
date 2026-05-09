@@ -2793,6 +2793,34 @@ end`;
       // Verify the trailing end is the one used (offset 22), not the case-label end (offset 12)
       assert.strictEqual(pairs[0].closeKeyword.startOffset, 22);
     });
+
+    test('should not treat object as block opener inside case label after =', () => {
+      const source = `case X of
+  Z = object: WriteLn;
+end`;
+      const pairs = parser.parse(source);
+      // The `Z = object:` is a (invalid) case label; `object` is not a type definition opener.
+      // Without this fix, the parser would treat `object` as a block opener and the trailing
+      // `end` would close `object` instead of `case`, leaving the `case` orphaned.
+      assertSingleBlock(pairs, 'case', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 33);
+    });
+
+    test('should not treat interface as block opener inside case label after =', () => {
+      const source = `case X of
+  Z = interface: WriteLn;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat class as block opener inside case label after =', () => {
+      const source = `case X of
+  Z = class: WriteLn;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
   });
 
   suite('Regression 2026-05-09: field-access dot followed by newline', () => {
