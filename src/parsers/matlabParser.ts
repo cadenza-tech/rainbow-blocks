@@ -538,6 +538,12 @@ export class MatlabBlockParser extends BaseBlockParser {
         if (this.isCommandSyntaxArgument(source, token.startOffset, excludedRegions)) {
           return false;
         }
+        // Reject block_middle keywords used as standalone RHS identifiers (`y = case;`,
+        // `y = else;`). Such usages are operand context — the keyword cannot be a real
+        // intermediate.
+        if (this.isUsedAsRhsIdentifier(source, token.startOffset, token.value, excludedRegions)) {
+          return false;
+        }
       }
       return true;
     });
