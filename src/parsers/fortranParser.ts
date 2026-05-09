@@ -699,8 +699,12 @@ export class FortranBlockParser extends BaseBlockParser {
         const fullMatch = contMatch[0];
         const endType = normalizeFortranEndType(contMatch[1]);
         const normalizedKeyword = `end ${contMatch[1]}`;
-        // Validate the compound `end <type>` (continuation form) is not in expression context
-        if (isValidFortranBlockClose(normalizedKeyword, source, pos)) {
+        // Validate the compound `end <type>` (continuation form) is not in expression context.
+        // `isValidFortranBlockClose` uses `position + keyword.length` to scan post-keyword
+        // context (assignment `=`, `//`, `%`, etc). We pass `fullMatch` so the length matches
+        // the actual span in source (including the `&` and newline), otherwise the validator
+        // would land inside the continuation gap and miss trailing `=` / `//` / `%`.
+        if (isValidFortranBlockClose(fullMatch, source, pos)) {
           // Normalize keyword to "end <type>" for consistent matching in matchBlocks
           compoundEndPositions.set(pos, {
             keyword: normalizedKeyword,
