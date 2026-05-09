@@ -146,7 +146,102 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (this.isInsideCurlyBraces(source, position, excludedRegions)) {
       return false;
     }
-    return !this.isInsideIndexingBrackets(source, position, excludedRegions);
+    if (this.isInsideIndexingBrackets(source, position, excludedRegions)) {
+      return false;
+    }
+    // Inside indexing brackets, `end` followed by a binary operator (e.g., `end!=2`,
+    // `end+1`, `end<5`) is lastindex, even when there are unmatched block openers
+    // between `[` and the `end`. These appear in expressions inside block bodies
+    // (e.g., `arr[if end!=2 1 else 0 end]` where `end!=2` is the if's condition).
+    if (this.isFollowedByBinaryOperator(source, position) && this.isInsideAnyIndexingBracket(source, position, excludedRegions)) {
+      return false;
+    }
+    // Inside array construction `[...]` (not indexing), an `end` without a matching
+    // block opener (begin/if/for/etc.) inside the bracket is treated as lastindex
+    // (or filtered as not a block close). For example, `[end]` after `return` is
+    // array construction, and the `end` is not a block close.
+    if (this.isLoneEndInArrayConstruction(source, position, excludedRegions)) {
+      return false;
+    }
+    return true;
+  }
+
+  // Checks if the `end` at `position` is directly inside an array construction `[...]`
+  // (not indexing) AND there is no block opener (including for/if) inside the same
+  // bracket between `[` and `position`. For example: `[end]` after `return`, `[1, end]`,
+  // `f([end])` — all return true. But `[begin ... end]`, `[for ... end]`, `[if ... end]`
+  // return false because there is a matching opener inside.
+  private isLoneEndInArrayConstruction(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let bracketDepth = 0;
+    let parenDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === ']') {
+        bracketDepth++;
+      } else if (ch === '[') {
+        if (bracketDepth === 0) {
+          // Found the enclosing `[`. Skip if it's indexing (already handled elsewhere).
+          if (isIndexingBracket(source, i)) {
+            return false;
+          }
+          // Array construction: check if there's ANY block opener (for/if/begin/...)
+          // inside the bracket. Use hasAnyBlockOpenerBetween (includes for) to avoid
+          // the generator-vs-block-form ambiguity in hasUnmatchedBlockOpenerBetween.
+          if (hasAnyBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
+            return false;
+          }
+          // No opener at all: this `end` is lone (lastindex / not block close).
+          return true;
+        }
+        bracketDepth--;
+      } else if (ch === ')') {
+        parenDepth++;
+      } else if (ch === '(') {
+        if (parenDepth === 0) return false;
+        parenDepth--;
+      }
+    }
+    return false;
+  }
+
+  // Checks if the `end` at `position` is followed by a binary operator (after optional whitespace).
+  private isFollowedByBinaryOperator(source: string, position: number): boolean {
+    let i = position + 3;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    if (i >= source.length) return false;
+    return this.isBinaryOperatorStart(source, i);
+  }
+
+  // Checks if position is inside any indexing bracket (a[...]) at any depth.
+  // Skips nested ()s and []s.
+  private isInsideAnyIndexingBracket(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let bracketDepth = 0;
+    let parenDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === ']') {
+        bracketDepth++;
+      } else if (ch === '[') {
+        if (bracketDepth === 0) {
+          if (isIndexingBracket(source, i)) {
+            return true;
+          }
+          // Array construction: keep scanning outward.
+        } else {
+          bracketDepth--;
+        }
+      } else if (ch === ')') {
+        parenDepth++;
+      } else if (ch === '(') {
+        if (parenDepth === 0) continue;
+        parenDepth--;
+      }
+    }
+    return false;
   }
 
   // Checks if position is inside any brackets (for for/if comprehension check)
@@ -244,11 +339,16 @@ export class JuliaBlockParser extends BaseBlockParser {
       } else if (char === '[') {
         if (bracketDepth === 0) {
           const isIndexing = isIndexingBracket(source, i);
-          if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks)) {
-            // In indexing brackets, `begin` immediately followed by `:` is the firstindex
-            // keyword (not a block opener). If every unmatched opener is such a `begin:`
-            // then treat the `end` as lastindex.
-            if (isIndexing && this.allUnmatchedBeginsAreFirstindex(source, i + 1, position, excludedRegions)) {
+          // For indexing brackets, use a variant that does not count `end<binary-op>`
+          // as a block close (those are lastindex expressions like `end!=2`).
+          const hasUnmatched = isIndexing
+            ? this.hasUnmatchedBlockOpenerBetweenInIndexing(source, i + 1, position, excludedRegions)
+            : hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+          if (hasUnmatched) {
+            // In indexing brackets, the parser filters bare `begin` as firstindex
+            // (whether or not followed by `:`). If every unmatched opener is such a
+            // filtered `begin`, treat this `end` as lastindex too.
+            if (isIndexing && this.allUnmatchedOpenersAreFilteredBegins(source, i + 1, position, excludedRegions)) {
               // fall through to return isIndexing
             } else {
               return false;
@@ -270,8 +370,18 @@ export class JuliaBlockParser extends BaseBlockParser {
             // If all unmatched begins are firstindex form (begin:) and there are no
             // other unmatched openers, continue scanning so the outer `[` can mark
             // `end` as lastindex (e.g., arr[(begin:end)]).
+            // Note: at this point we haven't yet seen the outer `[`, so we use the
+            // strict firstindex check (begin: form). The looser check is applied
+            // once we confirm we're inside indexing brackets above.
             if (!this.allUnmatchedBeginsAreFirstindex(source, i + 1, position, excludedRegions)) {
-              return false;
+              // For the indexing-bracket case (bug 1a: arr[(begin x end)]), if the
+              // unmatched opener is a bare `begin` (not followed by `:`), we still
+              // need to check whether we're inside an outer indexing bracket. In
+              // that case the parser also filters `begin` as firstindex, so we must
+              // continue scanning.
+              if (!this.allUnmatchedOpenersAreFilteredBeginsInsideIndexing(source, i + 1, position, excludedRegions)) {
+                return false;
+              }
             }
             continue;
           }
@@ -288,6 +398,225 @@ export class JuliaBlockParser extends BaseBlockParser {
         } else {
           parenDepth--;
         }
+      }
+    }
+    return false;
+  }
+
+  // Like hasUnmatchedBlockOpenerBetween, but treats `end` followed by a binary
+  // operator (e.g., `end!=`, `end+`, `end<`) as lastindex rather than block close.
+  // Used inside indexing brackets where lastindex expressions are common.
+  private hasUnmatchedBlockOpenerBetweenInIndexing(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    const blockOpen = this.keywords.blockOpen;
+    const openersWithoutFor = blockOpen.filter((kw) => kw !== 'for');
+    let depth = 0;
+    let inComprehensionContext = false;
+    let bracketDepth = 0;
+
+    // Detect leading block-form 'for' (after whitespace and excluded regions)
+    let firstNonWhite = start;
+    while (firstNonWhite < end) {
+      if (this.isInExcludedRegion(firstNonWhite, excludedRegions)) {
+        firstNonWhite++;
+        continue;
+      }
+      const ch = source[firstNonWhite];
+      if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') break;
+      firstNonWhite++;
+    }
+    if (firstNonWhite + 3 <= end && source.slice(firstNonWhite, firstNonWhite + 3) === 'for') {
+      const before = firstNonWhite > 0 ? source[firstNonWhite - 1] : ' ';
+      const after = firstNonWhite + 3 < source.length ? source[firstNonWhite + 3] : ' ';
+      if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+        if (!this.isAdjacentToUnicodeLetter(source, firstNonWhite, 3) && before !== '.') {
+          depth++;
+        }
+      }
+    }
+
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      if (source[i] === '[') {
+        bracketDepth++;
+        continue;
+      }
+      if (source[i] === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+        continue;
+      }
+      if (
+        !inComprehensionContext &&
+        source[i] === 'f' &&
+        i + 3 <= end &&
+        source.slice(i, i + 3) === 'for' &&
+        !/[a-zA-Z0-9_]/.test(i > 0 ? source[i - 1] : ' ') &&
+        !/[a-zA-Z0-9_]/.test(i + 3 < source.length ? source[i + 3] : ' ') &&
+        !this.isAdjacentToUnicodeLetter(source, i, 3)
+      ) {
+        const tail = source.slice(i + 3, end);
+        if (/^[ \t]+\S+.*?(?:\bin\b|\b∈\b|=)/.test(tail)) {
+          inComprehensionContext = true;
+        }
+      }
+      // Check for 'end' keyword
+      if (source[i] === 'e' && i + 3 <= end && source.slice(i, i + 3) === 'end') {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + 3 < source.length ? source[i + 3] : ' ';
+        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
+          if (!this.isAdjacentToUnicodeLetter(source, i, 3)) {
+            if (before !== '.' && bracketDepth === 0) {
+              // Check if `end` is followed by a binary operator (lastindex expression).
+              // Skip whitespace after `end` to find the next non-whitespace char.
+              let k = i + 3;
+              while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+              const isLastindex = k < source.length && this.isBinaryOperatorStart(source, k);
+              if (!isLastindex && depth > 0) depth--;
+            }
+            i += 2;
+            continue;
+          }
+        }
+      }
+      // Check for block openers
+      for (const keyword of openersWithoutFor) {
+        if (i + keyword.length <= end && source[i] === keyword[0] && source.slice(i, i + keyword.length) === keyword) {
+          const before = i > 0 ? source[i - 1] : ' ';
+          const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
+          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+          if (this.isAdjacentToUnicodeLetter(source, i, keyword.length)) continue;
+          if (before === '.') continue;
+          if (inComprehensionContext && keyword === 'if') continue;
+          if (keyword === 'abstract' || keyword === 'primitive') {
+            const afterKeyword = source.slice(i + keyword.length);
+            if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+          }
+          depth++;
+          i += keyword.length - 1;
+          break;
+        }
+      }
+    }
+    return depth > 0;
+  }
+
+  // Checks whether the character at `pos` is the start of a binary operator that can
+  // follow `end` as lastindex (e.g., `!=`, `==`, `+`, `-`, `<`, `>`, `<=`, `>=`).
+  private isBinaryOperatorStart(source: string, pos: number): boolean {
+    const c = source[pos];
+    const c2 = pos + 1 < source.length ? source[pos + 1] : '';
+    if (c === '!' && c2 === '=') return true;
+    if (c === '=' && c2 === '=') return true;
+    if (c === '<' && c2 === '=') return true;
+    if (c === '>' && c2 === '=') return true;
+    if (c === '<' && c2 !== ':') return true;
+    if (c === '>' && c2 !== ':') return true;
+    if (c === '+') return true;
+    if (c === '-') return true;
+    if (c === '*') return true;
+    if (c === '/') return true;
+    if (c === '%') return true;
+    if (c === '^') return true;
+    return false;
+  }
+
+  // Checks whether every unmatched opener in [start, end) is a `begin` keyword that
+  // the parser would filter as firstindex inside indexing brackets. The parser filters
+  // any bare `begin` inside indexing brackets (regardless of whether it is followed by `:`),
+  // so this method counts ALL bare `begin`s as filtered. Other block openers (if/for/let/...)
+  // are real block expressions in indexing brackets, and would NOT be filtered.
+  private allUnmatchedOpenersAreFilteredBegins(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    const blockOpen = this.keywords.blockOpen;
+    let nonBeginDepth = 0;
+    let beginDepth = 0;
+    let bracketDepth = 0;
+    for (let i = start; i < end; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      if (source[i] === '[') {
+        bracketDepth++;
+        continue;
+      }
+      if (source[i] === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+        continue;
+      }
+      if (source[i] === 'e' && i + 3 <= end && source.slice(i, i + 3) === 'end') {
+        const before = i > 0 ? source[i - 1] : ' ';
+        const after = i + 3 < source.length ? source[i + 3] : ' ';
+        if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after) && before !== '.') {
+          if (!this.isAdjacentToUnicodeLetter(source, i, 3)) {
+            if (bracketDepth === 0) {
+              // Skip `end<binary-op>` (lastindex expression like `end!=2`, `end+1`).
+              let k = i + 3;
+              while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+              const isLastindex = k < source.length && this.isBinaryOperatorStart(source, k);
+              if (isLastindex) {
+                i += 2;
+                continue;
+              }
+              // Prefer canceling non-begin openers first (they are real blocks).
+              if (nonBeginDepth > 0) {
+                nonBeginDepth--;
+              } else if (beginDepth > 0) {
+                beginDepth--;
+              }
+            }
+            i += 2;
+            continue;
+          }
+        }
+      }
+      if (bracketDepth > 0) continue;
+      for (const kw of blockOpen) {
+        if (i + kw.length <= end && source[i] === kw[0] && source.slice(i, i + kw.length) === kw) {
+          const before = i > 0 ? source[i - 1] : ' ';
+          const after = i + kw.length < source.length ? source[i + kw.length] : ' ';
+          if (/[a-zA-Z0-9_]/.test(before) || /[a-zA-Z0-9_]/.test(after)) continue;
+          if (before === '.') continue;
+          if (this.isAdjacentToUnicodeLetter(source, i, kw.length)) continue;
+          if (kw === 'abstract' || kw === 'primitive') {
+            const afterKeyword = source.slice(i + kw.length);
+            if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+          }
+          if (kw === 'begin') {
+            beginDepth++;
+          } else {
+            nonBeginDepth++;
+          }
+          i += kw.length - 1;
+          break;
+        }
+      }
+    }
+    return nonBeginDepth === 0;
+  }
+
+  // Like allUnmatchedOpenersAreFilteredBegins, but also requires there to be an enclosing
+  // indexing `[` outside the current paren scope. Used for paren-handling in
+  // isInsideIndexingBrackets to recognize cases like `arr[(begin x end)]` where the
+  // inner `begin` is filtered as firstindex by virtue of the outer indexing bracket.
+  private allUnmatchedOpenersAreFilteredBeginsInsideIndexing(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (!this.allUnmatchedOpenersAreFilteredBegins(source, start, end, excludedRegions)) {
+      return false;
+    }
+    // Confirm there is an enclosing indexing bracket outside the current paren.
+    // Scan backward from start - 1 to find `[` at depth 0, ignoring ()s and []s that close.
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    for (let i = start - 1; i >= 0; i--) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const ch = source[i];
+      if (ch === ')') {
+        parenDepth++;
+      } else if (ch === '(') {
+        if (parenDepth === 0) continue;
+        parenDepth--;
+      } else if (ch === ']') {
+        bracketDepth++;
+      } else if (ch === '[') {
+        if (bracketDepth === 0) {
+          return isIndexingBracket(source, i);
+        }
+        bracketDepth--;
       }
     }
     return false;
@@ -757,10 +1086,15 @@ export class JuliaBlockParser extends BaseBlockParser {
   private matchPrefixedString(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
-    // Prefix must not be part of an identifier
+    // Prefix must not be part of an identifier.
+    // Julia identifier characters: ASCII word chars (\w), digits, and Unicode Letters/Numbers.
+    // Unicode Symbol_Other characters (e.g., × U+00D7) are operators, not identifier chars.
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[\w]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
+      if (/[\w]/.test(prevChar)) {
+        return null;
+      }
+      if (prevChar.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(prevChar)) {
         return null;
       }
     }
