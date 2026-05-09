@@ -117,9 +117,11 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     }
   }
 
-  // Pattern requires matching quotes: <<'EOF', <<"EOF", <<EOF (no quotes)
-  // The backreference \2 ensures opening and closing quotes match
-  const heredocPattern = /<<([~-]?)(['"`])([A-Za-z_][A-Za-z0-9_]*)\2|<<([~-]?)([A-Za-z_][A-Za-z0-9_]*)/g;
+  // Pattern matches quoted (<<'EOF', <<"EOF", <<`EOF`) or unquoted (<<EOF) heredocs.
+  // Quoted forms allow any characters except the matching quote and newline,
+  // including spaces, hyphens, dots, and the empty string.
+  // Unquoted form follows Ruby identifier rules.
+  const heredocPattern = /<<([~-]?)"([^"\n\r]*)"|<<([~-]?)'([^'\n\r]*)'|<<([~-]?)`([^`\n\r]*)`|<<([~-]?)([A-Za-z_][A-Za-z0-9_]*)/g;
 
   // Find line end
   let lineEnd = pos;
@@ -136,9 +138,27 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     if (match.index !== undefined && isInsideRegion(match.index, commentOrStringStarts)) {
       continue;
     }
-    // Pattern has two alternatives: quoted (match[3]) or unquoted (match[5])
-    const terminator = match[3] || match[5];
-    const flag = match[1] || match[4];
+    // Pattern has four alternatives:
+    //   match[1]/match[2]: double-quoted flag/terminator
+    //   match[3]/match[4]: single-quoted flag/terminator
+    //   match[5]/match[6]: backtick flag/terminator
+    //   match[7]/match[8]: unquoted flag/terminator
+    // Use explicit undefined check because quoted forms allow empty terminator (<<"").
+    let terminator: string;
+    let flag: string;
+    if (match[2] !== undefined) {
+      terminator = match[2];
+      flag = match[1];
+    } else if (match[4] !== undefined) {
+      terminator = match[4];
+      flag = match[3];
+    } else if (match[6] !== undefined) {
+      terminator = match[6];
+      flag = match[5];
+    } else {
+      terminator = match[8];
+      flag = match[7];
+    }
     terminators.push({
       terminator,
       allowIndented: flag === '~' || flag === '-'
