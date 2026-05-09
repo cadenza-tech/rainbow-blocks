@@ -1294,6 +1294,51 @@ end`;
     });
   });
 
+  suite('Regression: trailing-dot heuristic must validate Lua number prefix', () => {
+    test('should treat 1A.end as field access, not as a numeric literal trailing dot', () => {
+      // Bug: the trailing-dot heuristic walked back over [a-zA-Z0-9_] and
+      // accepted any range starting with a digit as a number prefix. `1A` is
+      // not a valid Lua number (hex needs `0x` prefix), so `1A.end` is just
+      // an identifier `1A` followed by field-access `.end`. With the bug,
+      // `end` was treated as a real block close keyword and paired with
+      // `function`, leaving the actual closing `end` as orphan.
+      const pairs = parser.parse('function f()\n  return 1A.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      // The `end` that closes `function` is on line 2 (the trailing one),
+      // not the `end` inside `1A.end` on line 1.
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat 9X.if as field access on identifier 9X', () => {
+      const pairs = parser.parse('function f()\n  return 9X.if\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat 1aZ.end as field access (Z breaks hex prefix validity)', () => {
+      // `1aZ` is not a valid Lua number (Z is not hex, no `0x` prefix), so
+      // `.end` is field access regardless of the leading digits/hex letters.
+      const pairs = parser.parse('function f()\n  return 1aZ.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should still treat 1.end as trailing-dot decimal numeric literal', () => {
+      // Control: `1.` is a valid Lua number, so `1.end` is `1.` followed by
+      // a stray `end` keyword. The dot must not be treated as field access.
+      const pairs = parser.parse('function f()\n  return 1.end\nend');
+      // `end` on line 1 closes `function`; the trailing `end` on line 2 is orphan.
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+
+    test('should still treat 0x1A.end as trailing-dot hex numeric literal', () => {
+      // Control: `0x1A.` is a valid Lua hex number prefix.
+      const pairs = parser.parse('function f()\n  return 0x1A.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+  });
+
   suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
     test('should pair standalone do/end and outer function/end when goto for precedes do', () => {
       // Bug: outer loop-keyword scan in isDoPartOfLoop did not check isAfterGoto.
