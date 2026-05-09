@@ -1765,6 +1765,39 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: VT/FF allowed around block comment delimiters in Octave', () => {
+    test('should treat %{ followed by VT as block comment start (MATLAB-symmetric)', () => {
+      // MATLAB treats vertical tab (`\v`) and form feed (`\f`) as whitespace around
+      // block comment delimiters. Octave parser must do the same to keep behaviour
+      // symmetric and to avoid mis-parsing a comment starter as code.
+      // Lines: 0 = %{<VT>, 1 = if true, 2 = end, 3 = %}.
+      const source = '%{\v\nif true\nend\n%}';
+      const pairs = parser.parse(source);
+      // The if/end should NOT be detected as a block because the entire span is
+      // inside a block comment.
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat %{ followed by FF as block comment start (MATLAB-symmetric)', () => {
+      const source = '%{\f\nif true\nend\n%}';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat %} followed by VT as block comment end (MATLAB-symmetric)', () => {
+      // Trailing-content check on `%}` must accept VT/FF as whitespace too.
+      const source = '%{\nif true\nend\n%}\v';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat #{ followed by VT as block comment start (Octave-style)', () => {
+      const source = '#{\v\nif true\nend\n#}';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression 2026-05-09: command-syntax do argument is not block_open', () => {
     test('should not treat do as block_open when it is a command-syntax argument', () => {
       // `disp do` is command-syntax: `disp` is a command and `do` is its string argument.
