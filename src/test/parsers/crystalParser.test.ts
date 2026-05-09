@@ -3923,5 +3923,28 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-09: class_property/class_getter/class_setter macros', () => {
+    test('should not detect end as block_close in class_property end : Int32 = 0', () => {
+      const source = 'class Foo\n  class_property end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not detect end as block_close in class_getter end : Int32 = 0', () => {
+      const source = 'class Foo\n  class_getter end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not detect end as block_close in class_setter end : Int32 = 0', () => {
+      const source = 'class Foo\n  class_setter end : Int32 = 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
