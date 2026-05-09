@@ -3768,5 +3768,20 @@ end`;
     });
   });
 
+  suite('Regression: BMP-outside Unicode prefix for string macro (surrogate pairs)', () => {
+    test('should recognize 𝐀"x" as string macro with mathematical bold A prefix (U+1D400)', () => {
+      // Bug: BMP-outside Unicode characters (surrogate pairs) should be recognized as
+      // identifier prefix for string macros. Previously, the high-surrogate code unit
+      // failed the /[a-zA-Z_]/ test, but the high-surrogate alone is also not a valid
+      // letter via /\p{L}/, so prefix detection failed.
+      // 𝐀 is U+1D400 (MATHEMATICAL BOLD CAPITAL A), encoded as surrogate pair 𝐀.
+      const source = 'function f() 𝐀"x"end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === '𝐀"x"end'));
+    });
+  });
+
   generateCommonTests(config);
 });
