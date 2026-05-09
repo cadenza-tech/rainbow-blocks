@@ -957,6 +957,15 @@ export class PascalBlockParser extends BaseBlockParser {
             if ((middleValue === 'except' || middleValue === 'finally') && topValue !== 'try') break;
             // 'else' applies to 'case' and 'try' blocks (if/else is not block-level in Pascal)
             if (middleValue === 'else' && topValue !== 'case' && topValue !== 'try') break;
+            // try block: reject duplicate finally/except and the mutually exclusive
+            // finally-then-except / except-then-finally combinations. Delphi's
+            // try-except-else is still allowed because 'else' is a different keyword.
+            if (topValue === 'try' && (middleValue === 'except' || middleValue === 'finally')) {
+              const existing = stack[stack.length - 1].intermediates;
+              const hasExcept = existing.some((t) => t.value.toLowerCase() === 'except');
+              const hasFinally = existing.some((t) => t.value.toLowerCase() === 'finally');
+              if (hasExcept || hasFinally) break;
+            }
             stack[stack.length - 1].intermediates.push(token);
           }
           break;
