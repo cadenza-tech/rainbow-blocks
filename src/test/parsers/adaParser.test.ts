@@ -3118,6 +3118,50 @@ end F;
     });
   });
 
+  suite('Regression 2026-05-15: compound end with operator-symbol designator', () => {
+    test('should recognize end function with operator-symbol designator "+"', () => {
+      // Ada operator symbol designator: `function "+" ... end function "+";`.
+      // The compound-end pattern must accept a string-literal designator
+      // after `end function`, just as it accepts an identifier designator.
+      const source = `function "+" (A, B : Integer) return Integer is
+begin
+  return A + B;
+end function "+";
+`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('should recognize end function with operator-symbol designator "*"', () => {
+      const source = `function "*" (A, B : Integer) return Integer is
+begin
+  return A * B;
+end function "*";
+`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('should recognize end function with mixed string-literal and qualified designator', () => {
+      // `end function Math."+";` is unusual but matches Ada's syntax for
+      // qualified subprogram names ending in a string-literal designator.
+      const source = `function "+" (A, B : Integer) return Integer is
+begin
+  return A + B;
+end function "+";
+function Other return Integer is
+begin
+  return 0;
+end function Other;
+`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      for (const pair of pairs) {
+        assert.match(pair.closeKeyword.value.toLowerCase(), /^end\s+function$/);
+      }
+    });
+  });
+
   suite('Regression 2026-05-09: Unicode whitespace in or else and short-circuit detection', () => {
     test('should treat or<NBSP>else as short-circuit (intermediates only contain then)', () => {
       // `or` and `else` separated by NBSP (U+00A0)
