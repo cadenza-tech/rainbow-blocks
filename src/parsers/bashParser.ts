@@ -296,6 +296,9 @@ export class BashBlockParser extends BaseBlockParser {
     if (this.isFollowedByEquals(source, position, keyword)) {
       return false;
     }
+    if (this.isFollowedByFunctionParens(source, position, keyword)) {
+      return false;
+    }
     return true;
   }
 
@@ -324,7 +327,38 @@ export class BashBlockParser extends BaseBlockParser {
     if (this.isFollowedByEquals(source, position, keyword)) {
       return false;
     }
+    if (this.isFollowedByFunctionParens(source, position, keyword)) {
+      return false;
+    }
     return true;
+  }
+
+  // Checks if keyword is used as a function name: `keyword() { ... }`.
+  // POSIX function definition syntax allows reserved words as function names because the `()`
+  // disambiguates: `for() { ... }` is a function definition, not a for loop.
+  private isFollowedByFunctionParens(source: string, position: number, keyword: string): boolean {
+    let j = position + keyword.length;
+    // Skip whitespace after keyword
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== '(') return false;
+    j++;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== ')') return false;
+    j++;
+    // After `()`, allow whitespace, newlines, and line continuations before `{`
+    while (j < source.length) {
+      const c = source[j];
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+        j++;
+        continue;
+      }
+      if (c === '\\' && j + 1 < source.length && (source[j + 1] === '\n' || source[j + 1] === '\r')) {
+        j += 2;
+        continue;
+      }
+      break;
+    }
+    return j < source.length && source[j] === '{';
   }
 
   // Checks if keyword is preceded by 'in' (for empty case: case $x in esac)
