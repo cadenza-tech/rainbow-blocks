@@ -51,6 +51,30 @@ const COMPOUND_KEYWORDS = [
 // AppleScript files indented with non-ASCII whitespace are parsed correctly.
 const LINE_LEADING_WHITESPACE_PATTERN = /^[ \t\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]*$/;
 
+// Reserved words that are syntax errors when used as bare handler names after
+// `on`/`to` (e.g., `on if`, `to tell`). Function-style invocation `on tell()` is
+// still permitted because the trailing parens disambiguate it as a handler
+// declaration named after a reserved word.
+const RESERVED_HANDLER_NAMES = new Set([
+  'if',
+  'tell',
+  'repeat',
+  'try',
+  'script',
+  'else',
+  'end',
+  'to',
+  'on',
+  'considering',
+  'ignoring',
+  'true',
+  'false',
+  'with',
+  'using',
+  'return',
+  'exit'
+]);
+
 export class ApplescriptBlockParser extends BaseBlockParser {
   // Source captured during tokenize for use in matchBlocks (handler-name lookup).
   private _currentSource = '';
@@ -568,6 +592,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           if (probe >= source.length || !this.isHandlerIdentifierStart(source[probe])) {
             return { nextPos: endPos };
           }
+          // Reject bare reserved words as handler names (e.g., `on if`, `to tell`,
+          // `on repeat`). These are syntax errors. However, when the reserved word
+          // is followed by `(`, treat it as a function-style handler declaration
+          // (`on tell()`, `to tell()`) so the existing fallback pairing kicks in.
+          if (this.isReservedHandlerName(source, probe)) {
+            return { nextPos: endPos };
+          }
         }
       }
 
@@ -1070,5 +1101,25 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   private isHandlerIdentifierStart(ch: string): boolean {
     if (ch === '|') return true;
     return /[a-zA-Z_]/.test(ch);
+  }
+
+  // Returns true when the ASCII identifier starting at `pos` is a reserved word
+  // (e.g., `if`, `tell`, `repeat`) and is NOT immediately followed by `(`. Such
+  // sequences (`on if`, `on tell`, `to repeat`) are syntax errors rather than
+  // handler declarations. The `(` exception lets `on tell()` / `to tell()`
+  // continue to pair via the handler-name fallback in matchBlocks.
+  private isReservedHandlerName(source: string, pos: number): boolean {
+    if (pos >= source.length || !/[a-zA-Z_]/.test(source[pos])) return false;
+    let end = pos;
+    while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
+    const name = source.slice(pos, end).toLowerCase();
+    if (!RESERVED_HANDLER_NAMES.has(name)) return false;
+    // Allow `on tell(...)` / `to tell(...)` (function-style handler invocation).
+    let parenScan = end;
+    while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+    if (parenScan < source.length && source[parenScan] === '(') {
+      return false;
+    }
+    return true;
   }
 }
