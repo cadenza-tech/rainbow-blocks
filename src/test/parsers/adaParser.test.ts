@@ -3047,6 +3047,77 @@ end case;
     });
   });
 
+  suite('Regression 2026-05-15: exit when inside accept/return body must not register when as intermediate', () => {
+    test('should not register when as intermediate for accept body containing exit when', () => {
+      // Inside an `accept ... do ... end` body, `exit when <cond>;` is the
+      // loop-exit guard form, not an exception handler. The `when` token
+      // must not leak into the accept block's intermediates list (it would
+      // be misinterpreted as a handler arm). Mirrors the existing `begin`
+      // exit-when handling: only accept `when` after an `exception`
+      // intermediate has been observed.
+      const source = `accept E do
+  exit when X > 0;
+end E;
+`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'accept', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not register when as intermediate for extended-return body containing exit when', () => {
+      const source = `function F return Integer is
+begin
+  return R : Integer := 0 do
+    exit when X > 0;
+    R := 5;
+  end return;
+end F;
+`;
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return should be paired');
+      // No `when` intermediates: exit-when's `when` must not leak into the
+      // return block's intermediate list.
+      const whenIntermediates = returnPair.intermediates.filter((i) => i.value.toLowerCase() === 'when');
+      assert.strictEqual(whenIntermediates.length, 0);
+    });
+
+    test('should still attach when intermediate in accept body after exception handler', () => {
+      // Ada 2012 / accept with exception handler: `when` must still be tracked
+      // when it follows an `exception` intermediate (it is a real handler arm).
+      const source = `accept E do
+  null;
+exception
+  when others => null;
+end E;
+`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'accept', 'end');
+      // `exception` and `when` (the handler) should be intermediates.
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('exception'));
+      assert.ok(intermediateValues.includes('when'));
+    });
+
+    test('should still attach when intermediate in return body after exception handler', () => {
+      const source = `function F return Integer is
+begin
+  return R : Integer := 0 do
+    R := 5;
+  exception
+    when others => null;
+  end return;
+end F;
+`;
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return should be paired');
+      const intermediateValues = returnPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('exception'));
+      assert.ok(intermediateValues.includes('when'));
+    });
+  });
+
   suite('Regression 2026-05-09: Unicode whitespace in or else and short-circuit detection', () => {
     test('should treat or<NBSP>else as short-circuit (intermediates only contain then)', () => {
       // `or` and `else` separated by NBSP (U+00A0)
