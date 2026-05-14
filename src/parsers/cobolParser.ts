@@ -3,7 +3,13 @@
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import type { CobolHelperCallbacks } from './cobolHelpers';
-import { isInPseudoTextContext, matchExecBlock, matchPseudoText, skipBackwardWhitespaceAndComments } from './cobolHelpers';
+import {
+  isInCopyStatement as isInCopyStatementHelper,
+  isInPseudoTextContext,
+  matchExecBlock,
+  matchPseudoText,
+  skipBackwardWhitespaceAndComments
+} from './cobolHelpers';
 import { findLastOpenerByType } from './parserUtils';
 
 // COBOL verbs that take data-name operands. When a reserved word like WHEN/ELSE
@@ -115,7 +121,9 @@ export class CobolBlockParser extends BaseBlockParser {
 
   private get helperCallbacks(): CobolHelperCallbacks {
     return {
-      isFixedFormatCommentLine: (source, lineStart) => this.isFixedFormatCommentLine(source, lineStart)
+      isFixedFormatCommentLine: (source, lineStart) => this.isFixedFormatCommentLine(source, lineStart),
+      findLastPeriodOutsideStringsBefore: (endExclusive) => this.findLastPeriodOutsideStringsBefore(endExclusive),
+      isInCopyStatementCached: (posBeforeKeyword) => this.isInCopyStatementCached(posBeforeKeyword)
     };
   }
 
@@ -124,6 +132,293 @@ export class CobolBlockParser extends BaseBlockParser {
 
   // Cache of valid opener positions per keyword type, computed once per parse
   private validOpenPositions = new Map<string, Set<number>>();
+
+  // Per-parse caches reset at the start of each findExcludedRegions() call.
+  // These let pseudo-text / COPY-context queries run in roughly O(log n) per
+  // call instead of O(n^2), preventing super-linear blowups on large COPY
+  // REPLACING blocks.
+  private cachedSource: string | null = null;
+  private cachedPeriods: number[] | null = null;
+  private cachedCopyStatement = new Map<number, boolean>();
+  // Positions of `==` characters that begin a pseudo-text delimiter region.
+  // Precomputed in O(n) at the start of each parse via a single forward scan
+  // that tracks COPY REPLACING / REPLACE statement context, eliminating the
+  // per-`==` backward walk that previously gave O(n^2) behaviour for large
+  // multi-pair COPY REPLACING blocks.
+  private cachedPseudoTextStarts: Set<number> | null = null;
+
+  // Override findExcludedRegions to reset per-parse caches before scanning.
+  // Without this, repeated parser.parse() calls on different sources would
+  // reuse stale cached data.
+  protected findExcludedRegions(source: string): ExcludedRegion[] {
+    if (this.cachedSource !== source) {
+      this.cachedSource = source;
+      this.cachedPeriods = null;
+      this.cachedCopyStatement.clear();
+      this.cachedPseudoTextStarts = null;
+    }
+    return super.findExcludedRegions(source);
+  }
+
+  // Returns offset of the last period outside strings/comments at or before
+  // `endExclusive`. Computed in O(n) once per parse via the cached period
+  // array, then served in O(log n) per call.
+  private findLastPeriodOutsideStringsBefore(endExclusive: number): number {
+    if (this.cachedSource === null) return -1;
+    if (this.cachedPeriods === null) {
+      this.cachedPeriods = this.buildPeriodPositions(this.cachedSource);
+    }
+    const periods = this.cachedPeriods;
+    // Binary search for the largest period <= endExclusive
+    let lo = 0;
+    let hi = periods.length - 1;
+    let result = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (periods[mid] <= endExclusive) {
+        result = periods[mid];
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return result;
+  }
+
+  // Single-pass scan to collect all period positions that are not inside
+  // strings, *> inline comments, >> compiler directives, or fixed-format
+  // column-7 comment lines. Mirrors findLastPeriodOutsideStrings but builds
+  // a sorted array of every such period rather than just the last one.
+  private buildPeriodPositions(source: string): number[] {
+    const periods: number[] = [];
+    let i = 0;
+    while (i < source.length) {
+      const ch = source[i];
+      // Skip *> inline comments to end of line
+      if (ch === '*' && i + 1 < source.length && source[i + 1] === '>') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      // Skip >> compiler directives to end of line
+      if (ch === '>' && i + 1 < source.length && source[i + 1] === '>') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        i++;
+        while (i < source.length) {
+          if (source[i] === ch) {
+            if (i + 1 < source.length && source[i + 1] === ch) {
+              i += 2;
+              continue;
+            }
+            break;
+          }
+          // String cannot span multiple lines in COBOL
+          if (source[i] === '\n' || source[i] === '\r') {
+            break;
+          }
+          i++;
+        }
+        i++;
+        continue;
+      }
+      if (ch === '.') {
+        // Defer fixed-format-comment-line check until needed
+        let lineStart = i;
+        while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+          lineStart--;
+        }
+        if (!this.isFixedFormatCommentLine(source, lineStart)) {
+          periods.push(i);
+        }
+      }
+      i++;
+    }
+    return periods;
+  }
+
+  // Builds (lazily, once per parse) the set of source offsets that begin a
+  // pseudo-text region (`==`) inside a COPY REPLACING / REPLACE / ALSO context.
+  // The single forward scan tracks statement boundaries, the active COPY/
+  // REPLACE state, and known string/comment regions, so each `==` is classified
+  // in O(1) at lookup time and the total cost is O(n) per parse.
+  // Falls back gracefully: positions not recognised here are still re-checked
+  // via the existing per-position helper, so we cannot regress correctness
+  // even if the scan misses an edge case.
+  private getPseudoTextStarts(source: string): Set<number> {
+    if (this.cachedPseudoTextStarts !== null && this.cachedSource === source) {
+      return this.cachedPseudoTextStarts;
+    }
+    const starts = new Set<number>();
+    // Track statement-level state:
+    //   - sawCopy: a COPY keyword was seen since the last period
+    //   - inReplaceContext: a REPLACING/REPLACE/ALSO was seen, so following
+    //     `==...==` pairs are pseudo-text. REPLACING additionally requires sawCopy.
+    let sawCopy = false;
+    let inReplaceContext = false;
+    let i = 0;
+    while (i < source.length) {
+      const ch = source[i];
+      // End of statement: period (outside strings/comments — those are handled
+      // by the if-cases below). Reset both flags.
+      if (ch === '.') {
+        let lineStart = i;
+        while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+          lineStart--;
+        }
+        if (!this.isFixedFormatCommentLine(source, lineStart)) {
+          sawCopy = false;
+          inReplaceContext = false;
+        }
+        i++;
+        continue;
+      }
+      // Newline: also resets COPY state if we are not in a REPLACE chain.
+      // Period termination is the canonical statement end, so just advance.
+      if (ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      // *> inline comment: skip to end of line
+      if (ch === '*' && i + 1 < source.length && source[i + 1] === '>') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      // >> compiler directives: skip to end of line. Do NOT alter state — the
+      // directive line is not part of program text.
+      if (ch === '>' && i + 1 < source.length && source[i + 1] === '>') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      // Fixed-format column 7 comment line indicator: if at column 6 (i.e.,
+      // we are about to enter column 7), skip to end of line.
+      if (ch === '*' || ch === '/' || ch === 'D' || ch === 'd') {
+        let lineStart = i;
+        while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+          lineStart--;
+        }
+        if (this.isFixedFormatCommentLine(source, lineStart) && lineStart + 6 === i) {
+          while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+            i++;
+          }
+          continue;
+        }
+      }
+      // String literals: skip past them so keywords inside strings are ignored.
+      if (ch === "'" || ch === '"') {
+        const quote = ch;
+        i++;
+        while (i < source.length) {
+          if (source[i] === quote) {
+            if (i + 1 < source.length && source[i + 1] === quote) {
+              i += 2;
+              continue;
+            }
+            i++;
+            break;
+          }
+          // COBOL strings cannot span line breaks (without fixed-format
+          // continuation). Be lenient — let the dedicated string matcher
+          // handle continuation logic; here we only need a coarse skip.
+          if (source[i] === '\n' || source[i] === '\r') {
+            break;
+          }
+          i++;
+        }
+        continue;
+      }
+      // `==` pseudo-text delimiter: if currently in a recognised REPLACE
+      // context, record the opening offset and skip past the closing `==`.
+      if (ch === '=' && i + 1 < source.length && source[i + 1] === '=') {
+        if (inReplaceContext) {
+          starts.add(i);
+        }
+        // Always skip past the `==...==` payload to the next `==` so we don't
+        // mis-tokenise content inside the pseudo text. If unterminated, only
+        // skip the opening `==` (consistent with matchPseudoText behaviour).
+        // Pseudo-text content may span newlines (e.g., REPLACING ==a\nb== BY
+        // ==c==), so we do not stop at line boundaries.
+        let j = i + 2;
+        let foundClose = false;
+        while (j + 1 < source.length) {
+          if (source[j] === '=' && source[j + 1] === '=') {
+            j += 2;
+            foundClose = true;
+            break;
+          }
+          j++;
+        }
+        i = foundClose ? j : i + 2;
+        continue;
+      }
+      // Identifier / keyword scan: only walk ASCII letter characters that
+      // begin words to avoid duplicate work mid-identifier.
+      if (
+        (ch >= 'A' && ch <= 'Z') ||
+        (ch >= 'a' && ch <= 'z')
+      ) {
+        const prev = i > 0 ? source[i - 1] : '';
+        // Must be at a word boundary
+        if (prev && (prev === '-' || /[a-zA-Z0-9_]/.test(prev))) {
+          i++;
+          continue;
+        }
+        let end = i + 1;
+        while (end < source.length && /[a-zA-Z0-9_-]/.test(source[end])) {
+          end++;
+        }
+        const word = source.slice(i, end).toUpperCase();
+        // Reject hyphenated identifiers like X-REPLACING by checking the next char
+        if (word === 'COPY') {
+          sawCopy = true;
+        } else if (word === 'REPLACE') {
+          inReplaceContext = true;
+        } else if (word === 'REPLACING' && sawCopy) {
+          inReplaceContext = true;
+        }
+        i = end;
+        continue;
+      }
+      i++;
+    }
+    this.cachedPseudoTextStarts = starts;
+    return starts;
+  }
+
+  // Cached wrapper around the helper isInCopyStatement. Without this, every
+  // `==` pseudo-text check re-scans the source for COPY and rebuilds string
+  // exclusions, which is O(n^2) per call and produces O(n^3) overall for
+  // COPY REPLACING blocks with many pseudo-text pairs.
+  private isInCopyStatementCached(posBeforeKeyword: number): boolean {
+    const cached = this.cachedCopyStatement.get(posBeforeKeyword);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (this.cachedSource === null) return false;
+    // Build callbacks that bypass the cache to avoid infinite recursion in the
+    // helper. The non-cached helper itself uses findLastPeriodOutsideStringsBefore
+    // when available, so the inner scan remains O(log n).
+    const innerCallbacks: CobolHelperCallbacks = {
+      isFixedFormatCommentLine: (source, lineStart) => this.isFixedFormatCommentLine(source, lineStart),
+      findLastPeriodOutsideStringsBefore: (endExclusive) => this.findLastPeriodOutsideStringsBefore(endExclusive)
+    };
+    const result = isInCopyStatementHelper(this.cachedSource, posBeforeKeyword, innerCallbacks);
+    this.cachedCopyStatement.set(posBeforeKeyword, result);
+    return result;
+  }
 
   // Validates block open: checks pre-computed valid positions (O(1) per call)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -526,8 +821,15 @@ export class CobolBlockParser extends BaseBlockParser {
       }
     }
 
-    // Pseudo-text delimiter ==...== (only in COPY REPLACING / REPLACE context)
+    // Pseudo-text delimiter ==...== (only in COPY REPLACING / REPLACE context).
+    // We consult a precomputed Set of pseudo-text start positions built once
+    // per parse, falling back to the per-position scan for any positions the
+    // single-pass scan failed to recognise (e.g. malformed contexts).
     if (char === '=' && pos + 1 < source.length && source[pos + 1] === '=') {
+      const pseudoStarts = this.getPseudoTextStarts(source);
+      if (pseudoStarts.has(pos)) {
+        return matchPseudoText(source, pos);
+      }
       if (isInPseudoTextContext(source, pos, this.helperCallbacks)) {
         return matchPseudoText(source, pos);
       }

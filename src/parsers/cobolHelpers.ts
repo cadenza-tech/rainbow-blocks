@@ -2,9 +2,17 @@
 
 import type { ExcludedRegion } from '../types';
 
-// Callbacks for parser methods that remain in CobolBlockParser
+// Callbacks for parser methods that remain in CobolBlockParser. The optional cache
+// callbacks are populated by the parser before each parse so that pseudo-text /
+// COPY-context checks (called once per `==` delimiter) avoid re-scanning the
+// entire buffer on every invocation.
 export interface CobolHelperCallbacks {
   isFixedFormatCommentLine: (source: string, lineStart: number) => boolean;
+  // Returns the offset of the last period outside strings/comments at or before
+  // `endExclusive` (i.e., scanning `source.slice(0, endExclusive + 1)`). Cached.
+  findLastPeriodOutsideStringsBefore?: (endExclusive: number) => number;
+  // Returns true if the position is inside a COPY statement. Cached.
+  isInCopyStatementCached?: (posBeforeKeyword: number) => boolean;
 }
 
 // Checks if the given position is on a fixed-format column 7 comment line (*, /, D, d)
@@ -391,8 +399,13 @@ export function findLastPeriodOutsideStrings(text: string, callbacks: CobolHelpe
 // Checks if position is within a COPY statement by looking for COPY before the last period
 // Scans backward for COPY, skipping content inside strings, comments, and directive lines
 export function isInCopyStatement(source: string, posBeforeKeyword: number, callbacks: CobolHelperCallbacks): boolean {
+  if (callbacks.isInCopyStatementCached) {
+    return callbacks.isInCopyStatementCached(posBeforeKeyword);
+  }
+  const lastPeriod = callbacks.findLastPeriodOutsideStringsBefore
+    ? callbacks.findLastPeriodOutsideStringsBefore(posBeforeKeyword)
+    : findLastPeriodOutsideStrings(source.slice(0, posBeforeKeyword + 1), callbacks);
   const beforeKeyword = source.slice(0, posBeforeKeyword + 1);
-  const lastPeriod = findLastPeriodOutsideStrings(beforeKeyword, callbacks);
   const stmtStart = lastPeriod + 1;
   // Search for COPY word-boundary match, verifying each match is not inside a string or comment
   const copyPattern = /(?<![a-zA-Z0-9_-])COPY(?![a-zA-Z0-9_-])/gi;
