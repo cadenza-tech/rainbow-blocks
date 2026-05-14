@@ -5846,6 +5846,52 @@ fi`;
     });
   });
 
+  suite('Regression: reserved keywords used as function names', () => {
+    test('should not pair for() function definition with stray done', () => {
+      const source = 'for() { echo hi; }\ndone';
+      const pairs = parser.parse(source);
+      // for() is a function definition; the for keyword must be ignored as a block opener
+      // The { } pair should still be detected as a command group
+      const forPairs = pairs.filter((p) => p.openKeyword.value === 'for');
+      assert.strictEqual(forPairs.length, 0, 'for() function name should not be a block opener');
+    });
+
+    test('should not pair if() function definition with stray fi', () => {
+      const source = 'if() { echo hi; }\nfi';
+      const pairs = parser.parse(source);
+      const ifPairs = pairs.filter((p) => p.openKeyword.value === 'if');
+      assert.strictEqual(ifPairs.length, 0, 'if() function name should not be a block opener');
+    });
+
+    test('should not pair case() function definition with stray esac', () => {
+      const source = 'case() { echo hi; }\nesac';
+      const pairs = parser.parse(source);
+      const casePairs = pairs.filter((p) => p.openKeyword.value === 'case');
+      assert.strictEqual(casePairs.length, 0, 'case() function name should not be a block opener');
+    });
+
+    test('should not pair while() function definition with stray done', () => {
+      const source = 'while() { echo hi; }\ndone';
+      const pairs = parser.parse(source);
+      const whilePairs = pairs.filter((p) => p.openKeyword.value === 'while');
+      assert.strictEqual(whilePairs.length, 0, 'while() function name should not be a block opener');
+    });
+
+    test('should not pair until() function definition with stray done', () => {
+      const source = 'until() { echo hi; }\ndone';
+      const pairs = parser.parse(source);
+      const untilPairs = pairs.filter((p) => p.openKeyword.value === 'until');
+      assert.strictEqual(untilPairs.length, 0, 'until() function name should not be a block opener');
+    });
+
+    test('should not pair select() function definition with stray done', () => {
+      const source = 'select() { echo hi; }\ndone';
+      const pairs = parser.parse(source);
+      const selectPairs = pairs.filter((p) => p.openKeyword.value === 'select');
+      assert.strictEqual(selectPairs.length, 0, 'select() function name should not be a block opener');
+    });
+  });
+
   suite('Regression: time prefix combined with command starters (! time, then time, do time, etc.)', () => {
     test('should detect if/fi after ! time prefix combination', () => {
       const source = '! time if true; then echo; fi';
