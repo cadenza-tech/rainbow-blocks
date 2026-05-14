@@ -5845,4 +5845,42 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: time prefix combined with command starters (! time, then time, do time, etc.)', () => {
+    test('should detect if/fi after ! time prefix combination', () => {
+      const source = '! time if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect nested if/fi after then time prefix combination', () => {
+      const source = 'if true; then time if true; then echo; fi; fi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect nested if/fi after do time prefix combination', () => {
+      const source = 'for i in 1; do time if true; then echo; fi; done';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect nested if/fi after else time prefix combination', () => {
+      const source = 'if false; then echo a; else time if true; then echo; fi; fi';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect while/done after ! time prefix combination', () => {
+      const source = '! time while false; do echo; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'done');
+    });
+
+    test('should detect if/fi after time time prefix combination', () => {
+      const source = 'time time if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
