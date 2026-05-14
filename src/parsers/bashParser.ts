@@ -27,6 +27,16 @@ import { findLastOpenerByType } from './parserUtils';
 // Keywords that are closed by `done`
 const DONE_OPENERS = new Set(['for', 'while', 'until', 'select']);
 
+// Map of intermediate keywords to the set of opener keywords that legally accept them.
+// then/else/elif belong to `if` blocks; `do` belongs to `for`/`while`/`until`/`select` loops.
+// `case` and `{` (command group) accept no intermediate keywords at all.
+const INTERMEDIATE_TO_OPENERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['then', new Set(['if'])],
+  ['else', new Set(['if'])],
+  ['elif', new Set(['if'])],
+  ['do', new Set(['for', 'while', 'until', 'select'])]
+]);
+
 // Skips whitespace and \<newline> line continuations backward from `pos`.
 // Used to traverse between tokens separated by line continuations
 // (e.g., `function \<newline> name { ... }`).
@@ -670,7 +680,11 @@ export class BashBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
-            stack[stack.length - 1].intermediates.push(token);
+            const topOpener = stack[stack.length - 1].token.value;
+            const allowedOpeners = INTERMEDIATE_TO_OPENERS.get(token.value);
+            if (allowedOpeners?.has(topOpener)) {
+              stack[stack.length - 1].intermediates.push(token);
+            }
           }
           break;
 
