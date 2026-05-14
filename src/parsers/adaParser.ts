@@ -56,6 +56,22 @@ const COMPOUND_END_PATTERN = new RegExp(
 );
 
 export class AdaBlockParser extends BaseBlockParser {
+  // Most recent source string and excluded regions seen by parse(). Used by
+  // matchBlocks to scan for non-keyword markers (e.g., `do` in accept/return
+  // bodies) that are not part of the token stream.
+  private currentSource: string = '';
+  private currentExcludedRegions: ExcludedRegion[] = [];
+
+  // Override parse() so matchBlocks can consult the original source when it
+  // needs to look at non-keyword context (e.g., the `do` separator that
+  // distinguishes an accept entry-guard `when` from an `exit when` modifier
+  // inside the accept body).
+  parse(source: string): BlockPair[] {
+    this.currentSource = source;
+    this.currentExcludedRegions = this.findExcludedRegions(source);
+    return super.parse(source);
+  }
+
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'if',
@@ -841,6 +857,49 @@ export class AdaBlockParser extends BaseBlockParser {
     });
   }
 
+  // Returns true if a top-level `do` keyword (Ada body separator) appears
+  // between `fromOffset` (exclusive) and `toOffset` (exclusive) in the most
+  // recently parsed source. Used to distinguish:
+  //   - `accept E when G do ... end E;` (entry-guard `when` before `do`)
+  //   - `accept E do exit when X > 0; end E;` (modifier `when` after `do`)
+  // Skips characters that fall inside excluded regions (comments / strings /
+  // character literals) so a `do` token inside a comment is not honored.
+  private hasDoBetween(fromOffset: number, toOffset: number): boolean {
+    const source = this.currentSource;
+    const excluded = this.currentExcludedRegions;
+    const start = Math.max(0, fromOffset);
+    const end = Math.min(source.length, toOffset);
+    let i = start;
+    while (i < end) {
+      if (this.isInExcludedRegion(i, excluded)) {
+        const region = this.findExcludedRegionAt(i, excluded);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      const ch = source[i];
+      // Ada identifier characters: ASCII word chars or non-ASCII Unicode chars
+      const isWordChar = (c: string) => /[a-zA-Z0-9_]/.test(c) || c.charCodeAt(0) > 127;
+      if ((ch === 'd' || ch === 'D') && isAdaWordAt(source, i, 'do')) {
+        // Confirm a clean ASCII word boundary on the left side as well.
+        // isAdaWordAt already verifies left/right boundaries against
+        // ASCII word chars and non-ASCII Unicode chars.
+        return true;
+      }
+      // Skip past the current identifier so we don't match `do` inside
+      // identifier substrings like `done` or `do_something`.
+      if (isWordChar(ch)) {
+        while (i < end && isWordChar(source[i])) i++;
+        continue;
+      }
+      i++;
+    }
+    return false;
+  }
+
   // Custom matching to handle compound end keywords
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
@@ -907,16 +966,34 @@ export class AdaBlockParser extends BaseBlockParser {
                 stack[stack.length - 1].intermediates.push(token);
               }
             } else if (middleKw === 'when') {
-              // 'when' is valid for 'case', 'select', 'entry' (guard), 'accept' (guard),
-              // and 'return' (Ada 2012 extended-return exception handler) directly.
-              // For 'begin', 'when' is only valid as part of an exception handler:
-              // require a preceding 'exception' intermediate before accepting it (otherwise
-              // 'exit when X' / 'delay until X when Y' modifiers would be misclassified).
-              if (topOpener === 'case' || topOpener === 'select' || topOpener === 'entry' || topOpener === 'accept' || topOpener === 'return') {
+              // 'when' is valid for 'case', 'select', and 'entry' (guard)
+              // directly: every `when` inside those constructs is a section
+              // delimiter (case arms / select alternatives / entry guard).
+              //
+              // For 'accept', 'return' (Ada 2012 extended-return), and 'begin'
+              // bodies, `when` is only valid as part of an exception handler
+              // *inside* the body. Outside / before the body separator (`do`
+              // for accept and extended-return, the opening of the body for
+              // begin), an entry-guard `when` is also valid. Distinguish the
+              // two:
+              //   - `when` before the body separator → entry guard intermediate
+              //   - `when` after the body separator → only valid following an
+              //     `exception` intermediate (otherwise it is an `exit when`
+              //     or similar modifier and must be ignored)
+              if (topOpener === 'case' || topOpener === 'select' || topOpener === 'entry') {
                 stack[stack.length - 1].intermediates.push(token);
-              } else if (topOpener === 'begin') {
+              } else if (topOpener === 'accept' || topOpener === 'return' || topOpener === 'begin') {
                 const intermediates = stack[stack.length - 1].intermediates;
-                if (intermediates.some((t) => t.value.toLowerCase() === 'exception')) {
+                const hasException = intermediates.some((t) => t.value.toLowerCase() === 'exception');
+                let acceptAsIntermediate = hasException;
+                if (!acceptAsIntermediate && (topOpener === 'accept' || topOpener === 'return')) {
+                  // Body separator for accept / extended-return is the `do`
+                  // keyword. Check if `do` appears between the opener and
+                  // this `when` token; if not, treat as entry-guard / before-body
+                  // intermediate.
+                  acceptAsIntermediate = !this.hasDoBetween(stack[stack.length - 1].token.startOffset, token.startOffset);
+                }
+                if (acceptAsIntermediate) {
                   stack[stack.length - 1].intermediates.push(token);
                 }
               }
