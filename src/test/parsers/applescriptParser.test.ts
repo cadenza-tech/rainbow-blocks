@@ -2908,6 +2908,71 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-15: else/else if should only be intermediate at logical line start', () => {
+    test('should not attach else as intermediate when used as value in set-to', () => {
+      const source = 'if x then\n  set y to else\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when used as record value', () => {
+      const source = 'if x then\n  set y to {a: else}\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when used as command argument', () => {
+      const source = 'if x then\n  display dialog else\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when used after a statement on same line', () => {
+      const source = 'if x then\n  beep else\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when preceded by parenthesized expression', () => {
+      const source = 'if x then\n  (1)else\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when used as function-call form', () => {
+      const source = 'if x then\n  else(x)\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else if as intermediate when used as value in set-to', () => {
+      const source = 'if x then\n  set y to else if\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach else at logical line start as intermediate', () => {
+      const source = 'if x then\n  beep\nelse\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should still attach else if at logical line start as intermediate', () => {
+      const source = 'if x then\n  beep\nelse if y then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if']);
+    });
+  });
+
   suite('Regression 2026-05-15: handlerName fallback should skip block comments and continuations', () => {
     test('should pair on (* doc *) transaction() handler with end transaction via fallback', () => {
       const source = 'on (* doc *) transaction()\n  beep\nend transaction';
