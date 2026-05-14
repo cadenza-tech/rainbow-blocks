@@ -329,11 +329,31 @@ export class AdaBlockParser extends BaseBlockParser {
         // encountering one before the terminating `;` indicates the compound
         // end was already complete.
         const reservedDesignatorBlockers = new Set([...this.keywords.blockOpen, ...this.keywords.blockClose].map((k) => k.toLowerCase()));
-        // Skip optional designator: identifier (.identifier)*
+        // Skip optional designator: identifier (.identifier)* or an Ada
+        // operator-symbol designator written as a string literal (e.g.,
+        // `end function "+";`). Both forms may appear in qualified names
+        // (e.g., `Math."+"` or `Foo.Bar`).
         while (lookahead < source.length && lookahead < lookaheadEnd) {
           if (source[lookahead] === ';') break;
-          // Identifier must start with letter or underscore
           const startCh = source[lookahead];
+          // Operator-symbol designator: string literal (`"+"`, `"<"`, etc.)
+          if (startCh === '"') {
+            const strRegion = matchAdaString(source, lookahead);
+            // Reject if the string is unterminated or extends past the
+            // lookahead window (it would not be a single-line designator).
+            if (strRegion.end > lookaheadEnd) break;
+            lookahead = strRegion.end;
+            lookahead = skipAdaWhitespaceAndComments(source, lookahead);
+            // Allow qualified names: '.' followed by another identifier or
+            // operator-symbol designator
+            if (lookahead < source.length && source[lookahead] === '.') {
+              lookahead++;
+              lookahead = skipAdaWhitespaceAndComments(source, lookahead);
+              continue;
+            }
+            break;
+          }
+          // Identifier must start with letter or underscore
           if (!(/[a-zA-Z_]/.test(startCh) || startCh.charCodeAt(0) > 127)) break;
           // Reject if the next word is itself a block keyword (e.g., `if`,
           // `loop`, `case`, `begin`, ...) — those are independent constructs
@@ -349,7 +369,8 @@ export class AdaBlockParser extends BaseBlockParser {
           }
           lookahead = wordEnd;
           lookahead = skipAdaWhitespaceAndComments(source, lookahead);
-          // Allow qualified names: '.' followed by another identifier
+          // Allow qualified names: '.' followed by another identifier or
+          // operator-symbol designator
           if (lookahead < source.length && source[lookahead] === '.') {
             lookahead++;
             lookahead = skipAdaWhitespaceAndComments(source, lookahead);
