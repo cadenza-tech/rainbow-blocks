@@ -360,9 +360,9 @@ export function isAtCommandPosition(
     if (ts >= 3 && source.slice(ts - 3, ts + 1) === 'time') {
       const tStart = ts - 3;
       if (tStart === 0 || !/[a-zA-Z0-9_]/.test(source[tStart - 1])) {
-        let p = tStart - 1;
-        while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
-        if (p < 0 || ';|&\n\r()'.includes(source[p]) || source[p] === '`' || source[p] === '{' || source[p] === '}') {
+        // Recurse so command starters like `!`, `then`, `do`, `else`, `elif`, `coproc`,
+        // and another `time` correctly propagate command position to the keyword after `time`.
+        if (isAtCommandPosition(source, tStart, excludedRegions, callbacks)) {
           return true;
         }
       }
