@@ -2908,5 +2908,47 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-15: handlerName fallback should skip block comments and continuations', () => {
+    test('should pair on (* doc *) transaction() handler with end transaction via fallback', () => {
+      const source = 'on (* doc *) transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+
+    test('should pair on ¬\\n transaction() handler with end transaction via fallback', () => {
+      const source = 'on ¬\n  transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+
+    test('should pair to (* doc *) transaction() handler with end transaction via fallback', () => {
+      const source = 'to (* doc *) transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'to');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+
+    test('should pair on ¬\\n tell() handler with end tell via fallback', () => {
+      const source = 'on ¬\n  tell()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end tell');
+    });
+
+    test('should pair on with NBSP before handler name with matching end', () => {
+      const source = 'on transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+  });
+
   generateCommonTests(config);
 });
