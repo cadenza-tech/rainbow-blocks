@@ -54,13 +54,17 @@ const LINE_LEADING_WHITESPACE_PATTERN = /^[ \t\u00A0\u2000-\u200B\u2028\u2029\u2
 export class ApplescriptBlockParser extends BaseBlockParser {
   // Source captured during tokenize for use in matchBlocks (handler-name lookup).
   private _currentSource = '';
+  // Excluded regions captured during tokenize so handlerName() can transparently
+  // skip block comments `(* ... *)` between the keyword and the identifier.
+  private _currentExcludedRegions: ExcludedRegion[] = [];
 
   // Returns the handler name (lowercased) for an `on`/`to` open block, or '' when none.
-  // Reads from the source stored during tokenize.
+  // Reads from the source stored during tokenize. Skips ASCII space/tab, Unicode
+  // whitespace, `¬<newline>` line continuations, and block comments `(* ... *)` to
+  // match the same whitespace handling used by the handler-declaration probe.
   private handlerName(block: OpenBlock): string {
     const source = this._currentSource;
-    let i = block.token.endOffset;
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+    const i = this.skipHandlerProbeWhitespace(source, block.token.endOffset, this._currentExcludedRegions);
     if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) return '';
     let end = i;
     while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
@@ -326,6 +330,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   // Override tokenize to handle compound keywords and case-insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     this._currentSource = source;
+    this._currentExcludedRegions = excludedRegions;
     const tokens: Token[] = [];
     const newlinePositions = this.buildNewlinePositions(source);
     let i = 0;
