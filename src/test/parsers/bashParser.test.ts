@@ -5846,6 +5846,56 @@ fi`;
     });
   });
 
+  suite('Regression: incompatible intermediate keywords inside non-matching blocks', () => {
+    test('should not add elif intermediate inside while/do block', () => {
+      const source = 'while true; do\n  echo\nelif\ndone';
+      const pairs = parser.parse(source);
+      const whilePair = pairs.find((p) => p.openKeyword.value === 'while');
+      assert.ok(whilePair, 'while/done pair must exist');
+      assertIntermediates(whilePair, ['do']);
+    });
+
+    test('should not add else intermediate inside for/do block', () => {
+      const source = 'for i in 1; do\n  echo\nelse\ndone';
+      const pairs = parser.parse(source);
+      const forPair = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forPair, 'for/done pair must exist');
+      assertIntermediates(forPair, ['do']);
+    });
+
+    test('should not add then intermediate inside until/do block', () => {
+      const source = 'until true; do\n  echo\nthen\ndone';
+      const pairs = parser.parse(source);
+      const untilPair = pairs.find((p) => p.openKeyword.value === 'until');
+      assert.ok(untilPair, 'until/done pair must exist');
+      assertIntermediates(untilPair, ['do']);
+    });
+
+    test('should not add then intermediate inside case block', () => {
+      const source = 'case $x in\n  a) echo a ;;\nthen\nesac';
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(casePair, 'case/esac pair must exist');
+      assertIntermediates(casePair, []);
+    });
+
+    test('should not add do intermediate inside if block', () => {
+      const source = 'if true; then\n  echo\ndo\nfi';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.ok(ifPair, 'if/fi pair must exist');
+      assertIntermediates(ifPair, ['then']);
+    });
+
+    test('should not add then intermediate inside { } command group', () => {
+      const source = '{\n  echo\nthen\n}';
+      const pairs = parser.parse(source);
+      const bracePair = pairs.find((p) => p.openKeyword.value === '{');
+      assert.ok(bracePair, '{/} pair must exist');
+      assertIntermediates(bracePair, []);
+    });
+  });
+
   suite('Regression: reserved keywords used as function names', () => {
     test('should not pair for() function definition with stray done', () => {
       const source = 'for() { echo hi; }\ndone';
