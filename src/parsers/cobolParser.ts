@@ -780,7 +780,12 @@ export class CobolBlockParser extends BaseBlockParser {
     const ch = source[i];
     // Arithmetic operators: + - * / = < >
     // Separators: , ;
-    // Parentheses: ( )
+    // Open parenthesis: (   — followed token is an operand inside an expression.
+    // NOTE: closing parenthesis `)` is intentionally NOT treated as an
+    // expression-context character. `)` terminates an expression/condition
+    // (e.g., `IF (X > 0)`); the next reserved word is therefore in statement
+    // position, not operand position, so ELSE/WHEN after `)` are real
+    // control-flow intermediates.
     // Note: `**` is two `*` characters, so checking `*` covers it.
     return (
       ch === '+' ||
@@ -792,8 +797,7 @@ export class CobolBlockParser extends BaseBlockParser {
       ch === '>' ||
       ch === ',' ||
       ch === ';' ||
-      ch === '(' ||
-      ch === ')'
+      ch === '('
     );
   }
 
