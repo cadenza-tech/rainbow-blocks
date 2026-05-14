@@ -2979,6 +2979,74 @@ end procedure;`;
     });
   });
 
+  suite('Regression 2026-05-15: compound end must not create crossed block pairs', () => {
+    test('should not produce crossed pairs when end if and end loop are reversed', () => {
+      // The inner `for ... loop` is closed by the outer `end loop`, while the
+      // outer `if ... then` is closed by the inner `end if`. Pairing both
+      // would produce two crossed BlockPairs (if/end if crosses for/end loop).
+      // Anchor-set principle (CLAUDE.md, VS Code Bracket Pair Colorization):
+      // prefer leaving constructs unpaired (no color) over a wrong color that
+      // crosses an enclosing block. Expect zero or one pair, but never two
+      // crossed pairs.
+      const source = `if X then
+  for I in 1..10 loop
+    null;
+end if;
+end loop;
+`;
+      const pairs = parser.parse(source);
+      // Crossed pair detection: no two pairs may cross each other.
+      for (let i = 0; i < pairs.length; i++) {
+        for (let j = i + 1; j < pairs.length; j++) {
+          const a = pairs[i];
+          const b = pairs[j];
+          const aStart = a.openKeyword.startOffset;
+          const aEnd = a.closeKeyword.startOffset;
+          const bStart = b.openKeyword.startOffset;
+          const bEnd = b.closeKeyword.startOffset;
+          const aContainsB = aStart < bStart && bEnd < aEnd;
+          const bContainsA = bStart < aStart && aEnd < bEnd;
+          const disjoint = aEnd < bStart || bEnd < aStart;
+          const isProperlyNested = aContainsB || bContainsA || disjoint;
+          assert.ok(isProperlyNested, `BlockPairs ${i} and ${j} must not cross (anchor-set principle)`);
+        }
+      }
+      // At most one pair survives (the inner-most match, or none).
+      assert.ok(pairs.length <= 1, `Expected at most 1 pair, got ${pairs.length}`);
+    });
+
+    test('should not produce crossed pairs across three reversed compound ends', () => {
+      // Triple-reversed: end if closes nothing valid (for/while/loop are
+      // available), end loop should close the innermost loop, end case the
+      // outermost case. The if opener and the misplaced end if must be
+      // dropped to avoid crossing the loop pair.
+      const source = `case X is
+  when 1 =>
+    if A then
+      for I in 1..3 loop
+        null;
+end loop;
+end if;
+end case;
+`;
+      const pairs = parser.parse(source);
+      for (let i = 0; i < pairs.length; i++) {
+        for (let j = i + 1; j < pairs.length; j++) {
+          const a = pairs[i];
+          const b = pairs[j];
+          const aStart = a.openKeyword.startOffset;
+          const aEnd = a.closeKeyword.startOffset;
+          const bStart = b.openKeyword.startOffset;
+          const bEnd = b.closeKeyword.startOffset;
+          const aContainsB = aStart < bStart && bEnd < aEnd;
+          const bContainsA = bStart < aStart && aEnd < bEnd;
+          const disjoint = aEnd < bStart || bEnd < aStart;
+          assert.ok(aContainsB || bContainsA || disjoint, `BlockPairs ${i} and ${j} must not cross`);
+        }
+      }
+    });
+  });
+
   suite('Regression 2026-05-09: Unicode whitespace in or else and short-circuit detection', () => {
     test('should treat or<NBSP>else as short-circuit (intermediates only contain then)', () => {
       // `or` and `else` separated by NBSP (U+00A0)
