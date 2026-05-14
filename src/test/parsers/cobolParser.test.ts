@@ -929,6 +929,27 @@ END-PERFORM`;
         const pairs = parser.parse(source);
         assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
       });
+
+      // Regression: large COPY REPLACING used to run in super-linear time
+      // (~O(n^3): each `==` triggered a backward scan that re-walked all preceding `==` pairs,
+      // and each step inside re-scanned the buffer for the last period).
+      // Now it should complete in roughly linear time even for hundreds of pairs.
+      test('should parse 300-pair COPY REPLACING in linear time', () => {
+        const buf: string[] = ['COPY X REPLACING '];
+        const pairCount = 300;
+        for (let i = 0; i < pairCount; i++) {
+          buf.push(`==a${i}== BY ==b${i}== `);
+        }
+        buf.push('.\nIF COND\nEND-IF');
+        const source = buf.join('');
+        const t0 = Date.now();
+        const pairs = parser.parse(source);
+        const elapsed = Date.now() - t0;
+        assertSingleBlock(pairs, 'IF', 'END-IF');
+        // Pre-fix this took ~1800ms (O(n^3)). Post-fix should be well under 500ms.
+        // Use a generous ceiling to avoid flakiness on slow CI nodes.
+        assert.ok(elapsed < 1000, `300-pair COPY REPLACING took ${elapsed}ms (expected < 1000ms)`);
+      });
     });
   });
 
