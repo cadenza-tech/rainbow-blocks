@@ -846,7 +846,52 @@ export class AdaBlockParser extends BaseBlockParser {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
 
-    for (const token of tokens) {
+    // Pre-compute the set of compound-end types available *after* each token
+    // index. Used to detect when picking a deeper opener (via
+    // findLastOpenerByType) would create a crossed pair with an intervening
+    // opener that has its own compound end still ahead in the token stream.
+    // remainingEndTypes[i] = multiset of compound-end types at tokens with
+    // index >= i (e.g., 'if', 'loop', 'case', ...).
+    const compoundCloseRegex = /^end(?:\s|--[^\r\n]*)+(\w+)/;
+    const compoundEndTypesAt: string[][] = new Array(tokens.length + 1);
+    {
+      let acc: string[] = [];
+      compoundEndTypesAt[tokens.length] = acc;
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const t = tokens[i];
+        if (t.type === 'block_close') {
+          const m = t.value.toLowerCase().match(compoundCloseRegex);
+          if (m) {
+            acc = [m[1], ...acc];
+          }
+        }
+        compoundEndTypesAt[i] = acc;
+      }
+    }
+    const openerCompoundEndType = (openerKw: string): string | null => {
+      const k = openerKw.toLowerCase();
+      if (k === 'if') return 'if';
+      if (k === 'case') return 'case';
+      if (k === 'select') return 'select';
+      if (k === 'record') return 'record';
+      if (k === 'for' || k === 'while' || k === 'loop') return 'loop';
+      if (
+        k === 'procedure' ||
+        k === 'function' ||
+        k === 'package' ||
+        k === 'task' ||
+        k === 'protected' ||
+        k === 'accept' ||
+        k === 'entry' ||
+        k === 'return'
+      ) {
+        return k;
+      }
+      return null;
+    };
+
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+      const token = tokens[tokenIndex];
       switch (token.type) {
         case 'block_open':
           stack.push({ token, intermediates: [] });
@@ -908,6 +953,41 @@ export class AdaBlockParser extends BaseBlockParser {
             // no matching opener of the requested type exists. Per CLAUDE.md
             // best-effort parsing principle #3: prefer no color over wrong
             // color (anchor-set principle from VS Code Bracket Pair Colorization).
+
+            // Reject the match when pairing with this opener would create a
+            // crossed pair: i.e., another opener between matchIndex and the
+            // top of the stack has its own compound-end candidate still
+            // pending later in the token stream. If an intervening opener's
+            // compound close (e.g., `end loop` for a `for` opener above
+            // matchIndex) exists after this token, consuming the deeper
+            // matchIndex first would force that future close to cross the
+            // pair we are about to build.
+            //
+            // `begin` is excluded from the crossing check: it is closed by a
+            // simple `end` or merged into the surrounding BEGIN_CONTEXT
+            // opener below — never produces a compound-end pair on its own —
+            // so a lone `begin` above the matched opener does not constitute
+            // a crossing (it remains an orphan or merges into matchIndex via
+            // the BEGIN_CONTEXT branch below).
+            //
+            // `declare` is excluded for the same reason: it pairs with a
+            // simple `end` and has no compound-end form.
+            if (matchIndex >= 0 && matchIndex < stack.length - 1) {
+              const remaining = compoundEndTypesAt[tokenIndex + 1] ?? [];
+              const remainingCounts = new Map<string, number>();
+              for (const ty of remaining) {
+                remainingCounts.set(ty, (remainingCounts.get(ty) ?? 0) + 1);
+              }
+              for (let s = matchIndex + 1; s < stack.length; s++) {
+                const above = stack[s].token.value.toLowerCase();
+                if (above === 'begin' || above === 'declare') continue;
+                const ty = openerCompoundEndType(above);
+                if (ty !== null && (remainingCounts.get(ty) ?? 0) > 0) {
+                  matchIndex = -1;
+                  break;
+                }
+              }
+            }
 
             if (matchIndex >= 0) {
               // Check if 'begin' is on the stack above the matched opener
