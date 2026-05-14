@@ -2973,6 +2973,82 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-15: reserved word as handler name should be rejected', () => {
+    test('should not detect on if as block_open (orphan, no pair)', () => {
+      const source = 'on if\n  beep\nend if';
+      const pairs = parser.parse(source);
+      // `on if` is a syntax error (reserved word as handler name without parens);
+      // the parser should not pair `on` with `end if`.
+      const onPair = pairs.find((p) => p.openKeyword.value === 'on');
+      assert.strictEqual(onPair, undefined, 'on should not be paired when followed by bare reserved word');
+    });
+
+    test('should not detect on tell as block_open (orphan, no pair)', () => {
+      const source = 'on tell\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      const onPair = pairs.find((p) => p.openKeyword.value === 'on');
+      assert.strictEqual(onPair, undefined, 'on should not be paired when followed by bare reserved word');
+    });
+
+    test('should not detect on repeat as block_open (orphan, no pair)', () => {
+      const source = 'on repeat\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      const onPair = pairs.find((p) => p.openKeyword.value === 'on');
+      assert.strictEqual(onPair, undefined, 'on should not be paired when followed by bare reserved word');
+    });
+
+    test('should not detect to if as block_open (orphan, no pair)', () => {
+      const source = 'to if\n  beep\nend if';
+      const pairs = parser.parse(source);
+      const toPair = pairs.find((p) => p.openKeyword.value === 'to');
+      assert.strictEqual(toPair, undefined, 'to should not be paired when followed by bare reserved word');
+    });
+
+    test('should not detect on try as block_open (orphan, no pair)', () => {
+      const source = 'on try\n  beep\nend try';
+      const pairs = parser.parse(source);
+      const onPair = pairs.find((p) => p.openKeyword.value === 'on');
+      assert.strictEqual(onPair, undefined, 'on should not be paired when followed by bare reserved word');
+    });
+
+    test('should not detect on script as block_open (orphan, no pair)', () => {
+      const source = 'on script\n  beep\nend script';
+      const pairs = parser.parse(source);
+      const onPair = pairs.find((p) => p.openKeyword.value === 'on');
+      assert.strictEqual(onPair, undefined, 'on should not be paired when followed by bare reserved word');
+    });
+
+    test('should still pair on tell() with end tell via fallback (parens kept)', () => {
+      const source = 'on tell()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end tell');
+    });
+
+    test('should still pair to tell() with end tell via fallback (parens kept)', () => {
+      const source = 'to tell()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'to');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end tell');
+    });
+
+    test('should still pair on transaction() with end transaction (transaction is not a reserved word)', () => {
+      const source = 'on transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+
+    test('should still pair on myHandler with end (plain identifier kept)', () => {
+      const source = 'on myHandler\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   suite('Regression 2026-05-15: handlerName fallback should skip block comments and continuations', () => {
     test('should pair on (* doc *) transaction() handler with end transaction via fallback', () => {
       const source = 'on (* doc *) transaction()\n  beep\nend transaction';
