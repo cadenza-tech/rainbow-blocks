@@ -2946,6 +2946,39 @@ end procedure;`;
     });
   });
 
+  suite('Regression 2026-05-15: compound end lookahead must not consume next block opener as designator', () => {
+    test('should not greedily merge end<newline>loop with the following independent loop block', () => {
+      // The lookahead for the optional designator after `end <type>` must not
+      // consume a subsequent block opener keyword (here: `loop`). Without the
+      // guard, `end\nloop\n  null;\nend loop;` is misread as `end\nloop loop`
+      // (with `loop` as a designator-like identifier), which prevents pairing
+      // of both the preceding `if` and the following `loop` blocks.
+      const source = 'if X then\n  null;\nend\nloop\n  null;\nend loop;\n';
+      const pairs = parser.parse(source);
+      // Expect two independent blocks: the first `if X then` closed by simple
+      // `end`, and the second `loop ... end loop;`.
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(firstIf, 'first if block should be paired');
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop block (independent) should also be paired');
+      assert.match(loopBlock.closeKeyword.value.toLowerCase(), /^end\s+loop$/);
+    });
+
+    test('should not greedily merge end<newline>case with the following case block', () => {
+      const source = 'if X then\n  null;\nend\ncase Y is\n  when others => null;\nend case;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(firstIf, 'first if block should be paired');
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      const caseBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(caseBlock, 'case block (independent) should also be paired');
+      assert.match(caseBlock.closeKeyword.value.toLowerCase(), /^end\s+case$/);
+    });
+  });
+
   suite('Regression 2026-05-09: Unicode whitespace in or else and short-circuit detection', () => {
     test('should treat or<NBSP>else as short-circuit (intermediates only contain then)', () => {
       // `or` and `else` separated by NBSP (U+00A0)
