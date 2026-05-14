@@ -453,6 +453,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
+      // `else if` is only a valid block_middle at the start of a logical line.
+      // Mid-line occurrences (e.g., `set y to else if`) are identifier/value
+      // usages, not intermediates of the enclosing `if` block.
+      if (type === 'block_middle' && keyword === 'else if') {
+        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: flexMatch };
+        }
+      }
+
       // Check if compound middle keyword is used in set/copy/possessive patterns
       if (type === 'block_middle') {
         const ls = findLogicalLineStart(source, i, excludedRegions, this.helperCallbacks);
@@ -609,6 +618,22 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Reject single block_middle in record key position (e.g., `{else: 5}`)
       if (type === 'block_middle' && this.isAtRecordKeyPosition(source, i, endPos, excludedRegions)) {
         return { nextPos: endPos };
+      }
+
+      // `else` is only a valid block_middle when it appears at the start of a
+      // logical line. Mid-line occurrences (e.g., `set y to else`, `display dialog else`,
+      // `beep else`, `(1)else`) are identifier/value usages, not intermediates of
+      // the enclosing `if` block. Also reject `else(` (function-call form, with
+      // optional whitespace before `(`) regardless of line position.
+      if (type === 'block_middle' && keyword === 'else') {
+        if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
+          return { nextPos: endPos };
+        }
+        let parenScan = endPos;
+        while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+        if (parenScan < source.length && source[parenScan] === '(') {
+          return { nextPos: endPos };
+        }
       }
 
       const { line, column } = this.getLineAndColumn(i, newlinePositions);
