@@ -2032,6 +2032,17 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after comma is data name');
     });
+
+    test('should register ELSE as IF intermediate after a closing parenthesis on the condition', () => {
+      // Bug: isInExpressionContext treated `)` as an expression-context character,
+      // so `IF (X > 0)\nELSE\nEND-IF` suppressed ELSE registration. A closing paren
+      // terminates a condition or expression — the token after it is no longer an
+      // operand, so ELSE on the next line is a real IF intermediate.
+      const source = 'IF (X > 0)\nELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
   });
 
   suite('Regression 2026-05-09: ELSE/WHEN expression context honors excluded regions', () => {
