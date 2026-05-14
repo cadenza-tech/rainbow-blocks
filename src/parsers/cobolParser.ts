@@ -584,33 +584,56 @@ export class CobolBlockParser extends BaseBlockParser {
   }
 
   // Checks if keyword position is part of a COPY statement (e.g., `COPY END-IF.`)
-  // where the keyword is being used as a copybook/filename, not as a block close
+  // where the keyword is being used as a copybook/filename, not as a block close.
+  // Uses the cached statement-boundary table so multi-line `COPY\n  IF.` and
+  // fixed-format sequence-area prefixes (`001000 COPY ...`) are handled
+  // correctly, while honouring excludedRegions to skip COPY tokens that live
+  // inside EXEC/strings/comments.
   private isInCopyStatement(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let i = position - 1;
-    while (i >= 0) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region) {
-          i = region.start - 1;
-          continue;
-        }
-      }
-      const ch = source[i];
-      if (ch === '\n' || ch === '\r' || ch === '.') {
-        break;
-      }
-      i--;
+    // Statement boundary is the previous period outside strings/comments.
+    const lastPeriod = this.findLastPeriodOutsideStringsBefore(position);
+    const stmtStart = lastPeriod + 1;
+    if (stmtStart >= position) return false;
+    // Scan the statement for the COPY keyword with proper word-boundary
+    // matching. The regex avoids matching identifiers like MY-COPY or COPY-X.
+    const COPY_PATTERN = /(?<![a-zA-Z0-9_-])COPY(?![a-zA-Z0-9_-])/gi;
+    COPY_PATTERN.lastIndex = 0;
+    const statement = source.slice(stmtStart, position);
+    for (const match of statement.matchAll(COPY_PATTERN)) {
+      const absPos = stmtStart + match.index;
+      // Skip COPY tokens inside excluded regions (strings, comments, EXEC
+      // blocks, compiler directive lines, etc.)
+      if (this.isInExcludedRegion(absPos, excludedRegions)) continue;
+      // Reject if an unterminated pseudo-text region intervenes between
+      // the COPY keyword and the keyword position. matchPseudoText reports
+      // unterminated `==` as a 2-char excluded region, indicating a mid-edit
+      // state where the rest of the statement is ambiguous. We must not
+      // suppress real keywords past that ambiguity.
+      if (this.hasUnterminatedPseudoTextBetween(absPos, position, excludedRegions)) continue;
+      return true;
     }
-    let j = i + 1;
-    while (j < position && (source[j] === ' ' || source[j] === '\t')) {
-      j++;
+    return false;
+  }
+
+  // Returns true if there is an excluded region between `from` and `to` that
+  // represents an unterminated pseudo-text delimiter (a 2-char `==` region).
+  // Used by isInCopyStatement to avoid wrongly extending the COPY statement
+  // context past a half-typed `==`.
+  private hasUnterminatedPseudoTextBetween(from: number, to: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.cachedSource === null) return false;
+    const source = this.cachedSource;
+    for (const region of excludedRegions) {
+      if (region.start <= from) continue;
+      if (region.start >= to) break;
+      if (
+        region.end - region.start === 2 &&
+        source[region.start] === '=' &&
+        source[region.start + 1] === '='
+      ) {
+        return true;
+      }
     }
-    if (j + 4 > position) return false;
-    const candidate = source.slice(j, j + 4).toUpperCase();
-    if (candidate !== 'COPY') return false;
-    const afterCopy = source[j + 4];
-    if (afterCopy && afterCopy !== ' ' && afterCopy !== '\t') return false;
-    return true;
+    return false;
   }
 
   // Override tokenize for case-insensitive keyword matching
