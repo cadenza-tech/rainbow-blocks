@@ -292,17 +292,46 @@ export class AdaBlockParser extends BaseBlockParser {
         // keyword like `then` after `Cond`) indicates the type keyword
         // belongs to a separate construct.
         const lookaheadStart = pos + fullMatch.length;
+        // Limit the designator lookahead to the current logical statement —
+        // i.e., everything up to the next newline (line terminator) or `;`.
+        // Without this bound, `end\n<type>\n  <independent statement>;` would
+        // misread the independent statement's leading identifier as the
+        // designator of this end (e.g., `end\nloop\n  null;` consumed `null`
+        // as the designator of `end loop`, swallowing the next block opener).
+        // After the type keyword, an end statement is finished on the same
+        // line; a designator on a separate line is not allowed by Ada syntax.
+        let lookaheadEnd = lookaheadStart;
+        while (lookaheadEnd < source.length) {
+          const ch = source[lookaheadEnd];
+          if (ch === '\n' || ch === '\r' || ch === ';') break;
+          lookaheadEnd++;
+        }
         let lookahead = skipAdaWhitespaceAndComments(source, lookaheadStart);
         const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+        // Reserved keywords that must never be consumed as a designator: any
+        // block_open or block_close keyword belongs to a separate construct, so
+        // encountering one before the terminating `;` indicates the compound
+        // end was already complete.
+        const reservedDesignatorBlockers = new Set([...this.keywords.blockOpen, ...this.keywords.blockClose].map((k) => k.toLowerCase()));
         // Skip optional designator: identifier (.identifier)*
-        while (lookahead < source.length) {
+        while (lookahead < source.length && lookahead < lookaheadEnd) {
           if (source[lookahead] === ';') break;
           // Identifier must start with letter or underscore
           const startCh = source[lookahead];
           if (!(/[a-zA-Z_]/.test(startCh) || startCh.charCodeAt(0) > 127)) break;
-          while (lookahead < source.length && isWordChar(source[lookahead])) {
-            lookahead++;
+          // Reject if the next word is itself a block keyword (e.g., `if`,
+          // `loop`, `case`, `begin`, ...) — those are independent constructs
+          // and must not be consumed as the optional designator of this end.
+          const wordStart = lookahead;
+          let wordEnd = lookahead;
+          while (wordEnd < source.length && isWordChar(source[wordEnd])) {
+            wordEnd++;
           }
+          const word = source.slice(wordStart, wordEnd).toLowerCase();
+          if (reservedDesignatorBlockers.has(word)) {
+            break;
+          }
+          lookahead = wordEnd;
           lookahead = skipAdaWhitespaceAndComments(source, lookahead);
           // Allow qualified names: '.' followed by another identifier
           if (lookahead < source.length && source[lookahead] === '.') {
