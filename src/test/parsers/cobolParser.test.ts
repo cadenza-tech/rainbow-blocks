@@ -1812,6 +1812,27 @@ END-PERFORM`;
       assertBlockCount(pairs, 1);
       assert.strictEqual(pairs[0].closeKeyword.line, 2, 'IF should pair with the line-2 END-IF');
     });
+
+    test('should detect COPY when fixed-format sequence area precedes COPY on the same line', () => {
+      // Bug: the class-level isInCopyStatement only walked back to the
+      // beginning of the line and required the first non-blank token to be
+      // COPY. With a fixed-format sequence area like `001000 ` preceding COPY,
+      // the candidate token included the digits and COPY was missed.
+      const source = 'IF Y\n001000 COPY END-IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'IF should pair with the line-2 END-IF (not the END-IF on the COPY line)');
+    });
+
+    test('should detect COPY across a newline when the filename is on the next line', () => {
+      // Bug: the class-level isInCopyStatement stopped at the previous
+      // newline, so multi-line `COPY\n  IF.` did not recognise IF as a
+      // copybook name, causing IF to be tokenised as a block opener and
+      // paired with the following standalone END-IF.
+      const source = 'COPY\n  IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Regression 2026-05-09: COPY statement with reserved-word filename as block_open', () => {
