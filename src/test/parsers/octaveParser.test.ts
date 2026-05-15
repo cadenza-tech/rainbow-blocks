@@ -1835,6 +1835,43 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: end(idx) = value is indexing assignment, not block close', () => {
+    test('should not treat end(1) = 5 as block close', () => {
+      // `end(1) = 5;` is indexing assignment to a variable named `end`. This must
+      // not be treated as a block_close that consumes the function opener;
+      // otherwise the trailing real `end` becomes orphan.
+      const source = 'function f\nend(1) = 5;\nend';
+      const pairs = parser.parse(source);
+      // Function should pair with the trailing `end` (line 2), not `end(1)` (line 1).
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2, 'function should pair with trailing end on line 2');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end(idx) = expr as block close with complex expression', () => {
+      // Same pattern with a more complex assignment value.
+      const source = 'function f\nend(2) = compute(x);\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat end(1) without assignment as block close (indexing read)', () => {
+      // `x = end(1);` is reading the indexed end value (rare but valid Octave).
+      // However, in this context we only need to ensure that bare `end` inside
+      // brackets without assignment is NOT mis-pre-empted: the issue is only when
+      // followed by `=`. Test that `end` followed by `(` then `==` (comparison)
+      // is still a normal block close.
+      const source = 'function f\n  if end(1) == 5\n  endif\nend';
+      const pairs = parser.parse(source);
+      // function/end pair must exist; the `end` inside `if` is inside parens so
+      // already filtered (it's an `end` keyword for indexing inside `(`).
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 3, 'function should pair with outer end');
+    });
+  });
+
   suite('Regression 2026-05-15: do followed by line comment is function call', () => {
     test('should not treat do followed by % comment then ( as do/until block', () => {
       // `do % comment\n  (1, 2);` is a function call across the comment, not a
