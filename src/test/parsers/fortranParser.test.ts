@@ -5165,5 +5165,17 @@ end if`;
     });
   });
 
+  suite('Regression: if without parenthesized condition', () => {
+    test('should not treat `if then` without parens as block_if', () => {
+      // `if then` without `(condition)` is invalid Fortran syntax. The parser must not
+      // treat it as a block opener; otherwise it would falsely pair with `end if`.
+      const source = `if then
+  x = 1
+end if`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
