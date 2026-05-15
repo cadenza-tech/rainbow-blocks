@@ -24,8 +24,21 @@ const COMPARISON_CONTEXT_KEYWORDS = new Set([
   'div',
   'mod',
   'shl',
-  'shr'
+  'shr',
+  'try',
+  'begin',
+  'on',
+  'repeat'
 ]);
+
+// Statement-context scope keywords: when these appear before `X = class` (across `;`
+// boundaries), the `=` is a comparison expression, not a type definition.
+const STATEMENT_CONTEXT_SCOPE_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm', 'do', 'then', 'else', 'finally', 'except']);
+
+// Declaration-context scope keywords: when these appear before `X = class`, the `=`
+// is a type definition. Used to terminate the cross-`;` scope scan early so we do
+// not over-shoot into a previous statement block.
+const DECLARATION_CONTEXT_SCOPE_KEYWORDS = new Set(['type', 'var', 'const']);
 
 export class PascalBlockParser extends BaseBlockParser {
   private get validationCallbacks(): PascalValidationCallbacks {
@@ -357,31 +370,66 @@ export class PascalBlockParser extends BaseBlockParser {
     // and 'Y := X = class' (`:=` assignment makes the trailing '=' a comparison).
     // Scan backward to the start of the statement and look for any comparison-context
     // keyword along the way. Stop at statement boundaries (';' and start-of-source).
-    {
-      let ci = i - 1;
-      while (ci >= 0) {
-        if (this.isInExcludedRegion(ci, excludedRegions)) {
-          const region = this.findExcludedRegionAt(ci, excludedRegions);
+    let ci = i - 1;
+    let hitSemicolon = false;
+    while (ci >= 0) {
+      if (this.isInExcludedRegion(ci, excludedRegions)) {
+        const region = this.findExcludedRegionAt(ci, excludedRegions);
+        if (region) {
+          ci = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[ci];
+      if (ch === ';') {
+        hitSemicolon = true;
+        break;
+      }
+      // ':=' assignment operator: the '=' beyond it is a comparison, not a type def.
+      if (ch === '=' && ci > 0 && source[ci - 1] === ':') {
+        return false;
+      }
+      if (/[a-zA-Z_]/.test(ch)) {
+        const wordEnd = ci;
+        while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
+        const word = source.slice(ci, wordEnd + 1).toLowerCase();
+        if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
+          return false;
+        }
+      }
+      ci--;
+    }
+
+    // If we hit ';' before finding any comparison context keyword, the immediate
+    // statement boundary is ambiguous: this could be a type declaration (one of many
+    // in a `type` section) or a statement inside a `begin..end`. Scan further back
+    // across `;` boundaries to determine the enclosing scope. Whichever scope-introducing
+    // keyword is encountered first decides the context.
+    //  - statement-context keywords (begin/try/repeat/asm) => comparison
+    //  - declaration-context keywords (type/var/const) => type definition
+    if (hitSemicolon) {
+      let si = ci - 1;
+      while (si >= 0) {
+        if (this.isInExcludedRegion(si, excludedRegions)) {
+          const region = this.findExcludedRegionAt(si, excludedRegions);
           if (region) {
-            ci = region.start - 1;
+            si = region.start - 1;
             continue;
           }
         }
-        const ch = source[ci];
-        if (ch === ';') break;
-        // ':=' assignment operator: the '=' beyond it is a comparison, not a type def.
-        if (ch === '=' && ci > 0 && source[ci - 1] === ':') {
-          return false;
-        }
+        const ch = source[si];
         if (/[a-zA-Z_]/.test(ch)) {
-          const wordEnd = ci;
-          while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
-          const word = source.slice(ci, wordEnd + 1).toLowerCase();
-          if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
+          const wordEnd = si;
+          while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
+          const word = source.slice(si, wordEnd + 1).toLowerCase();
+          if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
             return false;
           }
+          if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+            break;
+          }
         }
-        ci--;
+        si--;
       }
     }
 
