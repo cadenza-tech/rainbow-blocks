@@ -2223,5 +2223,35 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: section keyword as function call inside function should not consume function end', () => {
+    test('should pair function with end when properties(obj) appears inside function body without classdef', () => {
+      // `properties(obj)` inside a free function (no enclosing classdef) is a function
+      // call, not a section keyword. The previous implementation pushed a pendingSkipDepth
+      // entry for the rejected section keyword, which then consumed the function's `end`,
+      // leaving the function/end pair missing.
+      const source = 'function showProps(obj)\n  properties(obj)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should pair function with end when methods(obj) appears inside function body without classdef', () => {
+      const source = 'function showMethods(obj)\n  methods(obj)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should pair function with end when events(obj) appears inside function body without classdef', () => {
+      const source = 'function showEvents(obj)\n  events(obj)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should pair function with end when enumeration(obj) appears inside function body without classdef', () => {
+      const source = 'function showEnum(obj)\n  enumeration(obj)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
