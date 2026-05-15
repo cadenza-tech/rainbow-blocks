@@ -730,25 +730,85 @@ export class CobolBlockParser extends BaseBlockParser {
     });
   }
 
-  // Returns true when the immediately preceding word on the same line is a COBOL verb
-  // that takes data names as operands (so the keyword is being used as an identifier,
-  // not as a control-flow intermediate). Skips intervening *> inline comments,
-  // fixed-format column-7 comment lines, and >> compiler directive lines so multi-line
-  // statements like
+  // Returns true when the keyword is part of an operand list begun by a COBOL verb that
+  // takes data names as operands (so the keyword is being used as an identifier, not as a
+  // control-flow intermediate). Walks backward past any number of intervening data-name
+  // operands (and the `,`/`;` separators that may appear between them) on the same
+  // physical line to find the verb itself.
+  //
+  // Examples recognised as data-name verb contexts:
+  //   MOVE ELSE TO Y                — immediately preceded by MOVE
+  //   MOVE A TO B WHEN              — preceded by chain B<-TO<-A<-MOVE (TO is a
+  //                                   DATA_NAME_VERB introducer; both A and B are operands)
+  //   CALL "P" USING WHEN ELSE      — preceded by chain WHEN<-USING (USING list)
+  //   ADD A B GIVING C ELSE         — preceded by chain C<-GIVING (GIVING list)
+  //
+  // Skips intervening *> inline comments, fixed-format column-7 comment lines, and >>
+  // compiler directive lines so multi-line statements like
   //   MOVE
   //   *> comment
   //   ELSE TO Y
-  // are recognized as data-name verb contexts. String literals are not skipped, since a
-  // string source operand consumes the data-name slot (e.g., DISPLAY "yes"\nELSE leaves
-  // ELSE as an IF intermediate, not a data name).
+  // are recognized as data-name verb contexts.
+  //
+  // Cross-line policy: only the first hop may cross a newline (to recognise multi-line
+  // statements). Once we have crossed a newline, we treat the preceding word as the
+  // immediate verb-or-operand context and do NOT walk back further. This prevents
+  // `USING WHEN ELSE\n  ELSE` from chaining the line-2 ELSE←WHEN←USING and incorrectly
+  // suppressing the line-3 ELSE intermediate.
+  //
+  // Stops walking back when an operator, period (statement boundary), parenthesis, string
+  // literal, or other non-operand character is encountered. String literals are treated as
+  // a non-data-name source operand (e.g., DISPLAY "yes"\nELSE leaves ELSE as an IF
+  // intermediate, not a data name) — the same is true of any quoted source operand.
   private isPrecedingWordDataNameVerb(source: string, position: number): boolean {
-    const i = skipBackwardWhitespaceAndComments(source, position - 1, this.helperCallbacks);
-    if (i < 0) return false;
-    const wordEnd = i + 1;
-    let wordStart = i;
-    while (wordStart > 0 && /[a-zA-Z0-9_-]/.test(source[wordStart - 1])) wordStart--;
-    const word = source.slice(wordStart, wordEnd).toUpperCase();
-    return DATA_NAME_VERBS.has(word);
+    const keywordLineStart = this.findLineStartFor(source, position);
+    let pos = position;
+    let crossedNewline = false;
+    // The bound prevents pathological inputs from causing super-linear scans on each
+    // ELSE/WHEN candidate. A real USING/INTO/TO list with 32 operands is far beyond
+    // typical COBOL.
+    for (let step = 0; step < 32; step++) {
+      let i = skipBackwardWhitespaceAndComments(source, pos - 1, this.helperCallbacks);
+      if (i < 0) return false;
+      // Skip a single `,` or `;` separator (followed by more whitespace/comments) so
+      // `USING A, B` and `USING A; B` both treat B as a list continuation.
+      if (source[i] === ',' || source[i] === ';') {
+        i = skipBackwardWhitespaceAndComments(source, i - 1, this.helperCallbacks);
+        if (i < 0) return false;
+      }
+      // Only identifier-like chars (letters/digits/_/-) form a word. Anything else is a
+      // statement boundary, operator, parenthesis, or string-literal close — stop.
+      if (!/[a-zA-Z0-9_-]/.test(source[i])) return false;
+      const wordEnd = i + 1;
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_-]/.test(source[wordStart - 1])) wordStart--;
+      const wordLineStart = this.findLineStartFor(source, wordStart);
+      // Did this hop cross a newline? On the first hop, compare against the original
+      // keyword's line; on subsequent hops, we already require same-line so this only
+      // tells us whether we have already crossed once.
+      const hopCrossedNewline = step === 0 ? wordLineStart !== keywordLineStart : false;
+      if (hopCrossedNewline) {
+        crossedNewline = true;
+      }
+      const word = source.slice(wordStart, wordEnd).toUpperCase();
+      if (DATA_NAME_VERBS.has(word)) return true;
+      // Once we have crossed a newline, we examine exactly one preceding word on the
+      // prior line; no further walk-back is permitted. The operand chain logically
+      // resides on a single physical line.
+      if (crossedNewline) return false;
+      pos = wordStart;
+    }
+    return false;
+  }
+
+  // Returns the offset of the line start (0 or position right after a CR/LF) for the
+  // line containing the given offset.
+  private findLineStartFor(source: string, offset: number): number {
+    let lineStart = offset;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    return lineStart;
   }
 
   // Returns true when the keyword is preceded by an expression-context character
