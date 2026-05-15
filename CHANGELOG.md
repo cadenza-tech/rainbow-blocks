@@ -5,6 +5,74 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.46] - 2026-05-16
+
+### Fixed
+
+- Ada: Prevent compound end lookahead from consuming the next block opener as a designator (`end\nloop`)
+- Ada: Avoid crossed pairs when compound end has a pending compound close above on the stack
+- Ada: Skip `exit when` as intermediate inside `accept` and extended-return bodies
+- Ada: Accept operator-symbol designator after compound end (`end function "+"`)
+- AppleScript: Skip block comments and `¬` continuations in handler name lookup (`on (* doc *) transaction()`)
+- AppleScript: Reject `else`/`else if` as `block_middle` when not at logical line start
+- AppleScript: Reject reserved words (`if`, `tell`, `repeat`, etc.) as bare handler names after `on`/`to`
+- Bash: Recognize command-starter prefixes (`!`, `then`, `do`, `else`, `coproc`) before `time` for `if`/`while`/`for` detection
+- Bash: Skip reserved keywords (`for`, `if`, `case`, `while`, `until`, `select`) used as function names
+- Bash: Skip incompatible intermediate keywords (`then`/`else`/`elif`/`do`) inside non-matching blocks
+- COBOL: Avoid O(n^3) blowup for large `COPY REPLACING` blocks via cached period positions and pseudo-text contexts
+- COBOL: Detect `COPY` across newlines and sequence-area prefixes so copybook filenames are not tokenized as block keywords
+- COBOL: Recognize `ELSE`/`WHEN` after closing parenthesis (`IF (X > 0)\nELSE`) as intermediate
+- COBOL: Treat `WHEN`/`ELSE` as data names in multi-operand `USING`/`MOVE`/`GIVING` lists
+- Crystal: Skip `%=` compound assignment and `%%` operator inside macro template body so `{% ... %}` and `{{ ... }}` terminate correctly
+- Crystal: Recognize keyword method names across backslash continuation after `def` (`def \<NL>NAME`)
+- Crystal: Allow combining marks (`\p{M}`) in heredoc identifier continuation for NFD-form identifiers
+- Elixir: Recognize 3+ character operator atoms (`:===`, `:!==`, `:&&&`, `:|||`, `:<<<`, `:>>>`)
+- Elixir: Validate sigil heredoc terminator with line-end check after modifiers (`~s"""\n"""1`)
+- Elixir: Reject `fn(...)` followed by `do` as block opener while preserving valid `fn(x) -> body end`
+- Erlang: Track binary syntax `<<` `>>` in type-context detection so `fun(...)` inside record `::` types is not paired with `end`
+- Erlang: Precompute attribute spans for O(log n) tokenize lookups (~12x speedup at 2000 functions)
+- Erlang: Reject Unicode-suffixed spec attributes like `-typeα` as user attributes
+- Erlang: Reject duplicate `of`/`after`/`else` intermediates in `case`/`receive`/`maybe` blocks
+- Erlang: Skip multi-char comparison operators (`=:=`, `=/=`, `==`, `=<`, `>=`, `/=`) in type-context backward scan
+- Fortran: Skip concatenated compound-end keywords (`endif`, `endprogram`, `enddo`) used as construct labels and names
+- Fortran: Reject bare `if then` without parenthesized condition
+- Fortran: Recognize multi-space and continuation forms of `block data` (`block  data`, `block&\n data`)
+- Fortran: Skip blank lines in continuation line scan so paren context survives `&\n\n  end)`
+- Fortran: Reject `submodule ()` and `change team ()` with empty parens
+- Fortran: Require `bind(c)` attribute for `enum` block opener
+- Fortran: Restrict `class is`/`type is`/`class default` guards to `select type` blocks
+- Julia: Recognize `:end` symbol literal after Unicode operators (`a × :end`)
+- Julia: Stop subtype-operator scan at newline so `where T <:` on a previous line does not poison `end`
+- Julia: Reject `end` as `block_close` after binary or transpose operators (`A'end`, `A+end`)
+- Julia: Drop intermediate keywords (`catch`/`finally`/`else`/`elseif`) with mismatched opener context
+- Lua: Treat excluded regions as opaque walls in `isAfterGoto` and `isPrecededByDotOrColon` walk-back
+- MATLAB: Drop section keyword token outside `classdef` instead of consuming `end` (`function f\n  properties(obj)\nend`)
+- MATLAB: Precompute bracket depth to avoid quadratic blowup with many orphan `end` tokens (~390x speedup at 100k tokens)
+- Octave: Skip line comments between `do` and `(` in function-call detection
+- Octave: Reject `end(idx) = value` indexing assignment as `block_close`
+- Octave: Reject `do` followed by colon as block opener
+- Octave: Treat Unicode whitespace (NBSP, U+2000-200A, etc.) between `do` and `(` as function-call separator
+- Pascal: Skip `class` type detection in statement context after `try`/`begin`/`on`/`repeat`
+- Pascal: Skip `block_middle` keywords with hex (`$`) or char-constant (`#`) prefix
+- Pascal: Reject `else` after `finally` in `try` block (Delphi allows `try-except-else` only)
+- Ruby: Extend control/meta char literal (`?\C-\X`, `?\M-\X`, `?\M-\C-\X`) to include escape-sequence target (`?\C-\n`)
+- Ruby: Recognize regex after `p`, `pp`, `warn`, `fail`, and `abort` (`p /if end/`)
+- Ruby: Skip `end` keyword after range operator (`..`/`...`) so `for x in (1..end)` pairs with the trailing `end`
+- Verilog: Skip `default` keyword inside brace expressions (`{default: 1}`)
+- Verilog: Skip reserved keywords (`endmodule`, `endfunction`, etc.) used as identifiers after declaration introducers (`localparam`, `parameter`, `genvar`)
+- Verilog: Skip line comments when detecting label-colon adjacency for control keywords
+- VHDL: Walk back through arbitrary tokens (signal names, commas) in `wait`-`while` detection (`wait on sig while running;`)
+- VHDL: Skip extended_identifier package name only once in `package \X\ is new Y` instantiation check
+- VHDL: Skip newlines and comments in component instantiation label check (`inst :\n-- comment\ncomponent foo`)
+- VHDL: Adjust begin/end body nestLevel for elsif/else-generate sibling chains
+- VHDL: Skip trailing type word of rejected compound end (`inst.end if;`) in tokenization
+- VHDL: Skip comments and newlines in dot check across `isValidBlockOpen`/`Close`/`Loop`/`isWaitBeforeFor`
+- VHDL: Fall through to LIFO for simple `end;` inside generate without `begin`
+
+### Refactor
+
+- COBOL/MATLAB: Remove unreachable fallback paths (`findLastPeriodOutsideStrings`, `isInsideParensOrBracketsSlow`, `hasMatchingCloseAhead`)
+
 ## [1.1.45] - 2026-05-10
 
 ### Fixed
@@ -1785,6 +1853,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.46]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.45...v1.1.46
 [1.1.45]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.44...v1.1.45
 [1.1.44]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.43...v1.1.44
 [1.1.43]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.42...v1.1.43
