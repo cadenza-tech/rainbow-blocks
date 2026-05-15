@@ -8,6 +8,7 @@ import type { VhdlValidationCallbacks } from './vhdlValidation';
 import {
   isInSignalAssignment,
   isInsideParens,
+  isPrecededByDot,
   isValidComponentOpen,
   isValidEntityOrConfigOpen,
   isValidForOpen,
@@ -140,12 +141,10 @@ export class VhdlBlockParser extends BaseBlockParser {
     const lowerKeyword = keyword.toLowerCase();
     const cb = this.validationCallbacks;
 
-    // Reject keywords preceded by '.' (library path like work.process or work . process)
-    let dotPos = position - 1;
-    while (dotPos >= 0 && (source[dotPos] === ' ' || source[dotPos] === '\t')) {
-      dotPos--;
-    }
-    if (dotPos >= 0 && source[dotPos] === '.') {
+    // Reject keywords preceded by '.' (library path like work.process or work . process).
+    // The helper skips whitespace, newlines, and excluded regions (line/block comments)
+    // so cases like `inst .  /* c */ process` are also rejected.
+    if (isPrecededByDot(source, position, excludedRegions, cb)) {
       return false;
     }
 
@@ -406,13 +405,11 @@ export class VhdlBlockParser extends BaseBlockParser {
     return false;
   }
 
-  protected isValidBlockClose(_keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
-    // Reject 'end' preceded by '.' (hierarchical reference like inst.end)
-    let dotPos = position - 1;
-    while (dotPos >= 0 && (source[dotPos] === ' ' || source[dotPos] === '\t')) {
-      dotPos--;
-    }
-    if (dotPos >= 0 && source[dotPos] === '.') {
+  protected isValidBlockClose(_keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Reject 'end' preceded by '.' (hierarchical reference like inst.end). The dot check
+    // skips whitespace, newlines, and excluded regions (line/block comments) so cases like
+    // `a . /* c */ end` are also rejected.
+    if (isPrecededByDot(source, position, excludedRegions, this.validationCallbacks)) {
       return false;
     }
     return true;

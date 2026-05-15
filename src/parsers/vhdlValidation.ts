@@ -39,7 +39,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       }
     }
   }
-  if (isWaitBeforeFor(lineBeforeNoComment, lineStart, rawLineBefore, excludedRegions, callbacks)) {
+  if (isWaitBeforeFor(source, lineBeforeNoComment, lineStart, rawLineBefore, excludedRegions, callbacks)) {
     return false;
   }
   // Check previous lines for 'wait' or 'use entity/configuration' (multi-line, skip blank lines)
@@ -89,7 +89,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
           }
         }
       }
-      if (isWaitBeforeFor(prevLineNoComment, prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
+      if (isWaitBeforeFor(source, prevLineNoComment, prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
         return false;
       }
       // Continue scanning upward through wait-clause continuation lines (`on signal_list`,
@@ -254,9 +254,22 @@ function hasUseEntityOrConfigAfterFor(
   return false;
 }
 
+// Returns true when the keyword at `position` is preceded (after skipping whitespace,
+// newlines, and excluded regions like comments) by a literal `.` — indicating a
+// hierarchical reference like `inst.process` or `rec . end`.
+export function isPrecededByDot(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  const i = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
+  return i >= 0 && source[i] === '.' && !callbacks.isInExcludedRegion(i, excludedRegions);
+}
+
 // Walks backward from `start` over whitespace and comments, returning the offset of the
 // next non-whitespace/non-comment character (or -1 if start of source is reached).
-function skipBackwardWhitespaceAndComments(
+export function skipBackwardWhitespaceAndComments(
   source: string,
   start: number,
   excludedRegions: ExcludedRegion[],
@@ -491,12 +504,9 @@ export function isValidFuncProcOpen(
 
 // Validates 'loop': checks for prefix keywords (for/while) and rejects standalone 'loop' in 'end loop'
 export function isValidLoopOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
-  // Reject 'loop' preceded by a dot (e.g., record.loop or record . loop)
-  let dotCheck = position - 1;
-  while (dotCheck >= 0 && (source[dotCheck] === ' ' || source[dotCheck] === '\t')) {
-    dotCheck--;
-  }
-  if (dotCheck >= 0 && source[dotCheck] === '.') {
+  // Reject 'loop' preceded by a dot (e.g., record.loop, record . loop, or record . /* c */ loop).
+  // Helper skips whitespace, newlines, and excluded regions.
+  if (isPrecededByDot(source, position, excludedRegions, callbacks)) {
     return false;
   }
 
@@ -876,6 +886,7 @@ function stripTrailingComment(
 // (not inside an excluded region like a string or comment)
 // Finds the LAST valid wait on the line, since earlier waits may be terminated by semicolons
 function isWaitBeforeFor(
+  source: string,
   trimmedLineText: string,
   lineAbsOffset: number,
   rawLineText: string,
@@ -890,13 +901,10 @@ function isWaitBeforeFor(
     if (callbacks.isInExcludedRegion(waitAbsPos, excludedRegions)) {
       continue;
     }
-    // Reject wait preceded by '.' (hierarchical reference like rec.wait)
-    const waitPosInRaw = waitAbsPos - lineAbsOffset;
-    let waitDotCheck = waitPosInRaw - 1;
-    while (waitDotCheck >= 0 && (rawLineText[waitDotCheck] === ' ' || rawLineText[waitDotCheck] === '\t')) {
-      waitDotCheck--;
-    }
-    if (waitDotCheck >= 0 && rawLineText[waitDotCheck] === '.') {
+    // Reject wait preceded by '.' (hierarchical reference like rec.wait, also
+    // `rec . /* c */ wait` after comments). Use the full source for the dot check so
+    // that excluded regions (block/line comments) are correctly traversed.
+    if (isPrecededByDot(source, waitAbsPos, excludedRegions, callbacks)) {
       continue;
     }
     // Check if this wait is terminated by a semicolon
