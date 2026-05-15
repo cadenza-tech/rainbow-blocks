@@ -3135,6 +3135,33 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: elsif-generate begin/end body siblings have flat nestLevel', () => {
+    test('should give same nestLevel to begin/end bodies in if-elsif generate chain', () => {
+      const source = 'architecture rtl of t is\nbegin\n  if X generate\n  begin\n    sig <= a;\n  end;\n  elsif Y generate\n  begin\n    sig <= b;\n  end;\n  end generate;\nend;';
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 2, 'should have 2 begin/end body pairs');
+      assert.strictEqual(
+        beginPairs[0].nestLevel,
+        beginPairs[1].nestLevel,
+        `begin/end bodies in elsif-generate siblings should have same nestLevel (got ${beginPairs[0].nestLevel} and ${beginPairs[1].nestLevel})`
+      );
+    });
+
+    test('should give same nestLevel to begin/end bodies in if-elsif-else generate chain', () => {
+      const source =
+        'architecture rtl of t is\nbegin\n  if X generate\n  begin\n    sig <= a;\n  end;\n  elsif Y generate\n  begin\n    sig <= b;\n  end;\n  else generate\n  begin\n    sig <= c;\n  end;\n  end generate;\nend;';
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 3, 'should have 3 begin/end body pairs');
+      const nestLevels = beginPairs.map((p) => p.nestLevel);
+      assert.ok(
+        nestLevels.every((l) => l === nestLevels[0]),
+        `all begin/end body pairs in elsif/else-generate chain should have same nestLevel (got ${nestLevels.join(', ')})`
+      );
+    });
+  });
+
   suite('Regression 2026-05-15: component instantiation across newlines and comments', () => {
     test('should reject component instantiation when label and component separated by newline', () => {
       const source = 'architecture rtl of t is\nbegin\n  inst :\n  component foo port map();\nend;';
