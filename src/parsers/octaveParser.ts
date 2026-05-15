@@ -360,9 +360,52 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return false;
   }
 
+  // Returns true when `end` at `position` is the target of an indexing assignment
+  // such as `end(1) = 5;` or `end(idx, j) = expr;`. Detection: directly followed
+  // (after whitespace/line-continuation) by `(`, then a balanced run to the matching
+  // `)`, then `=` (but not `==`, which is comparison). String/comment regions are
+  // skipped via `excludedRegions` while scanning the parens body.
+  private isEndIndexingAssignment(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position + 'end'.length;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== '(') return false;
+    // Find the matching `)` ignoring excluded regions and tracking nesting.
+    let depth = 1;
+    let k = j + 1;
+    while (k < source.length && depth > 0) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        if (region) {
+          k = region.end;
+          continue;
+        }
+      }
+      const ch = source[k];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (depth === 0) break;
+      k++;
+    }
+    if (depth !== 0) return false;
+    // After the closing `)`, skip whitespace and check for `=` (but not `==`).
+    let after = k + 1;
+    while (after < source.length && (source[after] === ' ' || source[after] === '\t')) after++;
+    if (after >= source.length || source[after] !== '=') return false;
+    if (after + 1 < source.length && source[after + 1] === '=') return false;
+    return true;
+  }
+
   // Reject block close keywords used as variable names (end = 5, endif = 1, etc.)
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
+      return false;
+    }
+    // Reject `end(<expr>) = <value>` indexing-assignment form: `end` here is a
+    // variable name being indexed and assigned, not a block close. Without this,
+    // the indexed-end consumes an outer block opener and the trailing real `end`
+    // becomes orphan. Only applies to bare `end` (typed closes like `endif` are
+    // already constrained by isAtStatementLeadingPosition).
+    if (keyword.toLowerCase() === 'end' && this.isEndIndexingAssignment(source, position, excludedRegions)) {
       return false;
     }
     // Reject typed-end keywords (endif/endfor/endwhile/etc.) used as identifiers in
