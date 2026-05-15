@@ -3165,6 +3165,18 @@ endmodule`;
       const beginTokens = tokens.filter((t) => t.value === 'begin');
       assert.strictEqual(beginTokens.length, 0);
     });
+
+    test('should not register default inside {default: ...} brace expression as case label', () => {
+      // Bug: `default` inside a non-apostrophe brace expression was tokenized as
+      // a case-label intermediate. Only the actual `default:` case label (line 3)
+      // should be registered as an intermediate.
+      const source = 'case (sel)\n  1: a = {default: 1};\n  default: a = 0;\nendcase';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const defaultIntermediates = pairs[0].intermediates.filter((i) => i.value === 'default');
+      assert.strictEqual(defaultIntermediates.length, 1, 'only the case label default should register as intermediate');
+      assert.strictEqual(defaultIntermediates[0].line, 2, 'the registered default should be the case label on line 2');
+    });
   });
 
   generateCommonTests(config);
