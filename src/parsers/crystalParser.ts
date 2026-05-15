@@ -621,11 +621,12 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Returns true when the token at `position` immediately follows the keyword `def`
-  // (with at most spaces/tabs between). Used to filter keywords used as method names
-  // (e.g., `def end`, `def class`, `def begin`).
+  // (with spaces/tabs and backslash line continuations between). Used to filter
+  // keywords used as method names (e.g., `def end`, `def class`, `def begin`,
+  // including `def \<NL> end`).
   private isAfterDefKeyword(source: string, position: number): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    i = this.skipBackwardsWhitespaceAndContinuations(source, i);
     if (i >= 2 && source.slice(i - 2, i + 1) === 'def') {
       const defStart = i - 2;
       return defStart === 0 || !/[a-zA-Z0-9_]/.test(source[defStart - 1]);
