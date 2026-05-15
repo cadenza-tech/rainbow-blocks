@@ -1388,5 +1388,47 @@ end`;
     });
   });
 
+  // Bug: walk-back loops in isPrecededByDotOrColon and isAfterGoto skipped
+  // entire excluded regions and continued scanning the characters BEFORE the
+  // region. This allowed `.`, `:`, or `goto` text on the far side of a string
+  // literal, long string, comment, or goto label to leak through and falsely
+  // disqualify keywords whose immediate predecessor was the excluded region.
+  // Fix: treat any excluded region encountered during walk-back as a hard wall
+  // and stop scanning (return false). A keyword separated from `.`/`:`/`goto`
+  // by a string/long string/comment/label is NOT a field access or goto target.
+  suite('Regression: walk-back must treat excluded regions as opaque walls', () => {
+    test('should detect function/end when goto is followed by string literal label-like usage', () => {
+      // `goto"end"` is invalid Lua syntax, but the walk-back from the next
+      // `function` must NOT see `goto` through the `"end"` string and reject
+      // `function` as a goto-target keyword.
+      const pairs = parser.parse('goto"end"\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should detect if/then/else/end when intermediate keyword follows a string after dot', () => {
+      // The `then` token is preceded (walking back) by whitespace, then a
+      // string literal `"str"`, then `t.`. With the bug, walk-back sees the
+      // `.` through the string and treats `then` as field access (filtered out).
+      const pairs = parser.parse('if t. "str" then\n  a()\nelse\n  b()\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should detect if/then when goto label separates dot and then', () => {
+      // The `then` token walks back through whitespace, then `::lbl::` (a
+      // goto label / excluded region), then `t.`. With the bug, `.` leaks
+      // through the label and `then` is rejected as field access.
+      const pairs = parser.parse('if t.\n::lbl::\nthen a() end');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should detect function/end when goto is followed by long string label-like usage', () => {
+      // Same as the string-literal case but with a long string `[[end]]`.
+      const pairs = parser.parse('goto[[end]]\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
