@@ -3135,6 +3135,27 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: rejected compound end trailing keyword should be skipped', () => {
+    test('should skip trailing if of rejected compound end (inst.end if)', () => {
+      const source = 'process is\nbegin\n  if cond then\n    signal x : integer := inst.end if;\n  end if;\nend process;';
+      const pairs = parser.parse(source);
+      // Should pair the outer if with `end if` and process with `end process`
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value.toLowerCase(), 'end if', 'outer if should pair with end if');
+      const processPair = findBlock(pairs, 'process');
+      assert.strictEqual(processPair.closeKeyword.value.toLowerCase(), 'end process', 'process should pair with end process');
+    });
+
+    test('should skip trailing loop of rejected compound end (inst.end loop)', () => {
+      const source = 'process is\nbegin\n  loop\n    x := inst.end loop;\n  end loop;\nend process;';
+      const pairs = parser.parse(source);
+      const loopPair = findBlock(pairs, 'loop');
+      assert.strictEqual(loopPair.closeKeyword.value.toLowerCase(), 'end loop', 'outer loop should pair with end loop');
+      const processPair = findBlock(pairs, 'process');
+      assert.strictEqual(processPair.closeKeyword.value.toLowerCase(), 'end process', 'process should pair with end process');
+    });
+  });
+
   suite('Regression 2026-05-15: elsif-generate begin/end body siblings have flat nestLevel', () => {
     test('should give same nestLevel to begin/end bodies in if-elsif generate chain', () => {
       const source = 'architecture rtl of t is\nbegin\n  if X generate\n  begin\n    sig <= a;\n  end;\n  elsif Y generate\n  begin\n    sig <= b;\n  end;\n  end generate;\nend;';
