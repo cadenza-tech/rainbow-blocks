@@ -1,6 +1,6 @@
 // Julia block parser: handles nested multi-line comments #= =#, prefixed strings, and transpose operator
 
-import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
 import {
@@ -94,6 +94,62 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
       return true;
     });
+  }
+
+  // Pairs blocks with context-aware intermediate handling: catch/finally only attach to
+  // try, else/elseif only attach to if. Otherwise default LIFO semantics.
+  // Without this override, `function f() catch e end` would attach catch to function,
+  // and `try ... else ... end` would attach else to try, neither of which reflects code
+  // structure (per Julia syntax, catch/finally only follow try; else/elseif only follow if).
+  protected matchBlocks(tokens: Token[]): BlockPair[] {
+    const pairs: BlockPair[] = [];
+    const stack: OpenBlock[] = [];
+
+    for (const token of tokens) {
+      switch (token.type) {
+        case 'block_open':
+          stack.push({ token, intermediates: [] });
+          break;
+
+        case 'block_middle':
+          if (stack.length > 0) {
+            const topOpener = stack[stack.length - 1].token.value;
+            if (this.isIntermediateValidForOpener(token.value, topOpener)) {
+              stack[stack.length - 1].intermediates.push(token);
+            }
+            // Else: drop the intermediate (context mismatch).
+          }
+          break;
+
+        case 'block_close': {
+          const openBlock = stack.pop();
+          if (openBlock) {
+            pairs.push({
+              openKeyword: openBlock.token,
+              closeKeyword: token,
+              intermediates: openBlock.intermediates,
+              nestLevel: stack.length
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    return pairs;
+  }
+
+  // Returns true if the intermediate keyword is valid for the given opener.
+  // - catch/finally: only valid for try
+  // - else/elseif: only valid for if
+  private isIntermediateValidForOpener(intermediate: string, opener: string): boolean {
+    if (intermediate === 'catch' || intermediate === 'finally') {
+      return opener === 'try';
+    }
+    if (intermediate === 'else' || intermediate === 'elseif') {
+      return opener === 'if';
+    }
+    return true;
   }
 
   // Validates block open keywords
