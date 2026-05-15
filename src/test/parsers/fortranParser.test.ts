@@ -5177,6 +5177,29 @@ end if`;
     });
   });
 
+  suite('Regression: enum without bind(c) is rejected', () => {
+    test('should not open enum block when enum has identifier instead of bind(c)', () => {
+      // Fortran requires `enum, bind(c)` form for enum block declarations.
+      // Plain `enum NAME` without `, bind(c)` is invalid syntax. Without this
+      // guard, `enum foo` would falsely pair with `end enum`.
+      const source = `enum foo
+  enumerator :: a, b
+end enum`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair `enum, bind(c)` with `end enum`', () => {
+      // The valid form `enum, bind(c)` (with comma and bind(c) attribute) must
+      // continue to pair correctly with `end enum`.
+      const source = `enum, bind(c)
+  enumerator :: a, b
+end enum`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end enum');
+    });
+  });
+
   suite('Regression: change team with empty parens is rejected', () => {
     test('should not open team block when change team has empty parens', () => {
       // `change team ()` with empty parens is invalid Fortran 2018 syntax. The
