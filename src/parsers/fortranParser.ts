@@ -146,9 +146,13 @@ export class FortranBlockParser extends BaseBlockParser {
         return false;
       }
       // Require parenthesized team-value: `change team (...)`. Reject bare `change team`.
+      // Also reject empty parens `change team ()` since the team-value requires an expression.
       let afterTeam = source.slice(position + keyword.length);
       afterTeam = collapseContinuationLines(afterTeam);
       if (!/^[ \t]*\(/.test(afterTeam)) {
+        return false;
+      }
+      if (/^[ \t]*\([ \t]*\)/.test(afterTeam)) {
         return false;
       }
     }
