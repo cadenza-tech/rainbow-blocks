@@ -278,8 +278,22 @@ export function isSymbolStart(source: string, pos: number): boolean {
   // <: and >: (subtype/supertype operators) are single tokens; the colon does not start a symbol
   if (pos > 0) {
     const prevChar = source[pos - 1];
-    if (prevChar === ':' || /[\w)\]}]/.test(prevChar) || prevChar.charCodeAt(0) > 127) {
+    if (prevChar === ':' || /[\w)\]}]/.test(prevChar)) {
       return false;
+    }
+    // Only reject when prevChar is a Unicode letter/identifier-continuation character.
+    // Unicode operators (e.g., × U+00D7) are NOT identifiers; after them `:` starts a symbol.
+    if (prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar)) {
+      return false;
+    }
+    // Handle surrogate pairs for BMP-outside characters: when prevChar is a low surrogate,
+    // the actual code point is at pos - 2 (high surrogate). Reject only if the full code
+    // point is a Unicode letter.
+    if (prevChar >= '\uDC00' && prevChar <= '\uDFFF' && pos >= 2) {
+      const cp = source.codePointAt(pos - 2);
+      if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) {
+        return false;
+      }
     }
     if (prevChar === '<' || prevChar === '>') {
       return false;
