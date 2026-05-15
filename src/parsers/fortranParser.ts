@@ -925,6 +925,19 @@ export class FortranBlockParser extends BaseBlockParser {
         if (!isValidFortranBlockClose(compound.keyword, source, pos)) {
           continue;
         }
+        // Skip when the concatenated compound end (e.g., `endif`, `endprogram`) is being
+        // used as a construct label (`endif:`), as a construct name following `end <type> `
+        // (e.g., `end if endif`), or as a procedure/program/module name following an
+        // open-construct introducer (e.g., `program endprogram`, `function endif`).
+        // Without these guards, an identifier that happens to spell a concatenated
+        // compound-end would phantom-close the parent block.
+        if (
+          this.isFortranConstructLabel(source, pos, compound.keyword) ||
+          this.isFortranEndConstructName(source, pos) ||
+          this.isFortranOpenConstructName(source, pos, compound.keyword)
+        ) {
+          continue;
+        }
         const { line, column } = this.getLineAndColumn(pos, newlinePositions);
         result.push({
           type: 'block_close',
