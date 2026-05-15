@@ -396,12 +396,20 @@ export class RubyBlockParser extends BaseBlockParser {
             ) {
               // Full \M-\C-x (8 chars): require pos+7 to be a printable, non-newline char
               if (pos + 7 < source.length && source[pos + 7] !== '\n' && source[pos + 7] !== '\r') {
+                // If target is a backslash, include the escape sequence char (e.g., ?\M-\C-\n is 9 chars)
+                if (source[pos + 7] === '\\' && pos + 8 < source.length && source[pos + 8] !== '\n' && source[pos + 8] !== '\r') {
+                  return { start: pos, end: pos + 9 };
+                }
                 return { start: pos, end: pos + 8 };
               }
               return { start: pos, end: pos + 7 };
             }
             // \C-x or \M-x: require pos+4 to be a printable, non-newline char
             if (pos + 4 < source.length && source[pos + 4] !== '\n' && source[pos + 4] !== '\r') {
+              // If target is a backslash, include the escape sequence char (e.g., ?\C-\n is 6 chars)
+              if (source[pos + 4] === '\\' && pos + 5 < source.length && source[pos + 5] !== '\n' && source[pos + 5] !== '\r') {
+                return { start: pos, end: pos + 6 };
+              }
               return { start: pos, end: pos + 5 };
             }
             return { start: pos, end: pos + 4 };
