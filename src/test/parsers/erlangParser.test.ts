@@ -2467,5 +2467,26 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: binary syntax tracking in type contexts', () => {
+    test('should not pair fun/end when fun() appears inside :: type with binary syntax', () => {
+      // The binary type <<_:8, _:_*8>> contains commas at top level of the binary,
+      // but the binary brackets themselves should bound the type expression.
+      // The fun() inside the union type after :: must be treated as a type, not a real block.
+      const source = '-record(s, {h :: <<_:8, _:_*8>> | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun inside :: type with binary syntax must not be paired with end');
+    });
+
+    test('should not pair fun/end when fun() appears inside :: type after multi-segment binary', () => {
+      // Multi-segment binary <<_:8, _:_*8, _:32>> contains multiple commas at binary-top-level.
+      // The ::-context detection must skip these and recognize fun() as a type.
+      const source = '-record(s, {h :: <<_:8, _:_*8, _:32>> | fun(() -> ok)}).\nbar() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun inside :: type with multi-segment binary must not be paired');
+    });
+  });
+
   generateCommonTests(config);
 });
