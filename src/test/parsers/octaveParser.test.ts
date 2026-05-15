@@ -1835,5 +1835,27 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: do followed by line comment is function call', () => {
+    test('should not treat do followed by % comment then ( as do/until block', () => {
+      // `do % comment\n  (1, 2);` is a function call across the comment, not a
+      // do/until block. The function-call skip loop must consume `%`-style line
+      // comments before reaching the `(`.
+      const source = 'function f\n  do % this is a comment\n  (1, 2);\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do %... ( should be a function call across comment');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do followed by # comment then ( as do/until block', () => {
+      // Octave-style line comment `#` must also be skipped between `do` and `(`.
+      const source = 'function f\n  do # this is a comment\n  (1, 2);\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do #... ( should be a function call across comment');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
