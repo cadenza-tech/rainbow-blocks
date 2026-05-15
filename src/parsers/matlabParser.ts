@@ -11,6 +11,13 @@ export class MatlabBlockParser extends BaseBlockParser {
   // position to avoid pairing it with an outer `classdef`/`function` block. Populated
   // by tokenize, consumed by matchBlocks. Not thread-safe, but parse() is synchronous.
   private phantomSectionPositions: number[] = [];
+  // Per-position bracket depth cache: bracketDepthAtPos[p] is the number of balanced
+  // (), [], or {} pairs that strictly enclose position p. Populated by tokenize() before
+  // any isValidBlockOpen / isValidBlockClose call so that isInsideParensOrBrackets can
+  // answer in O(1) instead of walking the source backward each time. null when no parse
+  // is in progress (defensive: callers fall back to the slow source walk in that case).
+  // Avoids the O(N^2) regression when many `end` tokens appear without enclosing brackets.
+  private bracketDepthAtPos: Int32Array | null = null;
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject end preceded by `@` (function handle prefix: `@end`, `h = @end;`).
@@ -524,6 +531,10 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Reset phantom positions for this parse — they accumulate via isValidBlockOpen
     // side effects below.
     this.phantomSectionPositions = [];
+    // Pre-compute bracket depth at each position so isInsideParensOrBrackets is O(1)
+    // per query. Must run before super.tokenize() because that calls isValidBlockOpen /
+    // isValidBlockClose for every keyword match, which in turn call isInsideParensOrBrackets.
+    this.bracketDepthAtPos = this.computeBracketDepthAtPos(source, excludedRegions);
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       if (this.isPrecededByDot(source, token.startOffset, excludedRegions)) {
@@ -757,10 +768,86 @@ export class MatlabBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if position is inside parentheses, square brackets, or curly braces
-  // Verifies that the opening bracket has a matching close ahead (in-progress edits
-  // with unterminated brackets should not silently swallow all subsequent `end` tokens)
+  // Checks if position is inside parentheses, square brackets, or curly braces.
+  // Uses the bracketDepthAtPos cache (populated by tokenize()) for O(1) lookup. The
+  // cache only counts BALANCED bracket pairs, matching the original semantics where
+  // unmatched openers do not flag the position as "inside" (the original walked
+  // backward and called hasMatchingCloseAhead to verify a matching close existed).
+  // Falls back to the slow source walk when called outside of a parse() context (e.g.
+  // unit tests that drive the method directly without going through parse()).
   protected isInsideParensOrBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.bracketDepthAtPos !== null && position >= 0 && position < this.bracketDepthAtPos.length) {
+      return this.bracketDepthAtPos[position] > 0;
+    }
+    return this.isInsideParensOrBracketsSlow(source, position, excludedRegions);
+  }
+
+  // Pre-computes bracket depth at every position in source. depth[p] = number of
+  // balanced (), [], or {} pairs that strictly enclose position p (i.e. start < p < end).
+  // Brackets inside excluded regions (comments / strings) are ignored. Unbalanced
+  // openers (no matching close) do NOT contribute, matching the original
+  // hasMatchingCloseAhead-gated semantics. Single forward pass: O(source.length).
+  private computeBracketDepthAtPos(source: string, excludedRegions: ExcludedRegion[]): Int32Array {
+    const len = source.length;
+    // Events list: each balanced pair contributes +1 at start+1 and -1 at end.
+    const events: Array<{ pos: number; delta: number }> = [];
+    const parenStack: number[] = [];
+    const bracketStack: number[] = [];
+    const braceStack: number[] = [];
+    let i = 0;
+    while (i < len) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === '(') parenStack.push(i);
+      else if (ch === ')') {
+        const start = parenStack.pop();
+        if (start !== undefined) {
+          events.push({ pos: start + 1, delta: 1 });
+          events.push({ pos: i, delta: -1 });
+        }
+      } else if (ch === '[') bracketStack.push(i);
+      else if (ch === ']') {
+        const start = bracketStack.pop();
+        if (start !== undefined) {
+          events.push({ pos: start + 1, delta: 1 });
+          events.push({ pos: i, delta: -1 });
+        }
+      } else if (ch === '{') braceStack.push(i);
+      else if (ch === '}') {
+        const start = braceStack.pop();
+        if (start !== undefined) {
+          events.push({ pos: start + 1, delta: 1 });
+          events.push({ pos: i, delta: -1 });
+        }
+      }
+      i++;
+    }
+    // Sort events by position, then accumulate prefix sum into a per-position depth array.
+    events.sort((a, b) => a.pos - b.pos);
+    const depthAtPos = new Int32Array(len + 1);
+    let depth = 0;
+    let eventIdx = 0;
+    for (let p = 0; p <= len; p++) {
+      while (eventIdx < events.length && events[eventIdx].pos === p) {
+        depth += events[eventIdx].delta;
+        eventIdx++;
+      }
+      depthAtPos[p] = depth;
+    }
+    return depthAtPos;
+  }
+
+  // Fallback path used when bracketDepthAtPos is not populated (e.g. unit tests that
+  // call isInsideParensOrBrackets directly). Same algorithm as the original implementation:
+  // walk source backward tracking bracket depth, and when an unmatched opener is seen,
+  // verify a matching close exists ahead.
+  private isInsideParensOrBracketsSlow(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
