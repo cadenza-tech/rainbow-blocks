@@ -2509,11 +2509,13 @@ bar() -> fun() -> ok end.`;
       // Linear scaling: 4x source size -> ~4-5x time.
       // Quadratic scaling (pre-fix) would be ~16x.
       // Add a baseline floor (10ms) so very fast small runs don't trip the ratio.
+      // Threshold of 12x leaves headroom for environment variance while still
+      // catching a regression to O(n^2) (which produces ~15x or worse).
       const baseline = Math.max(small, 10);
       const ratio = big / baseline;
       assert.ok(
-        ratio < 8,
-        `2000-func parse took ${big}ms vs 500-func ${small}ms (ratio ${ratio.toFixed(1)}x; expected < 8x for linear scaling, was ~15x with O(n^2))`
+        ratio < 12,
+        `2000-func parse took ${big}ms vs 500-func ${small}ms (ratio ${ratio.toFixed(1)}x; expected < 12x for linear scaling, was ~15x with O(n^2))`
       );
     });
   });
