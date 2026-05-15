@@ -2907,6 +2907,22 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: try-finally-else is invalid in Delphi', () => {
+    test('should reject else after finally in try block', () => {
+      // Only try-except-else is valid in Delphi; try-finally-else is not.
+      const source = `try
+  foo;
+finally
+  bar;
+else
+  baz;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['finally']);
+    });
+  });
+
   suite('Regression 2026-05-15: $/# prefixed block_middle keywords', () => {
     test('should not treat $else as block_middle inside case (hex literal prefix)', () => {
       const source = `case X of
