@@ -3217,5 +3217,30 @@ endmodule`;
     });
   });
 
+  suite('Regression: line comments between control keyword and label colon', () => {
+    test('should skip line comments when checking label-colon adjacency', () => {
+      // Bug: `isFollowedByLabelColon` only skipped block comments, so a line
+      // comment between a control keyword (e.g., `wait`) and a `:` would prevent
+      // the keyword from being recognized as a label name. As a result, `wait`
+      // was treated as a control opener and falsely paired with a subsequent `end`.
+      const source = 'module m;\n  initial begin\n    wait // comment\n      : begin\n        a = 1;\n      end\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // Expect: module-endmodule, initial-end, begin-end (3 pairs).
+      // No spurious wait-end pair from `wait` being misidentified as control opener.
+      assertBlockCount(pairs, 3);
+      const waitPair = pairs.find((p) => p.openKeyword.value === 'wait');
+      assert.strictEqual(waitPair, undefined, 'wait should not open a block when used as a label name');
+    });
+
+    test('should skip line comments before label colon for if', () => {
+      // Same bug for `if` used as a label name.
+      const source = 'module m;\n  initial begin\n    if // label name\n      : begin\n        a = 1;\n      end\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // No spurious if-end pair.
+      const ifPair = pairs.find((p) => p.openKeyword.value === 'if');
+      assert.strictEqual(ifPair, undefined, 'if should not open a block when used as a label name');
+    });
+  });
+
   generateCommonTests(config);
 });
