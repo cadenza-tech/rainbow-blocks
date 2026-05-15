@@ -2907,5 +2907,39 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: comparison context after try/begin/on/repeat', () => {
+    test('should not treat class as type definition after try statement', () => {
+      // `try Bar = class do Foo end` is a try block with comparison `Bar = class`
+      const source = 'try Bar = class do Foo end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+    });
+
+    test('should not treat class as type definition after begin statement', () => {
+      const source = `begin
+  Foo;
+  X = class
+  DoMore;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat class as type definition after on in except handler', () => {
+      const source = 'try Foo; except on E = class do Bar; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['except']);
+    });
+
+    test('should not treat class as type definition after repeat statement', () => {
+      const source = `repeat
+  X = class
+until done`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'until');
+    });
+  });
+
   generateCommonTests(config);
 });
