@@ -282,49 +282,50 @@ function skipBackwardWhitespaceAndComments(
 }
 
 // Validates 'while' keyword: rejects 'wait while' (not a loop construct).
-// Scans backward through whitespace and comments to the previous word; if it's `wait`,
-// reject. Also walks back through wait-clause keywords (`on`, `until`) so a multi-line
-// wait statement (`wait\n  on sig\n  while running;`) is detected as a wait-while clause.
+// Walks backward through arbitrary tokens (whitespace, comments, signal names, commas,
+// operators, parens, etc.) until reaching a `wait`/`on`/`until` keyword (reject case),
+// a statement boundary like `;` or block keywords (accept case), or start of source.
+// This handles multi-token wait clauses such as:
+//   - `wait on sig while running;`
+//   - `wait until clk = '1' while running;`
+//   - `wait on a, b, c while running;`
+//   - `wait\n  on sig\n  while running;` (multi-line)
 export function isValidWhileOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
-  let i = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
-  for (let safety = 0; safety < 20; safety++) {
-    if (i < 0) return true;
-    const wordEnd = i;
-    if (!/[a-zA-Z0-9_]/.test(source[wordEnd])) return true;
-    let wordStart = wordEnd;
-    while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
-    const word = source.slice(wordStart, wordEnd + 1).toLowerCase();
-    if (word === 'wait') return false;
-    if (word !== 'on' && word !== 'until') return true;
-    // Walk past the wait-clause expression: skip whitespace/comments, then any non-keyword
-    // tokens (signal names, parens, operators) until we reach `;`, another wait-clause
-    // keyword, or the `wait` keyword itself.
-    let j = skipBackwardWhitespaceAndComments(source, wordStart - 1, excludedRegions, callbacks);
-    while (j >= 0) {
-      if (callbacks.isInExcludedRegion(j, excludedRegions)) {
-        const region = callbacks.findExcludedRegionAt(j, excludedRegions);
-        if (region) {
-          j = region.start - 1;
-          continue;
-        }
-      }
-      const ch = source[j];
-      if (ch === ';') return true;
-      if (/[a-zA-Z0-9_]/.test(ch)) {
-        let ws = j;
-        while (ws > 0 && /[a-zA-Z0-9_]/.test(source[ws - 1])) ws--;
-        const w = source.slice(ws, j + 1).toLowerCase();
-        if (w === 'wait') return false;
-        if (w === 'on' || w === 'until') {
-          i = j;
-          break;
-        }
-        j = ws - 1;
+  let i = position - 1;
+  // Walk back through arbitrary tokens looking for `wait`. Stop at `;` or block-boundary
+  // keywords. The walk is bounded by SCAN_LIMIT to prevent worst-case behavior on huge files.
+  const SCAN_LIMIT = 4096;
+  let scanned = 0;
+  while (i >= 0 && scanned < SCAN_LIMIT) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        scanned++;
         continue;
       }
-      j--;
     }
-    if (j < 0) return true;
+    const ch = source[i];
+    // Statement boundary: definitely not in a wait clause
+    if (ch === ';') return true;
+    // Identifier-like sequence: extract word and check if it's a stop keyword
+    if (/[a-zA-Z0-9_]/.test(ch)) {
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
+      const word = source.slice(wordStart, i + 1).toLowerCase();
+      // `wait` keyword: this `while` belongs to a wait statement, reject
+      if (word === 'wait') return false;
+      // Block boundary keywords: we've left the statement scope
+      if (word === 'begin' || word === 'is' || word === 'then' || word === 'loop' || word === 'else' || word === 'elsif' || word === 'end') {
+        return true;
+      }
+      i = wordStart - 1;
+      scanned++;
+      continue;
+    }
+    // Other characters (whitespace, operators, parens, commas, quotes etc.) — keep scanning back
+    i--;
+    scanned++;
   }
   return true;
 }
