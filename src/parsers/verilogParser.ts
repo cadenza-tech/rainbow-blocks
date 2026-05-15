@@ -179,6 +179,16 @@ const METHOD_QUALIFIER_KEYWORDS: ReadonlySet<string> = new Set(['static', 'autom
 
 const METHOD_QUALIFIER_TARGETS: ReadonlySet<string> = new Set(['function', 'task', 'class']);
 
+// SystemVerilog declaration introducer keywords. When one of these immediately
+// precedes a block-keyword identifier (e.g., `localparam endmodule = 1;`,
+// `genvar case;`), the block keyword is being used as a declared name rather
+// than introducing a block. Per IEEE 1800-2017 these introducers are followed
+// by either a data type (already handled by DATA_TYPE_KEYWORDS) or directly by
+// the declared identifier, so adding them to the suppression set does not
+// break the data-type-prefixed form (`localparam int endmodule;`) which is
+// already covered by the data-type word-match in isPrecededByDataTypeKeyword.
+const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set(['localparam', 'parameter', 'genvar']);
+
 export class VerilogBlockParser extends BaseBlockParser {
   private get validationCallbacks(): VerilogValidationCallbacks {
     return {
@@ -462,6 +472,11 @@ export class VerilogBlockParser extends BaseBlockParser {
     if (i >= 0 && (source[i] === '$' || source[i] === '\\')) return false;
     const word = source.slice(wordStart, wordEnd);
     if (DATA_TYPE_KEYWORDS.has(word)) return true;
+    // Declaration introducer keywords (localparam/parameter/genvar) suppress the
+    // immediately following keyword identifier (e.g., `localparam endmodule = 1;`).
+    // The data-type-prefixed form (`localparam int endmodule;`) is already covered
+    // by the data-type branch above because the immediately preceding word is `int`.
+    if (DECLARATION_KEYWORDS.has(word)) return true;
     // Method qualifiers (static/automatic/const/...) only suppress when the following
     // keyword is NOT one of the legitimate qualified block openers.
     if (METHOD_QUALIFIER_KEYWORDS.has(word) && keyword !== undefined && !METHOD_QUALIFIER_TARGETS.has(keyword)) {
