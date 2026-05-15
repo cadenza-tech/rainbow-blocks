@@ -166,12 +166,63 @@ export class ErlangBlockParser extends BaseBlockParser {
             }
             break;
           }
-          // Skip => (map arrow) and := (map update) inside type expressions
+          // Skip => (map arrow) inside type expressions
           if (ch === '=' && k + 1 < source.length && source[k + 1] === '>') {
             k--;
             continue;
           }
-          if (ch === '=' && k > 0 && source[k - 1] === ':' && (k < 2 || source[k - 2] !== ':')) {
+          // Skip multi-char comparison operators that contain '=': =:=, =/=, ==, =<, >=, /=
+          // and the := (map update) operator. These appear in record/type expressions like
+          // `A =:= B | fun()` and must not stop the scan.
+          // Check the longer 3-char operators first to avoid matching their 2-char tails.
+          if (
+            ch === '=' &&
+            k > 1 &&
+            source[k - 1] === ':' &&
+            source[k - 2] === '=' &&
+            !this.isInExcludedRegion(k - 1, excludedRegions) &&
+            !this.isInExcludedRegion(k - 2, excludedRegions)
+          ) {
+            // =:= (exact equal): skip past all three characters
+            k -= 3;
+            continue;
+          }
+          if (
+            ch === '=' &&
+            k > 1 &&
+            source[k - 1] === '/' &&
+            source[k - 2] === '=' &&
+            !this.isInExcludedRegion(k - 1, excludedRegions) &&
+            !this.isInExcludedRegion(k - 2, excludedRegions)
+          ) {
+            // =/= (exact not equal): skip past all three characters
+            k -= 3;
+            continue;
+          }
+          if (ch === '=' && k > 0 && source[k - 1] === ':' && (k < 2 || source[k - 2] !== ':') && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            // := (map update): skip past both characters
+            k -= 2;
+            continue;
+          }
+          if (ch === '=' && k > 0 && source[k - 1] === '=' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            // == (equal): skip past both characters
+            k -= 2;
+            continue;
+          }
+          if (ch === '=' && k + 1 < source.length && source[k + 1] === '<') {
+            // =< (less than or equal): skip the '=' (we will encounter the '<' next iteration)
+            k--;
+            continue;
+          }
+          if (ch === '=' && k > 0 && source[k - 1] === '>' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            // >= (greater than or equal): ensure preceding '>' is not part of '->' or '>>' arrow.
+            // '->' would have '-' at k-2 which we already step over; '>>' is handled by the binary
+            // check earlier in the loop, so reaching here with '>' at k-1 implies a true '>=' op.
+            k -= 2;
+            continue;
+          }
+          if (ch === '=' && k > 0 && source[k - 1] === '/' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            // /= (not equal): skip past both characters
             k -= 2;
             continue;
           }
