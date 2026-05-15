@@ -2441,6 +2441,41 @@ end`;
     });
   });
 
+  suite('Regression: control/meta char literal with escape-sequence target', () => {
+    test('should treat ?\\C-\\n as a 6-char character literal (not split into ?\\C-\\ + n)', () => {
+      // ?\C-\n is Ctrl + newline (6 chars). The trailing target char includes
+      // the backslash + escape char, otherwise the literal cuts off before \n
+      // and `n` leaks into the next token (e.g., concatenating with `if` to form `nif`).
+      const source = 'x = ?\\C-\\n\nif true\nend';
+      const regions = parser.getExcludedRegions(source);
+      const charLitRegion = regions.find((r) => r.start === 4);
+      assert.ok(charLitRegion, 'character literal region should start at offset 4');
+      assert.strictEqual(charLitRegion.end, 10);
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat ?\\M-\\t as a 6-char character literal', () => {
+      const source = 'x = ?\\M-\\t\nif true\nend';
+      const regions = parser.getExcludedRegions(source);
+      const charLitRegion = regions.find((r) => r.start === 4);
+      assert.ok(charLitRegion, 'character literal region should start at offset 4');
+      assert.strictEqual(charLitRegion.end, 10);
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat ?\\M-\\C-\\n as a 9-char character literal', () => {
+      const source = 'x = ?\\M-\\C-\\n\nif true\nend';
+      const regions = parser.getExcludedRegions(source);
+      const charLitRegion = regions.find((r) => r.start === 4);
+      assert.ok(charLitRegion, 'character literal region should start at offset 4');
+      assert.strictEqual(charLitRegion.end, 13);
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Coverage: uncovered code paths', () => {
     test('should handle \\r stripping in heredoc content lines', () => {
       // Covers lines 713-715: \r stripping in heredoc content
