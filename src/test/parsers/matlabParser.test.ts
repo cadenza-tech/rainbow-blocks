@@ -2223,6 +2223,22 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: large orphan end token list parses in linear time', () => {
+    test('should parse 10000 orphan end tokens in well under 2 seconds (linear time)', () => {
+      // Previously isInsideParensOrBrackets walked the source backward from each `end`,
+      // making the worst case O(N^2). With 10000 orphan ends this took ~700ms; at 100k
+      // it took ~63s. After precomputing bracket positions, the runtime is dominated by
+      // tokenize and stays well under 2s for 10k.
+      const N = 10000;
+      const source = 'end\n'.repeat(N);
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.strictEqual(pairs.length, 0, 'orphan ends produce no pairs');
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+    });
+  });
+
   suite('Regression 2026-05-15: section keyword as function call inside function should not consume function end', () => {
     test('should pair function with end when properties(obj) appears inside function body without classdef', () => {
       // `properties(obj)` inside a free function (no enclosing classdef) is a function
