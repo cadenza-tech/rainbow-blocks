@@ -3812,6 +3812,53 @@ end`;
     });
   });
 
+  suite('Regression: end immediately after binary operator is not block_close', () => {
+    test("should not treat A'end as block_close (transpose operator)", () => {
+      // Bug 3 (LOW): `A'end` has `end` directly after the postfix transpose operator `'`.
+      // This is invalid Julia syntax (lastindex is only valid inside `[...]`), but must
+      // not be classified as block_close. Otherwise the inner `end` pairs with `function`
+      // and the outer `end` becomes orphan.
+      const source = "function f()\n  x = A'end\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      const sourceLines = source.split('\n');
+      const lastEndLine = sourceLines.length - 1;
+      assert.strictEqual(block.closeKeyword?.line, lastEndLine);
+    });
+
+    test('should not treat A+end as block_close (binary plus)', () => {
+      // Bug 3 (LOW): `A+end` — `end` directly after binary `+`. Invalid syntax outside
+      // of indexing brackets, must not pair as block_close.
+      const source = 'function f()\n  x = A+end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      const sourceLines = source.split('\n');
+      const lastEndLine = sourceLines.length - 1;
+      assert.strictEqual(block.closeKeyword?.line, lastEndLine);
+    });
+
+    test('should not treat A*end as block_close (binary multiplication)', () => {
+      const source = 'function f()\n  x = A*end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      const sourceLines = source.split('\n');
+      const lastEndLine = sourceLines.length - 1;
+      assert.strictEqual(block.closeKeyword?.line, lastEndLine);
+    });
+
+    test("should still treat A\\n'end pattern correctly (newline separates contexts)", () => {
+      // Counter-test: when there's a newline between the operator and `end`, the operator
+      // is on a previous line and should NOT poison the `end`. Here the source is just a
+      // valid begin..end without ambiguity.
+      const source = "function f()\n  x = A\n  'a'\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: subtype operator detection should not cross newline', () => {
     test('should pair function with end when <: is on previous line (best-effort during editing)', () => {
       // Bug 2 (LOW): isPrecededBySubtypeOperator scanned backwards across newlines while
