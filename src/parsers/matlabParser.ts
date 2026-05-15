@@ -599,13 +599,21 @@ export class MatlabBlockParser extends BaseBlockParser {
                 return v === 'function' || v === 'methods' || v === 'classdef';
               });
               if (!hasFunctionOrClass) {
-                pendingSkipDepths.push(stack.length);
+                // Drop the token: an `arguments` block outside of any function/methods/
+                // classdef context is almost certainly a function call (`arguments(obj)`)
+                // rather than a real section block. Pushing pendingSkipDepth here would
+                // consume a legitimate `end` from an enclosing block (e.g. a `function`
+                // wrapping a `arguments(obj)` call), destroying outer block pairing.
                 break;
               }
             } else {
               const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
               if (!hasClassdef) {
-                pendingSkipDepths.push(stack.length);
+                // Drop the token: section keywords like `properties(obj)` / `methods(obj)`
+                // outside of a classdef are function calls, not section blocks. Pushing
+                // pendingSkipDepth here would consume a legitimate `end` from an enclosing
+                // block (e.g. a `function` body containing `properties(obj)`), destroying
+                // outer block pairing.
                 break;
               }
             }
