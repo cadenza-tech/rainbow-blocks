@@ -315,6 +315,18 @@ function isLineEndAfterTerminator(source: string, pos: number): boolean {
   return !/[a-zA-Z0-9_]/.test(ch);
 }
 
+// Checks if position after a sigil heredoc terminator (followed by optional modifier letters)
+// is NOT followed by an identifier-continuation char that would indicate the """ was inside
+// the heredoc body, not a real terminator. Differs from isLineEndAfterTerminator by allowing
+// letters at position (since skipSigilModifiers may stop at a reserved word like `end`/`do`,
+// in which case the """ should still terminate and the reserved word be parsed as a keyword).
+// Rejects digits, underscores, `?`, and `!` as those indicate continued identifier content.
+function isLineEndAfterSigilTerminator(source: string, pos: number): boolean {
+  if (pos >= source.length) return true;
+  const ch = source[pos];
+  return !/[0-9_?!]/.test(ch);
+}
+
 // Matches triple-quoted string (heredoc) with #{} interpolation for """ and '''
 export function matchTripleQuotedString(source: string, pos: number, delimiter: string, skipInterpolation: SkipInterpolationFn): ExcludedRegion {
   // Both """ and ''' support interpolation in Elixir
@@ -447,10 +459,13 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
         continue;
       }
       if (source.slice(j, j + 3) === tripleDelim && (!isHeredoc || isAtLineStartAllowingWhitespace(source, j))) {
-        j += 3;
-        // Skip optional modifiers (stop before reserved words like end/do/def)
-        j = skipSigilModifiers(source, j);
-        return j;
+        // Tentatively skip optional modifiers (stop before reserved words like end/do/def)
+        const afterModifiers = skipSigilModifiers(source, j + 3);
+        // Heredoc terminator requires non-identifier-continuation char (or EOF) after
+        // modifiers; otherwise the """ is not a real terminator (sigil body continues).
+        if (!isHeredoc || isLineEndAfterSigilTerminator(source, afterModifiers)) {
+          return afterModifiers;
+        }
       }
       j++;
     }
@@ -539,9 +554,13 @@ export function matchSigil(source: string, pos: number, skipInterpolation: SkipI
         continue;
       }
       if (source.slice(i, i + 3) === tripleDelim && (!isSigilHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
-        // Skip optional modifiers after closing (stop before reserved words like end/do/def)
+        // Tentatively skip optional modifiers after closing (stop before reserved words like end/do/def)
         const end = skipSigilModifiers(source, i + 3);
-        return { start: pos, end };
+        // Heredoc terminator requires non-identifier-continuation char (or EOF) after
+        // modifiers; otherwise the """ is not a real terminator (sigil body continues).
+        if (!isSigilHeredoc || isLineEndAfterSigilTerminator(source, end)) {
+          return { start: pos, end };
+        }
       }
       i++;
     }
