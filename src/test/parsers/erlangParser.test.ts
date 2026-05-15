@@ -2515,6 +2515,39 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: spec attribute Unicode boundary', () => {
+    test('should treat -typeα as user attribute and not suppress fun block opener', () => {
+      // -typeα is a user-defined attribute (not -type). The fun() that follows
+      // must be detected as a real block opener.
+      const source = '-typeα foo() -> bar(), fun() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 1, 'fun() after -typeα (user attribute) must be paired with end');
+      assertSingleBlock(funPairs, 'fun', 'end');
+    });
+
+    test('should treat -callbackα as user attribute and not suppress fun block opener', () => {
+      const source = '-callbackα foo() ->\n  fun() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 1, 'fun() after -callbackα (user attribute) must be paired with end');
+    });
+
+    test('should treat -opaqueα as user attribute and not suppress block opener', () => {
+      const source = '-opaqueα foo() ->\n  begin ok end.\n';
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'begin after -opaqueα (user attribute) must be paired with end');
+    });
+
+    test('should treat -specα as user attribute and not suppress block opener', () => {
+      const source = '-specα foo() ->\n  case x of 1 -> ok end.\n';
+      const pairs = parser.parse(source);
+      const casePairs = pairs.filter((p) => p.openKeyword.value === 'case');
+      assert.strictEqual(casePairs.length, 1, 'case after -specα (user attribute) must be paired with end');
+    });
+  });
+
   suite('Regression: binary syntax tracking in type contexts', () => {
     test('should not pair fun/end when fun() appears inside :: type with binary syntax', () => {
       // The binary type <<_:8, _:_*8>> contains commas at top level of the binary,
