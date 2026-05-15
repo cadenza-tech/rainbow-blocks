@@ -312,13 +312,15 @@ export class VhdlBlockParser extends BaseBlockParser {
   private isValidPackageOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Step past 'package' keyword (length 7) and the package name identifier.
     let i = position + 7;
-    const skipWs = (p: number): number => {
+    const skipWsAndExclude = (p: number): { pos: number; skippedExclude: boolean } => {
       let q = p;
+      let skippedExclude = false;
       while (q < source.length) {
         if (this.isInExcludedRegion(q, excludedRegions)) {
           const region = this.findExcludedRegionAt(q, excludedRegions);
           if (region) {
             q = region.end;
+            skippedExclude = true;
             continue;
           }
         }
@@ -328,11 +330,17 @@ export class VhdlBlockParser extends BaseBlockParser {
         }
         break;
       }
-      return q;
+      return { pos: q, skippedExclude };
     };
-    i = skipWs(i);
-    // Skip the package name (identifier or \extended_identifier\)
-    if (i < source.length && source[i] === '\\') {
+    const skipWs = (p: number): number => skipWsAndExclude(p).pos;
+    const stepResult = skipWsAndExclude(i);
+    i = stepResult.pos;
+    // Skip the package name. If skipWs already passed an excluded region (extended
+    // identifier `\name\`), the package name is already consumed — do not skip again.
+    if (stepResult.skippedExclude) {
+      // Already past the extended identifier; nothing more to skip for the name.
+    } else if (i < source.length && source[i] === '\\') {
+      // Extended identifier not pre-skipped (e.g., adjacent to `package` with no whitespace)
       i++;
       while (i < source.length && source[i] !== '\\') i++;
       if (i < source.length) i++;
