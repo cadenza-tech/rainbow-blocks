@@ -5177,6 +5177,19 @@ end if`;
     });
   });
 
+  suite('Regression: submodule with empty parens is rejected', () => {
+    test('should not open submodule block when submodule has empty parens', () => {
+      // `submodule ()` with empty parens is invalid Fortran. The (parent) clause must
+      // contain at least one identifier. Without this guard, `submodule ()` would
+      // falsely pair with `end submodule`.
+      const source = `submodule () foo
+  x = 1
+end submodule foo`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: continuation line with blank line in between', () => {
     test('should skip blank line in continuation when checking paren context', () => {
       // `call foo( &\n\n    end)` - the `end` is inside parens via & continuation,
