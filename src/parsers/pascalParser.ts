@@ -927,9 +927,15 @@ export class PascalBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Reject block_middle keywords with FreePascal keyword-escape prefix (& or @)
-      if (type === 'block_middle' && startOffset > 0 && (source[startOffset - 1] === '&' || source[startOffset - 1] === '@')) {
-        continue;
+      // Reject block_middle keywords with FreePascal keyword-escape prefix (& or @),
+      // or hex-literal prefix ($) / character-constant prefix (#). This mirrors the
+      // open/close keyword rejection logic to keep behavior consistent across
+      // block_open, block_close, and block_middle keywords.
+      if (type === 'block_middle' && startOffset > 0) {
+        const prev = source[startOffset - 1];
+        if (prev === '&' || prev === '@' || prev === '$' || prev === '#') {
+          continue;
+        }
       }
 
       // Filter 'else' from if-then-else (not a case/try intermediate)
