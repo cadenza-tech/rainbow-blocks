@@ -2511,7 +2511,56 @@ bar() -> fun() -> ok end.`;
       // Add a baseline floor (10ms) so very fast small runs don't trip the ratio.
       const baseline = Math.max(small, 10);
       const ratio = big / baseline;
-      assert.ok(ratio < 8, `2000-func parse took ${big}ms vs 500-func ${small}ms (ratio ${ratio.toFixed(1)}x; expected < 8x for linear scaling, was ~15x with O(n^2))`);
+      assert.ok(
+        ratio < 8,
+        `2000-func parse took ${big}ms vs 500-func ${small}ms (ratio ${ratio.toFixed(1)}x; expected < 8x for linear scaling, was ~15x with O(n^2))`
+      );
+    });
+  });
+
+  suite('Regression: type-context backward scan with comparison operators', () => {
+    test('should not pair fun/end when fun() appears in :: type after =:= operator', () => {
+      // The exact-equal operator =:= contains '=' which previously stopped the type-context scan.
+      // The backward scanner must skip past =:= to find the leading :: that signals type context.
+      const source = '-record(s, {h :: A =:= B | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun in :: type with =:= must not be paired');
+    });
+
+    test('should not pair fun/end when fun() appears in :: type after == operator', () => {
+      const source = '-record(s, {h :: A == B | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun in :: type with == must not be paired');
+    });
+
+    test('should not pair fun/end when fun() appears in :: type after =/= operator', () => {
+      const source = '-record(s, {h :: A =/= B | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun in :: type with =/= must not be paired');
+    });
+
+    test('should not pair fun/end when fun() appears in :: type after =< operator', () => {
+      const source = '-record(s, {h :: A =< B | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun in :: type with =< must not be paired');
+    });
+
+    test('should not pair fun/end when fun() appears in :: type after /= operator', () => {
+      const source = '-record(s, {h :: A /= B | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun in :: type with /= must not be paired');
+    });
+
+    test('should not pair fun/end when fun() appears in :: type after >= operator', () => {
+      const source = '-record(s, {h :: A >= B | fun(() -> ok)}).\nfoo() -> ok end.\n';
+      const pairs = parser.parse(source);
+      const funPairs = pairs.filter((p) => p.openKeyword.value === 'fun');
+      assert.strictEqual(funPairs.length, 0, 'fun in :: type with >= must not be paired');
     });
   });
 
