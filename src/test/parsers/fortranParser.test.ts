@@ -5177,6 +5177,19 @@ end if`;
     });
   });
 
+  suite('Regression: change team with empty parens is rejected', () => {
+    test('should not open team block when change team has empty parens', () => {
+      // `change team ()` with empty parens is invalid Fortran 2018 syntax. The
+      // team-value clause requires an expression. Without this guard, the team
+      // block would falsely pair with `end team`.
+      const source = `change team ()
+  x = 1
+end team`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: submodule with empty parens is rejected', () => {
     test('should not open submodule block when submodule has empty parens', () => {
       // `submodule ()` with empty parens is invalid Fortran. The (parent) clause must
