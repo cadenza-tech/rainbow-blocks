@@ -1030,10 +1030,13 @@ export class VhdlBlockParser extends BaseBlockParser {
                 // Drop the begin (and any intermediates after it) from generate's list
                 // so a subsequent `end;` doesn't re-pair with the same begin.
                 stack[stack.length - 1] = { token: topGenerate.token, intermediates: generateIntermediates.slice(0, beginIdx) };
+                break;
               }
-              // If no begin found, drop this `end;` silently (alternative_label_end
-              // without a body is unusual; treat the generate as still open).
-              break;
+              // No begin found: fall through to the default LIFO `stack.pop()` so the
+              // generate itself is closed (best-effort pairing for malformed input that
+              // uses `end;` instead of the canonical `end generate;`). Without this
+              // fallthrough the `end;` would be silently dropped and the surrounding
+              // architecture would lose its own end pairing.
             }
             const openBlock = stack.pop();
             if (openBlock) {
