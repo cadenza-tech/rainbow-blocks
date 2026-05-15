@@ -1835,6 +1835,33 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: do followed by Unicode whitespace is function call', () => {
+    test('should not treat do<NBSP>(...) as do/until block', () => {
+      // U+00A0 NO-BREAK SPACE between `do` and `(` should still be treated as
+      // whitespace for function-call detection. Without this, the spurious `do`
+      // remains a block opener and breaks outer block pairing.
+      const source = 'function f\n  do (1, 2);\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do<NBSP>( should be a function call');
+      // function-end and if-end should both pair correctly.
+      assertBlockCount(pairs, 2);
+      const functionBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(functionBlock.closeKeyword.value, 'end');
+      assert.strictEqual(ifBlock.closeKeyword.value, 'end');
+    });
+
+    test('should not treat do<U+2000>(...) as do/until block (en quad)', () => {
+      // U+2000 EN QUAD is another Unicode whitespace.
+      const source = 'function f\n  do (1, 2);\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do<U+2000>( should be a function call');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-15: do followed by colon is not block open', () => {
     test('should not treat do: as do/until block opener', () => {
       // `do:` is invalid Octave syntax (Octave has no label statements; `:` here
