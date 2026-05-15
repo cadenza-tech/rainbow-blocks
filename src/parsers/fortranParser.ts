@@ -427,6 +427,10 @@ export class FortranBlockParser extends BaseBlockParser {
   private isValidIfOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position + keyword.length;
     let parenDepth = 0;
+    // Track whether a `(` has ever been seen at top-level after `if`. A valid block-if
+    // must have a parenthesized condition (`if (cond) then`); a bare `if then` without
+    // parens is invalid Fortran syntax and must be rejected.
+    let sawOpenParen = false;
     while (i < source.length) {
       // Skip excluded regions
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -438,6 +442,7 @@ export class FortranBlockParser extends BaseBlockParser {
       // Track parenthesis depth
       if (source[i] === '(') {
         parenDepth++;
+        sawOpenParen = true;
         i++;
         continue;
       }
@@ -452,6 +457,7 @@ export class FortranBlockParser extends BaseBlockParser {
       // If other content exists between ')' and 'then', it's a single-line if with 'then' as variable
       if (
         parenDepth === 0 &&
+        sawOpenParen &&
         source.slice(i, i + 4).toLowerCase() === 'then' &&
         (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
         (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
