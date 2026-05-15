@@ -96,9 +96,35 @@ function getSigilCloseDelimiter(open: string): string | null {
 
 // Multi-character operator atoms in Elixir, in order of match preference (longer first).
 // Per Elixir docs, the following operators may be used as atoms with the colon prefix.
-// Two-char operators must be matched before single-char ones to avoid splitting (e.g.,
-// ":==" must match as :== not :=).
-const OPERATOR_ATOM_MULTI = ['==', '!=', '<=', '>=', '=~', '->', '<-', '<>'] as const;
+// Longer operators must be matched before shorter ones to avoid splitting (e.g., ":===" must
+// match as :=== not :== then leftover =, ":&&" must match as :&& not :& then leftover &).
+const OPERATOR_ATOM_MULTI = [
+  // 3-char operators (must come first)
+  '===',
+  '!==',
+  '&&&',
+  '|||',
+  '<<<',
+  '>>>',
+  // 2-char operators
+  '==',
+  '!=',
+  '<=',
+  '>=',
+  '=~',
+  '->',
+  '<-',
+  '<>',
+  '&&',
+  '||',
+  '..',
+  '|>',
+  '++',
+  '--',
+  '**',
+  '<<',
+  '>>'
+] as const;
 
 // Single-character operator atoms in Elixir.
 const OPERATOR_ATOM_SINGLE = new Set(['+', '-', '*', '/', '<', '>', '=', '!', '?', '~', '^', '&', '|']);
