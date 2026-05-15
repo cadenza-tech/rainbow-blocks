@@ -3812,6 +3812,27 @@ end`;
     });
   });
 
+  suite('Regression: subtype operator detection should not cross newline', () => {
+    test('should pair function with end when <: is on previous line (best-effort during editing)', () => {
+      // Bug 2 (LOW): isPrecededBySubtypeOperator scanned backwards across newlines while
+      // skipping whitespace, so `function f() where T <:\nend` had its trailing `end`
+      // rejected as block_close (incorrectly seen as `end` after `<:`). Both `function`
+      // and `end` were orphan. After fix: scan stops at newline, so `end` is a valid
+      // block_close and pairs with function.
+      const source = 'function f() where T <:\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat T<:end (same line) as invalid syntax (end is not block_close)', () => {
+      // Counter-test: when `<:` and `end` are on the same line (no newline between them),
+      // the existing behavior must be preserved: end is rejected as block_close.
+      const source = 'function f() where T<:end\n  return x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: symbol literal after Unicode operator', () => {
     test('should recognize :end as symbol literal after Unicode operator (×)', () => {
       // Bug 1 (HIGH): isSymbolStart treated all chars with charCodeAt > 127 as identifier-like,
