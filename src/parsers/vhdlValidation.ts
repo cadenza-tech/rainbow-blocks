@@ -331,17 +331,18 @@ export function isValidWhileOpen(source: string, position: number, excludedRegio
 }
 
 // Validates 'component': rejects 'label: component' instantiation (not a declaration)
+// Walks backward through whitespace, newlines, and excluded regions (comments) so that
+// an instantiation written across multiple lines or with intervening comments is detected:
+//   inst :
+//     -- comment
+//     component foo port map();
 export function isValidComponentOpen(
   source: string,
   position: number,
   excludedRegions: ExcludedRegion[],
   callbacks: VhdlValidationCallbacks
 ): boolean {
-  // Scan backward from component, skipping whitespace
-  let i = position - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
-    i--;
-  }
+  const i = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
   // If preceded by ':', this is a component instantiation (label: component name ...)
   if (i >= 0 && source[i] === ':') {
     if (!callbacks.isInExcludedRegion(i, excludedRegions)) {
