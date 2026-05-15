@@ -3135,6 +3135,27 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: simple end on generate without begin uses LIFO fallback', () => {
+    test('should not silently drop simple end inside if-generate without begin', () => {
+      const source = 'architecture rtl of t is\nbegin\n  if x generate\n    sig <= a;\n  end;\nend;';
+      const pairs = parser.parse(source);
+      // Best-effort: at minimum, the simple end inside the generate should pop the
+      // generate via LIFO fallback (instead of being silently dropped).
+      const generatePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'generate');
+      assert.ok(generatePair, 'generate should be paired by simple end via LIFO fallback');
+      // Without the fix, no pairs are produced at all.
+      assert.ok(pairs.length > 0, 'should produce at least one pair');
+    });
+
+    test('should not silently drop simple end inside case-generate without begin', () => {
+      const source = 'architecture rtl of t is\nbegin\n  case x generate\n    when 0 => sig <= a;\n  end;\nend;';
+      const pairs = parser.parse(source);
+      const generatePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'generate');
+      assert.ok(generatePair, 'generate should be paired by simple end via LIFO fallback');
+      assert.ok(pairs.length > 0, 'should produce at least one pair');
+    });
+  });
+
   suite('Regression 2026-05-15: dot check should skip comments and newlines', () => {
     test('should reject end preceded by dot and block comment', () => {
       const source = 'process\nbegin\n  sig <= a . /* c */ end;\nend process;';
