@@ -86,6 +86,12 @@ function normalizeFortranEndType(rawType: string): string {
 const SELECT_TYPE_GUARD_PATTERN = /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b|case[ \t]+default\b|rank[ \t]+default\b)/gi;
 
 export class FortranBlockParser extends BaseBlockParser {
+  // Transient source captured during tokenize() for use in matchBlocks().
+  // matchBlocks() needs source access to determine `select` opener subtypes
+  // (`select type` vs `select case` vs `select rank`) but the base class API
+  // does not pass source to matchBlocks. Reset on each tokenize call.
+  private currentSource = '';
+
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'program',
@@ -699,8 +705,27 @@ export class FortranBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // Returns the select subtype (`type`, `case`, `rank`) for a `select` opener
+  // token, or null if the token is not a select opener or the subtype cannot be
+  // determined. Reads from currentSource captured during tokenize().
+  private getSelectSubtype(token: Token): 'type' | 'case' | 'rank' | null {
+    if (token.value.toLowerCase() !== 'select') {
+      return null;
+    }
+    let after = this.currentSource.slice(token.endOffset);
+    after = collapseContinuationLines(after);
+    const subMatch = after.match(/^[ \t]+(type|case|rank)\b/i);
+    if (!subMatch) {
+      return null;
+    }
+    return subMatch[1].toLowerCase() as 'type' | 'case' | 'rank';
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Capture source for use in matchBlocks (needed by getSelectSubtype).
+    this.currentSource = source;
+
     // Find all compound end keywords and their positions
     const compoundEndPositions = new Map<number, { keyword: string; length: number; endType: string }>();
     // Track positions where the compound `end <type>` was rejected due to expression
@@ -1069,6 +1094,11 @@ export class FortranBlockParser extends BaseBlockParser {
             const topBlock = stack[stack.length - 1];
             const middleValue = token.value.toLowerCase().replace(/[ \t\r\n]+/g, ' ');
             const openerValue = topBlock.token.value.toLowerCase();
+            // For `select` openers, peek at the source to determine the subtype
+            // (`select type` vs `select case` vs `select rank`). This lets us
+            // restrict guards (`type is`, `class is`, `class default`) to `select type`
+            // and case/rank intermediates to their respective select variants.
+            const selectSubtype = openerValue === 'select' ? this.getSelectSubtype(topBlock.token) : null;
             // `case default` / `rank default` are case/rank intermediates of select case / select rank.
             const isCaseRankDefault = middleValue === 'case default' || middleValue === 'rank default';
             // Skip the first case/rank after select (it's the opening guard: select case/rank (x))
@@ -1083,11 +1113,23 @@ export class FortranBlockParser extends BaseBlockParser {
             if ((middleValue === 'case' || middleValue === 'rank' || isCaseRankDefault) && openerValue !== 'select') {
               break;
             }
+            // `case` / `case default` valid only in `select case`; reject in `select type`/`select rank`.
+            if ((middleValue === 'case' || middleValue === 'case default') && selectSubtype !== null && selectSubtype !== 'case') {
+              break;
+            }
+            // `rank` / `rank default` valid only in `select rank`; reject in `select case`/`select type`.
+            if ((middleValue === 'rank' || middleValue === 'rank default') && selectSubtype !== null && selectSubtype !== 'rank') {
+              break;
+            }
             // `type is` / `class is` / `class default` are guards of `select type`.
             // Only valid when the parent opener is `select` (which itself was paired
             // with `select type (...)` via isValidBlockOpen).
             const isSelectTypeGuard = middleValue === 'type is' || middleValue === 'class is' || middleValue === 'class default';
             if (isSelectTypeGuard && openerValue !== 'select') {
+              break;
+            }
+            // Within `select`, guards are valid only for `select type`. Reject in `select case`/`select rank`.
+            if (isSelectTypeGuard && selectSubtype !== null && selectSubtype !== 'type') {
               break;
             }
             // Check if this is an else-where variant (elsewhere, else where, else &\n where)
