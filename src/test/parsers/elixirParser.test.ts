@@ -4389,5 +4389,53 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: fn followed by parens-then-do is invalid (no fn opener)', () => {
+    // In Elixir, `fn` always uses arrow syntax (fn pattern -> body end), never `do`.
+    // The form `fn(...) do ... end` is invalid Elixir. When this pattern appears inside
+    // an outer block (e.g., `if fn() do ... end`), the parser must NOT treat fn as a
+    // block opener; otherwise fn greedily pairs with end and the outer if is orphaned.
+    // Reference: https://hexdocs.pm/elixir/anonymous-functions.html
+    test('should pair if/end (not fn/end) when fn() do appears inside if', () => {
+      const source = 'if fn() do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should pair if/end (not fn/end) when fn(x) do appears inside if', () => {
+      const source = 'if fn(x) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should pair if/end when fn(a, b) do appears inside if', () => {
+      const source = 'if fn(a, b) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should pair unless/end when fn() do appears inside unless', () => {
+      const source = 'unless fn() do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+    test('should still pair fn/end for valid fn(x) -> body end', () => {
+      const source = 'result = fn(x) -> x * 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+    test('should still pair fn/end for valid fn() -> :ok end', () => {
+      const source = 'result = fn() -> :ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+    test('should still pair fn/end for valid fn x -> x*2 end (no parens)', () => {
+      const source = 'fn x -> x * 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+    test('should still pair fn/end for valid multi-clause fn(x) -> x; (y) -> y end', () => {
+      const source = 'f = fn(x) -> x; (y) -> y end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
