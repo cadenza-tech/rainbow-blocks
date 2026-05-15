@@ -8,6 +8,20 @@ import { findLastOpenerByType } from './parserUtils';
 const LINE_CONTINUATION_PATTERN = /^\.\.\.(?:[^\r\n]*)(?:\r\n|\r|\n)/;
 const BACKSLASH_CONTINUATION_PATTERN = /^\\[ \t]*(?:\r\n|\r|\n)/;
 
+// Unicode whitespace characters that should be treated like ASCII space/tab when
+// scanning between `do` and `(` (or other adjacency checks). Mirrors the set used
+// by adaParser.ts and applescriptParser.ts. Includes U+0085 (NEL), U+00A0 (NBSP),
+// U+1680 (Ogham Space Mark), U+2000-U+200A (En Quad..Hair Space), U+2028 (Line
+// Separator), U+2029 (Paragraph Separator), U+202F (Narrow No-Break Space),
+// U+205F (Medium Math Space), U+3000 (Ideographic Space). Excludes `\r` / `\n`
+// which terminate the logical line.
+const HORIZONTAL_WHITESPACE_PATTERN = /[\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/;
+
+function isHorizontalWhitespace(ch: string | undefined): boolean {
+  if (ch === undefined) return false;
+  return ch === ' ' || ch === '\t' || ch === '\v' || ch === '\f' || HORIZONTAL_WHITESPACE_PATTERN.test(ch);
+}
+
 const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   endfunction: 'function',
   endif: 'if',
@@ -151,14 +165,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
       return false;
     }
     if (keyword === 'do') {
-      // Skip whitespace, line continuations (... or \), and trailing line comments
-      // (`%...` / `#...`) between `do` and `(` so `do (args)`, `do ...\n(args)`,
-      // `do \\\n(args)`, and `do % comment\n(args)` are all rejected as the
-      // function-call form, not a do/until block. Also reject `do[...]` and `do{...}`
-      // (indexing / cell-access forms) for the same reason.
+      // Skip horizontal whitespace (ASCII space/tab/VT/FF plus Unicode spaces such
+      // as NBSP / U+2000-200A / Ideographic Space), line continuations (... or \),
+      // and trailing line comments (`%...` / `#...`) between `do` and `(` so
+      // `do (args)`, `do<NBSP>(args)`, `do ...\n(args)`, `do \\\n(args)`, and
+      // `do % comment\n(args)` are all rejected as the function-call form, not a
+      // do/until block. Also reject `do[...]` and `do{...}` (indexing / cell-access
+      // forms) for the same reason.
       let j = position + keyword.length;
       while (j < source.length) {
-        if (source[j] === ' ' || source[j] === '\t') {
+        if (isHorizontalWhitespace(source[j])) {
           j++;
           continue;
         }
