@@ -3558,6 +3558,33 @@ end`;
     });
   });
 
+  suite('Regression: end after range operator should not close a block', () => {
+    test('should not pair for with inner end inside (1..end) range expression', () => {
+      // Inside (1..end), `end` is invalid Ruby (end is a reserved keyword), but the parser
+      // must not match this fake `end` against the for/while open. Otherwise the trailing
+      // outer `end` becomes orphan and the for-loop is mis-paired.
+      const source = 'for x in (1..end)\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      // Outer end should be the close keyword (line 2 in 0-based, not line 0)
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not pair while with inner end inside ...end range expression', () => {
+      const source = 'while x < (1...end)\n  break\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat ..end as block close even at top level', () => {
+      const source = 'if true\n  arr = (1..end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   suite('Regression: keywords as method names after def', () => {
     test('should not treat do after def as block opener', () => {
       const pairs = parser.parse('class Foo\n  def do\n    1\n  end\nend');
