@@ -190,6 +190,16 @@ export class FortranBlockParser extends BaseBlockParser {
       }
     }
 
+    // 'enum' must be followed by `, bind(c)` clause (Fortran 2003+).
+    // Plain `enum NAME` without the bind(c) attribute is not a valid enum block.
+    if (lowerKeyword === 'enum') {
+      let afterEnum = source.slice(position + keyword.length);
+      afterEnum = collapseContinuationLines(afterEnum);
+      if (!/^[ \t]*,[ \t]*bind[ \t]*\(/i.test(afterEnum)) {
+        return false;
+      }
+    }
+
     // 'submodule' must be followed by `(parent)` clause (Fortran 2008+).
     // Plain `submodule name` without parens is invalid. Also reject empty parens
     // `submodule () name` since the parent clause requires at least one identifier.
