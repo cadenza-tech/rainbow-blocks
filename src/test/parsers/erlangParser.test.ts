@@ -2515,6 +2515,31 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: duplicate intermediate keywords for non-try blocks', () => {
+    test('should not register duplicate of in malformed case block', () => {
+      // Multiple `of` in a single case block (invalid syntax) should only register the first
+      // as an intermediate, matching the existing try-block behavior.
+      const source = 'case X of\n  1 -> a\nof\n  2 -> b\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+    });
+
+    test('should not register duplicate after in malformed receive block', () => {
+      const source = 'receive\n  msg -> ok\nafter\n  100 -> timeout\nafter\n  200 -> bye\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], ['after']);
+    });
+
+    test('should not register duplicate else in malformed maybe block', () => {
+      const source = 'maybe\n  ok\nelse\n  err -> 1\nelse\n  oops -> 2\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'maybe', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   suite('Regression: spec attribute Unicode boundary', () => {
     test('should treat -typeα as user attribute and not suppress fun block opener', () => {
       // -typeα is a user-defined attribute (not -type). The fun() that follows
