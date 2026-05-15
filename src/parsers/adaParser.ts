@@ -59,7 +59,7 @@ export class AdaBlockParser extends BaseBlockParser {
   // Most recent source string and excluded regions seen by parse(). Used by
   // matchBlocks to scan for non-keyword markers (e.g., `do` in accept/return
   // bodies) that are not part of the token stream.
-  private currentSource: string = '';
+  private currentSource = '';
   private currentExcludedRegions: ExcludedRegion[] = [];
 
   // Override parse() so matchBlocks can consult the original source when it

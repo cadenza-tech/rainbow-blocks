@@ -3199,7 +3199,8 @@ end package;`;
 
   suite('Regression 2026-05-15: elsif-generate begin/end body siblings have flat nestLevel', () => {
     test('should give same nestLevel to begin/end bodies in if-elsif generate chain', () => {
-      const source = 'architecture rtl of t is\nbegin\n  if X generate\n  begin\n    sig <= a;\n  end;\n  elsif Y generate\n  begin\n    sig <= b;\n  end;\n  end generate;\nend;';
+      const source =
+        'architecture rtl of t is\nbegin\n  if X generate\n  begin\n    sig <= a;\n  end;\n  elsif Y generate\n  begin\n    sig <= b;\n  end;\n  end generate;\nend;';
       const pairs = parser.parse(source);
       const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
       assert.strictEqual(beginPairs.length, 2, 'should have 2 begin/end body pairs');

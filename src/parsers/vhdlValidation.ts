@@ -257,12 +257,7 @@ function hasUseEntityOrConfigAfterFor(
 // Returns true when the keyword at `position` is preceded (after skipping whitespace,
 // newlines, and excluded regions like comments) by a literal `.` — indicating a
 // hierarchical reference like `inst.process` or `rec . end`.
-export function isPrecededByDot(
-  source: string,
-  position: number,
-  excludedRegions: ExcludedRegion[],
-  callbacks: VhdlValidationCallbacks
-): boolean {
+export function isPrecededByDot(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
   const i = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
   return i >= 0 && source[i] === '.' && !callbacks.isInExcludedRegion(i, excludedRegions);
 }

@@ -366,10 +366,7 @@ export class CobolBlockParser extends BaseBlockParser {
       }
       // Identifier / keyword scan: only walk ASCII letter characters that
       // begin words to avoid duplicate work mid-identifier.
-      if (
-        (ch >= 'A' && ch <= 'Z') ||
-        (ch >= 'a' && ch <= 'z')
-      ) {
+      if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
         const prev = i > 0 ? source[i - 1] : '';
         // Must be at a word boundary
         if (prev && (prev === '-' || /[a-zA-Z0-9_]/.test(prev))) {
@@ -625,11 +622,7 @@ export class CobolBlockParser extends BaseBlockParser {
     for (const region of excludedRegions) {
       if (region.start <= from) continue;
       if (region.start >= to) break;
-      if (
-        region.end - region.start === 2 &&
-        source[region.start] === '=' &&
-        source[region.start + 1] === '='
-      ) {
+      if (region.end - region.start === 2 && source[region.start] === '=' && source[region.start + 1] === '=') {
         return true;
       }
     }
@@ -847,18 +840,7 @@ export class CobolBlockParser extends BaseBlockParser {
     // position, not operand position, so ELSE/WHEN after `)` are real
     // control-flow intermediates.
     // Note: `**` is two `*` characters, so checking `*` covers it.
-    return (
-      ch === '+' ||
-      ch === '-' ||
-      ch === '*' ||
-      ch === '/' ||
-      ch === '=' ||
-      ch === '<' ||
-      ch === '>' ||
-      ch === ',' ||
-      ch === ';' ||
-      ch === '('
-    );
+    return ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '=' || ch === '<' || ch === '>' || ch === ',' || ch === ';' || ch === '(';
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
