@@ -281,7 +281,11 @@ end`;
       assertIntermediates(pairs[0], ['catch', 'finally']);
     });
 
-    test('should parse for-else pattern (break/else)', () => {
+    test('should NOT attach else to for (Julia has no for-else construct)', () => {
+      // Julia does not have a Python-style for-else construct. `else` is only valid as
+      // intermediate of `if`. With context-aware matchBlocks, `else` after for is dropped
+      // (the inner `if`/`end` is already closed when else is seen, so else has no valid
+      // opener). The for/end pair has no intermediates.
       const source = `for i in 1:10
   if condition
     break
@@ -291,7 +295,7 @@ else
 end`;
       const pairs = parser.parse(source);
       const forPair = findBlock(pairs, 'for');
-      assertIntermediates(forPair, ['else']);
+      assertIntermediates(forPair, []);
     });
   });
 
@@ -3809,6 +3813,72 @@ end`;
       const sourceLines = source.split('\n');
       const lastEndLine = sourceLines.length - 1;
       assert.strictEqual(block.closeKeyword?.line, lastEndLine);
+    });
+  });
+
+  suite('Regression: intermediate keywords require matching opener context', () => {
+    test('should NOT add catch as intermediate of function', () => {
+      // Bug 4 (LOW): catch is only valid as intermediate of `try`. When the stack top is
+      // `function` (or any non-try opener), `catch` should be dropped, not added to its
+      // intermediates list. Otherwise the function pair has a stray catch intermediate
+      // that does not reflect the actual code structure.
+      const source = 'function f() catch e end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assertIntermediates(block, []);
+    });
+
+    test('should NOT add finally as intermediate of function', () => {
+      const source = 'function f() finally end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assertIntermediates(block, []);
+    });
+
+    test('should NOT add else as intermediate of try', () => {
+      // try has catch/finally as valid intermediates, NOT else/elseif.
+      const source = 'try\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const block = findBlock(pairs, 'try');
+      assertIntermediates(block, []);
+    });
+
+    test('should NOT add elseif as intermediate of try', () => {
+      const source = 'try\nelseif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const block = findBlock(pairs, 'try');
+      assertIntermediates(block, []);
+    });
+
+    test('should still add catch as intermediate of try', () => {
+      // Counter-test: matched context must work normally.
+      const source = 'try\n  foo()\ncatch e\n  bar()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const block = findBlock(pairs, 'try');
+      assertIntermediates(block, ['catch']);
+    });
+
+    test('should still add else/elseif as intermediates of if', () => {
+      // Counter-test: if/elseif/else/end pattern must work normally.
+      const source = 'if x\nelseif y\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      const block = findBlock(pairs, 'if');
+      assertIntermediates(block, ['elseif', 'else']);
+    });
+
+    test('should still add catch+finally as intermediates of try', () => {
+      // Counter-test: try with both catch and finally must work normally.
+      const source = 'try\n  foo()\ncatch e\n  bar()\nfinally\n  baz()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const block = findBlock(pairs, 'try');
+      assertIntermediates(block, ['catch', 'finally']);
     });
   });
 
