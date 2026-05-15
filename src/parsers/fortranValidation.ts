@@ -290,7 +290,8 @@ export function isInsideParentheses(source: string, position: number): boolean {
 // Returns the line start position, or -1 if no continuation
 function findContinuationLineStart(source: string, currentLineStart: number): number {
   let searchStart = currentLineStart;
-  // Loop to skip comment-only lines (Fortran allows comment lines between continuation lines)
+  // Loop to skip comment-only lines and blank lines
+  // (Fortran allows comment-only and blank lines between continuation lines)
   while (true) {
     let prevEnd = searchStart - 1;
     // Skip line terminator (\r\n as a unit, then standalone \n or \r)
@@ -301,18 +302,32 @@ function findContinuationLineStart(source: string, currentLineStart: number): nu
     }
     if (prevEnd < 0) return -1;
 
+    // If prevEnd still points at a line terminator, the previous line is blank
+    // (e.g., `&\n\n    end)`). Skip the blank line and continue scanning the line before.
+    if (source[prevEnd] === '\n' || source[prevEnd] === '\r') {
+      searchStart = prevEnd + 1;
+      continue;
+    }
+
     // Find start of previous line
     let prevLineStart = prevEnd;
     while (prevLineStart > 0 && source[prevLineStart - 1] !== '\n' && source[prevLineStart - 1] !== '\r') {
       prevLineStart--;
     }
 
-    // Check if line is comment-only (first non-whitespace is !)
+    // Check if line is comment-only (first non-whitespace is !) or blank
+    // (only whitespace, including no characters at all). Blank lines are valid
+    // between continuation lines in free-form Fortran and must be skipped.
     let firstNonWs = prevLineStart;
     while (firstNonWs <= prevEnd && (source[firstNonWs] === ' ' || source[firstNonWs] === '\t')) {
       firstNonWs++;
     }
-    if (firstNonWs <= prevEnd && source[firstNonWs] === '!') {
+    if (firstNonWs > prevEnd) {
+      // Blank line (only whitespace), skip and check the line before
+      searchStart = prevLineStart;
+      continue;
+    }
+    if (source[firstNonWs] === '!') {
       // Comment-only line, skip and check the line before
       searchStart = prevLineStart;
       continue;
