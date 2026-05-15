@@ -671,20 +671,20 @@ export class ErlangBlockParser extends BaseBlockParser {
                 top.intermediates.push(token);
               }
             } else if (token.value === 'of') {
-              // 'of' is only valid for 'case' and 'try' blocks
-              if (topOpener === 'case' || topOpener === 'try') {
+              // 'of' is only valid for 'case' and 'try' blocks; reject duplicates
+              if ((topOpener === 'case' || topOpener === 'try') && !top.intermediates.some((t) => t.value === 'of')) {
                 top.intermediates.push(token);
               }
             } else if (token.value === 'after') {
-              // 'after' is only valid for 'receive' and 'try' blocks
-              if (topOpener === 'receive' || topOpener === 'try') {
+              // 'after' is only valid for 'receive' and 'try' blocks; reject duplicates
+              if ((topOpener === 'receive' || topOpener === 'try') && !top.intermediates.some((t) => t.value === 'after')) {
                 top.intermediates.push(token);
               }
             } else if (token.value === 'else') {
               // Per Erlang Reference Manual, `else` is only valid as an intermediate
               // for `maybe` blocks (OTP 25+). `if` only allows guard clauses (no else),
-              // and `try` allows `of`/`catch`/`after` (no else).
-              if (topOpener === 'maybe') {
+              // and `try` allows `of`/`catch`/`after` (no else). Reject duplicates.
+              if (topOpener === 'maybe' && !top.intermediates.some((t) => t.value === 'else')) {
                 top.intermediates.push(token);
               }
             } else {
