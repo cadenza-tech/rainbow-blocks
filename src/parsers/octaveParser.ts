@@ -151,8 +151,9 @@ export class OctaveBlockParser extends MatlabBlockParser {
       return false;
     }
     if (keyword === 'do') {
-      // Skip whitespace and line continuations (... or \) between `do` and `(` so
-      // `do (args)`, `do ...\n(args)`, and `do \\\n(args)` are also rejected as a
+      // Skip whitespace, line continuations (... or \), and trailing line comments
+      // (`%...` / `#...`) between `do` and `(` so `do (args)`, `do ...\n(args)`,
+      // `do \\\n(args)`, and `do % comment\n(args)` are all rejected as the
       // function-call form, not a do/until block. Also reject `do[...]` and `do{...}`
       // (indexing / cell-access forms) for the same reason.
       let j = position + keyword.length;
@@ -169,6 +170,22 @@ export class OctaveBlockParser extends MatlabBlockParser {
         const bsCont = source.slice(j).match(BACKSLASH_CONTINUATION_PATTERN);
         if (bsCont) {
           j += bsCont[0].length;
+          continue;
+        }
+        // Line comments (`%...` or `#...`) are equivalent to whitespace+newline
+        // here: they end the physical line but the logical statement continues
+        // on the next non-comment, non-blank line.
+        if (this.isCommentChar(source[j])) {
+          while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
+            j++;
+          }
+          // Consume the line terminator (\r, \n, or \r\n).
+          if (j < source.length && source[j] === '\r') {
+            j++;
+            if (j < source.length && source[j] === '\n') j++;
+          } else if (j < source.length && source[j] === '\n') {
+            j++;
+          }
           continue;
         }
         break;
