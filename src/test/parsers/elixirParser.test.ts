@@ -4120,6 +4120,96 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: sigil heredoc terminator requires line-end check after modifiers', () => {
+    // The plain triple-quoted heredoc terminator already checks isLineEndAfterTerminator
+    // (see matchTripleQuotedString). The sigil heredoc paths (matchSigil triple-quote and
+    // skipNestedSigil triple-quote) historically only checked isAtLineStartAllowingWhitespace.
+    // For a sigil heredoc terminator like """ followed by optional alphabetic modifiers,
+    // the terminator must end as a token; followed by digit, underscore, ?, or ! means it
+    // is NOT a real terminator (the sigil body continues).
+    test('should not close ~s""" sigil heredoc at """1 (digit suffix invalidates terminator)', () => {
+      const source = `~s"""
+"""1
+still_in
+"""
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should not close ~S""" sigil heredoc at """123 (digit suffix invalidates terminator)', () => {
+      const source = `~S"""
+"""123
+still_in
+"""
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should not close ~s""" sigil heredoc at """_x (underscore suffix invalidates terminator)', () => {
+      const source = `~s"""
+"""_x
+still_in
+"""
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test("should not close ~s''' sigil heredoc at '''9 (digit suffix invalidates terminator)", () => {
+      const source = `~s'''
+'''9
+still_in
+'''
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should still close ~s""" sigil heredoc at """ followed by valid modifier letters', () => {
+      // ~s""" with closing """uib (valid modifier letters) should terminate normally,
+      // and the trailing def/end should pair.
+      const source = `x = ~s"""
+hello
+"""u
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should not close sigil heredoc at """ followed by modifier-then-digit', () => {
+      // After modifier letters are consumed, the next char must not be an identifier-continuation
+      // char. """u9 should NOT terminate (the 9 indicates the line is not at terminator end).
+      const source = `~s"""
+"""u9
+still_in
+"""
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should not close sigil heredoc inside interpolation at mid-line """N', () => {
+      // skipNestedSigil triple-quote path: inside interpolation, the same check must apply.
+      const source = `"#{~s"""
+"""1
+still_in
+"""}"
+def foo do
+  :ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: hasDoKeyword should handle unbalanced parens', () => {
     // hasDoKeyword tracks paren/bracket/brace depth to ignore "do" inside grouping. With
     // unbalanced source code (e.g., a typo `if x)`), the depth could go negative and
