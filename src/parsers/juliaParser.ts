@@ -174,9 +174,11 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Checks if `end` at `position` is preceded by `<:` or `>:` (subtype/supertype operator).
-  // Skips intervening whitespace (and excluded regions like comments) but stops at any
-  // other token. Used to reject `end` as a block_close in `where T<:end` and similar
-  // invalid syntax where `end` is being used as a (nonexistent) type.
+  // Skips intervening tabs/spaces (and excluded regions like comments) but stops at newlines
+  // or any other token. Used to reject `end` as a block_close in `where T<:end` and similar
+  // invalid syntax where `end` is being used as a (nonexistent) type. Newlines terminate the
+  // scan because `where T <:\nend` is best-effort treated as a mid-edit state where the
+  // trailing `end` should still pair with the surrounding block.
   private isPrecededBySubtypeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -188,7 +190,11 @@ export class JuliaBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (ch === '\n' || ch === '\r') {
+        // Stop at newline: `<:` on a previous line should not affect this `end`.
+        return false;
+      }
+      if (ch === ' ' || ch === '\t') {
         i--;
         continue;
       }
