@@ -2907,6 +2907,49 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: $/# prefixed block_middle keywords', () => {
+    test('should not treat $else as block_middle inside case (hex literal prefix)', () => {
+      const source = `case X of
+  $else: foo;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      // Only `of` is a real intermediate; `$else` is a hex-literal-prefixed identifier
+      assertIntermediates(pairs[0], ['of']);
+    });
+
+    test('should not treat #else as block_middle inside case (char constant prefix)', () => {
+      const source = `case X of
+  #else: foo;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+    });
+
+    test('should not treat $finally as block_middle inside try (hex literal prefix)', () => {
+      const source = `try
+  $finally;
+  Bar;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      // No real intermediates; `$finally` is a hex-literal-prefixed identifier
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not treat $of as block_middle inside case (hex literal prefix)', () => {
+      // Case missing real `of`; $of is a hex literal, so case has no intermediates.
+      // Without `of`, the parser still pairs case with end via its block_close handling.
+      const source = `case X
+  $of 1: foo;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   suite('Regression 2026-05-15: comparison context after try/begin/on/repeat', () => {
     test('should not treat class as type definition after try statement', () => {
       // `try Bar = class do Foo end` is a try block with comparison `Bar = class`
