@@ -5177,5 +5177,33 @@ end if`;
     });
   });
 
+  suite('Regression: block data with multiple spaces or continuation', () => {
+    test('should pair `block  data NAME` (multiple spaces) with `end block data`', () => {
+      // Free-form Fortran allows arbitrary whitespace between `block` and `data`.
+      // The parser must recognize this as a single `block data` opener.
+      const source = `block  data init
+  integer :: x
+end block data`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'block  data', 'end block data');
+    });
+
+    test('should pair `block&\\n data NAME` (continuation line) with `end block data`', () => {
+      // Free-form Fortran allows line continuation between `block` and `data`.
+      // The opener token spans the entire `block&\n  data` text (including & and newline).
+      const source = `block&
+  data init
+  integer :: x
+end block data`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const pair = pairs[0];
+      // Opener begins with `block` and ends with `data`
+      const openLower = pair.openKeyword.value.toLowerCase();
+      assert.ok(/^block[\s&]+data$/.test(openLower), `Expected opener to span \`block...data\`; got: ${JSON.stringify(pair.openKeyword.value)}`);
+      assert.strictEqual(pair.closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end block data');
+    });
+  });
+
   generateCommonTests(config);
 });
