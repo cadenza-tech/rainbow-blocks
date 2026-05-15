@@ -320,6 +320,15 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
       const keywordStart = match.index + match[0].length - match[3].length;
       const keywordEnd = keywordStart + match[3].length;
+      // Reject if the next character is a Unicode identifier-continuation character.
+      // E.g. -typeα, -callbackα should be treated as user attributes, not -type/-callback.
+      // JavaScript \b only handles ASCII word boundaries so we must check explicitly here.
+      if (keywordEnd < source.length) {
+        const cp = source.codePointAt(keywordEnd);
+        if (cp !== undefined && /[\p{L}\p{M}\p{N}\p{Pc}]/u.test(String.fromCodePoint(cp))) {
+          continue;
+        }
+      }
       const endPeriod = this.findDeclarationEndingPeriod(source, keywordEnd, excludedRegions);
       spans.push({ dashStart, keywordStart, keywordEnd, endPeriod });
     }
