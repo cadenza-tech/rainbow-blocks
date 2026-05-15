@@ -187,11 +187,15 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     // 'submodule' must be followed by `(parent)` clause (Fortran 2008+).
-    // Plain `submodule name` without parens is invalid.
+    // Plain `submodule name` without parens is invalid. Also reject empty parens
+    // `submodule () name` since the parent clause requires at least one identifier.
     if (lowerKeyword === 'submodule') {
       let afterSub = source.slice(position + keyword.length);
       afterSub = collapseContinuationLines(afterSub);
       if (!/^[ \t]*\(/.test(afterSub)) {
+        return false;
+      }
+      if (/^[ \t]*\([ \t]*\)/.test(afterSub)) {
         return false;
       }
     }
