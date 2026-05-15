@@ -198,6 +198,13 @@ function skipMacroPercentLiteral(source: string, pos: number): number | null {
   // Reject closing brackets — only the opener form is a valid percent-literal delimiter.
   if (next === ')' || next === ']' || next === '}' || next === '>') return null;
 
+  // %= is a compound assignment operator (modulo-assign), not a percent literal.
+  // %% is the modulo operator applied to another %, not a percent literal.
+  // Both must be skipped here so the surrounding macro template ({% %} / {{ }})
+  // can recognize its own %} / }} closer instead of treating the macro close
+  // as a percent-literal delimiter.
+  if (next === '=' || next === '%') return null;
+
   const close = PERCENT_LITERAL_PAIRED_DELIMITERS[next] ?? next;
   const isPaired = next !== close;
 
