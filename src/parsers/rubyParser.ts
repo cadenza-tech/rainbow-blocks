@@ -205,8 +205,14 @@ export class RubyBlockParser extends BaseBlockParser {
         }
       }
       // Filter out dot-preceded tokens (method calls like obj.end, obj. class)
-      // But allow range operator (..) — x..end is valid
+      // The range operator (..) is excluded by isDotPreceded, but we still need to
+      // reject `end` after `..` / `...`: `end` is a Ruby keyword and cannot be the
+      // RHS of a range expression. Treating it as block_close mis-pairs surrounding
+      // blocks (e.g., `for x in (1..end)\n  ...\nend` would pair the inner end with for).
       if (this.isDotPreceded(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
+      if (token.value === 'end' && this.isPrecededByRangeOperator(source, token.startOffset, excludedRegions)) {
         return false;
       }
       // Filter out keywords used as method names after 'def' (e.g., def do, def begin, def end)
@@ -320,6 +326,33 @@ export class RubyBlockParser extends BaseBlockParser {
 
   private isDotPreceded(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     return isDotPrecededShared(source, position, excludedRegions, this.validationCallbacks);
+  }
+
+  // Checks if the keyword at position is immediately preceded by a range operator
+  // (.. or ...). Whitespace is permitted between the operator and the keyword (e.g.,
+  // `(1.. end)` would also be invalid Ruby). Skips characters inside excluded regions.
+  private isPrecededByRangeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    // Need at least two consecutive dots to form .. (or ...)
+    if (i < 1 || source[i] !== '.' || source[i - 1] !== '.') {
+      return false;
+    }
+    return true;
   }
 
   // Finds excluded regions: comments, strings, regex, heredocs, percent literals, symbols
