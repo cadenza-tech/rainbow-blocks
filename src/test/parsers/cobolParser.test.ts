@@ -2043,6 +2043,43 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
       assertIntermediates(pairs[0], ['ELSE']);
     });
+
+    test('should not register WHEN/ELSE in USING list as IF intermediate (data-name list continuation)', () => {
+      // Bug 4: USING accepts a list of data names. The 2nd and later entries in the list
+      // (WHEN, ELSE) should be treated as data names too, not as control-flow intermediates.
+      // The check must walk back past intervening data-name tokens to find the original
+      // DATA_NAME_VERB (USING) so the entire operand list is recognized.
+      const source = 'IF X\n  CALL "P" USING WHEN ELSE\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      // Only the standalone ELSE on line 3 should be a real IF intermediate.
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+
+    test('should not register subsequent operands in USING list with comma separators', () => {
+      // Variant: comma already covered by isInExpressionContext, but verify multi-element
+      // USING list (USING A B C ELSE) where commas are absent works too.
+      const source = 'IF X\n  CALL "P" USING A B C ELSE\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+
+    test('should not register WHEN as EVALUATE intermediate when it is the 2nd operand in MOVE list', () => {
+      // MOVE accepts: MOVE source TO target1 target2 ... — the 2nd target is also a data name.
+      const source = 'EVALUATE X\n  MOVE A TO B WHEN\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN as 2nd target of MOVE..TO list is data name');
+    });
+
+    test('should not register ELSE as IF intermediate when it is the 2nd operand in GIVING list', () => {
+      // ADD ... GIVING d1 d2 — both d1 and d2 are data names.
+      const source = 'IF X\n  ADD A B GIVING C ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE as 2nd target of GIVING list is data name');
+    });
   });
 
   suite('Regression 2026-05-09: ELSE/WHEN expression context honors excluded regions', () => {
