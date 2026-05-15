@@ -5,14 +5,32 @@ import { BaseBlockParser } from './baseParser';
 import type { ErlangHelperCallbacks } from './erlangHelpers';
 import { hasTopLevelCommaBetween, isCatchExpressionPrefix } from './erlangHelpers';
 
-// Matches a module attribute followed by '(' at line start: -define(, -module(, -export(, etc.
-const MODULE_ATTR_PAREN_PATTERN = /^[ \t]*-[ \t]*[a-zA-Z_][a-zA-Z0-9_]*[ \t]*\($/;
+// Pre-scanned span of a module attribute: -name(...).
+interface AttributeSpan {
+  // Start of the leading '-' character at line start
+  dashStart: number;
+  // Position of the opening '(' that immediately follows the attribute name
+  openParen: number;
+  // Position immediately after the matching closing ')' (exclusive)
+  endParen: number;
+  // Attribute name in lower case, e.g. 'define' or 'record'
+  name: string;
+  // Position of the body-introducing top-level ',' inside (...) or -1 if absent
+  bodyCommaPos: number;
+}
 
-// Matches -record( specifically at line start (record brace bodies contain real expressions)
-const RECORD_ATTR_PATTERN = /^[ \t]*-[ \t]*record[ \t]*\($/;
-
-// Matches -define( specifically at line start (macro bodies contain real expressions)
-const DEFINE_ATTR_PATTERN = /^[ \t]*-[ \t]*define[ \t]*\($/;
+// Pre-scanned span of a -spec/-type/-callback/-opaque declaration without a `(`,
+// such as `-spec foo() -> ok.` (terminated by a top-level period).
+interface SpecLineSpan {
+  // Start of the leading '-' character
+  dashStart: number;
+  // Start of the keyword (spec/type/callback/opaque)
+  keywordStart: number;
+  // Position immediately after the keyword
+  keywordEnd: number;
+  // Position of the terminating '.' or source.length if not terminated
+  endPeriod: number;
+}
 
 export class ErlangBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -20,6 +38,11 @@ export class ErlangBlockParser extends BaseBlockParser {
     blockClose: ['end'],
     blockMiddle: ['of', 'after', 'catch', 'else']
   };
+
+  // Per-parse caches built at the start of tokenize(). Cleared after parse.
+  // Sorted by dashStart; binary search yields O(log n) per-token lookups.
+  private attributeSpans: AttributeSpan[] = [];
+  private specLineSpans: SpecLineSpan[] = [];
 
   private get erlangHelperCallbacks(): ErlangHelperCallbacks {
     return {
@@ -181,59 +204,50 @@ export class ErlangBlockParser extends BaseBlockParser {
   // attribute (no declaration-ending period in between). Used to reject single-line spec usage like:
   //   -spec foo() -> begin atom() end.
   //   -type t() :: case Y of 1 -> err end.
-  private isOnSpecAttributeLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
-    const rawLineBefore = source.slice(lineStart, position);
-    const trimmedLength = rawLineBefore.length - rawLineBefore.trimStart().length;
-    const lineBefore = rawLineBefore.trimStart();
-    const attrMatch = lineBefore.match(/^-[ \t]*(spec|type|callback|opaque)\b/);
-    if (!attrMatch) {
+  private isOnSpecAttributeLine(source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    const span = this.findEnclosingSpecSpan(position);
+    if (!span) {
       return false;
     }
-    const afterAttr = lineStart + trimmedLength + lineBefore.indexOf(attrMatch[0]) + attrMatch[0].length;
-    return !this.hasDeclarationEndingPeriod(source, afterAttr, position, excludedRegions);
+    const lineStart = Math.max(source.lastIndexOf('\n', position), source.lastIndexOf('\r', position)) + 1;
+    return span.dashStart >= lineStart;
   }
 
   // Returns true if position is inside a -spec/-type/-callback/-opaque declaration that has not
-  // yet been closed by a declaration-ending period. Scans backwards across multiple lines.
-  private isInSpecContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const textBefore = source.slice(0, position);
-    const attrPattern = /-[ \t]*(?:spec|type|callback|opaque)\b/g;
-    let lastAttr = -1;
-    for (const match of textBefore.matchAll(attrPattern)) {
-      // Skip matches inside excluded regions (strings, comments)
-      if (this.isInExcludedRegion(match.index, excludedRegions)) {
-        continue;
-      }
-      // Verify the '-' is at the start of a line (module attributes must be at line start)
-      const dashPos = match.index;
-      let atLineStart = dashPos === 0;
-      if (!atLineStart) {
-        let k = dashPos - 1;
-        while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) {
-          k--;
-        }
-        atLineStart = k < 0 || source[k] === '\n' || source[k] === '\r';
-      }
-      if (!atLineStart) {
-        continue;
-      }
-      lastAttr = match.index;
-    }
-    if (lastAttr < 0) {
-      return false;
-    }
-    return !this.hasDeclarationEndingPeriod(source, lastAttr, position, excludedRegions);
+  // yet been closed by a declaration-ending period. Uses pre-computed specLineSpans for O(log n) lookup.
+  private isInSpecContext(_source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    return this.findEnclosingSpecSpan(position) !== null;
   }
 
-  // Returns true if a declaration-ending period exists between [start, end).
-  // Skips periods inside excluded regions, range operators (..), and float literals (digit.digit).
-  private hasDeclarationEndingPeriod(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
-    for (let j = start; j < end; j++) {
+  // Binary-search for the spec span enclosing `position` (keywordEnd <= position < endPeriod).
+  // Returns null if `position` is not inside any spec declaration.
+  private findEnclosingSpecSpan(position: number): SpecLineSpan | null {
+    const spans = this.specLineSpans;
+    let left = 0;
+    let right = spans.length - 1;
+    let candidate: SpecLineSpan | null = null;
+    while (left <= right) {
+      const mid = (left + right) >> 1;
+      const span = spans[mid];
+      if (span.keywordStart <= position) {
+        candidate = span;
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+    if (!candidate) return null;
+    if (position >= candidate.endPeriod) return null;
+    return candidate;
+  }
+
+  // Returns the position of the first declaration-ending period in [start, source.length),
+  // or source.length if none found. Skips excluded regions, range operators (..), and floats.
+  private findDeclarationEndingPeriod(source: string, start: number, excludedRegions: ExcludedRegion[]): number {
+    for (let j = start; j < source.length; j++) {
       if (source[j] !== '.' || this.isInExcludedRegion(j, excludedRegions)) {
         continue;
       }
-      // Skip range operator (..)
       if (j + 1 < source.length && source[j + 1] === '.') {
         j++;
         continue;
@@ -241,20 +255,90 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (j > 0 && source[j - 1] === '.') {
         continue;
       }
-      // Skip float literals (digit.digit)
       if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
         continue;
       }
-      return true;
+      return j;
     }
-    return false;
+    return source.length;
+  }
+
+  // Pre-scans source for module attribute spans -name(...) at line start. Each span
+  // tracks the matching closing ')' and the position of the body-introducing top-level ','.
+  // Sorted by dashStart for binary search.
+  private buildAttributeSpans(source: string, excludedRegions: ExcludedRegion[]): AttributeSpan[] {
+    const spans: AttributeSpan[] = [];
+    // Match -name( at line start; capture name and opening paren positions.
+    // Tolerates leading whitespace, whitespace between '-' and name, and between name and '('.
+    const pattern = /(^|\r\n|\r|\n)([ \t]*)-[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(/g;
+    for (const match of source.matchAll(pattern)) {
+      const dashStart = match.index + match[1].length + match[2].length;
+      if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
+      const openParen = match.index + match[0].length - 1;
+      const name = match[3].toLowerCase();
+      // Walk forward to the matching close paren, tracking nested brackets and excluded regions
+      let depth = 1;
+      let bodyCommaPos = -1;
+      let i = openParen + 1;
+      while (i < source.length) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+        const ch = source[i];
+        if (ch === '(' || ch === '[' || ch === '{') {
+          depth++;
+        } else if (ch === ')' || ch === ']' || ch === '}') {
+          depth--;
+          if (depth === 0) {
+            // Closing paren that matches the attribute's open paren
+            spans.push({ dashStart, openParen, endParen: i + 1, name, bodyCommaPos });
+            break;
+          }
+        } else if (ch === ',' && depth === 1 && bodyCommaPos === -1) {
+          bodyCommaPos = i;
+        }
+        i++;
+      }
+      if (i >= source.length) {
+        // Unterminated attribute: treat as extending to end of source
+        spans.push({ dashStart, openParen, endParen: source.length, name, bodyCommaPos });
+      }
+    }
+    return spans;
+  }
+
+  // Pre-scans source for -spec/-type/-callback/-opaque declarations at line start.
+  // Each span tracks the position of the terminating '.' (or source.length if unterminated).
+  // Sorted by keywordStart for binary search.
+  private buildSpecLineSpans(source: string, excludedRegions: ExcludedRegion[]): SpecLineSpan[] {
+    const spans: SpecLineSpan[] = [];
+    const pattern = /(^|\r\n|\r|\n)([ \t]*)-[ \t]*(spec|type|callback|opaque)\b/g;
+    for (const match of source.matchAll(pattern)) {
+      const dashStart = match.index + match[1].length + match[2].length;
+      if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
+      const keywordStart = match.index + match[0].length - match[3].length;
+      const keywordEnd = keywordStart + match[3].length;
+      const endPeriod = this.findDeclarationEndingPeriod(source, keywordEnd, excludedRegions);
+      spans.push({ dashStart, keywordStart, keywordEnd, endPeriod });
+    }
+    return spans;
   }
 
   // Filter out keywords used as map keys (followed by =>),
   // record field access (preceded by .), and preprocessor directives (preceded by -)
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Pre-compute attribute spans and spec line spans once per parse so
+    // isInSpecContext / isInsideModuleAttributeArgs can use O(log n) binary
+    // search instead of O(n) backward scans per token. This must run before
+    // super.tokenize() because super.tokenize() invokes isValidBlockOpen()
+    // (which calls isInSpecContext) per token.
+    this.attributeSpans = this.buildAttributeSpans(source, excludedRegions);
+    this.specLineSpans = this.buildSpecLineSpans(source, excludedRegions);
+
     const tokens = super.tokenize(source, excludedRegions);
-    return tokens.filter((token) => {
+    const result = tokens.filter((token) => {
       const afterToken = source.slice(token.endOffset);
       // Allow at most one line break to handle multi-line map expressions
       // Also skip trailing comments (% ...) before line break
@@ -325,6 +409,12 @@ export class ErlangBlockParser extends BaseBlockParser {
       }
       return true;
     });
+
+    // Release per-parse caches so they don't leak across calls or hold large
+    // source references in memory.
+    this.attributeSpans = [];
+    this.specLineSpans = [];
+    return result;
   }
 
   private isCatchExpressionPrefix(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -617,12 +707,23 @@ export class ErlangBlockParser extends BaseBlockParser {
   // For -record, stops at unmatched '{' because record bodies contain real expressions (fun() -> ok end)
   // For -define and other attributes, tuple bodies inside braces still filter keywords
   private isInsideModuleAttributeArgs(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Fast path: binary search for the enclosing module-attribute span (-name(...).
+    // If pos is not inside any -name(...) on a line-start attribute, we cannot be
+    // inside module attribute args. This bounds the backward scan to the attribute
+    // body instead of scanning from pos all the way back to source start.
+    const span = this.findEnclosingAttributeSpan(pos);
+    if (!span) {
+      return false;
+    }
+
     let parenDepth = 0;
     let braceDepth = 0;
     let insideUnmatchedBrace = false;
     let sawCommaAtTopLevel = false;
     let insideNestedCall = false;
-    for (let i = pos - 1; i >= 0; i--) {
+    // Stop at openParen-1: anything before that is outside the attribute and irrelevant.
+    const stopAt = span.openParen;
+    for (let i = pos - 1; i > stopAt; i--) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         continue;
       }
@@ -637,35 +738,17 @@ export class ErlangBlockParser extends BaseBlockParser {
         if (parenDepth > 0) {
           parenDepth--;
         } else if (ch === '(') {
-          if (!MODULE_ATTR_PAREN_PATTERN.test(this.getTextFromLineStart(source, i))) {
-            // Check if '(' is a function call (preceded by identifier) or grouping paren (preceded by operator/comma/whitespace)
-            // Only mark as nested call if preceded by an identifier character
-            let prevIdx = i - 1;
-            while (prevIdx >= 0 && /\s/.test(source[prevIdx])) {
-              prevIdx--;
-            }
-            if (prevIdx >= 0 && /[a-zA-Z0-9_]/.test(source[prevIdx])) {
-              // This '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
-              insideNestedCall = true;
-            }
-            continue;
+          // Inner unmatched '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
+          // Per the original algorithm we must check: is this '(' preceded by an identifier?
+          let prevIdx = i - 1;
+          while (prevIdx >= 0 && /\s/.test(source[prevIdx])) {
+            prevIdx--;
           }
-          // For -record, unmatched braces contain real expressions
-          // (but keywords inside nested function calls inside the brace are still filtered)
-          if (insideUnmatchedBrace && !insideNestedCall && RECORD_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
-            return false;
+          if (prevIdx >= 0 && /[a-zA-Z0-9_]/.test(source[prevIdx])) {
+            insideNestedCall = true;
           }
-          // For -define, the body (after the first top-level ',') contains real expressions,
-          // but only outside tuple braces and outside nested function calls.
-          if (sawCommaAtTopLevel && !insideUnmatchedBrace && !insideNestedCall && DEFINE_ATTR_PATTERN.test(this.getTextFromLineStart(source, i))) {
-            // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
-            // itself, so it's a reserved-word reference, not a real block opener.
-            if (this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
-              return true;
-            }
-            return false;
-          }
-          return true;
+          // Continue scanning back; this is not the enclosing attribute paren
+          // (the loop bound stopAt = span.openParen guarantees we stop before it).
         }
       } else if (ch === '}') {
         braceDepth++;
@@ -685,7 +768,48 @@ export class ErlangBlockParser extends BaseBlockParser {
         }
       }
     }
-    return false;
+
+    // Reached the enclosing attribute opening paren at span.openParen; apply the
+    // attribute-name-specific rules using the precomputed attribute name.
+    const attrName = span.name;
+    // For -record, unmatched braces contain real expressions (but keywords inside
+    // nested function calls inside the brace are still filtered).
+    if (attrName === 'record' && insideUnmatchedBrace && !insideNestedCall) {
+      return false;
+    }
+    // For -define, the body (after the first top-level ',') contains real expressions,
+    // but only outside tuple braces and outside nested function calls.
+    if (attrName === 'define' && sawCommaAtTopLevel && !insideUnmatchedBrace && !insideNestedCall) {
+      // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
+      // itself, so it's a reserved-word reference, not a real block opener.
+      if (this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  // Binary-search for the attribute span enclosing `position` (openParen < position < endParen).
+  // Returns the innermost (largest openParen) span, or null if `position` is not inside any.
+  private findEnclosingAttributeSpan(position: number): AttributeSpan | null {
+    const spans = this.attributeSpans;
+    let left = 0;
+    let right = spans.length - 1;
+    let candidate: AttributeSpan | null = null;
+    while (left <= right) {
+      const mid = (left + right) >> 1;
+      const span = spans[mid];
+      if (span.openParen < position) {
+        candidate = span;
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+    if (!candidate) return null;
+    if (position >= candidate.endParen) return null;
+    return candidate;
   }
 
   // Returns true if the keyword at `pos` is the entire body of a -define macro: -define(NAME, KEYWORD).
@@ -743,14 +867,6 @@ export class ErlangBlockParser extends BaseBlockParser {
       return ch === ')';
     }
     return false;
-  }
-
-  private getTextFromLineStart(source: string, pos: number): string {
-    let lineStart = pos;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-      lineStart--;
-    }
-    return source.slice(lineStart, pos + 1);
   }
 
   // Matches single-quoted atom with escape handling
