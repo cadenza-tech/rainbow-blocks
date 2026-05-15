@@ -127,11 +127,24 @@ export function isCatchExpressionPrefix(
 }
 
 // Checks if there's a comma at bracket depth 0 between two positions (forward scan)
+// Tracks (), {}, [], and Erlang binary syntax << >> as bracket-like depth controls
 export function hasTopLevelCommaBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
   let depth = 0;
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
     const ch = source[i];
+    // Binary open: <<
+    if (ch === '<' && i + 1 < end && source[i + 1] === '<' && !isInExcludedRegion(i + 1, excludedRegions)) {
+      depth++;
+      i++;
+      continue;
+    }
+    // Binary close: >>
+    if (ch === '>' && i + 1 < end && source[i + 1] === '>' && !isInExcludedRegion(i + 1, excludedRegions)) {
+      depth = Math.max(0, depth - 1);
+      i++;
+      continue;
+    }
     if (ch === '(' || ch === '{' || ch === '[') {
       depth++;
     } else if (ch === ')' || ch === '}' || ch === ']') {

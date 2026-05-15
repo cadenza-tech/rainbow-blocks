@@ -110,6 +110,19 @@ export class ErlangBlockParser extends BaseBlockParser {
             k--;
             continue;
           }
+          // Binary close >>: in backward scan, this opens a binary scope (we are exiting it as we move backward)
+          if (ch === '>' && k > 0 && source[k - 1] === '>' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            // Avoid confusing with -> (clause arrow): -> is single '>' preceded by '-', not '>>'
+            depth++;
+            k -= 2;
+            continue;
+          }
+          // Binary open <<: in backward scan, this closes a binary scope
+          if (ch === '<' && k > 0 && source[k - 1] === '<' && !this.isInExcludedRegion(k - 1, excludedRegions)) {
+            depth = Math.max(0, depth - 1);
+            k -= 2;
+            continue;
+          }
           if (ch === ')' || ch === '}' || ch === ']') {
             depth++;
             k--;
