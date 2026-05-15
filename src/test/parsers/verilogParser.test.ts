@@ -3179,5 +3179,43 @@ endmodule`;
     });
   });
 
+  suite('Regression: declaration keywords suppress reserved-word identifiers', () => {
+    test('should not treat endmodule as block_close after localparam', () => {
+      // Bug: `localparam endmodule = 1;` declares a parameter named `endmodule`.
+      // Since SystemVerilog allows reserved words as identifiers in parameter
+      // declarations, the inner `endmodule` should not pair with the outer module.
+      const source = 'module m;\n  localparam endmodule = 1;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const modulePair = pairs[0];
+      assert.strictEqual(modulePair.openKeyword.value, 'module');
+      assert.strictEqual(modulePair.openKeyword.line, 0, 'module should be the outer module on line 0');
+      assert.strictEqual(modulePair.closeKeyword?.line, 2, 'module should pair with the outer endmodule on line 2');
+    });
+
+    test('should not treat endmodule as block_close after parameter', () => {
+      const source = 'module m;\n  parameter endmodule = 1;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].closeKeyword?.line, 2, 'module should pair with the outer endmodule');
+    });
+
+    test('should not treat endmodule as block_close after genvar', () => {
+      const source = 'module m;\n  genvar endmodule;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].closeKeyword?.line, 2, 'module should pair with the outer endmodule');
+    });
+
+    test('should not tokenize reserved keyword as block_open after localparam (case)', () => {
+      // Sanity: same suppression should apply to block_open (e.g., `case` used as
+      // a parameter name). The `case` keyword should not produce a token at all.
+      const source = 'module m;\n  localparam case = 0;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0, 'case used as a parameter name should not be tokenized as block_open');
+    });
+  });
+
   generateCommonTests(config);
 });
