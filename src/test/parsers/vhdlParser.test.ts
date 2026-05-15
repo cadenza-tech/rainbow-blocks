@@ -3135,5 +3135,25 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: wait on/until ... while clause with signal names', () => {
+    test('should reject while in wait on <signal> while <cond>', () => {
+      const source = 'process\nbegin\n  wait on sig while running;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+
+    test('should reject while in wait until <expr> while <cond>', () => {
+      const source = "process\nbegin\n  wait until clk = '1' while running;\nend;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+
+    test('should reject while in wait on <signal_list> while <cond>', () => {
+      const source = 'process\nbegin\n  wait on a, b, c while running;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
