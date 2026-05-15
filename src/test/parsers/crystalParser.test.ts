@@ -3954,6 +3954,37 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: keyword as method name after def with backslash line continuation', () => {
+    test('should treat class as method name when def is on previous line via backslash continuation', () => {
+      const source = 'class A\n  def \\\n    class\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outerClass = findBlock(pairs, 'class');
+      const innerDef = findBlock(pairs, 'def');
+      assert.strictEqual(outerClass.nestLevel, 0);
+      assert.strictEqual(innerDef.nestLevel, 1);
+      // Outer class/end pair should close on the LAST line (line 4)
+      assert.strictEqual(outerClass.closeKeyword.line, 4);
+      // Inner def/end pair should close on line 3
+      assert.strictEqual(innerDef.closeKeyword.line, 3);
+    });
+
+    test('should treat end as method name when def is on previous line via backslash continuation', () => {
+      const source = 'def \\\n    end\n42\nend';
+      const pairs = parser.parse(source);
+      // The "end" on line 2 is the method name; the "end" on line 4 closes the def block.
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should treat begin as method name when def is on previous line via CRLF backslash continuation', () => {
+      const source = 'def \\\r\n    begin\r\n  42\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+  });
+
   suite('Regression 2026-05-15: macro template with %= compound assignment and %% operator', () => {
     test('should terminate {% %} when body contains %= compound assignment', () => {
       const source = '{% counter %= 10 %}\nif true\nend';
