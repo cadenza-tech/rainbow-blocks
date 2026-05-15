@@ -3812,5 +3812,50 @@ end`;
     });
   });
 
+  suite('Regression: symbol literal after Unicode operator', () => {
+    test('should recognize :end as symbol literal after Unicode operator (×)', () => {
+      // Bug 1 (HIGH): isSymbolStart treated all chars with charCodeAt > 127 as identifier-like,
+      // causing `:end` after a Unicode operator (e.g., × U+00D7) to NOT be recognized as a
+      // symbol literal. As a result the inner `end` (part of `:end`) was tokenized as
+      // block_close, pairing with `function` and leaving the outer `end` orphan.
+      // After fix: only Unicode letters block the symbol; Unicode operators are allowed.
+      const source = 'function foo()\n  x = a×:end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === ':end'));
+    });
+
+    test('should still treat :end after Unicode letter (α) as not a symbol', () => {
+      // Counter-test: after a Unicode letter, `:` is type annotation / part of `α::T`-like
+      // syntax, not a symbol literal. The `end` should remain accessible as a token.
+      // (Here we verify the fix did not break the existing behavior for letters.)
+      const source = 'function foo()\n  α:end\nend';
+      const pairs = parser.parse(source);
+      // Without symbol detection, the inner `end` becomes block_close and pairs with
+      // function (LIFO), leaving the outer `end` orphan. This is the existing behavior.
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      // No `:end` symbol literal should be detected when preceded by a Unicode letter.
+      assert.ok(!regions.some((r) => source.slice(r.start, r.end) === ':end'));
+    });
+
+    test('should recognize :end as symbol literal after BMP-outside Unicode operator (surrogate pair)', () => {
+      // Bug 1 (HIGH) extension: surrogate-pair handling. When previous char at pos-1 is a
+      // low surrogate, the actual code point is at pos-2 (high surrogate). We must inspect
+      // the full code point to decide if it is a Unicode letter (block symbol) or operator
+      // (allow symbol). U+1D7D8 (MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO 𝟘) is a Number, not
+      // a letter. Use a math operator from BMP-outside: U+1D6FC is Mathematical Italic
+      // Small Alpha (a letter, NOT operator). For an operator, use U+1F70 from BMP. So
+      // we use a safer test: U+2A00 (N-ARY CIRCLED DOT OPERATOR) is BMP and an operator.
+      // Use U+1F49C (PURPLE HEART) which is a Symbol_Other (operator-like) BMP-outside.
+      const source = 'function foo()\n  x = a\u{1F49C}:end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(regions.some((r) => source.slice(r.start, r.end) === ':end'));
+    });
+  });
+
   generateCommonTests(config);
 });
