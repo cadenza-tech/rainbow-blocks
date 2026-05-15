@@ -544,6 +544,11 @@ export class VhdlBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // First, find all compound end keywords and their positions
     const compoundEndPositions = new Map<number, { keyword: string; length: number; endType: string }>();
+    // Track positions of trailing type words (e.g., `if`, `loop`) inside compound end
+    // patterns that were REJECTED by isValidBlockClose (typically because the `end` is
+    // preceded by `.` like `inst.end if;`). Without this, the trailing type word is later
+    // tokenized as a fresh block_open and breaks pairing with the surrounding block.
+    const rejectedCompoundTypePositions = new Set<number>();
 
     // Reset the pattern's lastIndex
     COMPOUND_END_PATTERN.lastIndex = 0;
@@ -551,26 +556,52 @@ export class VhdlBlockParser extends BaseBlockParser {
     while (match !== null) {
       const pos = match.index;
       // Check if in excluded region
-      if (!this.isInExcludedRegion(pos, excludedRegions) && this.isValidBlockClose(match[0], source, pos, excludedRegions)) {
-        const fullMatch = match[0];
-        const matchedType = match[1].toLowerCase();
-        // For 'package body' / 'protected body' compound forms, the actual opener
-        // keyword is 'package' / 'protected' (not the trailing 'body').
-        let endType: string;
-        if (/^package[ \t]+body$/.test(matchedType)) {
-          endType = 'package';
-        } else if (/^protected[ \t]+body$/.test(matchedType)) {
-          endType = 'protected';
+      if (!this.isInExcludedRegion(pos, excludedRegions)) {
+        if (this.isValidBlockClose(match[0], source, pos, excludedRegions)) {
+          const fullMatch = match[0];
+          const matchedType = match[1].toLowerCase();
+          // For 'package body' / 'protected body' compound forms, the actual opener
+          // keyword is 'package' / 'protected' (not the trailing 'body').
+          let endType: string;
+          if (/^package[ \t]+body$/.test(matchedType)) {
+            endType = 'package';
+          } else if (/^protected[ \t]+body$/.test(matchedType)) {
+            endType = 'protected';
+          } else {
+            // Use last word for multi-word matches like 'postponed process' -> 'process'
+            const endTypeParts = matchedType.split(/[ \t]+/);
+            endType = endTypeParts[endTypeParts.length - 1];
+          }
+          compoundEndPositions.set(pos, {
+            keyword: fullMatch, // Preserve original case
+            length: fullMatch.length,
+            endType
+          });
         } else {
-          // Use last word for multi-word matches like 'postponed process' -> 'process'
-          const endTypeParts = matchedType.split(/[ \t]+/);
-          endType = endTypeParts[endTypeParts.length - 1];
+          // Compound end was rejected (e.g., `inst.end if`). Record the offset of the
+          // trailing keyword (`if`/`loop`/etc.) so the keyword loop below skips it as a
+          // new block_open. Locate it relative to the match by scanning past `end` and
+          // any whitespace.
+          const fullMatch = match[0];
+          // Skip "end"
+          let trailingPos = pos + 3;
+          while (trailingPos < pos + fullMatch.length && (source[trailingPos] === ' ' || source[trailingPos] === '\t')) {
+            trailingPos++;
+          }
+          // For multi-word compound forms (`postponed process`, `package body`, `protected body`)
+          // also skip the first word and whitespace to land on the final type word.
+          const innerLower = match[1].toLowerCase();
+          if (/^(postponed|package|protected)[ \t]+/.test(innerLower)) {
+            // Skip the first inner word
+            while (trailingPos < pos + fullMatch.length && /[a-zA-Z0-9_]/.test(source[trailingPos])) {
+              trailingPos++;
+            }
+            while (trailingPos < pos + fullMatch.length && (source[trailingPos] === ' ' || source[trailingPos] === '\t')) {
+              trailingPos++;
+            }
+          }
+          rejectedCompoundTypePositions.add(trailingPos);
         }
-        compoundEndPositions.set(pos, {
-          keyword: fullMatch, // Preserve original case
-          length: fullMatch.length,
-          endType
-        });
       }
       match = COMPOUND_END_PATTERN.exec(source);
     }
@@ -603,6 +634,13 @@ export class VhdlBlockParser extends BaseBlockParser {
 
       // Skip reserved-word labels that follow a compound `end <type>` form.
       if (labelPositionsToSkip.has(startOffset)) {
+        continue;
+      }
+
+      // Skip the trailing type keyword (`if`/`loop`/etc.) of any REJECTED compound end
+      // (e.g., `inst.end if`). Otherwise it would be tokenized as a stray block_open and
+      // absorb a surrounding `end <type>` from the enclosing block.
+      if (rejectedCompoundTypePositions.has(startOffset)) {
         continue;
       }
 
