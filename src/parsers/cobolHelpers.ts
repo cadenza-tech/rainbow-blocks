@@ -10,18 +10,11 @@ export interface CobolHelperCallbacks {
   isFixedFormatCommentLine: (source: string, lineStart: number) => boolean;
   // Returns the offset of the last period outside strings/comments at or before
   // `endExclusive` (i.e., scanning `source.slice(0, endExclusive + 1)`). Cached.
+  // Required when isInCopyStatementCached is omitted so isInCopyStatement can
+  // still locate the prior statement boundary.
   findLastPeriodOutsideStringsBefore?: (endExclusive: number) => number;
   // Returns true if the position is inside a COPY statement. Cached.
   isInCopyStatementCached?: (posBeforeKeyword: number) => boolean;
-}
-
-// Checks if the given position is on a fixed-format column 7 comment line (*, /, D, d)
-function isOnFixedFormatCommentLine(source: string, pos: number, callbacks: CobolHelperCallbacks): boolean {
-  let lineStart = pos;
-  while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-    lineStart--;
-  }
-  return callbacks.isFixedFormatCommentLine(source, lineStart);
 }
 
 // Checks if the given position is on a fixed-format comment line or >> compiler directive line
@@ -344,67 +337,16 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
   return -1;
 }
 
-// Finds the last period that is not inside a string literal, inline comment, compiler directive, or column-7 comment line
-// Scans forward tracking quote state with COBOL doubled-quote escaping ('' and "")
-export function findLastPeriodOutsideStrings(text: string, callbacks: CobolHelperCallbacks): number {
-  let lastPeriod = -1;
-  let i = 0;
-  while (i < text.length) {
-    const ch = text[i];
-    // Skip *> inline comments to end of line
-    if (ch === '*' && i + 1 < text.length && text[i + 1] === '>') {
-      i += 2;
-      while (i < text.length && text[i] !== '\n' && text[i] !== '\r') {
-        i++;
-      }
-      continue;
-    }
-    // Skip >> compiler directives to end of line
-    if (ch === '>' && i + 1 < text.length && text[i + 1] === '>') {
-      i += 2;
-      while (i < text.length && text[i] !== '\n' && text[i] !== '\r') {
-        i++;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      i++;
-      while (i < text.length) {
-        if (text[i] === ch) {
-          if (i + 1 < text.length && text[i + 1] === ch) {
-            i += 2;
-            continue;
-          }
-          break;
-        }
-        // String cannot span multiple lines in COBOL
-        if (text[i] === '\n' || text[i] === '\r') {
-          break;
-        }
-        i++;
-      }
-      i++;
-      continue;
-    }
-    if (ch === '.') {
-      if (!isOnFixedFormatCommentLine(text, i, callbacks)) {
-        lastPeriod = i;
-      }
-    }
-    i++;
-  }
-  return lastPeriod;
-}
-
 // Checks if position is within a COPY statement by looking for COPY before the last period
 // Scans backward for COPY, skipping content inside strings, comments, and directive lines
 export function isInCopyStatement(source: string, posBeforeKeyword: number, callbacks: CobolHelperCallbacks): boolean {
   if (callbacks.isInCopyStatementCached) {
     return callbacks.isInCopyStatementCached(posBeforeKeyword);
   }
-  const lastPeriod = callbacks.findLastPeriodOutsideStringsBefore
-    ? callbacks.findLastPeriodOutsideStringsBefore(posBeforeKeyword)
-    : findLastPeriodOutsideStrings(source.slice(0, posBeforeKeyword + 1), callbacks);
+  if (!callbacks.findLastPeriodOutsideStringsBefore) {
+    return false;
+  }
+  const lastPeriod = callbacks.findLastPeriodOutsideStringsBefore(posBeforeKeyword);
   const beforeKeyword = source.slice(0, posBeforeKeyword + 1);
   const stmtStart = lastPeriod + 1;
   // Search for COPY word-boundary match, verifying each match is not inside a string or comment

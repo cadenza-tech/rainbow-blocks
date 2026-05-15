@@ -771,15 +771,12 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Checks if position is inside parentheses, square brackets, or curly braces.
   // Uses the bracketDepthAtPos cache (populated by tokenize()) for O(1) lookup. The
   // cache only counts BALANCED bracket pairs, matching the original semantics where
-  // unmatched openers do not flag the position as "inside" (the original walked
-  // backward and called hasMatchingCloseAhead to verify a matching close existed).
-  // Falls back to the slow source walk when called outside of a parse() context (e.g.
-  // unit tests that drive the method directly without going through parse()).
-  protected isInsideParensOrBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  // unmatched openers do not flag the position as "inside".
+  protected isInsideParensOrBrackets(_source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
     if (this.bracketDepthAtPos !== null && position >= 0 && position < this.bracketDepthAtPos.length) {
       return this.bracketDepthAtPos[position] > 0;
     }
-    return this.isInsideParensOrBracketsSlow(source, position, excludedRegions);
+    return false;
   }
 
   // Pre-computes bracket depth at every position in source. depth[p] = number of
@@ -841,72 +838,6 @@ export class MatlabBlockParser extends BaseBlockParser {
       depthAtPos[p] = depth;
     }
     return depthAtPos;
-  }
-
-  // Fallback path used when bracketDepthAtPos is not populated (e.g. unit tests that
-  // call isInsideParensOrBrackets directly). Same algorithm as the original implementation:
-  // walk source backward tracking bracket depth, and when an unmatched opener is seen,
-  // verify a matching close exists ahead.
-  private isInsideParensOrBracketsSlow(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let parenDepth = 0;
-    let bracketDepth = 0;
-    let braceDepth = 0;
-    for (let i = position - 1; i >= 0; i--) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        continue;
-      }
-      const char = source[i];
-      if (char === ')') parenDepth++;
-      else if (char === '(') {
-        if (parenDepth === 0) {
-          return this.hasMatchingCloseAhead(source, i, ')', '(', position, excludedRegions);
-        }
-        parenDepth--;
-      } else if (char === ']') bracketDepth++;
-      else if (char === '[') {
-        if (bracketDepth === 0) {
-          return this.hasMatchingCloseAhead(source, i, ']', '[', position, excludedRegions);
-        }
-        bracketDepth--;
-      } else if (char === '}') braceDepth++;
-      else if (char === '{') {
-        if (braceDepth === 0) {
-          return this.hasMatchingCloseAhead(source, i, '}', '{', position, excludedRegions);
-        }
-        braceDepth--;
-      }
-    }
-    return false;
-  }
-
-  // Scans forward from openPos+1 looking for a matching close bracket, tracking nested brackets
-  private hasMatchingCloseAhead(
-    source: string,
-    openPos: number,
-    closeCh: string,
-    openCh: string,
-    keywordPos: number,
-    excludedRegions: ExcludedRegion[]
-  ): boolean {
-    let depth = 1;
-    let i = openPos + 1;
-    while (i < source.length) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region) {
-          i = region.end;
-          continue;
-        }
-      }
-      const ch = source[i];
-      if (ch === openCh) depth++;
-      else if (ch === closeCh) {
-        depth--;
-        if (depth === 0) return i > keywordPos;
-      }
-      i++;
-    }
-    return false;
   }
 
   protected readonly keywords: LanguageKeywords = {

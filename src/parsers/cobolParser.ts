@@ -122,7 +122,6 @@ export class CobolBlockParser extends BaseBlockParser {
   private get helperCallbacks(): CobolHelperCallbacks {
     return {
       isFixedFormatCommentLine: (source, lineStart) => this.isFixedFormatCommentLine(source, lineStart),
-      findLastPeriodOutsideStringsBefore: (endExclusive) => this.findLastPeriodOutsideStringsBefore(endExclusive),
       isInCopyStatementCached: (posBeforeKeyword) => this.isInCopyStatementCached(posBeforeKeyword)
     };
   }
@@ -187,8 +186,8 @@ export class CobolBlockParser extends BaseBlockParser {
 
   // Single-pass scan to collect all period positions that are not inside
   // strings, *> inline comments, >> compiler directives, or fixed-format
-  // column-7 comment lines. Mirrors findLastPeriodOutsideStrings but builds
-  // a sorted array of every such period rather than just the last one.
+  // column-7 comment lines. Builds a sorted array of every such period so
+  // findLastPeriodOutsideStringsBefore can binary-search the result.
   private buildPeriodPositions(source: string): number[] {
     const periods: number[] = [];
     let i = 0;
