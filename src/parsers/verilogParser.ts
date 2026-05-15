@@ -343,8 +343,14 @@ export class VerilogBlockParser extends BaseBlockParser {
         if (isPrecededByScopeResolution(source, token.startOffset)) {
           return false;
         }
-        // Reject default inside `'{...}` assignment pattern
+        // Reject default inside `'{...}` assignment pattern or any `{...}` brace
+        // expression (e.g., `{default: 1}` field-style brace expressions). Only the
+        // bare `default` followed by `:` outside braces is a valid case-label
+        // intermediate.
         if (this.isInsideAssignmentPattern(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+        if (this.isInsideBraceExpression(source, token.startOffset, excludedRegions)) {
           return false;
         }
         let j = token.endOffset;
