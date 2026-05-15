@@ -3135,6 +3135,26 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: dot check should skip comments and newlines', () => {
+    test('should reject end preceded by dot and block comment', () => {
+      const source = 'process\nbegin\n  sig <= a . /* c */ end;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should reject end preceded by dot and line comment on previous line', () => {
+      const source = 'process\nbegin\n  sig <= a . -- comment\n  end;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should reject end preceded by dot across newlines', () => {
+      const source = 'process\nbegin\n  sig <= a .\n  end;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+  });
+
   suite('Regression 2026-05-15: rejected compound end trailing keyword should be skipped', () => {
     test('should skip trailing if of rejected compound end (inst.end if)', () => {
       const source = 'process is\nbegin\n  if cond then\n    signal x : integer := inst.end if;\n  end if;\nend process;';
