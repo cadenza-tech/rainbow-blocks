@@ -51,6 +51,54 @@ const COMPOUND_END_PATTERN = new RegExp(
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
 export class VhdlBlockParser extends BaseBlockParser {
+  // Override parse to post-adjust nestLevel for synthetic begin/end bodies inside
+  // elsif/else generate chains. The base recalculateNestLevels considers a sibling
+  // generate as a container of any pair fully inside its offset range, so a body
+  // inside the elsif-generate is incorrectly treated as nested under the if-generate.
+  // After base recomputation, subtract the count of sibling generates that incorrectly
+  // contain each begin-body pair.
+  parse(source: string): BlockPair[] {
+    const pairs = super.parse(source);
+    this.adjustGenerateBodyNestLevels(pairs);
+    return pairs;
+  }
+
+  // Generate-chain siblings (if/elsif/else generate ... end generate) all close at the
+  // same `end generate` token. recalculateNestLevels uses shared closeKeyword + last
+  // block_middle intermediate to recognize siblings, so the generates themselves are
+  // siblings of each other (correct). However, synthetic begin/end body pairs inside
+  // each branch close at separate `end;` tokens, so the shared-close exclusion does not
+  // fire and prior sibling generates are counted as parents. This method walks each
+  // begin-body pair and subtracts the sibling-generate over-count.
+  private adjustGenerateBodyNestLevels(pairs: BlockPair[]): void {
+    for (const body of pairs) {
+      if (body.openKeyword.value.toLowerCase() !== 'begin') continue;
+      // Find generates that appear to "contain" this body by offsets only
+      const containingGenerates = pairs.filter(
+        (other) =>
+          other !== body &&
+          other.openKeyword.value.toLowerCase() === 'generate' &&
+          other.openKeyword.startOffset < body.openKeyword.startOffset &&
+          other.closeKeyword.startOffset >= body.closeKeyword.startOffset
+      );
+      if (containingGenerates.length <= 1) continue;
+      // Group generates that share the same closeKeyword (they're an elsif/else-generate chain)
+      const closeOffsetCounts = new Map<number, number>();
+      for (const gen of containingGenerates) {
+        const off = gen.closeKeyword.startOffset;
+        closeOffsetCounts.set(off, (closeOffsetCounts.get(off) ?? 0) + 1);
+      }
+      // For each chain (closeOffsetCounts > 1), there's only ONE direct parent generate
+      // (the one whose body actually contains the body pair). The other (count - 1)
+      // generates are siblings that the base recalculation incorrectly counted.
+      let overCount = 0;
+      for (const count of closeOffsetCounts.values()) {
+        if (count > 1) overCount += count - 1;
+      }
+      body.nestLevel = Math.max(0, body.nestLevel - overCount);
+    }
+  }
+
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'entity',
