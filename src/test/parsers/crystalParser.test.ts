@@ -3892,6 +3892,15 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: heredoc identifier with combining marks (NFD form)', () => {
+    test('should match heredoc terminator with NFD-form combining mark identifier', () => {
+      // 'á' in NFD form = 'a' + U+0301 (combining acute accent).
+      const source = 's = <<-á\nbody\ná\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: end as parameter/property name with space-separated colon type annotation', () => {
     test('should not detect end as block_close in property end : Int32 = 0', () => {
       const source = 'class Foo\n  property end : Int32 = 0\nend';
