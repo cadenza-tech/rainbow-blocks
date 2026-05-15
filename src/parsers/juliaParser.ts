@@ -170,6 +170,13 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (this.isPrecededBySubtypeOperator(source, position, excludedRegions)) {
       return false;
     }
+    // `end` directly after a binary or postfix operator (e.g., `A+end`, `A*end`, `A'end`)
+    // is invalid syntax outside of indexing brackets. It should not be classified as
+    // block_close so the surrounding real `end` can pair with its opener correctly.
+    // Newlines terminate the scan: `A\n end` is not the same case (separate lines).
+    if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
+      return false;
+    }
     return true;
   }
 
@@ -200,6 +207,54 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
       // Found a non-whitespace char. Check if it's `:` preceded by `<` or `>`.
       if (ch === ':' && i > 0 && (source[i - 1] === '<' || source[i - 1] === '>')) {
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  // Checks if `end` at `position` is preceded by a binary or postfix operator
+  // (e.g., `+`, `-`, `*`, `/`, `%`, `^`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `'` transpose).
+  // Skips intervening tabs/spaces but stops at newlines (so `A\n end` is unaffected).
+  // Used to reject `end` as block_close in expressions like `A+end`, `A*end`, `A'end`,
+  // which are invalid syntax outside of indexing brackets but otherwise cause the inner
+  // `end` to pair with the surrounding block opener.
+  private isPrecededByBinaryOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === '\n' || ch === '\r') {
+        return false;
+      }
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      // Found a non-whitespace char. Check if it's a binary/postfix operator.
+      // Single-char binary operators: + - * / % ^
+      if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '%' || ch === '^') {
+        return true;
+      }
+      // Postfix transpose operator: ' (preceded by identifier or closing bracket).
+      // We use the existing isTransposeOperator helper for accuracy.
+      if (ch === "'" && isTransposeOperator(source, i)) {
+        return true;
+      }
+      // Comparison operators: ==, !=, <=, >=, <, > (but not <:, >: which are subtype ops
+      // already handled by isPrecededBySubtypeOperator).
+      if (ch === '=' && i > 0 && (source[i - 1] === '=' || source[i - 1] === '!' || source[i - 1] === '<' || source[i - 1] === '>')) {
+        return true;
+      }
+      // Bare < or >: bare comparison (not part of <: or >:, since those would have ':' here).
+      if (ch === '<' || ch === '>') {
         return true;
       }
       return false;
