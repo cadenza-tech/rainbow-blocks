@@ -62,11 +62,12 @@ const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
 );
 
 // Normalize endType for compound end matching:
-// `block data`, `block  data`, `blockdata` all map to canonical `block data`.
-// Used to align the captured endType (matched text) with the opener token value.
+// `block data`, `block  data`, `block&\n data`, `blockdata` all map to canonical
+// `block data`. Used to align the captured endType (matched text) with the
+// opener token value, including the continuation form `block&\n[&]?data`.
 function normalizeFortranEndType(rawType: string): string {
   const lower = rawType.toLowerCase();
-  if (lower === 'blockdata' || /^block[ \t]+data$/.test(lower)) {
+  if (lower === 'blockdata' || /^block[ \t&!\r\n]+data$/.test(lower)) {
     return 'block data';
   }
   return lower;
@@ -862,20 +863,51 @@ export class FortranBlockParser extends BaseBlockParser {
       });
     }
 
+    // Merge 'block' + 'data' (with intervening whitespace, multiple spaces, or
+    // line continuation `&\n`) into a single `block data` token. The keyword
+    // regex literal `block data` only matches a single space; multi-space and
+    // continuation forms must be merged at this stage so `end block data` can
+    // pair correctly via normalizeFortranEndType.
+    const blockDataMergedTokens: Token[] = [];
+    for (const current of tokens) {
+      if (current.value.toLowerCase() === 'block' && current.type === 'block_open') {
+        const after = source.slice(current.endOffset);
+        // Match: whitespace (possibly with line continuation `&\n[&]`) then `data`
+        // followed by a non-identifier (whitespace, EOL, `(`, end of file, etc.)
+        const blockDataPattern =
+          /^([ \t]+|[ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)?(?:\r\n|\r|\n))*[ \t]*&?[ \t]*)data\b/i;
+        const match = after.match(blockDataPattern);
+        if (match) {
+          const dataEnd = current.endOffset + match[0].length;
+          blockDataMergedTokens.push({
+            type: 'block_open',
+            value: source.slice(current.startOffset, dataEnd),
+            startOffset: current.startOffset,
+            endOffset: dataEnd,
+            line: current.line,
+            column: current.column
+          });
+          continue;
+        }
+      }
+      blockDataMergedTokens.push(current);
+    }
+
     // Merge 'else' + 'if' into a single blockMiddle token (token-based merge)
     // Also merge 'else' + 'where' by scanning source text (where may be absent
     // from token list when it failed isValidBlockOpen without a condition)
     const mergedTokens: Token[] = [];
-    for (let ti = 0; ti < tokens.length; ti++) {
-      const current = tokens[ti];
+    for (let ti = 0; ti < blockDataMergedTokens.length; ti++) {
+      const current = blockDataMergedTokens[ti];
       if (current.value.toLowerCase() === 'else' && current.type === 'block_middle') {
         // Try token-based merge for else + if or else + where (when where is tokenized)
-        if (ti + 1 < tokens.length) {
-          const nextValue = tokens[ti + 1].value.toLowerCase();
+        if (ti + 1 < blockDataMergedTokens.length) {
+          const nextValue = blockDataMergedTokens[ti + 1].value.toLowerCase();
           const isMergeTarget =
-            (nextValue === 'if' && tokens[ti + 1].type === 'block_open') || (nextValue === 'where' && tokens[ti + 1].type === 'block_open');
+            (nextValue === 'if' && blockDataMergedTokens[ti + 1].type === 'block_open') ||
+            (nextValue === 'where' && blockDataMergedTokens[ti + 1].type === 'block_open');
           if (isMergeTarget) {
-            const textBetween = source.slice(current.endOffset, tokens[ti + 1].startOffset);
+            const textBetween = source.slice(current.endOffset, blockDataMergedTokens[ti + 1].startOffset);
             // Same line: else if / else where
             const isSameLine = /^[ \t]+$/.test(textBetween);
             // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if/where
@@ -886,9 +918,9 @@ export class FortranBlockParser extends BaseBlockParser {
             if (isSameLine || isContinuation) {
               mergedTokens.push({
                 type: 'block_middle',
-                value: source.slice(current.startOffset, tokens[ti + 1].endOffset),
+                value: source.slice(current.startOffset, blockDataMergedTokens[ti + 1].endOffset),
                 startOffset: current.startOffset,
-                endOffset: tokens[ti + 1].endOffset,
+                endOffset: blockDataMergedTokens[ti + 1].endOffset,
                 line: current.line,
                 column: current.column
               });
@@ -901,7 +933,7 @@ export class FortranBlockParser extends BaseBlockParser {
         const elseWhereMatch = matchElseWhere(source, current.endOffset, excludedRegions);
         if (elseWhereMatch) {
           // Check that no other token starts between else and where
-          const nextTokenStart = ti + 1 < tokens.length ? tokens[ti + 1].startOffset : source.length;
+          const nextTokenStart = ti + 1 < blockDataMergedTokens.length ? blockDataMergedTokens[ti + 1].startOffset : source.length;
           if (elseWhereMatch.whereStart >= nextTokenStart) {
             // Another token exists between; don't merge
             mergedTokens.push(current);
