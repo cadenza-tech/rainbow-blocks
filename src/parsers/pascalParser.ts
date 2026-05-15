@@ -1020,6 +1020,14 @@ export class PascalBlockParser extends BaseBlockParser {
               const hasFinally = existing.some((t) => t.value.toLowerCase() === 'finally');
               if (hasExcept || hasFinally) break;
             }
+            // try block: reject 'else' when the body is in `finally` clause. Only
+            // try-except-else is valid in Delphi; try-finally-else is not. The
+            // 'else' here is malformed and would otherwise pollute the intermediates.
+            if (topValue === 'try' && middleValue === 'else') {
+              const existing = stack[stack.length - 1].intermediates;
+              const hasFinally = existing.some((t) => t.value.toLowerCase() === 'finally');
+              if (hasFinally) break;
+            }
             stack[stack.length - 1].intermediates.push(token);
           }
           break;
