@@ -1835,6 +1835,37 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: do followed by colon is not block open', () => {
+    test('should not treat do: as do/until block opener', () => {
+      // `do:` is invalid Octave syntax (Octave has no label statements; `:` here
+      // would be a range operator without a left operand). Treating `do` as a
+      // block opener in this context destroys the outer function pairing because
+      // the orphan `do` consumes nothing and remains on the stack.
+      const source = 'function f\n  do:\n    x = 1;\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do: should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do : (with space) as do/until block opener', () => {
+      // Same with whitespace between `do` and `:`.
+      const source = 'function f\n  do :\n    x = 1;\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do : should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat do; ... until as a valid do/until block', () => {
+      // Postfix `;` after `do` is a valid statement separator in Octave's
+      // do/until form. Make sure the `:` rejection above does not regress this.
+      const source = 'do;\n  x = 1;\nuntil x > 0';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
   suite('Regression 2026-05-15: end(idx) = value is indexing assignment, not block close', () => {
     test('should not treat end(1) = 5 as block close', () => {
       // `end(1) = 5;` is indexing assignment to a variable named `end`. This must
