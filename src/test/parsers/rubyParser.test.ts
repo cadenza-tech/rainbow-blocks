@@ -2151,6 +2151,38 @@ end`;
     });
   });
 
+  suite('Regression: regex after debug/output methods', () => {
+    test('should treat / after p as regex start (not division)', () => {
+      const source = 'p /if end/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after pp as regex start', () => {
+      const source = 'pp /if end/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after warn as regex start', () => {
+      const source = 'warn /if end/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after fail as regex start', () => {
+      const source = 'fail /if end/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after abort as regex start', () => {
+      const source = 'abort /if end/\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Coverage: skipRegexInterpolation edge cases', () => {
     // Covers lines 503-505: escape sequences in regex interpolation
     test('should handle escape sequences inside regex interpolation', () => {
