@@ -5118,5 +5118,52 @@ end select`;
     });
   });
 
+  suite('Regression: concatenated compound end as construct labels and names', () => {
+    test('should not treat function name `endif` as block_close', () => {
+      // function name `endif` happens to spell a concatenated compound-end keyword.
+      // The outer if-block must pair with `end if`, the inner function with `end function endif`.
+      const source = `if (.true.) then
+  function endif() result(r)
+    r = 1
+  end function endif
+end if`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end if');
+      const fnPair = findBlock(pairs, 'function');
+      assert.strictEqual(fnPair.closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end function');
+    });
+
+    test('should not treat program name `endprogram` as block_close', () => {
+      const source = `program endprogram
+  x = 1
+end program endprogram`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat construct label `endif:` as block_close', () => {
+      // `endif: if (.false.) then ... end if endif` uses `endif` as a construct label
+      // for the inner if-block. The label `endif` must not be treated as block_close.
+      const source = `if (.true.) then
+  endif: if (.false.) then
+    x = 1
+  end if endif
+  y = 2
+end if`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // Outer if must pair with the trailing `end if` on the last line
+      const outerIf = pairs.find((p) => p.openKeyword.line === 0);
+      assert.ok(outerIf, 'Outer if must pair');
+      assert.strictEqual(outerIf.closeKeyword.line, 5);
+      // Inner if must pair with `end if endif`
+      const innerIf = pairs.find((p) => p.openKeyword.line === 1);
+      assert.ok(innerIf, 'Inner if must pair');
+      assert.strictEqual(innerIf.closeKeyword.line, 3);
+    });
+  });
+
   generateCommonTests(config);
 });
