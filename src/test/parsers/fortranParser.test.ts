@@ -5177,6 +5177,22 @@ end if`;
     });
   });
 
+  suite('Regression: continuation line with blank line in between', () => {
+    test('should skip blank line in continuation when checking paren context', () => {
+      // `call foo( &\n\n    end)` - the `end` is inside parens via & continuation,
+      // crossing a blank line. findContinuationLineStart must skip the blank line
+      // and find the previous code line ending with `&`. Without this, the `end`
+      // is treated as a phantom block_close pairing with `program test`.
+      const source = `program test
+  call foo( &
+
+    end)
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
   suite('Regression: block data with multiple spaces or continuation', () => {
     test('should pair `block  data NAME` (multiple spaces) with `end block data`', () => {
       // Free-form Fortran allows arbitrary whitespace between `block` and `data`.
