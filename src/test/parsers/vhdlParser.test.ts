@@ -3135,6 +3135,26 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: component instantiation across newlines and comments', () => {
+    test('should reject component instantiation when label and component separated by newline', () => {
+      const source = 'architecture rtl of t is\nbegin\n  inst :\n  component foo port map();\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end');
+    });
+
+    test('should reject component instantiation when label and component separated by line comment', () => {
+      const source = 'architecture rtl of t is\nbegin\n  inst :\n  -- comment\n  component foo port map();\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end');
+    });
+
+    test('should reject component instantiation when label and component separated by block comment', () => {
+      const source = 'architecture rtl of t is\nbegin\n  inst : /* comment */ component foo port map();\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end');
+    });
+  });
+
   suite('Regression 2026-05-15: package instantiation with extended_identifier', () => {
     test('should reject inner package instantiation with extended_identifier as block opener', () => {
       const source = 'package outer_pkg is\n  package \\inner\\ is new work.gen_pkg generic map (WIDTH => 8);\nend package;';
