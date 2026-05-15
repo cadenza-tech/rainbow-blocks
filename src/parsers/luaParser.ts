@@ -44,7 +44,11 @@ export class LuaBlockParser extends BaseBlockParser {
 
   // Checks if keyword is preceded by '.' or ':' (table field/method access)
   // But not '..' (concatenation) or '::' (goto label syntax)
-  // Skips whitespace (including newlines) and excluded regions between operator and keyword
+  // Skips only whitespace (including newlines) between operator and keyword.
+  // Excluded regions (strings, long strings, comments, goto labels, shebang)
+  // act as opaque walls: a `.` or `:` on the far side of an excluded region
+  // is NOT field/method access on the keyword that follows the region, so we
+  // stop the walk-back at the region boundary and return false.
   private isPrecededByDotOrColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -53,14 +57,8 @@ export class LuaBlockParser extends BaseBlockParser {
         continue;
       }
       if (this.isInExcludedRegion(i, excludedRegions)) {
-        // Skip the entire excluded region (e.g., comment ending with '.')
-        const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region) {
-          i = region.start - 1;
-          continue;
-        }
-        i--;
-        continue;
+        // Excluded region is an opaque wall: do not look through it.
+        return false;
       }
       break;
     }
@@ -250,16 +248,16 @@ export class LuaBlockParser extends BaseBlockParser {
 
   // Detects whether the keyword at position is the target of a `goto` statement.
   // Lua spec allows whitespace (including newlines) between `goto` and its label name.
-  // Skips excluded regions (comments, strings) so `goto` text inside them is ignored.
+  // Excluded regions (strings, long strings, comments, goto labels, shebang)
+  // act as opaque walls: `goto` text on the far side of an excluded region does
+  // NOT bind the keyword that follows the region, so we stop the walk-back at
+  // the region boundary and return false.
   private isAfterGoto(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
-        const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region) {
-          i = region.start - 1;
-          continue;
-        }
+        // Excluded region is an opaque wall: do not look through it.
+        return false;
       }
       const ch = source[i];
       if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v') {
