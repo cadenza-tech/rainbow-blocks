@@ -2467,6 +2467,54 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: tokenize performance on large sources', () => {
+    // Helper: build N functions, each with a case-end block (3-clause case).
+    // This stresses tokenize() because each block keyword triggers
+    // isInsideModuleAttributeArgs() and isInSpecContext() backward scans.
+    function buildLargeSource(funcCount: number): string {
+      const lines: string[] = ['-module(perf_test).', '-export([f/1]).'];
+      for (let i = 0; i < funcCount; i++) {
+        lines.push(`f${i}(X) ->`);
+        lines.push('  case X of');
+        lines.push('    1 -> a;');
+        lines.push('    2 -> b;');
+        lines.push('    _ -> c');
+        lines.push('  end.');
+      }
+      return lines.join('\n');
+    }
+
+    test('should parse 2000-function source in under 600ms (linear scaling)', () => {
+      const source = buildLargeSource(2000);
+      const t0 = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - t0;
+      assert.strictEqual(pairs.length, 2000, 'should parse all 2000 case-end blocks');
+      // Pre-fix: ~1700ms on this hardware; post-fix expected to be well under 600ms.
+      // Threshold chosen with 3-4x headroom over expected post-fix time.
+      assert.ok(elapsed < 600, `parse took ${elapsed}ms (expected < 600ms; pre-fix was ~1700ms)`);
+    });
+
+    test('should scale roughly linearly between 500 and 2000 functions', () => {
+      const source500 = buildLargeSource(500);
+      const source2000 = buildLargeSource(2000);
+      // Warm-up to stabilize timings against JIT and module init.
+      parser.parse(source500);
+      const t1 = Date.now();
+      parser.parse(source500);
+      const small = Date.now() - t1;
+      const t2 = Date.now();
+      parser.parse(source2000);
+      const big = Date.now() - t2;
+      // Linear scaling: 4x source size -> ~4-5x time.
+      // Quadratic scaling (pre-fix) would be ~16x.
+      // Add a baseline floor (10ms) so very fast small runs don't trip the ratio.
+      const baseline = Math.max(small, 10);
+      const ratio = big / baseline;
+      assert.ok(ratio < 8, `2000-func parse took ${big}ms vs 500-func ${small}ms (ratio ${ratio.toFixed(1)}x; expected < 8x for linear scaling, was ~15x with O(n^2))`);
+    });
+  });
+
   suite('Regression: binary syntax tracking in type contexts', () => {
     test('should not pair fun/end when fun() appears inside :: type with binary syntax', () => {
       // The binary type <<_:8, _:_*8>> contains commas at top level of the binary,
