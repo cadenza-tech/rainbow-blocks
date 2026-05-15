@@ -193,6 +193,13 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (j < source.length && (source[j] === '(' || source[j] === '[' || source[j] === '{')) {
         return false;
       }
+      // Reject `do:` and `do :` — Octave has no label statements and `:` is the
+      // range operator, so a `:` immediately after `do` cannot start a do/until
+      // body. Treating `do` as a block opener here destroys outer block pairing
+      // (the orphan `do` consumes nothing and breaks the stack).
+      if (j < source.length && source[j] === ':') {
+        return false;
+      }
       // Reject `do` used as a command-syntax argument (`disp do` → `disp('do')`).
       // The pattern is `<identifier> <whitespace> do` at statement start where the
       // identifier is not a recognized keyword. Treating such `do` as a block open
