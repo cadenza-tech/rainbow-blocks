@@ -261,8 +261,14 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // fn-end doesn't use "do"
+    // fn-end doesn't use "do" — it always uses arrow syntax (fn pattern -> body end).
+    // Reject fn(...) followed by `do` because that is invalid Elixir; treating it as a
+    // block opener would greedily pair fn with end and orphan an outer block (e.g., the
+    // outer if in `if fn() do ... end`). Allow the common case (fn / fn x / fn(x) -> ...).
     if (keyword === 'fn') {
+      if (afterKeyword === '(' && this.isFnParensFollowedByDo(source, position + keyword.length, excludedRegions)) {
+        return false;
+      }
       return true;
     }
 
@@ -735,6 +741,39 @@ export class ElixirBlockParser extends BaseBlockParser {
       i++;
     }
     return false;
+  }
+
+  // Checks if a fn(...) parameter list is immediately followed by `do` rather than `->`.
+  // In Elixir, `fn` always uses arrow syntax (fn pattern -> body end) and never `do`.
+  // The form `fn(...) do` is invalid Elixir; treating fn as a block opener in this case
+  // would greedily pair fn with end and orphan the outer block (e.g. `if fn() do ... end`
+  // should pair if/end, not fn/end).
+  // pos must point at the '(' immediately after `fn`. Returns true only when a balanced
+  // `(...)` is found and the next non-whitespace token is `do` (with word boundary).
+  private isFnParensFollowedByDo(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (pos >= source.length || source[pos] !== '(') return false;
+    let parenDepth = 1;
+    let i = pos + 1;
+    while (i < source.length && parenDepth > 0) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+      i++;
+    }
+    if (parenDepth !== 0) return false;
+    // i now points just past the matching ')'. Skip whitespace.
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    // Check for `do` followed by a word boundary (so `done`/`do_x`/etc. don't match).
+    if (source.slice(i, i + 2) !== 'do') return false;
+    const afterDo = source[i + 2];
+    return afterDo === undefined || !/[a-zA-Z0-9_?!]/.test(afterDo);
   }
 
   // Checks if a block keyword at pos is a function call (immediately followed by '(')
