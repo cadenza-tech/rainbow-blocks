@@ -5177,6 +5177,51 @@ end if`;
     });
   });
 
+  suite('Regression: select-type guards excluded from select case / select rank intermediates', () => {
+    test('should not include `class is (...)` as intermediate in select case', () => {
+      // `class is (...)` is a select-type guard, valid only inside `select type (...)`.
+      // It must NOT be recognized as an intermediate of `select case` / `select rank`.
+      const source = `select case (x)
+  case (1)
+    y = 1
+  class is (T)
+    z = 2
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase().replace(/\s+/g, ' ').trim());
+      assert.deepStrictEqual(intermediateValues, ['case']);
+    });
+
+    test('should not include `type is (...)` as intermediate in select rank', () => {
+      const source = `select rank (a)
+  rank (0)
+    y = 1
+  type is (integer)
+    z = 2
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase().replace(/\s+/g, ' ').trim());
+      assert.deepStrictEqual(intermediateValues, ['rank']);
+    });
+
+    test('should still include `type is (...)` as intermediate in select type', () => {
+      // Sanity check: select type guards remain recognized in select type blocks.
+      const source = `select type (obj)
+  type is (integer)
+    y = 1
+  class is (base_t)
+    z = 2
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const intermediateValues = pairs[0].intermediates.map((t) => t.value.toLowerCase().replace(/\s+/g, ' ').trim());
+      assert.ok(intermediateValues.includes('type is'), `Expected 'type is' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
+      assert.ok(intermediateValues.includes('class is'), `Expected 'class is' as intermediate, got: ${JSON.stringify(intermediateValues)}`);
+    });
+  });
+
   suite('Regression: enum without bind(c) is rejected', () => {
     test('should not open enum block when enum has identifier instead of bind(c)', () => {
       // Fortran requires `enum, bind(c)` form for enum block declarations.
