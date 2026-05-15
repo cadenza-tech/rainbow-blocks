@@ -3954,6 +3954,26 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: macro template with %= compound assignment and %% operator', () => {
+    test('should terminate {% %} when body contains %= compound assignment', () => {
+      const source = '{% counter %= 10 %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should terminate {% %} when body contains bare %% operator', () => {
+      const source = '{% %% %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should terminate {{ }} when body contains %= compound assignment', () => {
+      const source = '{{ counter %= 10 }}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: backtick literal inside macro string interpolation', () => {
     test('should not let backtick braces confuse interpolation depth', () => {
       const source = '{% "#{`{`}" %}\nif true\nend';
