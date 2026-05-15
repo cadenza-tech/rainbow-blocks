@@ -3998,6 +3998,128 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-15: 3+ character operator atoms should be recognized', () => {
+    // Per Elixir docs, the following operators may also be used as atoms with the
+    // colon prefix: :===, :!==, :&&&, :|||, :<<<, :>>>, :&&, :||, :.., :|>, :++,
+    // :--, :**, :<<, :>>. These must be treated as a single atom literal so that
+    // adjacent block keywords (e.g., :===\nif x do\nend) are not mis-detected.
+    test('should treat :=== as a 4-char atom (not :== then leftover =)', () => {
+      const source = 'x = :===';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':=== should produce an excluded region starting at offset 4');
+      assert.strictEqual(atomRegion?.end, 8, ':=== should span 4 characters');
+    });
+    test('should treat :!== as a 4-char atom (not :!= then leftover =)', () => {
+      const source = 'x = :!==';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':!== should produce an excluded region starting at offset 4');
+      assert.strictEqual(atomRegion?.end, 8, ':!== should span 4 characters');
+    });
+    test('should treat :&&& as a 4-char atom', () => {
+      const source = 'x = :&&&';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 8);
+    });
+    test('should treat :||| as a 4-char atom', () => {
+      const source = 'x = :|||';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 8);
+    });
+    test('should treat :<<< as a 4-char atom', () => {
+      const source = 'x = :<<<';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 8);
+    });
+    test('should treat :>>> as a 4-char atom', () => {
+      const source = 'x = :>>>';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 8);
+    });
+    test('should treat :&& as a 3-char atom', () => {
+      const source = 'x = :&&';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion, ':&& should produce an excluded region starting at offset 4');
+      assert.strictEqual(atomRegion?.end, 7, ':&& should span 3 characters');
+    });
+    test('should treat :|| as a 3-char atom', () => {
+      const source = 'x = :||';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :.. as a 3-char atom', () => {
+      const source = 'x = :..';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :|> as a 3-char atom', () => {
+      const source = 'x = :|>';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :++ as a 3-char atom', () => {
+      const source = 'x = :++';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :-- as a 3-char atom', () => {
+      const source = 'x = :--';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :** as a 3-char atom', () => {
+      const source = 'x = :**';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :<< as a 3-char atom', () => {
+      const source = 'x = :<<';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should treat :>> as a 3-char atom', () => {
+      const source = 'x = :>>';
+      const regions = parser.getExcludedRegions(source);
+      const atomRegion = regions.find((r) => r.start === 4);
+      assert.ok(atomRegion);
+      assert.strictEqual(atomRegion?.end, 7);
+    });
+    test('should still detect if/end after :=== atom (not consume = leftover)', () => {
+      const source = 'x = :===\nif true do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should still detect if/end after :&& atom (not consume & leftover)', () => {
+      const source = 'x = :&&\nif true do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: hasDoKeyword should handle unbalanced parens', () => {
     // hasDoKeyword tracks paren/bracket/brace depth to ignore "do" inside grouping. With
     // unbalanced source code (e.g., a typo `if x)`), the depth could go negative and
