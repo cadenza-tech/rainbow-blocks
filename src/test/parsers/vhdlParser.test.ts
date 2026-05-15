@@ -3135,6 +3135,22 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-15: package instantiation with extended_identifier', () => {
+    test('should reject inner package instantiation with extended_identifier as block opener', () => {
+      const source = 'package outer_pkg is\n  package \\inner\\ is new work.gen_pkg generic map (WIDTH => 8);\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      // Outer package should be the one paired
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'outer package should be the paired opener');
+    });
+
+    test('should still accept regular package declaration with extended_identifier name', () => {
+      const source = 'package \\my_pkg\\ is\n  signal s : integer;\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+    });
+  });
+
   suite('Regression 2026-05-15: wait on/until ... while clause with signal names', () => {
     test('should reject while in wait on <signal> while <cond>', () => {
       const source = 'process\nbegin\n  wait on sig while running;\nend;';
