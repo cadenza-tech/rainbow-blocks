@@ -68,7 +68,7 @@ function isPrecededByScopeResolution(source: string, position: number): boolean 
 
 // Returns true when a keyword starting at `position` (length `keywordLength`) is followed
 // by a single `:` (not `::`), indicating the keyword is being used as a label name.
-// e.g., `wait : begin`, `if : begin`. Skips whitespace and block comments only.
+// e.g., `wait : begin`, `if : begin`. Skips whitespace, line comments, and block comments.
 // Does NOT skip escaped identifiers (`\name`) because they are label names — they
 // represent a separate token between the keyword and the label colon
 // (e.g., `always \my_label :` is `<keyword> <label> :`, not `<label> :`).
@@ -80,13 +80,18 @@ function isFollowedByLabelColon(source: string, position: number, keywordLength:
       i++;
       continue;
     }
-    // Skip block comments only (regions starting with `/*`). Other excluded regions
-    // such as escaped identifiers (`\name`) and strings are real tokens that break
-    // the `<keyword> :` adjacency and must not be skipped.
+    // Skip line comments (`//`) and block comments (`/* ... */`) — both are
+    // trivia between the keyword and the label colon. Other excluded regions
+    // such as escaped identifiers (`\name`) and strings are real tokens that
+    // break the `<keyword> :` adjacency and must not be skipped.
     let skipped = false;
     for (const region of excludedRegions) {
       if (i >= region.start && i < region.end) {
-        if (source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*') {
+        if (
+          source[region.start] === '/' &&
+          region.start + 1 < source.length &&
+          (source[region.start + 1] === '*' || source[region.start + 1] === '/')
+        ) {
           i = region.end;
           skipped = true;
         }
