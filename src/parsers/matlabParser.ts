@@ -3,6 +3,25 @@
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 
+// Per-logical-line metadata, computed once per parse and consulted by the
+// logical-line-scanning validators (isCommandSyntaxArgument / isUsedAsRhsIdentifier)
+// so they answer in O(1) instead of walking the source backward each call.
+interface LogicalLineInfo {
+  // Start offset of the leading identifier of the line when the line is a
+  // pure whitespace-separated identifier sequence whose first identifier is a
+  // non-keyword (i.e. command-syntax like `disp end`). -1 when the line is not
+  // command-syntax (leading token is a keyword, a number, an operator, etc.).
+  commandLeadIdentStart: number;
+  // Offset just past the last identifier of the leading pure-identifier run.
+  // A keyword whose start offset is within [commandLeadIdentStart, pureRunEnd)
+  // and is not the leading identifier is a command-syntax string argument.
+  pureRunEnd: number;
+  // Offset of the first plain assignment `=` in the line (not `==`/`<=`/`>=`/
+  // `~=`/`!=`), or -1 when the line has no assignment. A block keyword appearing
+  // after this offset sits on the RHS of an assignment.
+  firstAssignEqOffset: number;
+}
+
 export class MatlabBlockParser extends BaseBlockParser {
   // Positions of classdef section keywords (properties / methods / events / enumeration /
   // arguments) that appear at line-start but were rejected at tokenize because of a
@@ -18,6 +37,18 @@ export class MatlabBlockParser extends BaseBlockParser {
   // is in progress (defensive: callers fall back to the slow source walk in that case).
   // Avoids the O(N^2) regression when many `end` tokens appear without enclosing brackets.
   private bracketDepthAtPos: Int32Array | null = null;
+  // Per-position logical-line start cache: statementStartAtPos[p] is the start
+  // offset of the logical line (statement) containing position p. A logical line
+  // begins at file start, just after a `;`/`,` separator outside excluded regions,
+  // or at a physical line start that is not the continuation of a `...`/`\` line.
+  // Populated by tokenize() before any isValidBlockOpen / isValidBlockClose call so
+  // the logical-line-scanning validators run in O(1). null when no parse is in
+  // progress (defensive: callers fall back to a bounded slow walk in that case).
+  private statementStartAtPos: Int32Array | null = null;
+  // Per-logical-line metadata cache keyed by logical-line start offset. Computed
+  // lazily (each line scanned once) and consulted by isCommandSyntaxArgument and
+  // isUsedAsRhsIdentifier. null when no parse is in progress.
+  private logicalLineInfoCache: Map<number, LogicalLineInfo> | null = null;
   // Validates block close: 'end' inside parentheses or brackets is array indexing, not block close
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject end preceded by `@` (function handle prefix: `@end`, `h = @end;`).
@@ -65,87 +96,29 @@ export class MatlabBlockParser extends BaseBlockParser {
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
 
-  // Returns true when `end` at position is the argument of a command-syntax invocation,
-  // e.g. `disp end`. Detection collects the full logical line preceding `end` (following
-  // `...` and Octave `\` line continuations) and checks whether the line begins with a
-  // non-keyword identifier. This handles:
+  // Returns true when the keyword at `position` is the argument of a command-syntax
+  // invocation, e.g. `disp end` (sugar for `disp('end')`). A logical line is
+  // command-syntax when it is a pure whitespace-separated identifier sequence
+  // (crossing `...`/`\` line continuations) whose leading identifier is a
+  // non-keyword. This handles:
   //   * Single-arg forms: `disp end`
-  //   * Multi-arg forms: `clear all end` (the leading `clear` is the command, `all` and
-  //     `end` are string arguments)
+  //   * Multi-arg forms: `clear all end` (the leading `clear` is the command, `all`
+  //     and `end` are string arguments)
   //   * Line continuation forms: `disp ...\n end` and `disp \\\n end`
-  // Treats a leading UTF-8/UTF-16 BOM (U+FEFF) as whitespace so files saved with a
-  // byte-order mark still recognise command-syntax at the very first statement.
+  // The leading identifier itself is the command, not an argument, so a keyword that
+  // IS the leading identifier is excluded. The per-logical-line metadata is cached by
+  // tokenize(), so this answers in O(1) rather than walking the source backward.
   private isCommandSyntaxArgument(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
-    // Require at least one space/tab between the previous token and `end` (so `xend` is
-    // not detected — but adjacency is already handled by the keyword regex word boundary).
+    // Require at least one space/tab between the previous token and the keyword (so
+    // `xend` is not detected — though adjacency is already handled by the word boundary).
     if (position <= 0 || (source[position - 1] !== ' ' && source[position - 1] !== '\t')) return false;
-    // Walk backward, skipping whitespace and `...`/`\` line-continuation regions (which
-    // include the trailing newline), looking for the leading identifier of the command.
-    // We must encounter at least one identifier (the command itself) at statement start.
-    // Multi-argument command-syntax (`clear all end`) walks past intermediate identifiers
-    // — including block keywords that appear in argument position (`disp end case` is
-    // command-syntax with `end` and `case` as string args) — until reaching a non-keyword
-    // identifier at statement start.
-    let i = position - 1;
-    while (i >= 0) {
-      // Skip space/tab
-      if (source[i] === ' ' || source[i] === '\t') {
-        i--;
-        continue;
-      }
-      // Skip line-continuation excluded regions: `...<NL>` or `\<NL>`. The continuation
-      // region ends just past the last `.` (or `\`), i.e. at the newline position. So
-      // when i is on the newline itself, we detect a region whose `end == i` and whose
-      // start is `.`/`\\`. When i is inside the continuation (e.g. at one of the dots),
-      // a region containing i directly will be found.
-      if (excludedRegions) {
-        let region = this.findExcludedRegionAt(i, excludedRegions);
-        if (!region && i >= 0) {
-          // Walk past CRLF newline pair: when source[i] === '\n' and source[i-1] === '\r',
-          // treat them as one logical line ending. Continuation region ends at the `\r`.
-          let nlStart = i;
-          if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') nlStart = i - 1;
-          const candidate = this.findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
-          if (candidate && candidate.end === nlStart) region = candidate;
-        }
-        if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
-          i = region.start - 1;
-          continue;
-        }
-      }
-      // Newlines outside an excluded continuation are not legal in a command-syntax chain.
-      if (source[i] === '\n' || source[i] === '\r') return false;
-      // Must end with an identifier character at this position.
-      if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
-      const idEnd = i;
-      while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
-      const idStart = i + 1;
-      const ident = source.slice(idStart, idEnd + 1);
-      // Identifier must start with letter or underscore (not a digit).
-      if (!/^[a-zA-Z_]/.test(ident)) return false;
-      // Check what precedes this identifier. If it is statement-start (newline / `;` /
-      // `,` / file start with optional BOM), this identifier is the leading command.
-      // BOM (U+FEFF) is treated as whitespace.
-      let j = idStart - 1;
-      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\u{FEFF}')) j--;
-      const atStatementStart = j < 0 || source[j] === '\n' || source[j] === '\r' || source[j] === ';' || source[j] === ',';
-      // A recognised block keyword (`if`, `for`, etc.) at statement start breaks the
-      // command-syntax chain — we cannot treat a real block opener as a command. But a
-      // block keyword in argument position (preceded by another identifier) is just a
-      // string argument, and we should continue walking back to find the real command.
-      if (this.getAllBlockKeywords().has(ident.toLowerCase()) && atStatementStart) {
-        return false;
-      }
-      if (atStatementStart) {
-        // Leading identifier reached. If it's a non-keyword identifier, this is the
-        // command; the chain is valid command-syntax.
-        return !this.getAllBlockKeywords().has(ident.toLowerCase());
-      }
-      // Otherwise, the preceding non-space char should be either another identifier
-      // (multi-arg form) or a line continuation. Continue walking back.
-      i = j;
+    const info = this.getLogicalLineInfo(source, position, excludedRegions ?? []);
+    if (info === null || info.commandLeadIdentStart < 0) {
+      return false;
     }
-    return false;
+    // The keyword must sit inside the leading pure-identifier run, after the
+    // command (leading) identifier.
+    return position > info.commandLeadIdentStart && position < info.pureRunEnd;
   }
 
   // MATLAB-specific block keywords (open + close + middle), used to filter
@@ -286,8 +259,10 @@ export class MatlabBlockParser extends BaseBlockParser {
       break;
     }
     if (i >= 0 && source[i] === ':') {
+      // collectLogicalLineBefore returns text starting at a logical-line boundary,
+      // so the for-header check anchors at `^`.
       const beforeText = this.collectLogicalLineBefore(source, i, excludedRegions);
-      if (/(?:^|[;,])\s*(?:par)?for[\s(]/.test(beforeText)) return true;
+      if (/^\s*(?:par)?for[\s(]/.test(beforeText)) return true;
     }
 
     // Case 2: end is followed by `:` (LHS of range, e.g. `for i = end:5`)
@@ -296,34 +271,28 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (j < source.length && source[j] === ':' && j + 1 < source.length && source[j + 1] !== '=') {
       const beforeEnd = this.collectLogicalLineBefore(source, position, excludedRegions);
       // Require an `=` (assignment in for-header) before `end` on the same line, with for at start
-      if (/(?:^|[;,])\s*(?:par)?for[\s(].*=\s*$/.test(beforeEnd)) return true;
+      if (/^\s*(?:par)?for[\s(].*=\s*$/.test(beforeEnd)) return true;
     }
 
     return false;
   }
 
-  // Collects the logical line content preceding `position`, following `...` (and Octave `\`)
-  // continuations backward across physical line breaks. Returns the joined text with newlines
-  // collapsed to single spaces so anchored regexes still match.
-  private collectLogicalLineBefore(source: string, position: number, excludedRegions?: ExcludedRegion[]): string {
-    const segments: string[] = [];
-    let cursor = position;
-    while (cursor > 0) {
-      const lineStart = Math.max(source.lastIndexOf('\n', cursor - 1), source.lastIndexOf('\r', cursor - 1)) + 1;
-      segments.unshift(source.slice(lineStart, cursor));
-      if (lineStart === 0) break;
-      // Look at the previous physical line; if it ends with a `...` (or `\`) continuation
-      // excluded region, walk further back. Otherwise stop.
-      let nlEnd = lineStart - 1;
-      if (nlEnd > 0 && source[nlEnd] === '\n' && source[nlEnd - 1] === '\r') nlEnd--;
-      if (!excludedRegions) break;
-      const regionAtEnd = this.findExcludedRegionAt(nlEnd > 0 ? nlEnd - 1 : 0, excludedRegions);
-      if (!regionAtEnd || regionAtEnd.end !== nlEnd) break;
-      const regionStartCh = source[regionAtEnd.start];
-      if (regionStartCh !== '.' && regionStartCh !== '\\') break;
-      cursor = regionAtEnd.start;
+  // Collects the logical-line content preceding `position`, from the start of the
+  // current logical line (the statementStartAtPos cache already follows `...`/`\`
+  // continuations across physical line breaks and splits on `;`/`,`). Newlines are
+  // collapsed to single spaces so anchored regexes still match. The returned text
+  // starts exactly at a logical-line boundary, so callers anchor with `^` instead
+  // of `(?:^|[;,])`.
+  private collectLogicalLineBefore(source: string, position: number, _excludedRegions?: ExcludedRegion[]): string {
+    let lineStart = 0;
+    if (this.statementStartAtPos !== null) {
+      const clamped = position < 0 ? 0 : position >= this.statementStartAtPos.length ? this.statementStartAtPos.length - 1 : position;
+      lineStart = this.statementStartAtPos[clamped];
+    } else {
+      // Defensive fallback when no parse is in progress: current physical line only.
+      lineStart = Math.max(source.lastIndexOf('\n', position - 1), source.lastIndexOf('\r', position - 1)) + 1;
     }
-    return segments.join(' ');
+    return source.slice(lineStart, position).replace(/[\r\n]/g, ' ');
   }
 
   // Classdef section keywords that can also be used as function calls
@@ -459,27 +428,14 @@ export class MatlabBlockParser extends BaseBlockParser {
   // the RHS of an assignment with no body following. Such forms (`r = for;`, `r = if,`,
   // `x = while)`) are invalid MATLAB but should not destroy outer block pairing.
   // A `;` or `,` between the `=` and the keyword terminates the assignment context, so
-  // `x=1; do<NL>` should NOT treat `do` as an RHS identifier.
-  // Follows `...` line continuations backward so `r = ...\n  for;` is detected correctly.
+  // `x=1; do<NL>` should NOT treat `do` as an RHS identifier — the logical-line cache
+  // splits on `;`/`,`, so the assignment offset belongs to a different line in that case.
+  // The cache also follows `...` line continuations so `r = ...\n  for;` is detected.
   private isUsedAsRhsIdentifier(source: string, position: number, keyword: string, excludedRegions?: ExcludedRegion[]): boolean {
-    const before = this.collectLogicalLineBefore(source, position, excludedRegions);
-    let hasAssignmentBefore = false;
-    for (let i = before.length - 1; i >= 0; i--) {
-      const ch = before[i];
-      if (ch === ';' || ch === ',') {
-        return false;
-      }
-      if (ch === '=') {
-        const prev = i > 0 ? before[i - 1] : '';
-        const next = i + 1 < before.length ? before[i + 1] : '';
-        if (next === '=' || prev === '<' || prev === '>' || prev === '!' || prev === '~' || prev === '=') {
-          continue;
-        }
-        hasAssignmentBefore = true;
-        break;
-      }
+    const info = this.getLogicalLineInfo(source, position, excludedRegions ?? []);
+    if (info === null || info.firstAssignEqOffset < 0 || info.firstAssignEqOffset >= position) {
+      return false;
     }
-    if (!hasAssignmentBefore) return false;
     let i = position + keyword.length;
     while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
     if (i >= source.length) return true;
@@ -535,6 +491,11 @@ export class MatlabBlockParser extends BaseBlockParser {
     // per query. Must run before super.tokenize() because that calls isValidBlockOpen /
     // isValidBlockClose for every keyword match, which in turn call isInsideParensOrBrackets.
     this.bracketDepthAtPos = this.computeBracketDepthAtPos(source, excludedRegions);
+    // Pre-compute logical-line starts and reset the per-line metadata cache so the
+    // logical-line-scanning validators run in O(1) instead of O(line length) per call.
+    // Must also run before super.tokenize() for the same reason as the bracket cache.
+    this.statementStartAtPos = this.computeStatementStarts(source, excludedRegions);
+    this.logicalLineInfoCache = new Map<number, LogicalLineInfo>();
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
       if (this.isPrecededByDot(source, token.startOffset, excludedRegions)) {
@@ -838,6 +799,166 @@ export class MatlabBlockParser extends BaseBlockParser {
       depthAtPos[p] = depth;
     }
     return depthAtPos;
+  }
+
+  // Pre-computes the logical-line start offset for every position in source.
+  // statementStartAtPos[p] = start offset of the logical line containing p.
+  // A logical line begins at file start, just after a `;`/`,` outside excluded
+  // regions, or at a physical line start that is not the continuation of a
+  // `...`/`\` line. `;`/`,` and newlines inside excluded regions (strings,
+  // comments, line-continuation regions) never start a new line. Single forward
+  // pass: O(source.length). Lets the logical-line-scanning validators answer in
+  // O(1) instead of walking the source backward each call.
+  private computeStatementStarts(source: string, excludedRegions: ExcludedRegion[]): Int32Array {
+    const len = source.length;
+    const result = new Int32Array(len + 1);
+    let lineStart = 0;
+    let i = 0;
+    while (i < len) {
+      // Skip excluded regions wholesale: separators/newlines inside strings,
+      // comments, and `...`/`\` continuation regions do not split a logical line.
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          for (let p = i; p < region.end && p < len; p++) {
+            result[p] = lineStart;
+          }
+          i = region.end;
+          continue;
+        }
+      }
+      result[i] = lineStart;
+      const ch = source[i];
+      if (ch === ';' || ch === ',') {
+        // Statement separator: the next logical line starts right after it.
+        lineStart = i + 1;
+        i++;
+        continue;
+      }
+      if (ch === '\n' || ch === '\r') {
+        // Physical line break. Walk past a CRLF pair as a single line ending.
+        let nextStart = i + 1;
+        if (ch === '\r' && i + 1 < len && source[i + 1] === '\n') {
+          nextStart = i + 2;
+        }
+        // The line break ends the logical line unless the physical line ended
+        // with a `...`/`\` continuation (an excluded region ending at this break).
+        if (!this.isLineContinuationBeforeNewline(source, i, excludedRegions)) {
+          lineStart = nextStart;
+        }
+        for (let p = i; p < nextStart; p++) {
+          result[p] = result[i];
+        }
+        i = nextStart;
+        continue;
+      }
+      i++;
+    }
+    result[len] = lineStart;
+    return result;
+  }
+
+  // Returns true when the physical line break at position `nlPos` is immediately
+  // preceded by a `...` (or Octave `\`) line continuation. matchSingleLineComment
+  // ends a `...` excluded region at the newline start, so a region whose `end`
+  // equals the newline position and whose first char is `.`/`\` is a continuation.
+  private isLineContinuationBeforeNewline(source: string, nlPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (nlPos <= 0) return false;
+    const region = this.findExcludedRegionAt(nlPos - 1, excludedRegions);
+    return region !== null && region.end === nlPos && (source[region.start] === '.' || source[region.start] === '\\');
+  }
+
+  // Returns the logical-line metadata for the line containing `position`,
+  // computing and memoizing it on first access. Each logical line is scanned at
+  // most once, so total work across a parse is O(source.length).
+  private getLogicalLineInfo(source: string, position: number, excludedRegions: ExcludedRegion[]): LogicalLineInfo | null {
+    if (this.statementStartAtPos === null || this.logicalLineInfoCache === null) {
+      return null;
+    }
+    const clamped = position < 0 ? 0 : position >= this.statementStartAtPos.length ? this.statementStartAtPos.length - 1 : position;
+    const lineStart = this.statementStartAtPos[clamped];
+    const cached = this.logicalLineInfoCache.get(lineStart);
+    if (cached) {
+      return cached;
+    }
+    const info = this.computeLogicalLineInfo(source, lineStart, excludedRegions);
+    this.logicalLineInfoCache.set(lineStart, info);
+    return info;
+  }
+
+  // Scans a single logical line (starting at `lineStart`) and derives its
+  // command-syntax and assignment metadata. Excluded regions are skipped; `...`/`\`
+  // continuation regions inside the leading identifier run are treated as
+  // whitespace so `disp ...<NL> end` is recognised as a continued command line.
+  private computeLogicalLineInfo(source: string, lineStart: number, excludedRegions: ExcludedRegion[]): LogicalLineInfo {
+    const statementStarts = this.statementStartAtPos;
+    const len = source.length;
+    // Walk the leading whitespace-separated identifier run.
+    let commandLeadIdentStart = -1;
+    let pureRunEnd = lineStart;
+    let firstIdentIsKeyword = false;
+    let identCount = 0;
+    let i = lineStart;
+    while (i < len && statementStarts !== null && statementStarts[i] === lineStart) {
+      const ch = source[i];
+      // Skip whitespace, a leading BOM, and the newline of a `...`/`\` continuation.
+      // The loop guard guarantees any newline reached here belongs to this logical
+      // line (a continuation break), so it is treated as whitespace within the run.
+      if (ch === ' ' || ch === '\t' || ch === '\u{FEFF}' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      // Treat `...`/`\` continuation regions as whitespace within the run.
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.end;
+        continue;
+      }
+      if (!/[a-zA-Z0-9_]/.test(ch)) {
+        break;
+      }
+      // An identifier run starting with a digit is a number, not an identifier.
+      if (identCount === 0 && !/[a-zA-Z_]/.test(ch)) {
+        break;
+      }
+      const identStart = i;
+      while (i < len && /[a-zA-Z0-9_]/.test(source[i])) {
+        i++;
+      }
+      if (identCount === 0) {
+        commandLeadIdentStart = identStart;
+        firstIdentIsKeyword = this.getAllBlockKeywords().has(source.slice(identStart, i).toLowerCase());
+      }
+      identCount++;
+      pureRunEnd = i;
+    }
+    // A line is command-syntax only when its leading token is a non-keyword
+    // identifier and at least one further token follows it in the run.
+    if (firstIdentIsKeyword || identCount < 2) {
+      commandLeadIdentStart = -1;
+    }
+    // Find the first plain assignment `=` in the line.
+    let firstAssignEqOffset = -1;
+    let j = lineStart;
+    while (j < len && statementStarts !== null && statementStarts[j] === lineStart) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === '=') {
+        const prev = j > lineStart ? source[j - 1] : '';
+        const next = j + 1 < len ? source[j + 1] : '';
+        if (next !== '=' && prev !== '=' && prev !== '<' && prev !== '>' && prev !== '!' && prev !== '~') {
+          firstAssignEqOffset = j;
+          break;
+        }
+      }
+      j++;
+    }
+    return { commandLeadIdentStart, pureRunEnd, firstAssignEqOffset };
   }
 
   protected readonly keywords: LanguageKeywords = {
