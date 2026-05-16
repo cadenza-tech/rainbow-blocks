@@ -852,7 +852,14 @@ export class AdaBlockParser extends BaseBlockParser {
             prevPos >= 5 &&
             source.slice(selectStart, prevPos + 1).toLowerCase() === 'select' &&
             (selectStart === 0 || !/[a-zA-Z0-9_]/.test(source[selectStart - 1]));
-          if (!(prevPos >= 0 && (source[prevPos] === ';' || atSelectKeyword))) {
+          // A select alternative body may be incomplete (no trailing `;`) while
+          // the source is being edited. In that case the `or` still delimits a
+          // select alternative when it begins its own line and is not part of
+          // a `when ... =>` guard or an assignment expression.
+          const atAlternativeBoundary =
+            (prevPos >= 0 && (source[prevPos] === ';' || atSelectKeyword)) ||
+            this.isSelectAlternativeOrAtLineStart(source, token.startOffset, excludedRegions);
+          if (!atAlternativeBoundary) {
             continue;
           }
         }
@@ -948,6 +955,71 @@ export class AdaBlockParser extends BaseBlockParser {
       i++;
     }
     return false;
+  }
+
+  // Decides whether an `or` token that starts its own physical line delimits a
+  // select alternative (true) rather than being a boolean operator (false).
+  //
+  // A select alternative `or` follows either a complete statement or the
+  // `select` keyword. A boolean `or` instead continues an expression: inside a
+  // `when ... =>` guard, or as the operator of an assignment / condition. The
+  // single-line boolean forms (`when A or B =>`, `Z := A or B;`) are already
+  // filtered out because such an `or` is not at the start of its line; this
+  // helper only needs to reject the boolean forms whose expression was wrapped
+  // so that `or` happens to begin a line.
+  //
+  // It scans backward from the `or`, skipping whitespace, comments and excluded
+  // regions, looking for the nearest delimiter:
+  //   - `when` (with no intervening `=>`) -> boolean operator in a guard
+  //   - `:=`                              -> boolean operator on an assignment RHS
+  //   - `;`, `=>`, `select`, any other reserved block keyword, or start of
+  //     source                           -> select alternative boundary
+  private isSelectAlternativeOrAtLineStart(source: string, orStart: number, excludedRegions: ExcludedRegion[]): boolean {
+    // The `or` must be the first non-whitespace token on its physical line.
+    for (let p = orStart - 1; p >= 0; p--) {
+      const ch = source[p];
+      if (ch === '\n' || ch === '\r') break;
+      if (ch === ' ' || ch === '\t') continue;
+      return false;
+    }
+    const reservedBlockKeywords = new Set([...this.keywords.blockOpen, ...this.keywords.blockClose].map((k) => k.toLowerCase()));
+    const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+    let p = orStart - 1;
+    while (p >= 0) {
+      if (this.isInExcludedRegion(p, excludedRegions)) {
+        const region = this.findExcludedRegionAt(p, excludedRegions);
+        p = region ? region.start - 1 : p - 1;
+        continue;
+      }
+      const ch = source[p];
+      if (isAdaWhitespace(ch)) {
+        p--;
+        continue;
+      }
+      // `;` and `=>` mark the end of the previous statement / guard arrow:
+      // the `or` after them delimits a select alternative.
+      if (ch === ';') return true;
+      if (ch === '>' && p >= 1 && source[p - 1] === '=') return true;
+      // `:=` means the `or` continues an assignment's right-hand side.
+      if (ch === '=' && p >= 1 && source[p - 1] === ':') return false;
+      // Identifiers / keywords: classify `when` (guard) vs. other reserved
+      // block keywords (scope boundary) vs. ordinary identifiers (operands).
+      if (isWordChar(ch)) {
+        let wordEnd = p + 1;
+        let wordStart = p;
+        while (wordStart > 0 && isWordChar(source[wordStart - 1])) {
+          wordStart--;
+        }
+        const word = source.slice(wordStart, wordEnd).toLowerCase();
+        if (word === 'when') return false;
+        if (reservedBlockKeywords.has(word)) return true;
+        p = wordStart - 1;
+        continue;
+      }
+      p--;
+    }
+    // Reached the start of source without crossing a guard or assignment.
+    return true;
   }
 
   // Custom matching to handle compound end keywords
