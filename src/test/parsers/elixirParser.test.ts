@@ -674,6 +674,30 @@ end`;
       assertSingleBlock(pairs, 'defmodule', 'end');
     });
 
+    test('should not treat keyword before closing paren as block open in if(cond) do', () => {
+      const pairs = parser.parse('if(cond) do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat keyword before closing bracket as block open in if [case] do', () => {
+      const source = `def foo do
+  if [case] do
+    :ok
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value, 'end');
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword.value, 'end');
+    });
+
+    test('should not treat keyword before closing brace as block open in if {cond} do', () => {
+      const pairs = parser.parse('if {cond} do\n  :ok\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
     test('should handle multiple fn blocks', () => {
       const source = `list
 |> Enum.map(fn x -> x * 2 end)
