@@ -2023,5 +2023,43 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: out-of-order and duplicate intermediate keywords', () => {
+    test('should not record elseif after else as an intermediate', () => {
+      // `else` must be the last branch of an `if`. An `elseif` appearing after
+      // `else` is a syntax error and must not be recorded as an intermediate.
+      const source = 'if c\nelse\nelseif d\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should not record a duplicate else as an intermediate', () => {
+      // An `if` block allows at most one `else`. A second `else` is a syntax
+      // error and must not be recorded.
+      const source = 'if c\nelse\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should not record a duplicate catch as an intermediate', () => {
+      // A `try` block allows at most one `catch`. A second `catch` is a syntax
+      // error and must not be recorded.
+      const source = 'try\ncatch a\ncatch b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should still record multiple elseif before else', () => {
+      // Multiple `elseif` branches before a single `else` are valid Octave and
+      // must all be recorded — the duplicate rejection must not regress this.
+      const source = 'if a\nelseif b\nelseif c\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['elseif', 'elseif', 'else']);
+    });
+  });
+
   generateCommonTests(config);
 });
