@@ -2239,6 +2239,36 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: space-separated keywords on one logical line parse in linear time', () => {
+    test('should parse 8000 space-separated orphan end tokens in well under 2 seconds (linear time)', () => {
+      // Previously isCommandSyntaxArgument (and the other logical-line-scanning methods)
+      // walked from each keyword backward to the logical-line start. When many keywords
+      // share one physical line (no `;`/`,`/newline between them), this is O(N^2): 8000
+      // space-separated `end` tokens took ~4s while the same count newline-separated took
+      // ~15ms. After caching logical-line boundaries in tokenize(), the same-line case is
+      // linear too.
+      const N = 8000;
+      const source = `${'end '.repeat(N)}`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.strictEqual(pairs.length, 0, 'orphan ends produce no pairs');
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+    });
+
+    test('should parse 8000 space-separated orphan for tokens in well under 2 seconds (linear time)', () => {
+      // The block_open path (isUsedAsRhsIdentifier / isCommandSyntaxArgument) is O(N^2)
+      // for the same reason. `for` keywords share one physical line here.
+      const N = 8000;
+      const source = `${'for '.repeat(N)}`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.strictEqual(pairs.length, 0, 'orphan for openers without end produce no pairs');
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+    });
+  });
+
   suite('Regression 2026-05-15: section keyword as function call inside function should not consume function end', () => {
     test('should pair function with end when properties(obj) appears inside function body without classdef', () => {
       // `properties(obj)` inside a free function (no enclosing classdef) is a function
