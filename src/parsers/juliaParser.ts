@@ -275,11 +275,14 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Checks if `end` at `position` is preceded by a binary or postfix operator
-  // (e.g., `+`, `-`, `*`, `/`, `%`, `^`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `'` transpose).
+  // (e.g., `+`, `-`, `*`, `/`, `%`, `^`, `\`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `=`, `:`,
+  // `::`, `&`, `&&`, `|`, `||`, `~`, `'` transpose).
   // Skips intervening tabs/spaces but stops at newlines (so `A\n end` is unaffected).
   // Used to reject `end` as block_close in expressions like `A+end`, `A*end`, `A'end`,
-  // which are invalid syntax outside of indexing brackets but otherwise cause the inner
-  // `end` to pair with the surrounding block opener.
+  // `x = end`, `1:end`, `x::end`, `c && end`, `~end`, which are invalid syntax outside of
+  // indexing brackets but otherwise cause the inner `end` to pair with the surrounding
+  // block opener. `end` inside indexing brackets (e.g. `arr[1:end]`) is `lastindex` and is
+  // handled earlier by isInsideIndexingBrackets, so this check never sees it.
   private isPrecededByBinaryOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -299,8 +302,9 @@ export class JuliaBlockParser extends BaseBlockParser {
         continue;
       }
       // Found a non-whitespace char. Check if it's a binary/postfix operator.
-      // Single-char binary operators: + - * / % ^
-      if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '%' || ch === '^') {
+      // Single-char binary operators: + - * / % ^ \ ~
+      // `\` is left division, `~` is the unary/bitwise-not operator.
+      if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '%' || ch === '^' || ch === '\\' || ch === '~') {
         return true;
       }
       // Postfix transpose operator: ' (preceded by identifier or closing bracket).
@@ -308,13 +312,28 @@ export class JuliaBlockParser extends BaseBlockParser {
       if (ch === "'" && isTransposeOperator(source, i)) {
         return true;
       }
-      // Comparison operators: ==, !=, <=, >=, <, > (but not <:, >: which are subtype ops
-      // already handled by isPrecededBySubtypeOperator).
+      // Comparison operators: ==, !=, <=, >= (the `=` is the char immediately before `end`).
       if (ch === '=' && i > 0 && (source[i - 1] === '=' || source[i - 1] === '!' || source[i - 1] === '<' || source[i - 1] === '>')) {
+        return true;
+      }
+      // Bare `=` assignment operator (not part of ==, !=, <=, >= handled just above).
+      if (ch === '=') {
         return true;
       }
       // Bare < or >: bare comparison (not part of <: or >:, since those would have ':' here).
       if (ch === '<' || ch === '>') {
+        return true;
+      }
+      // Colon `:` covers the range operator (`1:end`) and the type-annotation operator
+      // (`x::end`, where the char before `end` is still `:`). The subtype operators `<:`
+      // and `>:` are rejected earlier by isPrecededBySubtypeOperator, so a `:` reaching
+      // here is always a range/annotation/ternary colon.
+      if (ch === ':') {
+        return true;
+      }
+      // Boolean operators: & (and `&&`), | (and `||`). The trailing `&`/`|` of the
+      // short-circuit forms is the char immediately before `end`.
+      if (ch === '&' || ch === '|') {
         return true;
       }
       return false;
