@@ -2724,5 +2724,55 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Bug ER2: intermediate keyword inside brackets must not be registered', () => {
+    test('should register the real after, not the record field name after', () => {
+      // 'after' as a record field name inside #r{...} must not be the registered intermediate
+      const source = 'receive\n  #r{after = 1} -> ok\nafter\n  100 -> t\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], ['after']);
+      // The registered 'after' must be the clause-separator one, not the record field name
+      const realAfterOffset = source.lastIndexOf('after');
+      assert.strictEqual(
+        pairs[0].intermediates[0].startOffset,
+        realAfterOffset,
+        'intermediate must point at the clause-separator after, not the record field name'
+      );
+    });
+
+    test('should register the real of, not the parenthesized of', () => {
+      // 'of' inside f(of) is an argument atom, not the case clause separator
+      const source = 'case f(of) of 1 -> a end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+      const realOfOffset = source.lastIndexOf('of');
+      assert.strictEqual(
+        pairs[0].intermediates[0].startOffset,
+        realOfOffset,
+        'intermediate must point at the case clause separator of, not the parenthesized of'
+      );
+    });
+
+    test('should not register else used as record field name in maybe block', () => {
+      // 'else' as a record field name inside #r{...} must not be the registered intermediate
+      const source = 'maybe\n  #r{else = 1},\n  ok\nelse\n  err -> 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'maybe', 'end');
+      assertIntermediates(pairs[0], ['else']);
+      const realElseOffset = source.lastIndexOf('else');
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, realElseOffset, 'intermediate must point at the real else clause separator');
+    });
+
+    test('should still register a normal of intermediate at the correct position', () => {
+      // Sanity: a plain case/of must still register 'of' at its real position
+      const source = 'case X of\n  1 -> a\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, source.indexOf('of'));
+    });
+  });
+
   generateCommonTests(config);
 });
