@@ -513,8 +513,33 @@ export class VerilogBlockParser extends BaseBlockParser {
     return j < source.length && source[j] === ';';
   }
 
+  // Returns true when the `{` at `bracePos` is closed by a matching `}` at or after
+  // `position`. An unclosed `{` (an incomplete concatenation/assignment pattern still
+  // being typed) is NOT a real brace expression: treating `position` as "inside" it
+  // would suppress every later block keyword in the file. Per the best-effort parsing
+  // principle, only a properly closed `{...}` brace context should suppress keywords.
+  private isBraceClosedAfter(source: string, bracePos: number, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    for (let i = bracePos; i < source.length; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '{') {
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          return i >= position;
+        }
+      }
+    }
+    return false;
+  }
+
   // Detects whether position is inside a SystemVerilog assignment pattern: `'{...}`
-  // Walks back tracking brace depth; returns true when the innermost unmatched `{` is preceded by `'`
+  // Walks back tracking brace depth; returns true when the innermost unmatched `{` is
+  // preceded by `'` AND is closed by a matching `}` at or after `position`.
   private isInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let braceDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -526,8 +551,9 @@ export class VerilogBlockParser extends BaseBlockParser {
         braceDepth++;
       } else if (ch === '{') {
         if (braceDepth === 0) {
-          // Innermost unmatched `{` — check for preceding `'`
-          return i > 0 && source[i - 1] === "'";
+          // Innermost unmatched `{` — check for preceding `'` and that the brace
+          // is actually closed after `position` (an unclosed brace is incomplete).
+          return i > 0 && source[i - 1] === "'" && this.isBraceClosedAfter(source, i, position, excludedRegions);
         }
         braceDepth--;
       }
@@ -539,7 +565,8 @@ export class VerilogBlockParser extends BaseBlockParser {
   // whether the brace is preceded by an apostrophe. This includes concatenation
   // operators (`{a, b, c}`), streaming operators, and any expression context where
   // SystemVerilog block keywords cannot legitimately appear as control-flow openers.
-  // Walks back tracking brace depth; returns true at the innermost unmatched `{`.
+  // Walks back tracking brace depth; returns true at the innermost unmatched `{`
+  // only when that `{` is closed by a matching `}` at or after `position`.
   private isInsideBraceExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let braceDepth = 0;
     for (let i = position - 1; i >= 0; i--) {
@@ -551,7 +578,7 @@ export class VerilogBlockParser extends BaseBlockParser {
         braceDepth++;
       } else if (ch === '{') {
         if (braceDepth === 0) {
-          return true;
+          return this.isBraceClosedAfter(source, i, position, excludedRegions);
         }
         braceDepth--;
       }
