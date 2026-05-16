@@ -2193,5 +2193,34 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: next-line WHEN/ELSE after a line ending in an operand introducer', () => {
+    test('should register the 2nd WHEN when the previous line ends with MOVE..TO', () => {
+      // Bug: isPrecedingWordDataNameVerb crossed the newline and landed on the
+      // trailing TO of an incomplete `MOVE X TO`, treating the next line's WHEN
+      // as a data name. A line-crossing first hop onto an operand introducer
+      // (TO/BY/INTO/...) must not suppress WHEN/ELSE.
+      const source = 'EVALUATE Z\n  WHEN A\n    MOVE X TO\n  WHEN B\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN', 'WHEN']);
+    });
+
+    test('should register ELSE when the previous line ends with ADD..TO', () => {
+      const source = 'IF X\n  ADD A TO\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+
+    test('should still suppress ELSE when the previous line ends with the verb MOVE itself', () => {
+      // Counter-case: a line ending with the bare verb MOVE keeps the next
+      // line's ELSE as the verb's first operand (existing data-name behavior).
+      const source = 'IF X\n  MOVE\n    ELSE TO Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after a bare MOVE on the prior line stays a data name');
+    });
+  });
+
   generateCommonTests(config);
 });
