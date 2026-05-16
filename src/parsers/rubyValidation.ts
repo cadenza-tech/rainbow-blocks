@@ -43,6 +43,31 @@ export function isEndlessMethodDef(source: string, start: number, excludedRegion
   const identMatch = source.slice(i).match(/^(?:[a-zA-Z_][a-zA-Z0-9_]*[?!=]?|\[\]=?|<=>|===|==|=~|!=|!~|<=|>=|<<|>>|\*\*|[+\-*/%&|^<>~!])/);
   if (!identMatch) return false;
   i += identMatch[0].length;
+  // The `[?!=]?` suffix above greedily consumes a trailing `=`. That `=` is part of
+  // a setter method name (`def name=(value)`) only when a parameter list `(` follows.
+  // Otherwise (`def a=1`) the `=` is the endless-method separator written without a
+  // space, so rewind one char to let the `=` check below recognize it.
+  if (identMatch[0].endsWith('=') && /^[a-zA-Z_]/.test(identMatch[0])) {
+    let peek = i;
+    while (peek < source.length) {
+      const ch = source[peek];
+      if (ch === ' ' || ch === '\t') {
+        peek++;
+        continue;
+      }
+      if (callbacks.isInExcludedRegion(peek, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(peek, excludedRegions);
+        if (region) {
+          peek = region.end;
+          continue;
+        }
+      }
+      break;
+    }
+    if (source[peek] !== '(') {
+      i--;
+    }
+  }
   skipWs();
   // Optional parameter list in parens
   if (source[i] === '(') {
