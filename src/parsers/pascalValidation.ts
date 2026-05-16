@@ -299,7 +299,12 @@ export function isVariantRecordCase(
 // or contains a field-declaration colon (a `:` that is not part of `:=`). A parenthesized
 // expression — e.g. a malformed standalone case arm like `9: (HandleNine)` — contains no
 // such colon, so it is rejected. Excluded regions (comments, strings) are skipped.
-function parenBodyIsVariantFieldList(source: string, openParen: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): boolean {
+function parenBodyIsVariantFieldList(
+  source: string,
+  openParen: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: PascalValidationCallbacks
+): boolean {
   let depth = 1;
   let i = openParen + 1;
   while (i < source.length) {

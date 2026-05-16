@@ -1005,7 +1005,7 @@ export class AdaBlockParser extends BaseBlockParser {
       // Identifiers / keywords: classify `when` (guard) vs. other reserved
       // block keywords (scope boundary) vs. ordinary identifiers (operands).
       if (isWordChar(ch)) {
-        let wordEnd = p + 1;
+        const wordEnd = p + 1;
         let wordStart = p;
         while (wordStart > 0 && isWordChar(source[wordStart - 1])) {
           wordStart--;

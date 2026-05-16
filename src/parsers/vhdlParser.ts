@@ -860,7 +860,11 @@ export class VhdlBlockParser extends BaseBlockParser {
               // enclosing block's intermediates. A block-opener line WITHOUT its own `is`
               // (e.g. `entity counter` then `is`) is the real owner of this `is`, so we
               // do not skip in that case.
-              if (/^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units)\b/.test(prevLine)) {
+              if (
+                /^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units)\b/.test(
+                  prevLine
+                )
+              ) {
                 if (this.lineContainsStandaloneIs(source, prevLineStart, scanPos, excludedRegions)) {
                   skipThisIs = true;
                 }

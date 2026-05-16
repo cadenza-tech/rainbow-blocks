@@ -3138,10 +3138,7 @@ end try`;
       const innerTell = pairs.find((p) => p.openKeyword.startOffset !== 0 && p.openKeyword.value === 'tell');
       assert.ok(outerTell, 'outer tell at offset 0 should be paired');
       assert.ok(innerTell, 'inner tell (path to me) should be paired');
-      assert.ok(
-        innerTell.closeKeyword.startOffset < outerTell.closeKeyword.startOffset,
-        'inner tell close must come before outer tell close (LIFO)'
-      );
+      assert.ok(innerTell.closeKeyword.startOffset < outerTell.closeKeyword.startOffset, 'inner tell close must come before outer tell close (LIFO)');
     });
 
     test('should still treat top-level `to` after parenthesized target as one-liner', () => {
