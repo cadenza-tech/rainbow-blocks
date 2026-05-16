@@ -372,6 +372,7 @@ export class PascalBlockParser extends BaseBlockParser {
     // keyword along the way. Stop at statement boundaries (';' and start-of-source).
     let ci = i - 1;
     let hitSemicolon = false;
+    let hitDeclarationKeyword = false;
     while (ci >= 0) {
       if (this.isInExcludedRegion(ci, excludedRegions)) {
         const region = this.findExcludedRegionAt(ci, excludedRegions);
@@ -396,6 +397,13 @@ export class PascalBlockParser extends BaseBlockParser {
         if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
           return false;
         }
+        // A `type`/`var`/`const` scope keyword before the `=` (within the same
+        // statement, no `;` crossed yet) confirms a declaration context. The `=`
+        // is a type definition, so stop scanning and skip the cross-`;` scan.
+        if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+          hitDeclarationKeyword = true;
+          break;
+        }
       }
       ci--;
     }
@@ -407,7 +415,7 @@ export class PascalBlockParser extends BaseBlockParser {
     // keyword is encountered first decides the context.
     //  - statement-context keywords (begin/try/repeat/asm) => comparison
     //  - declaration-context keywords (type/var/const) => type definition
-    if (hitSemicolon) {
+    if (hitSemicolon && !hitDeclarationKeyword) {
       let si = ci - 1;
       while (si >= 0) {
         if (this.isInExcludedRegion(si, excludedRegions)) {
