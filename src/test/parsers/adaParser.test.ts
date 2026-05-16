@@ -3386,5 +3386,71 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-16: deeply nested blocks must not parse in quadratic time', () => {
+    // Builds N nested `if X<i> then ... end if;` blocks.
+    function buildNestedIfs(n: number): string {
+      const lines: string[] = [];
+      for (let i = 0; i < n; i++) {
+        lines.push(`${'  '.repeat(i)}if X${i} then`);
+      }
+      lines.push(`${'  '.repeat(n)}null;`);
+      for (let i = n - 1; i >= 0; i--) {
+        lines.push(`${'  '.repeat(i)}end if;`);
+      }
+      return lines.join('\n');
+    }
+
+    test('should parse 1200 nested if blocks well under one second', () => {
+      const source = buildNestedIfs(1200);
+      // Warm-up to stabilize against JIT and module init.
+      parser.parse(source);
+      const t0 = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - t0;
+      assert.strictEqual(pairs.length, 1200, 'should pair all 1200 nested if blocks');
+      // Pre-fix `isInsideParens` scanned from each opener back to offset 0,
+      // giving O(n^2) behavior (~10s at this depth). The bounded backward scan
+      // keeps each lookup O(1); the parse then stays well under the threshold.
+      // The 2000ms threshold leaves wide headroom over the post-fix time
+      // (~0.1s) while still failing hard on the pre-fix quadratic blow-up.
+      assert.ok(elapsed < 2000, `parse took ${elapsed}ms (expected < 2000ms; pre-fix was ~10s)`);
+    });
+
+    test('should not scale quadratically between 500 and 2000 nested if blocks', () => {
+      const small = buildNestedIfs(500);
+      const big = buildNestedIfs(2000);
+      // Warm-up to stabilize timings against JIT and module init.
+      parser.parse(small);
+      parser.parse(big);
+      const t1 = Date.now();
+      parser.parse(small);
+      const smallMs = Date.now() - t1;
+      const t2 = Date.now();
+      parser.parse(big);
+      const bigMs = Date.now() - t2;
+      // 4x depth: pre-fix `isInsideParens` quadratic behavior gives ~16x time;
+      // with the bounded scan the `isInsideParens` cost is linear (a residual
+      // sub-quadratic term from base nest-level recalculation remains, but is
+      // far below the pre-fix curve). A baseline floor avoids tripping the
+      // ratio on very fast small runs; 13x cleanly separates the post-fix
+      // (~10x) from the pre-fix (~16x) curve with headroom on both sides.
+      const baseline = Math.max(smallMs, 10);
+      const ratio = bigMs / baseline;
+      assert.ok(
+        ratio < 13,
+        `2000-deep parse took ${bigMs}ms vs 500-deep ${smallMs}ms (ratio ${ratio.toFixed(1)}x; expected < 13x, was ~16x with O(n^2) isInsideParens)`
+      );
+    });
+
+    test('should still detect if inside a parenthesized conditional expression', () => {
+      // The bound must not break genuine paren detection: an `if` keyword
+      // inside an Ada 2012 conditional expression argument must still be
+      // recognized as inside parentheses (and thus not a block opener).
+      const source = 'X := F((if A then 1 else 2));\nif B then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   generateCommonTests(config);
 });
