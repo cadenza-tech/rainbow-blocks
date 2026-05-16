@@ -4107,5 +4107,25 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: abstract followed by backslash inside a comment (CR1)', () => {
+    test('should treat def as block opener when "abstract \\" ends a comment line', () => {
+      const source = '# abstract \\\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat def as block opener when "abstract \\" ends a comment with CRLF', () => {
+      const source = '# abstract \\\r\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still suppress genuine abstract def with backslash continuation', () => {
+      const source = 'abstract \\\ndef foo\nclass Bar\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
