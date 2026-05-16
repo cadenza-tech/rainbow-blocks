@@ -166,12 +166,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
     }
     if (keyword === 'do') {
       // Skip horizontal whitespace (ASCII space/tab/VT/FF plus Unicode spaces such
-      // as NBSP / U+2000-200A / Ideographic Space), line continuations (... or \),
-      // and trailing line comments (`%...` / `#...`) between `do` and `(` so
-      // `do (args)`, `do<NBSP>(args)`, `do ...\n(args)`, `do \\\n(args)`, and
-      // `do % comment\n(args)` are all rejected as the function-call form, not a
-      // do/until block. Also reject `do[...]` and `do{...}` (indexing / cell-access
-      // forms) for the same reason.
+      // as NBSP / U+2000-200A / Ideographic Space) and line continuations (... or \)
+      // after `do`, then inspect the first significant character. `do (args)`,
+      // `do<NBSP>(args)`, `do ...\n(args)`, `do \\\n(args)`, `do[...]`, and
+      // `do{...}` are the function-call / indexing forms — `do` is a variable
+      // there, not a block opener. `do .x` (field access, possibly across a
+      // continuation) is likewise a variable. A trailing line comment (`%...` /
+      // `#...`) ends the logical line, so reaching it confirms `do` is a real
+      // do/until opener.
       let j = position + keyword.length;
       while (j < source.length) {
         if (isHorizontalWhitespace(source[j])) {
@@ -203,6 +205,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
         break;
       }
       if (j < source.length && (source[j] === '(' || source[j] === '[' || source[j] === '{')) {
+        return false;
+      }
+      // Reject `do .x` (struct field assignment such as `do.x = 1`): the `.`
+      // begins a field access, so `do` is a variable name, not a block opener.
+      // Treating it as an opener leaves a spurious `do` on the stack and breaks
+      // the enclosing block pairing. Exclude `.` that begins `..` so a `...`
+      // continuation that was not consumed above (e.g. at EOF without a trailing
+      // newline) is not mistaken for field access.
+      if (j < source.length && source[j] === '.' && source[j + 1] !== '.') {
         return false;
       }
       // Reject `do:` and `do :` — Octave has no label statements and `:` is the
