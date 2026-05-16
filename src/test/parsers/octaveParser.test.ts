@@ -1973,5 +1973,31 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: do followed by field access is not block open', () => {
+    test('should not treat do .x = 1 as do/until block opener', () => {
+      // `do .x = 1` is a struct field assignment where `do` is a variable name
+      // (`do.x = 1` with whitespace before the `.`). Treating `do` as a block
+      // opener leaves a spurious opener on the stack and destroys the enclosing
+      // function/end pairing.
+      const source = 'function f\n  do .x = 1;\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do .x should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do ...\\n.x as a do/until block (field access across continuation)', () => {
+      // A `...` continuation followed by `.x` on the next line keeps `do` as the
+      // statement: this is `do .x` across a line continuation, which is a field
+      // access — `do` is still a variable. The `.` rejection must hold across the
+      // continuation just like the `(`/`[`/`{` rejection does.
+      const source = 'function f\n  do ...\n  .x = 1;\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do ...\\n.x should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
