@@ -3837,13 +3837,15 @@ end`;
       assertIntermediates(block, []);
     });
 
-    test('should NOT add else as intermediate of try', () => {
-      // try has catch/finally as valid intermediates, NOT else/elseif.
+    test('should add else as intermediate of try', () => {
+      // Bug J1 (MEDIUM): Julia 1.8+ allows an `else` clause after `catch` in a try block
+      // (try/catch/else/finally). `else` is therefore a valid intermediate of `try`, not
+      // only of `if`. Previously `else` was dropped from a try's intermediates.
       const source = 'try\nelse\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'try', 'end');
       const block = findBlock(pairs, 'try');
-      assertIntermediates(block, []);
+      assertIntermediates(block, ['else']);
     });
 
     test('should NOT add elseif as intermediate of try', () => {
@@ -3879,6 +3881,26 @@ end`;
       assertSingleBlock(pairs, 'try', 'end');
       const block = findBlock(pairs, 'try');
       assertIntermediates(block, ['catch', 'finally']);
+    });
+
+    test('should add catch/else/finally as intermediates of try (Julia 1.8+ try-catch-else-finally)', () => {
+      // Bug J1 (MEDIUM): Julia 1.8+ supports try/catch/else/finally. The `else` clause
+      // runs when no exception is thrown. All three (catch, else, finally) must appear
+      // as intermediates of the try block in source order.
+      const source = 'try\n  risky()\ncatch e\n  handle(e)\nelse\n  success()\nfinally\n  cleanup()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const block = findBlock(pairs, 'try');
+      assertIntermediates(block, ['catch', 'else', 'finally']);
+    });
+
+    test('should still NOT add elseif as intermediate of try', () => {
+      // Counter-test: `elseif` only follows `if`, never `try` (even in Julia 1.8+).
+      const source = 'try\n  foo()\ncatch e\nelseif y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const block = findBlock(pairs, 'try');
+      assertIntermediates(block, ['catch']);
     });
   });
 
