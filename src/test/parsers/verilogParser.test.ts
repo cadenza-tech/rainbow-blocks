@@ -2352,6 +2352,47 @@ endmodule`;
     });
   });
 
+  suite('Regression: keyword case-item label must not suppress the real block opener', () => {
+    test('should treat begin after a begin: case-item label as the real block opener', () => {
+      // Bug: `begin:` is a case-item label whose name happens to be the reserved
+      // word `begin`. The label `begin` was tokenized as block_open and the real
+      // `begin x=1; end` block opener was suppressed by isPrecededByLabelColon.
+      const source = 'case (s)\n  begin: begin x=1; end\nendcase';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = findBlock(pairs, 'begin');
+      // The real begin opener follows the label colon, not the label itself.
+      assert.strictEqual(beginPair.openKeyword.startOffset, source.indexOf('begin', source.indexOf(':')));
+      assert.strictEqual(beginPair.closeKeyword?.value, 'end');
+    });
+
+    test('should treat fork after a fork: case-item label as the real block opener', () => {
+      // Same bug with fork/join.
+      const source = 'case (s)\n  fork: fork x=1; join\nendcase';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forkPair = findBlock(pairs, 'fork');
+      assert.strictEqual(forkPair.openKeyword.startOffset, source.indexOf('fork', source.indexOf(':')));
+      assert.strictEqual(forkPair.closeKeyword?.value, 'join');
+    });
+
+    test('should still treat begin: module outside case as a named block', () => {
+      // Sanity: outside a case body, `begin : <name>` is a named begin block.
+      // The leading `begin` is the real opener; `module` is the block name.
+      const pairs = parser.parse('begin : module\n  x = 1;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+
+    test('should still pair first fork for fork : fork outside case', () => {
+      // Sanity: outside a case body, `fork : fork` is a named fork block whose
+      // name is `fork`; the leading fork is the real opener.
+      const pairs = parser.parse('fork : fork\n  #10 a = 1;\njoin');
+      assertSingleBlock(pairs, 'fork', 'join');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+    });
+  });
+
   suite('Regression: else-if chain nest level consistency', () => {
     test('should have consistent nest levels for if and else-if begin blocks', () => {
       const pairs = parser.parse('always @(posedge clk)\n  if (a) begin\n    x <= 1;\n  end else if (b) begin\n    x <= 2;\n  end');
