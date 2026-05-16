@@ -1083,7 +1083,30 @@ export class FortranBlockParser extends BaseBlockParser {
     // Track select blocks that have had their first case skipped
     const firstCaseSkipped = new Set<OpenBlock>();
 
-    for (const token of tokens) {
+    // Pre-compute the multiset of compound-end types available *at or after*
+    // each token index. Used to detect when pairing a compound `end <type>`
+    // with a deeper opener would cross an intervening opener whose own
+    // compound close is still pending later in the token stream.
+    // compoundEndTypesAt[i] = compound-end types of block_close tokens with
+    // index >= i (e.g., 'do', 'if', 'program', 'block data', ...).
+    const compoundEndTypesAt: string[][] = new Array(tokens.length + 1);
+    {
+      let acc: string[] = [];
+      compoundEndTypesAt[tokens.length] = acc;
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const t = tokens[i];
+        if (t.type === 'block_close') {
+          const m = t.value.toLowerCase().match(/^end[ \t]*(.+)/);
+          if (m) {
+            acc = [normalizeFortranEndType(m[1]), ...acc];
+          }
+        }
+        compoundEndTypesAt[i] = acc;
+      }
+    }
+
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+      const token = tokens[tokenIndex];
       switch (token.type) {
         case 'block_open':
           stack.push({ token, intermediates: [] });
@@ -1181,6 +1204,32 @@ export class FortranBlockParser extends BaseBlockParser {
               if (openerValue === endType) {
                 matchIndex = si;
                 break;
+              }
+            }
+
+            // Reject the match when pairing with this opener would create a
+            // crossed pair: an intervening opener between matchIndex and the
+            // top of the stack has its own compound-end candidate still pending
+            // later in the token stream. Consuming the deeper matchIndex first
+            // would force that future compound close to cross the pair we are
+            // about to build. Best-effort parsing prefers leaving the outer
+            // opener as an orphan (no color) over a crossed pair (CLAUDE.md
+            // best-effort parsing principle #3: prefer no color over wrong
+            // color; VS Code Bracket Pair Colorization anchor-set principle).
+            // Each Fortran opener's compound-end type equals its normalized
+            // opener value, so no opener-type-to-end-type mapping is needed.
+            if (matchIndex >= 0 && matchIndex < stack.length - 1) {
+              const remaining = compoundEndTypesAt[tokenIndex + 1] ?? [];
+              const remainingCounts = new Map<string, number>();
+              for (const ty of remaining) {
+                remainingCounts.set(ty, (remainingCounts.get(ty) ?? 0) + 1);
+              }
+              for (let s = matchIndex + 1; s < stack.length; s++) {
+                const aboveType = normalizeFortranEndType(stack[s].token.value);
+                if ((remainingCounts.get(aboveType) ?? 0) > 0) {
+                  matchIndex = -1;
+                  break;
+                }
               }
             }
           }
