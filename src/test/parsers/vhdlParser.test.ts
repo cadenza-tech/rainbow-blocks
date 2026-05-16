@@ -2614,6 +2614,18 @@ end package;`;
       }
       assertNestLevel(pairs, 'if', 0);
     });
+
+    test('should give equal nest levels to processes in elsif-generate sibling branches', () => {
+      const source =
+        'g: if c1 generate\n  p1: process begin null; end process;\nelsif c2 generate\n  p2: process begin null; end process;\nend generate;';
+      const pairs = parser.parse(source);
+      const processes = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.strictEqual(processes.length, 2);
+      // Both processes are direct children of a generate branch: siblings at the
+      // same visual nesting depth, so they must share the same nestLevel.
+      assert.strictEqual(processes[0].nestLevel, processes[1].nestLevel);
+      assert.strictEqual(processes[0].nestLevel, 2);
+    });
   });
 
   suite('Regression: multi-line port/generic map in for binding', () => {
