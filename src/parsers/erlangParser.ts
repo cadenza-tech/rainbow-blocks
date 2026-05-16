@@ -5,6 +5,14 @@ import { BaseBlockParser } from './baseParser';
 import type { ErlangHelperCallbacks } from './erlangHelpers';
 import { hasTopLevelCommaBetween, isCatchExpressionPrefix } from './erlangHelpers';
 
+// OTP 27 sigil paired delimiters: opening character maps to its closing character
+const PAIRED_SIGIL_DELIMITERS: Readonly<Record<string, string>> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+  '<': '>'
+};
+
 // Pre-scanned span of a module attribute: -name(...).
 interface AttributeSpan {
   // Start of the leading '-' character at line start
@@ -515,13 +523,15 @@ export class ErlangBlockParser extends BaseBlockParser {
 
     // OTP 27+ tilde-sigil: ~"...", ~'...' (verbatim, no backslash escapes)
     // Also handles triple-quoted sigils: ~""", ~'''
+    // OTP 27 also allows other delimiters: paired (){}[]<> and same-char / | ` # .
     if (char === '~' && pos + 1 < source.length) {
       let offset = pos + 1;
       // Skip optional sigil modifier letter (OTP 27+: only s, S, b, B are valid)
       if (/[sSbB]/.test(source[offset]) && offset + 1 < source.length) {
         offset++;
       }
-      if (source[offset] === '"') {
+      const delim = source[offset];
+      if (delim === '"') {
         // Check for triple-quoted sigil string: ~""" or ~s"""
         if (source.slice(offset, offset + 3) === '"""') {
           let k = offset + 3;
@@ -534,7 +544,7 @@ export class ErlangBlockParser extends BaseBlockParser {
         }
         return this.matchVerbatimString(source, pos, offset, '"');
       }
-      if (source[offset] === "'") {
+      if (delim === "'") {
         // Check for triple-quoted sigil atom: ~''' or ~s'''
         if (source.slice(offset, offset + 3) === "'''") {
           let k = offset + 3;
@@ -546,6 +556,14 @@ export class ErlangBlockParser extends BaseBlockParser {
           }
         }
         return this.matchVerbatimString(source, pos, offset, "'");
+      }
+      // Paired delimiters: scan to the matching close delimiter (no nesting)
+      if (delim === '(' || delim === '[' || delim === '{' || delim === '<') {
+        return this.matchSigilDelimited(source, pos, offset, PAIRED_SIGIL_DELIMITERS[delim]);
+      }
+      // Same-char delimiters: scan to the next occurrence of the same character
+      if (delim === '/' || delim === '|' || delim === '`' || delim === '#' || delim === '.') {
+        return this.matchSigilDelimited(source, pos, offset, delim);
       }
     }
 
@@ -581,6 +599,24 @@ export class ErlangBlockParser extends BaseBlockParser {
     let i = quoteStart + 1;
     while (i < source.length) {
       if (source[i] === quoteChar) {
+        return { start: regionStart, end: i + 1 };
+      }
+      if (source[i] === '\n' || source[i] === '\r') {
+        return { start: regionStart, end: source.length };
+      }
+      i++;
+    }
+    return { start: regionStart, end: source.length };
+  }
+
+  // Matches OTP 27+ sigil with non-quote delimiters (no backslash escapes, no nesting)
+  // delimStart points at the opening delimiter; closeChar is the matching close character
+  // (same char for /|`#. delimiters, the paired bracket for (){}[]<>)
+  // Unterminated or newline before close extends to source.length, matching matchVerbatimString
+  private matchSigilDelimited(source: string, regionStart: number, delimStart: number, closeChar: string): ExcludedRegion {
+    let i = delimStart + 1;
+    while (i < source.length) {
+      if (source[i] === closeChar) {
         return { start: regionStart, end: i + 1 };
       }
       if (source[i] === '\n' || source[i] === '\r') {
