@@ -13,6 +13,9 @@ const PAIRED_SIGIL_DELIMITERS: Readonly<Record<string, string>> = {
   '<': '>'
 };
 
+// Block-opening keywords used to bound backward scans for intermediate keyword validation
+const BLOCK_OPENER_KEYWORDS = new Set(['begin', 'if', 'case', 'receive', 'try', 'fun', 'maybe']);
+
 // Pre-scanned span of a module attribute: -name(...).
 interface AttributeSpan {
   // Start of the leading '-' character at line start
@@ -475,6 +478,15 @@ export class ErlangBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Reject 'of'/'after'/'else' that appear inside an unclosed (), [], or {} scope
+      // (record field name, function argument). Such occurrences are reserved-word usage,
+      // not clause separators, and must not be registered as block intermediates.
+      // 'catch' is excluded here because it has its own expression-prefix handling above.
+      if (token.type === 'block_middle' && (token.value === 'of' || token.value === 'after' || token.value === 'else')) {
+        if (this.isIntermediateInsideBrackets(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+      }
       return true;
     });
 
@@ -487,6 +499,59 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   private isCatchExpressionPrefix(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     return isCatchExpressionPrefix(source, position, excludedRegions, this.erlangHelperCallbacks);
+  }
+
+  // Returns true if the keyword at `position` sits inside an unclosed (), [], or {} scope
+  // before reaching its enclosing block opener. Such keywords (record field names,
+  // function-call arguments) are reserved-word usage, not real block intermediates.
+  // Backward scan: closing brackets increase depth; an opening bracket reaching depth 0
+  // means the keyword is inside that unclosed bracket. Reaching a block opener at depth 0
+  // (or a declaration-ending '.') first means the keyword is a top-level intermediate.
+  private isIntermediateInsideBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ')' || ch === ']' || ch === '}') {
+        depth++;
+        continue;
+      }
+      if (ch === '(' || ch === '[' || ch === '{') {
+        if (depth === 0) {
+          // Unclosed opening bracket before any enclosing block opener: keyword is nested
+          return true;
+        }
+        depth--;
+        continue;
+      }
+      // Declaration-ending period at depth 0 ends the search without an enclosing block
+      if (ch === '.' && depth === 0) {
+        const prev = i > 0 ? source[i - 1] : '';
+        const next = i + 1 < source.length ? source[i + 1] : '';
+        // Skip '..' range operator and decimal points in float literals
+        if (prev !== '.' && next !== '.' && !(/[0-9]/.test(prev) && /[0-9]/.test(next))) {
+          return false;
+        }
+        continue;
+      }
+      // Block opener keyword reached at depth 0: keyword is a top-level intermediate
+      if (depth === 0 && /[a-z]/i.test(ch)) {
+        let wordStart = i;
+        while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+          wordStart--;
+        }
+        const word = source.slice(wordStart, i + 1);
+        if (BLOCK_OPENER_KEYWORDS.has(word)) {
+          return false;
+        }
+        i = wordStart;
+      }
+    }
+    return false;
   }
 
   private hasTopLevelCommaBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
