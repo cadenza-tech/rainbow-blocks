@@ -17,10 +17,12 @@ import type { VerilogValidationCallbacks } from './verilogValidation';
 import {
   getPrecedingLabelColonWord,
   isEnclosingBlockCase,
+  isFollowedByOpenParen,
   isFollowedByWord,
   isInsideParens,
   isOnDpiLine,
   isPrecededByAssertionVerb,
+  isPrecededByAssignmentOperator,
   isPrecededByLabelColon,
   isPrecededByModifierKeyword,
   isValidForkOpen,
@@ -195,6 +197,11 @@ const METHOD_QUALIFIER_TARGETS: ReadonlySet<string> = new Set(['function', 'task
 // break the data-type-prefixed form (`localparam int endmodule;`) which is
 // already covered by the data-type word-match in isPrecededByDataTypeKeyword.
 const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set(['localparam', 'parameter', 'genvar']);
+
+// case-statement opener keywords. These keywords introduce a case statement and
+// never appear as an expression operand, so finding one on the right-hand side
+// of an assignment (e.g., `x = case;`) indicates it is misused as an identifier.
+const CASE_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez', 'randcase']);
 
 export class VerilogBlockParser extends BaseBlockParser {
   private get validationCallbacks(): VerilogValidationCallbacks {
@@ -628,6 +635,19 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Reject keywords used as identifiers after a data type/qualifier keyword
     // (e.g., `int function`, `input module`, `bit task`, `reg [7:0] endmodule`)
     if (this.isPrecededByDataTypeKeyword(source, position, keyword, excludedRegions)) {
+      return false;
+    }
+
+    // Reject case-statement keywords misused as identifiers on the right-hand side
+    // of an assignment (e.g., `x = case;`, `y <= casex;`, `b = randcase;`). A
+    // case keyword never appears as an expression operand, so a preceding
+    // assignment operator means it is being used as an identifier. The `case (expr)`
+    // statement form is kept by skipping this check when an opening paren follows.
+    if (
+      CASE_KEYWORDS.has(keyword) &&
+      isPrecededByAssignmentOperator(source, position, excludedRegions, this.validationCallbacks) &&
+      !isFollowedByOpenParen(source, position, keyword.length, excludedRegions, this.validationCallbacks)
+    ) {
       return false;
     }
 

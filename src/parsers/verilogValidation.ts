@@ -574,6 +574,56 @@ export function isEnclosingBlockCase(
   return false;
 }
 
+// Returns true when the keyword at `position` is immediately preceded (skipping
+// whitespace and comments) by an assignment operator: `=`, `<=` (non-blocking),
+// or a compound assignment (`+=`, `-=`, `<<=`, ...). Comparison operators (`==`,
+// `!=`, `>=`, `===`, ...) are NOT treated as assignment operators.
+// A case-statement keyword (`case`/`casex`/`casez`/`randcase`) can only appear at
+// statement position, never as an expression operand, so a preceding assignment
+// operator means the keyword is being misused as an identifier.
+export function isPrecededByAssignmentOperator(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const eqPos = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
+  if (eqPos < 0 || source[eqPos] !== '=') return false;
+  const prev = eqPos > 0 ? source[eqPos - 1] : '';
+  // `==`, `!=`, `>=`, `===`, `!==`, `==?`, `!=?` are comparisons, not assignments.
+  if (prev === '=' || prev === '!' || prev === '>') return false;
+  // `<=` (non-blocking / shift assignment), `+=`, `-=`, `*=`, `/=`, `%=`, `&=`,
+  // `|=`, `^=` and the bare `=` are all assignment operators.
+  return true;
+}
+
+// Returns true when the char after the keyword at `position` (skipping whitespace
+// and comments) is an opening parenthesis. Used to keep the normal `case (expr)`
+// statement form recognized even if it appears in an unusual context.
+export function isFollowedByOpenParen(
+  source: string,
+  position: number,
+  keywordLength: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  let i = position + keywordLength;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      i++;
+      continue;
+    }
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      i = region ? region.end : i + 1;
+      continue;
+    }
+    break;
+  }
+  return i < source.length && source[i] === '(';
+}
+
 // Scans forward from a control keyword to find 'begin' before any statement terminator
 export function scanForBeginAfterControl(
   source: string,
