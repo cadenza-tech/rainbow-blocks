@@ -1859,6 +1859,32 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should detect blocks after a period-less COPY statement', () => {
+      // Bug: a COPY statement with no terminating period made isInCopyStatement
+      // treat every following keyword as a copybook name, swallowing the whole
+      // IF/END-IF block. A block-opening verb after the copybook name ends the
+      // COPY statement context.
+      const source = 'COPY ABC\nIF A\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should detect blocks after a period-less COPY with OF library qualifier', () => {
+      const source = 'COPY ABC OF LIB\nIF A\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not extend a period-less COPY past a following block verb into a later REPLACING', () => {
+      // Companion fix in cobolHelpers.isInCopyStatement: a period-less COPY must
+      // not reach a REPLACING that belongs to a separate statement, otherwise
+      // its pseudo-text delimiters are wrongly excluded.
+      const source = 'COPY ABC\nIF X\nREPLACING ==a== BY ==b==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0, 'REPLACING after a period-less COPY + block verb is not in COPY context');
+    });
   });
 
   suite('Regression 2026-05-09: COPY statement with reserved-word filename as block_open', () => {
