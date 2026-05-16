@@ -2260,6 +2260,59 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: block_middle after binary operator or @ handle is not an intermediate', () => {
+    test('should not treat case after a binary operator as an intermediate', () => {
+      // `1 + case;` uses the reserved word `case` as an operand of `+` — invalid MATLAB.
+      // The fake `case` must not register as a switch intermediate; only the real
+      // `case 1` on the next line is a genuine intermediate.
+      const source = 'switch x\n  1 + case;\n  case 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should not treat otherwise after a binary operator as an intermediate', () => {
+      // No `=` here, so the RHS-identifier check does not fire — this exercises the
+      // binary-operator check specifically.
+      const source = 'switch x\n  case 1\n  2 * otherwise;\n  otherwise\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case', 'otherwise']);
+    });
+
+    test('should not treat else after a binary operator as an intermediate', () => {
+      const source = 'if x\n  1 - else;\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else after a binary operator is not an intermediate');
+    });
+
+    test('should not treat case after an @ function handle as an intermediate', () => {
+      // `@case` is a function handle to a function named `case` — invalid because
+      // `case` is reserved, but the `case` here is not a switch intermediate.
+      const source = 'switch x\n  @case 1\n  case 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should not treat catch after an @ function handle as an intermediate', () => {
+      // No `=` here, so the @ check is exercised directly rather than the RHS check.
+      const source = 'try\n  @catch;\n  x = 1;\ncatch\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should still treat a real case at statement start as an intermediate', () => {
+      // Sanity check: genuine case branches must remain intermediates.
+      const source = 'switch x\n  case 1\n    y = 1;\n  case 2\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case', 'case']);
+    });
+  });
+
   suite('Regression 2026-05-09: command-syntax argument is not block_open', () => {
     test('should treat clear if as command-syntax (if is string argument)', () => {
       // `clear if` is command-syntax: `clear` is a command and `if` is its string argument.
