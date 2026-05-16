@@ -2222,5 +2222,26 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: WHEN/ELSE registers on the enclosing block past an unclosed inner block', () => {
+    test('should register ELSE on the IF when an inner PERFORM is unclosed at the ELSE', () => {
+      // Bug: matchBlocks only inspected the stack top for ELSE; with an unclosed
+      // PERFORM on top, the ELSE was silently dropped instead of registering on
+      // the enclosing IF. The handler now searches the stack downward.
+      const source = 'IF X\n  PERFORM UNTIL Z\n    DISPLAY A\nELSE\n  DISPLAY B\n  END-PERFORM\nEND-IF';
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toUpperCase() === 'IF');
+      assert.ok(ifPair, 'IF/END-IF should be detected');
+      assertIntermediates(ifPair as (typeof pairs)[number], ['ELSE']);
+    });
+
+    test('should register WHEN on the EVALUATE when an inner PERFORM is unclosed at the WHEN', () => {
+      const source = 'EVALUATE Z\n  PERFORM UNTIL Q\n  WHEN A\n  END-PERFORM\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      const evalPair = pairs.find((p) => p.openKeyword.value.toUpperCase() === 'EVALUATE');
+      assert.ok(evalPair, 'EVALUATE/END-EVALUATE should be detected');
+      assertIntermediates(evalPair as (typeof pairs)[number], ['WHEN']);
+    });
+  });
+
   generateCommonTests(config);
 });
