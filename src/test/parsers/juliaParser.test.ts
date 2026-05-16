@@ -3963,6 +3963,101 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should not treat x = end as block_close (assignment operator)', () => {
+      // Bug J3 (LOW): `end` directly after the assignment operator `=`. Invalid syntax
+      // outside indexing brackets — the inner `end` must not be classified as block_close,
+      // otherwise it pairs with the inner `if` and the outer `end` becomes orphan.
+      const source = 'function f()\n  if c\n    x = end\n  end\nend';
+      const pairs = parser.parse(source);
+      // function pairs with the last end, if pairs with its own end (not the `= end` one).
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      const sourceLines = source.split('\n');
+      assert.strictEqual(funcBlock.closeKeyword?.line, sourceLines.length - 1);
+      assert.strictEqual(ifBlock.closeKeyword?.line, 3);
+    });
+
+    test('should not treat 1:end as block_close (range colon operator)', () => {
+      // Bug J3 (LOW): `end` directly after `:` outside indexing brackets. `lastindex` is
+      // only valid inside `[...]`; here `1:end` is invalid and `end` must not be block_close.
+      const source = 'function f()\n  x = 1:end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should not treat x::end as block_close (type annotation operator)', () => {
+      // Bug J3 (LOW): `end` directly after `::` (type annotation). `end` is not a type;
+      // it must not be classified as block_close.
+      const source = 'function f()\n  x::end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should not treat c && end as block_close (short-circuit and)', () => {
+      // Bug J3 (LOW): `end` directly after `&&`. The trailing `&` of `&&` is the char
+      // immediately before `end`; it must not let `end` become block_close.
+      const source = 'function f()\n  x = c && end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should not treat c || end as block_close (short-circuit or)', () => {
+      // Bug J3 (LOW): `end` directly after `||`. The trailing `|` of `||` is the char
+      // immediately before `end`; it must not let `end` become block_close.
+      const source = 'function f()\n  x = c || end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should not treat ~end as block_close (bitwise not operator)', () => {
+      // Bug J3 (LOW): `end` directly after the unary `~` operator. Invalid syntax;
+      // `end` must not be classified as block_close.
+      const source = 'function f()\n  x = ~end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should not treat x \\ end as block_close (left-division operator)', () => {
+      // Bug J3 (LOW): `end` directly after the `\` (left division) operator. Invalid
+      // syntax outside indexing brackets; `end` must not be classified as block_close.
+      const source = 'function f()\n  x = A \\ end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should not treat ternary c ? 1 : end as block_close (colon before end)', () => {
+      // Bug J3 (LOW): in a ternary `c ? 1 : end`, the `end` follows the ternary `:`.
+      // This `:` is caught by the same colon rule as range/type-annotation colons, so
+      // `end` is correctly rejected as block_close (desirable side-effect of the fix).
+      const source = 'function f()\n  x = c ? 1 : end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const block = findBlock(pairs, 'function');
+      assert.strictEqual(block.closeKeyword?.line, source.split('\n').length - 1);
+    });
+
+    test('should still treat arr[1:end] as lastindex (colon inside indexing brackets)', () => {
+      // Counter-test: inside indexing brackets, `end` after `:` is `lastindex` and the
+      // colon rule must NOT apply (isInsideIndexingBrackets handles it first). The
+      // function still pairs with the only real `end`.
+      const source = 'function f(arr)\n  x = arr[1:end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   suite('Regression: subtype operator detection should not cross newline', () => {
