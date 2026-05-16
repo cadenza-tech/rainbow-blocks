@@ -1036,6 +1036,7 @@ export class VhdlBlockParser extends BaseBlockParser {
             // (for elsif/else generate chains, multiple generate blocks stack up)
             if (endType === 'generate') {
               let generateIndex = findLastOpenerByType(stack, 'generate', true);
+              const hadGenerateOpener = generateIndex >= 0;
 
               while (generateIndex >= 0) {
                 // Check for control keyword immediately before generate
@@ -1071,6 +1072,23 @@ export class VhdlBlockParser extends BaseBlockParser {
 
                 // Continue: close more generate blocks in the elsif/else chain
                 generateIndex = findLastOpenerByType(stack, 'generate', true);
+              }
+
+              // No 'generate' opener anywhere on the stack: fall back to a simple-end
+              // LIFO match against the most recent opener. This mirrors the non-generate
+              // compound-end branch (`end loop`/`end process`) so an `end generate;`
+              // written without a matching generate still produces a best-effort pair
+              // instead of being silently dropped (which would orphan the opener).
+              if (!hadGenerateOpener && stack.length > 0) {
+                const openBlock = stack.pop();
+                if (openBlock) {
+                  pairs.push({
+                    openKeyword: openBlock.token,
+                    closeKeyword: token,
+                    intermediates: openBlock.intermediates,
+                    nestLevel: stack.length
+                  });
+                }
               }
             } else {
               let matchIndex = -1;
