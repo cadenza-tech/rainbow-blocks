@@ -1999,5 +1999,29 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: do followed by quote is not block open', () => {
+    test("should not treat do' as a do/until block opener (transpose)", () => {
+      // `do'` is the transpose of a variable named `do` — the `'` directly
+      // follows the identifier, so it is the transpose operator. Treating `do`
+      // as a do/until opener wrongly pairs it with a following `until`.
+      const source = "do'\nuntil c";
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, "do' should not open a do/until block");
+      assertNoBlocks(pairs);
+    });
+
+    test("should not let do' break enclosing block pairing", () => {
+      // A spurious `do` opener for the transpose form `do'` would block the
+      // stack and prevent the enclosing for/endfor from pairing. Rejecting `do'`
+      // keeps the for/endfor pair intact.
+      const source = "for i = 1:3\n  do'\n  x = 1;\nendfor";
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, "do' should not open a do/until block");
+      assertSingleBlock(pairs, 'for', 'endfor');
+    });
+  });
+
   generateCommonTests(config);
 });
