@@ -2921,28 +2921,28 @@ end procedure;`;
     });
   });
 
-  suite('Regression 2026-05-10: malformed and-then short-circuit collapses to single then intermediate', () => {
-    test('should collapse Test_and then to a single then intermediate', () => {
+  suite('Regression 2026-05-10: and-then short-circuit only collapses a standalone and keyword', () => {
+    test('should keep both then tokens for Test_and then (and is part of an identifier)', () => {
       // Malformed input: `Test_and then` is not a valid `and then` short-circuit
-      // because `_and` is part of the identifier `Test_and`. The trailing `then`
-      // would otherwise leak into the if-block intermediates twice (once for the
-      // malformed `Test_and then` and once for the genuine `then`). Collapse to
-      // a single `then` so the if-block is colored with the correct intermediate
-      // count.
+      // because `_and` is part of the identifier `Test_and` — `and` has no left
+      // word boundary. The short-circuit collapse only fires for a standalone
+      // `and` keyword, so both `then` tokens (the one after `Test_and` and the
+      // genuine if-`then`) remain as intermediates. The if/end-if pair itself is
+      // still correct.
       const source = 'if Test_and then B then null; end if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
-      assertIntermediates(pairs[0], ['then']);
+      assertIntermediates(pairs[0], ['then', 'then']);
     });
 
-    test('should collapse 1and then to a single then intermediate', () => {
+    test('should keep both then tokens for 1and then (and is part of an invalid identifier)', () => {
       // Malformed input: `1and` is an invalid identifier (digits cannot start an
-      // identifier in Ada). The `then` after `1and` must not be tracked as a
-      // separate intermediate from the genuine if-`then`.
+      // identifier in Ada). `and` has no left word boundary, so the short-circuit
+      // collapse does not apply and both `then` tokens are kept as intermediates.
       const source = 'if 1and then B then null; end if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
-      assertIntermediates(pairs[0], ['then']);
+      assertIntermediates(pairs[0], ['then', 'then']);
     });
   });
 
@@ -3190,6 +3190,54 @@ end function Other;
     test('should treat or<U+3000>else as short-circuit (ideographic space)', () => {
       // `or` and `else` separated by U+3000 (ideographic space, common in CJK editors)
       const source = 'if A or　else B then\nnull;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
+  suite('Regression 2026-05-16: identifier ending in and must not swallow the if-then intermediate', () => {
+    test('should keep then intermediate after an identifier ending in and (Command)', () => {
+      // `Command` ends with the letters `and`, but `and` here is part of the
+      // identifier — not a standalone `and then` short-circuit operator. The
+      // `then` after `Command` is the genuine if-`then` and must be tracked
+      // as an intermediate.
+      const source = `if Command then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should keep then intermediate after an identifier ending in and (Operand)', () => {
+      const source = `if Operand then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should keep then intermediate after an identifier ending in and on an elsif branch', () => {
+      // `elsif Demand then` — `Demand` ends with `and`; the `then` after it
+      // is the elsif-branch `then` and must be tracked alongside `elsif`.
+      const source = `if X then
+  null;
+elsif Demand then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'elsif', 'then']);
+    });
+
+    test('should still treat a standalone and then as a short-circuit operator', () => {
+      // A genuine `and then` short-circuit: only the if-`then` is an
+      // intermediate; the short-circuit's `then` is dropped.
+      const source = `if A and then B then
+  null;
+end if;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
       assertIntermediates(pairs[0], ['then']);
