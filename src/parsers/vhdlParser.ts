@@ -625,6 +625,24 @@ export class VhdlBlockParser extends BaseBlockParser {
     return result;
   }
 
+  // Checks whether the inclusive source range [lineStart, lineEnd] contains a
+  // standalone `is` keyword (case-insensitive, word-bounded) outside excluded regions.
+  // Used to detect that a block-opener header line already has its own `is`.
+  private lineContainsStandaloneIs(source: string, lineStart: number, lineEnd: number, excludedRegions: ExcludedRegion[]): boolean {
+    for (let i = lineStart; i + 1 <= lineEnd; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) continue;
+      const isI = source[i] === 'i' || source[i] === 'I';
+      const isS = source[i + 1] === 's' || source[i + 1] === 'S';
+      if (!isI || !isS) continue;
+      const before = i > 0 ? source[i - 1] : '';
+      const after = i + 2 <= lineEnd ? source[i + 2] : '';
+      const beforeOk = before === '' || !/[a-zA-Z0-9_]/.test(before);
+      const afterOk = after === '' || !/[a-zA-Z0-9_]/.test(after);
+      if (beforeOk && afterOk) return true;
+    }
+    return false;
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // First, find all compound end keywords and their positions
@@ -830,6 +848,20 @@ export class VhdlBlockParser extends BaseBlockParser {
                   }
                 }
                 if (!hasSemicolon) {
+                  skipThisIs = true;
+                }
+                break;
+              }
+              // A block-opener header line that already carries its own `is` keyword
+              // (e.g. `package p is`) means that construct's header is complete. If only
+              // bare-identifier content lines sit between it and the current `is`, then
+              // the current `is` belongs to an invalid `identifier is ...` statement
+              // (e.g. `my_signal\n  is something;`). Skip it so it does not pollute the
+              // enclosing block's intermediates. A block-opener line WITHOUT its own `is`
+              // (e.g. `entity counter` then `is`) is the real owner of this `is`, so we
+              // do not skip in that case.
+              if (/^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units)\b/.test(prevLine)) {
+                if (this.lineContainsStandaloneIs(source, prevLineStart, scanPos, excludedRegions)) {
                   skipThisIs = true;
                 }
                 break;
