@@ -3000,6 +3000,29 @@ until done`;
     });
   });
 
+  suite('Performance: record with many variant case statements', () => {
+    test('should parse a record with hundreds of variant case statements without quadratic blowup', () => {
+      // Build a single record containing many variant `case` parts. With the prior
+      // O(N^2) isInsideRecord scan, 800 cases took ~60s; an O(N)/O(N log N)
+      // implementation finishes in tens of milliseconds. The 5s ceiling leaves a
+      // wide margin for slow CI machines while still failing clearly on O(N^2).
+      const caseCount = 800;
+      let source = 'TBig = record\n';
+      for (let i = 0; i < caseCount; i++) {
+        source += `  case Tag${i}: Integer of\n    0: (V${i}: Integer);\n`;
+      }
+      source += 'end;\n';
+
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+
+      // All inner `case` keywords are variant cases (no own end); only the record block.
+      assertSingleBlock(pairs, 'record', 'end');
+      assert.ok(elapsed < 5000, `parsing ${caseCount} variant cases took ${elapsed}ms, expected < 5000ms`);
+    });
+  });
+
   suite('Regression 2026-05-16: record after less-than comparison in prior statement', () => {
     test('should detect record type definition after a < comparison in a preceding statement', () => {
       // The bare `<` in `const C = 1 < 2;` belongs to a prior statement. The `record`
