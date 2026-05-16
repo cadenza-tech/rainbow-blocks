@@ -1,6 +1,6 @@
 // Crystal block parser: handles macro templates, heredocs, percent literals, regex, and postfix conditionals
 
-import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import { isForIn, isLoopDo, isPostfixConditional, isPostfixRescue, matchCharLiteral, matchHeredoc, matchMacroTemplate } from './crystalExcluded';
 import type { HeredocState, InterpolationHandlers } from './rubyFamilyHelpers';
@@ -54,6 +54,28 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
 // immediately before `def`, allowing only spaces/tabs and backslash line
 // continuations (\<LF>, \<CRLF>, \<CR>) between the two keywords.
 const ABSTRACT_DEF_PATTERN = /\babstract(?:[ \t]+|[ \t]*\\(?:\r\n|\r|\n)[ \t]*)+$/;
+
+// Maps each intermediate keyword to the set of opener keywords it can belong to.
+// An intermediate keyword appearing under an incompatible opener (e.g. `rescue`
+// directly inside a `class` body) is not a section of that block, so it is
+// dropped from the block's intermediates instead of being mis-attributed.
+// - elsif: conditional branches (if/unless)
+// - rescue/ensure: exception handling, valid only in implicit-begin contexts
+//   (begin, def, and do-blocks); class/module/struct bodies are not such contexts
+// - when: case branches and select branches
+// - in: case-in pattern matching (for-in `in` is filtered out during tokenize)
+// - else: conditional else (if/unless), case/select else, and exception else
+//   (begin/def/do)
+// - then: one-line conditional/case bodies (if/unless and case/select branches)
+const INTERMEDIATE_TO_OPENERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['elsif', new Set(['if', 'unless'])],
+  ['rescue', new Set(['begin', 'def', 'do'])],
+  ['ensure', new Set(['begin', 'def', 'do'])],
+  ['when', new Set(['case', 'select'])],
+  ['in', new Set(['case'])],
+  ['else', new Set(['if', 'unless', 'case', 'select', 'begin', 'def', 'do'])],
+  ['then', new Set(['if', 'unless', 'case', 'select'])]
+]);
 
 // Crystal interpolation check: %Q, %W, %I, %x, %r and bare % interpolate
 function isCrystalInterpolatingPercent(specifier: string, hasSpecifier: boolean): boolean {
@@ -501,6 +523,52 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
       return true;
     });
+  }
+
+  // Stack-based pairing that mirrors the base algorithm, but only attaches an
+  // intermediate keyword to the current block when the keyword is valid for
+  // that block's opener (e.g. `rescue` belongs to begin/def/do, not class).
+  // An intermediate that does not fit the enclosing opener is a stray keyword
+  // (invalid syntax) and is left as an orphan rather than mis-attributed.
+  protected matchBlocks(tokens: Token[]): BlockPair[] {
+    const pairs: BlockPair[] = [];
+    const stack: OpenBlock[] = [];
+
+    for (const token of tokens) {
+      switch (token.type) {
+        case 'block_open':
+          stack.push({ token, intermediates: [] });
+          break;
+
+        case 'block_middle': {
+          if (stack.length === 0) {
+            break;
+          }
+          const opener = stack[stack.length - 1].token.value;
+          const validOpeners = INTERMEDIATE_TO_OPENERS.get(token.value);
+          if (validOpeners && !validOpeners.has(opener)) {
+            break;
+          }
+          stack[stack.length - 1].intermediates.push(token);
+          break;
+        }
+
+        case 'block_close': {
+          const openBlock = stack.pop();
+          if (openBlock) {
+            pairs.push({
+              openKeyword: openBlock.token,
+              closeKeyword: token,
+              intermediates: openBlock.intermediates,
+              nestLevel: stack.length
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    return pairs;
   }
 
   // Matches regex literal with #{} interpolation
