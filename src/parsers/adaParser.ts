@@ -23,7 +23,14 @@ import {
   isValidTaskOpen
 } from './adaValidation';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
+import {
+  buildCaseInsensitiveKeywordPattern,
+  findLastOpenerByType,
+  findLastOpenerForLoop,
+  findLineStart,
+  getTokenTypeCaseInsensitive,
+  mergeCompoundEndTokens
+} from './parserUtils';
 
 // List of block types that have compound end keywords
 const COMPOUND_END_TYPES = [
@@ -426,11 +433,7 @@ export class AdaBlockParser extends BaseBlockParser {
 
     // Tokenize with case-insensitive matching
     const tokens: Token[] = [];
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
-    // Use 'gi' flag for case-insensitive global matching
-    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'gi');
+    const keywordPattern = buildCaseInsensitiveKeywordPattern(this.keywords);
     const newlinePositions = this.buildNewlinePositions(source);
 
     for (const keywordMatch of source.matchAll(keywordPattern)) {

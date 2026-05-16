@@ -2,7 +2,14 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { findLastOpenerByType, findLastOpenerForLoop, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
+import {
+  buildCaseInsensitiveKeywordPattern,
+  findLastOpenerByType,
+  findLastOpenerForLoop,
+  findLineStart,
+  getTokenTypeCaseInsensitive,
+  mergeCompoundEndTokens
+} from './parserUtils';
 import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
 import type { VhdlValidationCallbacks } from './vhdlValidation';
 import {
@@ -729,11 +736,7 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     // Tokenize with case-insensitive matching
     const tokens: Token[] = [];
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
-    // Use 'gi' flag for case-insensitive global matching
-    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'gi');
+    const keywordPattern = buildCaseInsensitiveKeywordPattern(this.keywords);
     const newlinePositions = this.buildNewlinePositions(source);
 
     for (const keywordMatch of source.matchAll(keywordPattern)) {

@@ -35,6 +35,22 @@ export function getTokenTypeCaseInsensitive(keyword: string, keywords: LanguageK
   return 'block_open';
 }
 
+// Escape regex metacharacters in a string
+// Standalone version for use outside class context; see also BaseBlockParser.escapeRegex
+export function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Build a case-insensitive keyword-matching regex from LanguageKeywords
+// Sorts keywords by length descending so longer keywords match first
+// Used by Ada, VHDL, Fortran, COBOL, Pascal in their case-insensitive tokenize overrides
+export function buildCaseInsensitiveKeywordPattern(keywords: LanguageKeywords): RegExp {
+  const allKeywords = [...keywords.blockOpen, ...keywords.blockClose, ...keywords.blockMiddle];
+  const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
+  const escapedKeywords = sortedKeywords.map((kw) => escapeRegex(kw));
+  return new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'gi');
+}
+
 // Paired delimiters for percent literals in line-level scanning
 const LINE_PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
   '(': ')',

@@ -2,7 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
+import { buildCaseInsensitiveKeywordPattern, findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 import type { PascalValidationCallbacks } from './pascalValidation';
 import { buildRecordContextMap, isIfThenElse, isInsideParens, isTypeDeclarationOf, isVariantRecordCase, TYPE_MODIFIERS } from './pascalValidation';
 
@@ -950,13 +950,7 @@ export class PascalBlockParser extends BaseBlockParser {
     this.recordContextMap = buildRecordContextMap(source, excludedRegions, this.validationCallbacks);
 
     const tokens: Token[] = [];
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-
-    // Sort keywords by length descending to match longer keywords first
-    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
-    // Add 'i' flag for case-insensitive matching
-    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'gi');
+    const keywordPattern = buildCaseInsensitiveKeywordPattern(this.keywords);
 
     const newlinePositions = this.buildNewlinePositions(source);
 

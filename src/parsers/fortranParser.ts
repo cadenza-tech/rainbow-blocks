@@ -22,7 +22,7 @@ import {
   isValidFortranBlockClose,
   isValidProcedureOpen
 } from './fortranValidation';
-import { findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
+import { buildCaseInsensitiveKeywordPattern, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
 // List of block types that have compound end keywords
 // 'block data' must be listed BEFORE 'block' for longest-first alternation matching:
@@ -804,11 +804,7 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // Tokenize with case-insensitive matching
     const tokens: Token[] = [];
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
-    // Use 'gi' flag for case-insensitive global matching
-    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'gi');
+    const keywordPattern = buildCaseInsensitiveKeywordPattern(this.keywords);
     const newlinePositions = this.buildNewlinePositions(source);
 
     for (const keywordMatch of source.matchAll(keywordPattern)) {

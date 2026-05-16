@@ -10,7 +10,7 @@ import {
   matchPseudoText,
   skipBackwardWhitespaceAndComments
 } from './cobolHelpers';
-import { findLastOpenerByType } from './parserUtils';
+import { buildCaseInsensitiveKeywordPattern, findLastOpenerByType } from './parserUtils';
 
 // COBOL verbs that take data-name operands. When a reserved word like WHEN/ELSE
 // immediately follows one of these on the same line, treat it as an identifier.
@@ -770,14 +770,7 @@ export class CobolBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     this.validOpenPositions.clear();
     const tokens: Token[] = [];
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-
-    // Sort keywords by length descending to match longer keywords first
-    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    // Escape regex metacharacters in keywords for safe pattern construction
-    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
-    // Use 'gi' flag for case-insensitive global matching
-    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'gi');
+    const keywordPattern = buildCaseInsensitiveKeywordPattern(this.keywords);
 
     // Pre-compute newline positions for O(log n) line/column lookup
     const newlinePositions = this.buildNewlinePositions(source);
