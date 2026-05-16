@@ -324,6 +324,17 @@ export class AdaBlockParser extends BaseBlockParser {
         }
         let lookahead = skipAdaWhitespaceAndComments(source, lookaheadStart);
         const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+        // Ada 2012 extended return closes with a fixed `end return;` — it never
+        // takes an optional designator. So a `return` immediately following an
+        // `end` is only a compound end when the next non-whitespace character
+        // is `;`. Otherwise (e.g., `end\n  return Tmp;`) the `return` begins an
+        // independent return statement and the preceding `end` is a simple
+        // block close; merging them would orphan the block that the simple
+        // `end` was meant to close.
+        if (match[1].toLowerCase() === 'return' && (lookahead >= source.length || source[lookahead] !== ';')) {
+          match = COMPOUND_END_PATTERN.exec(source);
+          continue;
+        }
         // Reserved keywords that must never be consumed as a designator: any
         // block_open or block_close keyword belongs to a separate construct, so
         // encountering one before the terminating `;` indicates the compound
