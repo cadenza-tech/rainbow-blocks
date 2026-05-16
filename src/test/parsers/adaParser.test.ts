@@ -2049,6 +2049,53 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-16: select alternative or after a non-semicolon-terminated body', () => {
+    test('should keep or as a select intermediate when the alternative body is not semicolon-terminated', () => {
+      // The first select alternative body is just `X` with no trailing `;`.
+      // A bare `or` starting its own line still delimits a select alternative
+      // and must be tracked as an intermediate, even though the preceding
+      // (incomplete) statement does not end with `;`.
+      const source = 'select\n  X\nor\n  accept B;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+
+    test('should keep or as a select intermediate after an identifier-only alternative body', () => {
+      const source = 'select\n  Do_Work\nor\n  delay 1.0;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+
+    test('should not treat boolean or inside an if condition as an intermediate', () => {
+      // `A or B` is a boolean expression: the `or` is an operator, not a
+      // select alternative delimiter, and must not become an intermediate.
+      const source = 'if A or B then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should not treat boolean or inside a select guard as an intermediate', () => {
+      // `when A or B =>` — the guard's `or` is a boolean operator. Only the
+      // alternative-delimiting `or` should be an intermediate.
+      const source = 'select\n  when A or B =>\n    accept Foo;\nor\n  accept Bar;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['when', 'or']);
+    });
+
+    test('should not treat boolean or in a select guard split across lines as an intermediate', () => {
+      // The guard `A or B` is split so that `or` starts its own line; it is
+      // still a boolean operator inside the `when ... =>` guard.
+      const source = 'select\n  when A\n  or B =>\n    accept Foo;\nor\n  accept Bar;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['when', 'or']);
+    });
+  });
+
   suite('Branch coverage: findExcludedRegionAt null fallback and isOrElseShortCircuit comment', () => {
     // Lines 514-522: backward scan from 'then' crossing excluded regions (comments)
     // The loop at lines 515-521 calls isInExcludedRegion then findExcludedRegionAt.
