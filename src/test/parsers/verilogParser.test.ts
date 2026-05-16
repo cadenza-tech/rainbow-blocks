@@ -2325,6 +2325,23 @@ endmodule`;
     });
   });
 
+  suite('Regression: unclosed paren must not suppress interface keyword', () => {
+    test('should still detect interface block after an unclosed paren', () => {
+      // Bug: an unclosed `(` (incomplete syntax) made isInsideParens report that
+      // every later position is inside a port list, suppressing the `interface`
+      // keyword. The standalone `interface ... endinterface` block must still pair.
+      const source = 'foo(\ninterface my_if;\n  logic x;\nendinterface';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'endinterface');
+    });
+
+    test('should still suppress interface inside a properly closed port list', () => {
+      // Sanity: the real port-list suppression must keep working after the fix.
+      const tokens = parser.getTokens('module test(interface bus);\nendmodule');
+      assert.ok(!tokens.some((t) => t.value === 'interface'), 'interface inside a closed port list must stay suppressed');
+    });
+  });
+
   suite('Regression: label colon check with comments', () => {
     test('should reject module after label colon with block comment', () => {
       const pairs = parser.parse('begin /* comment */ : module\nend');
