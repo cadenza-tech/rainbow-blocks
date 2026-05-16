@@ -85,16 +85,19 @@ export abstract class BaseBlockParser {
     return true;
   }
 
+  // Builds the keyword-matching regex from the parser's block keywords
+  // Longer keywords are sorted first so they match before their prefixes (e.g. `elsif` before `if`)
+  private buildKeywordPattern(): RegExp {
+    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
+    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
+    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
+    return new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'g');
+  }
+
   // Tokenizes source code to find block keywords
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens: Token[] = [];
-    const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
-
-    // Sort keywords by length descending to match longer keywords first
-    const sortedKeywords = [...allKeywords].sort((a, b) => b.length - a.length);
-    // Escape regex metacharacters in keywords for safe pattern construction
-    const escapedKeywords = sortedKeywords.map((kw) => this.escapeRegex(kw));
-    const keywordPattern = new RegExp(`\\b(${escapedKeywords.join('|')})\\b`, 'g');
+    const keywordPattern = this.buildKeywordPattern();
 
     // Pre-compute newline positions for O(log n) line/column lookup
     const newlinePositions = this.buildNewlinePositions(source);
