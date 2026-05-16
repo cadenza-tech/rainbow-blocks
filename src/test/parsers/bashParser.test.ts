@@ -6015,4 +6015,23 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  suite('Regression: unclosed [[ must not disable comment detection', () => {
+    test('should still detect if/fi after a comment that follows an unclosed [[', () => {
+      // The unclosed `[[` must not put findExcludedRegions into double-bracket
+      // mode; the `#` on the next line must still start a comment so the `"`
+      // inside it does not open a string region that swallows the if/fi block.
+      const source = '[[\n# x " y\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still treat # as comment inside a properly closed [[ ]] only', () => {
+      // Sanity check: a closed [[ ]] still suppresses # comment detection within
+      // it, while the comment after the closed bracket works normally.
+      const source = 'if [[ a == b ]]; then\n# c " d\n  echo ok\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
 });
