@@ -1048,18 +1048,37 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     return i < source.length && source[i] === ')';
   }
 
-  // Checks if 'tell' is followed by 'to' on the same line (one-liner form)
+  // Checks if 'tell' is followed by a top-level 'to' on the same logical line
+  // (one-liner form like `tell app to activate`). A `to` nested inside parentheses
+  // (e.g. `tell application (path to me)`) belongs to the target expression — such
+  // as the Standard Additions `path to` command — and must NOT be treated as the
+  // one-liner marker, otherwise a real multi-line `tell` block is dropped. Paren
+  // depth is tracked so only depth-0 occurrences of `to` count; parentheses inside
+  // excluded regions (strings, comments, chevrons) are skipped and do not affect it.
   private isTellToOneLiner(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     const lineEnd = findLogicalLineEnd(source, position + 4, excludedRegions, this.helperCallbacks);
 
     let i = position + 4;
+    let parenDepth = 0;
     while (i < lineEnd) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
       if (region) {
         i = region.end;
         continue;
       }
+      const ch = source[i];
+      if (ch === '(') {
+        parenDepth++;
+        i++;
+        continue;
+      }
+      if (ch === ')') {
+        if (parenDepth > 0) parenDepth--;
+        i++;
+        continue;
+      }
       if (
+        parenDepth === 0 &&
         source.slice(i, i + 2).toLowerCase() === 'to' &&
         (i === 0 || !/\w/.test(source[i - 1])) &&
         (i + 2 >= source.length || !/\w/.test(source[i + 2]))
