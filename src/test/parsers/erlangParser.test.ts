@@ -1995,6 +1995,85 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Bug ER1: OTP 27 sigil delimiters other than quotes', () => {
+    test('should treat ~b{...} brace-delimited sigil as excluded region', () => {
+      // OTP 27 sigil with {} delimiters: keywords inside must not leak
+      const source = 'X = ~b{begin end}';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b/.../ slash-delimited sigil as excluded region', () => {
+      const source = 'Y = ~b/begin end/';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b[...] bracket-delimited sigil as excluded region', () => {
+      const source = 'Z = ~b[begin end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b<...> angle-delimited sigil as excluded region', () => {
+      const source = 'W = ~b<begin end>';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b|...| pipe-delimited sigil as excluded region', () => {
+      const source = 'V = ~b|begin end|';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b`...` backtick-delimited sigil as excluded region', () => {
+      const source = 'U = ~b`begin end`';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b#...# hash-delimited sigil as excluded region', () => {
+      const source = 'T = ~b#begin end#';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~b(...) paren-delimited sigil as excluded region', () => {
+      const source = 'S = ~b(begin end)';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat ~ (no modifier) brace-delimited sigil as excluded region', () => {
+      const source = 'R = ~{begin end}';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not leak keywords after a brace-delimited sigil', () => {
+      const source = 'X = ~b{ignored},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat unterminated brace-delimited sigil as region to end of source', () => {
+      const source = '~b{begin end';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should terminate slash-delimited sigil at newline like verbatim string', () => {
+      // Same-char delimiter sigils behave like verbatim strings: a newline ends the region
+      const source = '~b/begin\n/ end';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+  });
+
   suite('Regression: multi-line comment between map key and =>', () => {
     test('should reject block keyword followed by => with multi-line comments between', () => {
       const source = '#{begin\n  % comment1\n  % comment2\n  => value},\nbegin\n  ok\nend';
