@@ -64,6 +64,14 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
       return false;
     }
+    // Reject end used as a compound-assignment target (`end += 1`, `end *= 2`).
+    // Such a form (`end += 1` ≡ `end = end + 1`) uses the reserved word `end` as a
+    // variable; it is not a block close. Comparison operators (`== ~= >= <=`) are NOT
+    // compound assignments and are deliberately left alone (a real block close may be
+    // followed by a stray comparison).
+    if (this.isFollowedByCompoundAssignment(source, position + keyword.length)) {
+      return false;
+    }
     // Reject end followed by a single `.` (possibly preceded by whitespace) that is NOT
     // part of `..` (line continuation marker prefix). `end.field` and `end .field` are
     // both struct field-access syntax, not block close — the `end` is an identifier in
@@ -1012,6 +1020,33 @@ export class MatlabBlockParser extends BaseBlockParser {
       i++;
     }
     return i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=');
+  }
+
+  // Checks if a keyword (whose end is `afterPos`) is followed (after whitespace) by a
+  // compound assignment operator: `+= -= *= /= ^= \=` and the `.`-prefixed element-wise
+  // forms `.^= .*= ./= .\=`. Such a form (`end += 1` ≡ `end = end + 1`) uses the keyword
+  // as an assignment target, so the keyword is a variable, not a block close. Comparison
+  // operators (`==`, `~=`, `<=`, `>=`, `!=`) are intentionally NOT matched: they are not
+  // compound assignments, and a real block close may be followed by a stray comparison.
+  protected isFollowedByCompoundAssignment(source: string, afterPos: number): boolean {
+    let i = afterPos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    if (i >= source.length) {
+      return false;
+    }
+    const ch = source[i];
+    const next = i + 1 < source.length ? source[i + 1] : '';
+    // Plain compound assignment: arithmetic/division operator directly followed by `=`.
+    if (next === '=' && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '^' || ch === '\\')) {
+      return true;
+    }
+    // Element-wise compound assignment: `.` then an operator then `=` (`.^=`, `.*=` ...).
+    if (ch === '.' && i + 2 < source.length && source[i + 2] === '=') {
+      return next === '*' || next === '/' || next === '^' || next === '\\';
+    }
+    return false;
   }
 
   // Returns true when a block-opener keyword (whose end is `afterPos`) is immediately
