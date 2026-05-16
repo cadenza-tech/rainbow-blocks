@@ -67,13 +67,16 @@ export class VhdlBlockParser extends BaseBlockParser {
   // Generate-chain siblings (if/elsif/else generate ... end generate) all close at the
   // same `end generate` token. recalculateNestLevels uses shared closeKeyword + last
   // block_middle intermediate to recognize siblings, so the generates themselves are
-  // siblings of each other (correct). However, synthetic begin/end body pairs inside
-  // each branch close at separate `end;` tokens, so the shared-close exclusion does not
-  // fire and prior sibling generates are counted as parents. This method walks each
-  // begin-body pair and subtracts the sibling-generate over-count.
+  // siblings of each other (correct). However, ordinary blocks nested inside each branch
+  // (synthetic begin/end body pairs, or process/case/loop/if/nested-generate blocks)
+  // close at their own separate `end;`/`end <type>;` tokens, so the shared-close
+  // exclusion does not fire and prior sibling generates are counted as parents. This
+  // method walks each such inner pair and subtracts the sibling-generate over-count.
   private adjustGenerateBodyNestLevels(pairs: BlockPair[]): void {
     for (const body of pairs) {
-      if (body.openKeyword.value.toLowerCase() !== 'begin') continue;
+      // Skip the generate pairs themselves (their sibling relation is handled by the
+      // shared-close exclusion in recalculateNestLevels).
+      if (body.openKeyword.value.toLowerCase() === 'generate') continue;
       // Find generates that appear to "contain" this body by offsets only
       const containingGenerates = pairs.filter(
         (other) =>
