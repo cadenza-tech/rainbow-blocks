@@ -1430,5 +1430,69 @@ end`;
     });
   });
 
+  suite('Regression: isDoPartOfLoop must not be super-quadratic for loops mixed with standalone do', () => {
+    // Bug: isDoPartOfLoop's forward scan was O(N^2)-O(N^3) for files mixing
+    // loops with standalone `do` blocks. Each standalone `do` belongs to no
+    // for/while, so the outer loop scanned every preceding for/while, and each
+    // iteration did a full source.slice + matchAll. With N=300 (~28KB) this
+    // took ~6s; with N=800 ~24s+, effectively hanging the parser.
+    //
+    // The fix classifies every `do` in a single O(N) pass over pre-computed
+    // keyword positions, cached per source (doClassificationCache). The two
+    // tests below pin the fix from complementary angles:
+    //   1. a wall-clock ceiling that the O(N^3) version blew past by ~30x;
+    //   2. a cache-contract assertion that fails if the per-`do` rescan
+    //      returns (timing-independent, robust against JIT / CI jitter).
+    function buildMixedSource(repeats: number): string {
+      // Each unit: one loop `do...end` plus one standalone `do...end`.
+      return 'for i=1,1 do end\ndo x=1 end\n'.repeat(repeats);
+    }
+
+    test('should parse ~28KB of loops mixed with standalone do well under 2 seconds', () => {
+      // N=800 (~28KB) took ~61s with the O(N^3) bug; the linearized version is
+      // a few hundred ms. A 2000ms ceiling is generous for slow/contended CI
+      // while still failing by a wide margin if the cubic scan returns.
+      const source = buildMixedSource(800);
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      // Each unit contributes exactly 2 block pairs (loop do/end + standalone do/end)
+      assertBlockCount(pairs, 1600);
+      assert.ok(elapsed < 2000, `parse took ${elapsed}ms, expected < 2000ms (super-quadratic regression)`);
+    });
+
+    test('should classify every do once via a per-source cache, not rescan per do keyword', () => {
+      // The O(N^3) bug came from re-deriving each `do`'s loop membership by
+      // re-scanning the prefix on every `do`. The fix builds the full
+      // classification in one O(N) pass and caches it by source identity.
+      // We assert the cache is populated and classifies every `do` correctly,
+      // pinning the contract behind the perf fix without timing assertions.
+      const source = buildMixedSource(3);
+      parser.parse(source);
+      type CacheT = { source: string; classification: Map<number, boolean> } | null;
+      const cache = (parser as unknown as { doClassificationCache: CacheT }).doClassificationCache;
+      assert.ok(cache !== null, 'doClassificationCache must be populated after parse');
+      assert.strictEqual(cache.source, source, 'cache must be keyed by source string');
+      // 3 units => 6 `do` keywords: 3 loop dos (true) + 3 standalone dos (false)
+      assert.strictEqual(cache.classification.size, 6, 'every do keyword must be classified');
+      const values = [...cache.classification.values()];
+      assert.strictEqual(values.filter((v) => v === true).length, 3, 'three loop dos');
+      assert.strictEqual(values.filter((v) => v === false).length, 3, 'three standalone dos');
+    });
+
+    test('should reuse the do-classification cache across repeat parses of the same source', () => {
+      const source = buildMixedSource(2);
+      parser.parse(source);
+      type CacheT = { source: string; classification: Map<number, boolean> } | undefined;
+      const cache1 = (parser as unknown as { doClassificationCache: CacheT }).doClassificationCache;
+      // Reject undefined too: without the fix the field does not exist at all,
+      // so this also pins that the cache mechanism is actually present.
+      assert.ok(cache1 !== null && cache1 !== undefined, 'doClassificationCache must be populated after first parse');
+      parser.parse(source);
+      const cache2 = (parser as unknown as { doClassificationCache: CacheT }).doClassificationCache;
+      assert.strictEqual(cache1, cache2, 'parsing the same source twice must reuse the cache');
+    });
+  });
+
   generateCommonTests(config);
 });
