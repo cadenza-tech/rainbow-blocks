@@ -294,6 +294,50 @@ export function isVariantRecordCase(
   return false;
 }
 
+// Returns true when the parentheses opening at `openParen` enclose a variant-record field
+// list rather than a parenthesized expression. A variant field list is either empty `()`
+// or contains a field-declaration colon (a `:` that is not part of `:=`). A parenthesized
+// expression — e.g. a malformed standalone case arm like `9: (HandleNine)` — contains no
+// such colon, so it is rejected. Excluded regions (comments, strings) are skipped.
+function parenBodyIsVariantFieldList(source: string, openParen: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): boolean {
+  let depth = 1;
+  let i = openParen + 1;
+  while (i < source.length) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+    }
+    const ch = source[i];
+    if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+      if (depth === 0) {
+        // Reached the matching ')' without finding a field-declaration colon: empty
+        // body is a (valid) empty variant field list; a non-empty body is an expression.
+        return isWhitespaceRun(source, openParen + 1, i);
+      }
+    } else if (ch === ':' && source[i + 1] !== '=') {
+      // A field-declaration colon confirms a variant field list.
+      return true;
+    }
+    i++;
+  }
+  return false;
+}
+
+// Returns true when source[start, end) contains only whitespace and newlines.
+function isWhitespaceRun(source: string, start: number, end: number): boolean {
+  for (let i = start; i < end; i++) {
+    const ch = source[i];
+    if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') return false;
+  }
+  return true;
+}
+
 // Checks if a case at the given position is a variant case (record variant part)
 // Variant cases have parenthesized field lists after labels: case Tag of 0: (Field: Type)
 // Standalone cases have statements after labels: case X of 1: WriteLn
@@ -345,7 +389,7 @@ export function isVariantCase(source: string, caseStart: number, excludedRegions
       if (j < source.length && source[j] === ':') {
         j++;
         while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
-        return j < source.length && source[j] === '(';
+        return j < source.length && source[j] === '(' && parenBodyIsVariantFieldList(source, j, excludedRegions, callbacks);
       }
       continue;
     }
@@ -380,8 +424,8 @@ export function isVariantCase(source: string, caseStart: number, excludedRegions
         j++;
         // Skip whitespace and newlines after ':'
         while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) j++;
-        // '(' indicates variant case field list
-        return j < source.length && source[j] === '(';
+        // '(' that opens a variant field list (not a parenthesized expression)
+        return j < source.length && source[j] === '(' && parenBodyIsVariantFieldList(source, j, excludedRegions, callbacks);
       }
     }
     break;
