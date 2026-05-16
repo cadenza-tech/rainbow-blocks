@@ -1479,6 +1479,32 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: REPLACE inside EXEC block does not leak pseudo-text context', () => {
+    test('should not treat == after END-EXEC as pseudo-text when REPLACE appears in EXEC body', () => {
+      // Bug: getPseudoTextStarts forward scan did not skip EXEC/EXECUTE blocks,
+      // so a REPLACE keyword inside an EXEC body set inReplaceContext=true.
+      // The EXEC block has no terminating period, so the flag leaked past
+      // END-EXEC and made `== B IF C ==` a pseudo-text excluded region.
+      const source = 'EXEC SQL\n  WHERE REPLACE\nEND-EXEC\nIF A == B IF C == D END-IF END-IF';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const inner = pairs.find((p) => p.nestLevel === 1);
+      const outer = pairs.find((p) => p.nestLevel === 0);
+      assert.ok(inner, 'inner IF/END-IF should be detected');
+      assert.ok(outer, 'outer IF/END-IF should be detected');
+      assert.strictEqual(inner?.openKeyword.value.toUpperCase(), 'IF');
+      assert.strictEqual(inner?.closeKeyword.value.toUpperCase(), 'END-IF');
+      assert.strictEqual(outer?.openKeyword.value.toUpperCase(), 'IF');
+      assert.strictEqual(outer?.closeKeyword.value.toUpperCase(), 'END-IF');
+    });
+
+    test('should not leak REPLACE pseudo-text context out of an EXECUTE block', () => {
+      const source = 'EXECUTE SQL\n  WHERE REPLACE\nEND-EXEC\nIF A == B\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   suite('Regression: isValidBlockClose check in tokenize override', () => {
     test('should reject block close keyword preceded by hyphen', () => {
       // Bug: missing isValidBlockClose check in tokenize override allowed
