@@ -435,6 +435,18 @@ end process;`;
       assertSingleBlock(pairs, 'if', 'end process');
     });
 
+    test('should handle end generate without a generate opener via simple-end fallback', () => {
+      const source = 'architecture a of t is\nbegin\n  process begin null;\n  end generate;\nend architecture;';
+      const pairs = parser.parse(source);
+      // end generate has no generate opener; like end loop/end process it falls back
+      // to a best-effort LIFO match against the most recent opener (the process).
+      assertBlockCount(pairs, 2);
+      const processPair = findBlock(pairs, 'process');
+      assert.strictEqual(processPair.closeKeyword.value, 'end generate');
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value, 'end architecture');
+    });
+
     test('should not detect keywords adjacent to Unicode letters', () => {
       const source = 'variable caf\u00E9entity : integer;\nentity test is\nend entity;';
       const pairs = parser.parse(source);
