@@ -3337,6 +3337,20 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should treat end inside unterminated indexing bracket a[end as lastindex, not block_close', () => {
+      // Bug J2 (LOW): `a[end` is an unterminated indexing bracket. The `end` directly after
+      // `[` is the lastindex reference, not a block_close. Previously, when the bracket had
+      // no matching `]`, isInsideIndexingBrackets returned false for that `end`, so it was
+      // tokenized as block_close and mis-paired with `begin` (LIFO), leaving the real
+      // trailing `end` orphan. After the fix the `begin` pairs with the real `end`.
+      const source = 'begin\n  x = a[end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // begin must pair with the LAST `end` (the real block close), not the one in `a[end`.
+      const block = findBlock(pairs, 'begin');
+      assert.strictEqual(block.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: dot-preceded keywords should not count as block openers in bracket helpers', () => {
