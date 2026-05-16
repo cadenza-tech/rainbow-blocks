@@ -3091,5 +3091,37 @@ end try`;
     });
   });
 
+  suite('Regression: tell with parenthesized object specifier is a valid block opener', () => {
+    test('should detect tell (window 1) as block opener', () => {
+      const source = 'tell (window 1)\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should detect tell (front window) with extra whitespace as block opener', () => {
+      const source = 'tell  (front window)\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should detect tell(window 1) with no whitespace as block opener', () => {
+      const source = 'tell(window 1)\n  activate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should still reject tell () with empty parens as block opener', () => {
+      const source = 'on run\n  tell ()\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should still reject tell ( ) with whitespace-only parens as block opener', () => {
+      const source = 'on run\n  tell ( )\nend run';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
