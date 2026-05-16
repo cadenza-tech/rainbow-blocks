@@ -2979,6 +2979,63 @@ end procedure;`;
     });
   });
 
+  suite('Regression 2026-05-16: same-line compound end without trailing semicolon', () => {
+    test('should treat "end if" without trailing semicolon as a compound end inside a procedure', () => {
+      // The inner `end if` is missing its trailing `;`. When `end` and the type
+      // keyword are on the same line, treat them as a single (unterminated)
+      // compound close so the type keyword is not misread as a fresh block
+      // opener that swallows the enclosing procedure block.
+      const source = 'procedure P is\nbegin\n  if X then\n    Do_Something;\n  end if\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifPair, 'if block should be paired');
+      assert.match(ifPair.closeKeyword.value.toLowerCase(), /^end\s+if$/);
+      const procPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'procedure');
+      assert.ok(procPair, 'procedure block must survive');
+      assert.strictEqual(procPair.closeKeyword.value.toLowerCase(), 'end');
+    });
+
+    test('should treat "end loop" without trailing semicolon as a compound end inside a procedure', () => {
+      const source = 'procedure P is\nbegin\n  for I in 1..3 loop\n    Do_Something;\n  end loop\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'for');
+      assert.ok(forPair, 'for-loop block should be paired');
+      assert.match(forPair.closeKeyword.value.toLowerCase(), /^end\s+loop$/);
+      const procPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'procedure');
+      assert.ok(procPair, 'procedure block must survive');
+      assert.strictEqual(procPair.closeKeyword.value.toLowerCase(), 'end');
+    });
+
+    test('should treat "end case" without trailing semicolon as a compound end inside a procedure', () => {
+      const source = 'procedure P is\nbegin\n  case X is\n    when others => null;\n  end case\nend P;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const casePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(casePair, 'case block should be paired');
+      assert.match(casePair.closeKeyword.value.toLowerCase(), /^end\s+case$/);
+      const procPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'procedure');
+      assert.ok(procPair, 'procedure block must survive');
+      assert.strictEqual(procPair.closeKeyword.value.toLowerCase(), 'end');
+    });
+
+    test('should still leave end<newline>loop as separate end and loop opener', () => {
+      // Cross-line separator (`end` and `loop` on different lines): the `loop`
+      // must remain an independent block opener, not be merged into a compound
+      // end. Guards against the same-line rule over-reaching.
+      const source = 'if X then\n  null;\nend\nloop\n  null;\nend loop;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(firstIf, 'first if block should be paired');
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop block (independent) should be paired');
+      assert.match(loopBlock.closeKeyword.value.toLowerCase(), /^end\s+loop$/);
+    });
+  });
+
   suite('Regression 2026-05-15: compound end must not create crossed block pairs', () => {
     test('should not produce crossed pairs when end if and end loop are reversed', () => {
       // The inner `for ... loop` is closed by the outer `end loop`, while the
