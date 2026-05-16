@@ -6,6 +6,7 @@ import {
   generateCommonTests,
   generateEdgeCaseTests,
   generateExcludedRegionTests,
+  generateNestedBlockTests,
   generateRegexInterpolationTests,
   generateStringInterpolationTests
 } from '../helpers/sharedTestGenerators';
@@ -36,7 +37,20 @@ suite('RubyBlockParser Test Suite', () => {
     singleQuotedStringBlockClose: 'end',
     escapedQuoteStringSource: 'x = "say \\"if\\" end"\ndef foo\nend',
     escapedQuoteStringBlockOpen: 'def',
-    escapedQuoteStringBlockClose: 'end'
+    escapedQuoteStringBlockClose: 'end',
+    nestedBlockSource: `class Foo
+  def bar
+    if condition
+      do_something
+    end
+  end
+end`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [
+      { keyword: 'if', level: 2 },
+      { keyword: 'def', level: 1 },
+      { keyword: 'class', level: 0 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -168,20 +182,7 @@ end`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `class Foo
-  def bar
-    if condition
-      do_something
-    end
-  end
-end`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'if', 2);
-      assertNestLevel(pairs, 'def', 1);
-      assertNestLevel(pairs, 'class', 0);
-    });
+    generateNestedBlockTests(config);
 
     test('should parse deeply nested blocks', () => {
       const source = `module A

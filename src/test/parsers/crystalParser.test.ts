@@ -6,6 +6,7 @@ import {
   generateCommonTests,
   generateEdgeCaseTests,
   generateExcludedRegionTests,
+  generateNestedBlockTests,
   generateRegexInterpolationTests,
   generateStringInterpolationTests
 } from '../helpers/sharedTestGenerators';
@@ -33,7 +34,20 @@ suite('CrystalBlockParser Test Suite', () => {
     stringBlockClose: 'end',
     escapedQuoteStringSource: 'msg = "he said \\"if\\" and \\"end\\""\nif condition\nend',
     escapedQuoteStringBlockOpen: 'if',
-    escapedQuoteStringBlockClose: 'end'
+    escapedQuoteStringBlockClose: 'end',
+    nestedBlockSource: `class MyClass
+  def my_method
+    if condition
+      action
+    end
+  end
+end`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [
+      { keyword: 'if', level: 2 },
+      { keyword: 'def', level: 1 },
+      { keyword: 'class', level: 0 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -200,20 +214,7 @@ end`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `class MyClass
-  def my_method
-    if condition
-      action
-    end
-  end
-end`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'if', 2);
-      assertNestLevel(pairs, 'def', 1);
-      assertNestLevel(pairs, 'class', 0);
-    });
+    generateNestedBlockTests(config);
   });
 
   suite('Excluded regions - Comments', () => {

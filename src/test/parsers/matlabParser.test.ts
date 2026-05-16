@@ -1,8 +1,8 @@
 import * as assert from 'node:assert';
 import { MatlabBlockParser } from '../../parsers/matlabParser';
-import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('MatlabBlockParser Test Suite', () => {
   let parser: MatlabBlockParser;
@@ -37,7 +37,20 @@ suite('MatlabBlockParser Test Suite', () => {
     commentAtEndOfLineBlockClose: 'end',
     escapedQuoteStringSource: "msg = 'it''s an if statement';\nif true\nend",
     escapedQuoteStringBlockOpen: 'if',
-    escapedQuoteStringBlockClose: 'end'
+    escapedQuoteStringBlockClose: 'end',
+    nestedBlockSource: `function result = outer()
+  for i = 1:10
+    if i > 5
+      disp(i);
+    end
+  end
+end`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [
+      { keyword: 'if', level: 2 },
+      { keyword: 'for', level: 1 },
+      { keyword: 'function', level: 0 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -213,20 +226,7 @@ end`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `function result = outer()
-  for i = 1:10
-    if i > 5
-      disp(i);
-    end
-  end
-end`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'if', 2);
-      assertNestLevel(pairs, 'for', 1);
-      assertNestLevel(pairs, 'function', 0);
-    });
+    generateNestedBlockTests(config);
 
     test('should handle deeply nested blocks', () => {
       const source = `function outer()

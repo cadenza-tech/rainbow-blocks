@@ -2,7 +2,7 @@ import * as assert from 'node:assert';
 import { VerilogBlockParser } from '../../parsers/verilogParser';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('VerilogBlockParser Test Suite', () => {
   let parser: VerilogBlockParser;
@@ -34,7 +34,16 @@ suite('VerilogBlockParser Test Suite', () => {
     commentAtEndOfLineBlockClose: 'endmodule',
     escapedQuoteStringSource: 'module test;\n  initial $display("say \\"begin\\"");\nendmodule',
     escapedQuoteStringBlockOpen: 'module',
-    escapedQuoteStringBlockClose: 'endmodule'
+    escapedQuoteStringBlockClose: 'endmodule',
+    nestedBlockSource: `module test;
+  always @(posedge clk) begin
+    if (enable) begin
+      data <= in;
+    end
+  end
+endmodule`,
+    nestedBlockCount: 5,
+    nestedBlockLevels: [{ keyword: 'module', level: 0 }]
   };
 
   suite('Simple blocks', () => {
@@ -233,18 +242,7 @@ endcase`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `module test;
-  always @(posedge clk) begin
-    if (enable) begin
-      data <= in;
-    end
-  end
-endmodule`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 5);
-      assertNestLevel(pairs, 'module', 0);
-    });
+    generateNestedBlockTests(config);
 
     test('should handle deeply nested structures', () => {
       const source = `module top;

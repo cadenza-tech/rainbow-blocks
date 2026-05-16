@@ -2,7 +2,7 @@ import * as assert from 'node:assert';
 import { VhdlBlockParser } from '../../parsers/vhdlParser';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('VhdlBlockParser Test Suite', () => {
   let parser: VhdlBlockParser;
@@ -34,7 +34,24 @@ suite('VhdlBlockParser Test Suite', () => {
     commentAtEndOfLineBlockClose: 'end if',
     escapedQuoteStringSource: 'signal msg : string := "say ""if""";\nif condition then\nend if;',
     escapedQuoteStringBlockOpen: 'if',
-    escapedQuoteStringBlockClose: 'end if'
+    escapedQuoteStringBlockClose: 'end if',
+    nestedBlockSource: `entity test is
+end entity;
+
+architecture rtl of test is
+begin
+  process (clk)
+  begin
+    if rising_edge(clk) then
+      q <= d;
+    end if;
+  end process;
+end architecture;`,
+    nestedBlockCount: 4,
+    nestedBlockLevels: [
+      { keyword: 'entity', level: 0 },
+      { keyword: 'architecture', level: 0 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -205,24 +222,7 @@ end case;`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `entity test is
-end entity;
-
-architecture rtl of test is
-begin
-  process (clk)
-  begin
-    if rising_edge(clk) then
-      q <= d;
-    end if;
-  end process;
-end architecture;`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 4);
-      assertNestLevel(pairs, 'entity', 0);
-      assertNestLevel(pairs, 'architecture', 0);
-    });
+    generateNestedBlockTests(config);
 
     test('should handle deeply nested if statements', () => {
       const source = `if a then

@@ -1,9 +1,9 @@
 import * as assert from 'node:assert';
 import { isOrElseShortCircuit } from '../../parsers/adaHelpers';
 import { AdaBlockParser } from '../../parsers/adaParser';
-import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('AdaBlockParser Test Suite', () => {
   let parser: AdaBlockParser;
@@ -35,7 +35,17 @@ suite('AdaBlockParser Test Suite', () => {
     commentAtEndOfLineBlockClose: 'end if',
     escapedQuoteStringSource: 'Put("say ""if""");\nif Condition then\nend if;',
     escapedQuoteStringBlockOpen: 'if',
-    escapedQuoteStringBlockClose: 'end if'
+    escapedQuoteStringBlockClose: 'end if',
+    nestedBlockSource: `procedure Outer is
+begin
+   for I in 1 .. 10 loop
+      if I > 5 then
+         Put(I);
+      end if;
+   end loop;
+end Outer;`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [{ keyword: 'procedure', level: 0 }]
   };
 
   suite('Simple blocks', () => {
@@ -234,19 +244,7 @@ end;`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `procedure Outer is
-begin
-   for I in 1 .. 10 loop
-      if I > 5 then
-         Put(I);
-      end if;
-   end loop;
-end Outer;`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'procedure', 0);
-    });
+    generateNestedBlockTests(config);
 
     test('should handle deeply nested if statements', () => {
       const source = `if A then

@@ -2,7 +2,7 @@
 
 import * as assert from 'node:assert';
 import type { BaseBlockParser } from '../../parsers/baseParser';
-import { assertNoBlocks, assertSingleBlock, assertTokenPosition, assertTokens } from './parserTestHelpers';
+import { assertBlockCount, assertNestLevel, assertNoBlocks, assertSingleBlock, assertTokenPosition, assertTokens } from './parserTestHelpers';
 
 // Configuration for common test generation
 export interface CommonTestConfig {
@@ -49,6 +49,11 @@ export interface CommonTestConfig {
   escapedQuoteStringSource?: string;
   escapedQuoteStringBlockOpen?: string;
   escapedQuoteStringBlockClose?: string;
+
+  // Nested blocks - heterogeneous multi-level nest verification
+  nestedBlockSource?: string;
+  nestedBlockCount?: number;
+  nestedBlockLevels?: ReadonlyArray<{ keyword: string; level: number }>;
 }
 
 // Generate edge case tests (empty source, no blocks)
@@ -150,6 +155,23 @@ export function generateExcludedRegionTests(config: CommonTestConfig): void {
       assertSingleBlock(pairs, eqOpen, eqClose);
     });
   }
+}
+
+// Generate nested-block nest-level verification test
+// Callers must set nestedBlockSource/Count/Levels; an incomplete config fails loudly instead of silently skipping
+export function generateNestedBlockTests(config: CommonTestConfig): void {
+  test('should parse nested blocks with correct nest levels', () => {
+    const { nestedBlockSource, nestedBlockCount, nestedBlockLevels } = config;
+    assert.ok(
+      nestedBlockSource && nestedBlockCount !== undefined && nestedBlockLevels,
+      'generateNestedBlockTests requires nestedBlockSource, nestedBlockCount, and nestedBlockLevels in config'
+    );
+    const pairs = config.getParser().parse(nestedBlockSource);
+    assertBlockCount(pairs, nestedBlockCount);
+    for (const { keyword, level } of nestedBlockLevels) {
+      assertNestLevel(pairs, keyword, level);
+    }
+  });
 }
 
 // Generate string interpolation tests (Ruby/Crystal shared)

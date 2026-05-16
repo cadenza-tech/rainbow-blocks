@@ -1,8 +1,8 @@
 import * as assert from 'node:assert';
 import { CobolBlockParser } from '../../parsers/cobolParser';
-import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock } from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('CobolBlockParser Test Suite', () => {
   let parser: CobolBlockParser;
@@ -37,7 +37,21 @@ suite('CobolBlockParser Test Suite', () => {
     commentAtEndOfLineBlockClose: 'END-IF',
     escapedQuoteStringSource: "MOVE 'It''s an IF statement' TO A\nIF CONDITION\nEND-IF",
     escapedQuoteStringBlockOpen: 'IF',
-    escapedQuoteStringBlockClose: 'END-IF'
+    escapedQuoteStringBlockClose: 'END-IF',
+    nestedBlockSource: `PERFORM
+  IF CONDITION
+    EVALUATE VALUE
+      WHEN 1
+        DISPLAY "Nested"
+    END-EVALUATE
+  END-IF
+END-PERFORM`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [
+      { keyword: 'PERFORM', level: 0 },
+      { keyword: 'IF', level: 1 },
+      { keyword: 'EVALUATE', level: 2 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -219,21 +233,7 @@ END-EVALUATE`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `PERFORM
-  IF CONDITION
-    EVALUATE VALUE
-      WHEN 1
-        DISPLAY "Nested"
-    END-EVALUATE
-  END-IF
-END-PERFORM`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'PERFORM', 0);
-      assertNestLevel(pairs, 'IF', 1);
-      assertNestLevel(pairs, 'EVALUATE', 2);
-    });
+    generateNestedBlockTests(config);
 
     test('should handle deeply nested IF statements', () => {
       const source = `IF A

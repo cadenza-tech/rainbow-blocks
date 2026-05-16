@@ -2,7 +2,7 @@ import * as assert from 'node:assert';
 import { ElixirBlockParser } from '../../parsers/elixirParser';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('ElixirBlockParser Test Suite', () => {
   let parser: ElixirBlockParser;
@@ -27,7 +27,20 @@ suite('ElixirBlockParser Test Suite', () => {
     stringBlockClose: 'end',
     escapedQuoteStringSource: 'x = "say \\"if\\" end"\ndef foo do\nend',
     escapedQuoteStringBlockOpen: 'def',
-    escapedQuoteStringBlockClose: 'end'
+    escapedQuoteStringBlockClose: 'end',
+    nestedBlockSource: `defmodule MyModule do
+  def my_func do
+    if condition do
+      action()
+    end
+  end
+end`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [
+      { keyword: 'if', level: 2 },
+      { keyword: 'def', level: 1 },
+      { keyword: 'defmodule', level: 0 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -291,20 +304,7 @@ end`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `defmodule MyModule do
-  def my_func do
-    if condition do
-      action()
-    end
-  end
-end`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'if', 2);
-      assertNestLevel(pairs, 'def', 1);
-      assertNestLevel(pairs, 'defmodule', 0);
-    });
+    generateNestedBlockTests(config);
   });
 
   suite('do: one-liner exclusion', () => {

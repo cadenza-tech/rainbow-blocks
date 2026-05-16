@@ -3,7 +3,7 @@ import { collapseContinuationLines, isAfterDoubleColon, isPrecedingContinuationK
 import { FortranBlockParser } from '../../parsers/fortranParser';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
-import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests } from '../helpers/sharedTestGenerators';
+import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
 suite('FortranBlockParser Test Suite', () => {
   let parser: FortranBlockParser;
@@ -38,7 +38,20 @@ suite('FortranBlockParser Test Suite', () => {
     commentAtEndOfLineBlockClose: 'end if',
     escapedQuoteStringSource: "print *, 'it''s an if statement'\nif (condition) then\nend if",
     escapedQuoteStringBlockOpen: 'if',
-    escapedQuoteStringBlockClose: 'end if'
+    escapedQuoteStringBlockClose: 'end if',
+    nestedBlockSource: `program test
+  do i = 1, 10
+    if (i > 5) then
+      print *, i
+    end if
+  end do
+end program`,
+    nestedBlockCount: 3,
+    nestedBlockLevels: [
+      { keyword: 'program', level: 0 },
+      { keyword: 'do', level: 1 },
+      { keyword: 'if', level: 2 }
+    ]
   };
 
   suite('Simple blocks', () => {
@@ -232,20 +245,7 @@ end module`;
   });
 
   suite('Nested blocks', () => {
-    test('should parse nested blocks with correct nest levels', () => {
-      const source = `program test
-  do i = 1, 10
-    if (i > 5) then
-      print *, i
-    end if
-  end do
-end program`;
-      const pairs = parser.parse(source);
-      assertBlockCount(pairs, 3);
-      assertNestLevel(pairs, 'program', 0);
-      assertNestLevel(pairs, 'do', 1);
-      assertNestLevel(pairs, 'if', 2);
-    });
+    generateNestedBlockTests(config);
 
     test('should handle deeply nested if statements', () => {
       const source = `if (a) then
