@@ -75,18 +75,19 @@ export function activate(context: vscode.ExtensionContext): void {
   const decorator = new BlockDecorator(currentConfig);
   const debounceTimers = new Map<vscode.TextDocument, ReturnType<typeof setTimeout>>();
 
+  // Clears and cancels all pending debounce timers
+  function clearAllDebounceTimers(): void {
+    for (const timer of debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    debounceTimers.clear();
+  }
+
   // Register decorator for automatic disposal
   context.subscriptions.push(decorator);
 
   // Register debounce timer cleanup
-  context.subscriptions.push({
-    dispose: () => {
-      for (const timer of debounceTimers.values()) {
-        clearTimeout(timer);
-      }
-      debounceTimers.clear();
-    }
-  });
+  context.subscriptions.push({ dispose: clearAllDebounceTimers });
 
   // Updates decorations after debounce delay for all visible editors showing the given document
   function updateDecorationsDebounced(document: vscode.TextDocument): void {
@@ -184,10 +185,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration(CONFIG_SECTION)) {
-        for (const timer of debounceTimers.values()) {
-          clearTimeout(timer);
-        }
-        debounceTimers.clear();
+        clearAllDebounceTimers();
         currentConfig = loadConfig();
         decorator.updateConfig(currentConfig);
         for (const editor of vscode.window.visibleTextEditors) {
