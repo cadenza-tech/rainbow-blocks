@@ -3289,6 +3289,50 @@ endmodule`;
     });
   });
 
+  suite('Regression: case keyword used as identifier in assignment right-hand side', () => {
+    test('should not tokenize `case` as block_open on the right-hand side of `=`', () => {
+      // Bug: `x = case;` uses the reserved word `case` as an identifier. The `case`
+      // was tokenized as block_open and falsely paired with the trailing `endcase`.
+      const source = 'x = case;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'case'), '`case` after `=` must not be tokenized as block_open');
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should not tokenize `casex` as block_open on the right-hand side of non-blocking `<=`', () => {
+      const source = 'y <= casex;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'casex'), '`casex` after `<=` must not be tokenized as block_open');
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should not tokenize `randcase` as block_open on the right-hand side of `=`', () => {
+      const source = 'b = randcase;';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'randcase'), '`randcase` after `=` must not be tokenized as block_open');
+    });
+
+    test('should still parse a normal case statement', () => {
+      // Sanity: `case (expr)` at statement position must remain a real block.
+      const pairs = parser.parse('case (sel)\n  1: x = a;\n  default: x = b;\nendcase');
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should still parse a normal randcase statement', () => {
+      // Sanity: `randcase` at statement position must remain a real block.
+      const pairs = parser.parse('randcase\n  50: x = 1;\nendcase');
+      assertSingleBlock(pairs, 'randcase', 'endcase');
+    });
+
+    test('should still parse a case statement as the body of always', () => {
+      // Sanity: `always @(...) case (...)` keeps the case as a real block even
+      // though a control keyword precedes it.
+      const pairs = parser.parse('always @(posedge clk) case (sel)\n  1: x = 1;\nendcase');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'case');
+    });
+  });
+
   suite('Regression: line comments between control keyword and label colon', () => {
     test('should skip line comments when checking label-colon adjacency', () => {
       // Bug: `isFollowedByLabelColon` only skipped block comments, so a line
