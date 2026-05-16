@@ -2,6 +2,34 @@
 
 import type { ExcludedRegion } from '../types';
 
+// Block-opening verbs (uppercase). When such a verb appears past the copybook
+// name of a COPY statement, the COPY statement is over: a period-less COPY does
+// not extend across a following block-opening statement. Kept in sync with
+// CobolBlockParser.keywords.blockOpen.
+const COPY_TERMINATING_VERBS = new Set([
+  'PERFORM',
+  'IF',
+  'EVALUATE',
+  'READ',
+  'WRITE',
+  'REWRITE',
+  'DELETE',
+  'START',
+  'RETURN',
+  'SEARCH',
+  'STRING',
+  'UNSTRING',
+  'ACCEPT',
+  'DISPLAY',
+  'CALL',
+  'INVOKE',
+  'COMPUTE',
+  'ADD',
+  'SUBTRACT',
+  'MULTIPLY',
+  'DIVIDE'
+]);
+
 // Callbacks for parser methods that remain in CobolBlockParser. The optional cache
 // callbacks are populated by the parser before each parse so that pseudo-text /
 // COPY-context checks (called once per `==` delimiter) avoid re-scanning the
@@ -337,6 +365,70 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
   return -1;
 }
 
+// Scans from just after a COPY keyword for the first block-opening verb that
+// appears past the copybook name. The copybook name is the first word after
+// COPY; an optional `OF`/`IN <library>` qualifier may follow it. Returns the
+// offset of that verb, or -1 when none is found before `limit`. Strings, *>
+// inline comments, fixed-format comment lines and >> directive lines are
+// skipped so keywords inside them are not mistaken for a statement boundary.
+function findBlockVerbAfterCopy(source: string, copyEnd: number, limit: number, callbacks: CobolHelperCallbacks): number {
+  let i = copyEnd;
+  let wordIndex = 0;
+  let expectLibrary = false;
+  while (i < limit) {
+    const ch = source[i];
+    // Skip *> inline comments to end of line
+    if (ch === '*' && i + 1 < source.length && source[i + 1] === '>') {
+      i += 2;
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') i++;
+      continue;
+    }
+    // Skip string literals (they cannot span line breaks in COBOL)
+    if (ch === "'" || ch === '"') {
+      i++;
+      while (i < source.length && source[i] !== ch && source[i] !== '\n' && source[i] !== '\r') i++;
+      if (i < source.length && source[i] === ch) i++;
+      continue;
+    }
+    // Skip fixed-format comment lines and >> directive lines entirely
+    if (ch === '\n' || ch === '\r') {
+      i++;
+      if (i < limit && isOnExcludedLine(source, i, callbacks)) {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') i++;
+      }
+      continue;
+    }
+    // Identifier-like word
+    if (/[a-zA-Z0-9]/.test(ch)) {
+      const wordStart = i;
+      while (i < source.length && /[a-zA-Z0-9_-]/.test(source[i])) i++;
+      if (wordStart >= limit) break;
+      const upper = source.slice(wordStart, i).toUpperCase();
+      // Word 0 is the copybook name itself — never a statement boundary.
+      if (wordIndex === 0) {
+        wordIndex++;
+        continue;
+      }
+      // `COPY name OF lib` / `COPY name IN lib`: the library name is part of COPY.
+      if (expectLibrary) {
+        expectLibrary = false;
+        continue;
+      }
+      if (upper === 'OF' || upper === 'IN') {
+        expectLibrary = true;
+        continue;
+      }
+      if (COPY_TERMINATING_VERBS.has(upper)) {
+        return wordStart;
+      }
+      wordIndex++;
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
 // Checks if position is within a COPY statement by looking for COPY before the last period
 // Scans backward for COPY, skipping content inside strings, comments, and directive lines
 export function isInCopyStatement(source: string, posBeforeKeyword: number, callbacks: CobolHelperCallbacks): boolean {
@@ -390,7 +482,14 @@ export function isInCopyStatement(source: string, posBeforeKeyword: number, call
         }
       }
     }
-    if (!inString) return true;
+    if (inString) continue;
+    // A period-less COPY otherwise extends to the next period (or end of
+    // source), wrongly swallowing later statements. Once a block-opening verb
+    // appears past the copybook name the COPY statement is over; if the queried
+    // position is at or past that verb it is not inside the COPY statement.
+    const verbBoundary = findBlockVerbAfterCopy(source, absPos + 4, posBeforeKeyword + 1, callbacks);
+    if (verbBoundary >= 0 && posBeforeKeyword >= verbBoundary) continue;
+    return true;
   }
   return false;
 }

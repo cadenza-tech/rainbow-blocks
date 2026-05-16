@@ -43,6 +43,34 @@ const DATA_NAME_VERBS = new Set([
   'REMAINDER'
 ]);
 
+// Block-opening verbs (uppercase). When such a verb appears past the copybook
+// name of a COPY statement, the COPY statement is over: a period-less COPY does
+// not extend across a following block-opening statement. Used by the
+// pseudo-text forward scan to drop COPY context once a block verb is seen.
+const COPY_TERMINATING_VERBS = new Set([
+  'PERFORM',
+  'IF',
+  'EVALUATE',
+  'READ',
+  'WRITE',
+  'REWRITE',
+  'DELETE',
+  'START',
+  'RETURN',
+  'SEARCH',
+  'STRING',
+  'UNSTRING',
+  'ACCEPT',
+  'DISPLAY',
+  'CALL',
+  'INVOKE',
+  'COMPUTE',
+  'ADD',
+  'SUBTRACT',
+  'MULTIPLY',
+  'DIVIDE'
+]);
+
 // Mapping of close keywords to their valid openers (case insensitive comparison)
 const CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   'end-perform': 'perform',
@@ -260,13 +288,18 @@ export class CobolBlockParser extends BaseBlockParser {
     //   - sawCopy: a COPY keyword was seen since the last period
     //   - inReplaceContext: a REPLACING/REPLACE/ALSO was seen, so following
     //     `==...==` pairs are pseudo-text. REPLACING additionally requires sawCopy.
+    //   - copyWordsSeen: words seen since COPY (word 0 is the copybook name).
+    //     Used to drop sawCopy when a block-opening verb ends a period-less COPY.
+    //   - expectCopyLibrary: the next word is the library name of `COPY name OF`.
     let sawCopy = false;
     let inReplaceContext = false;
+    let copyWordsSeen = 0;
+    let expectCopyLibrary = false;
     let i = 0;
     while (i < source.length) {
       const ch = source[i];
       // End of statement: period (outside strings/comments — those are handled
-      // by the if-cases below). Reset both flags.
+      // by the if-cases below). Reset all statement-level flags.
       if (ch === '.') {
         let lineStart = i;
         while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
@@ -275,6 +308,8 @@ export class CobolBlockParser extends BaseBlockParser {
         if (!this.isFixedFormatCommentLine(source, lineStart)) {
           sawCopy = false;
           inReplaceContext = false;
+          copyWordsSeen = 0;
+          expectCopyLibrary = false;
         }
         i++;
         continue;
@@ -393,10 +428,28 @@ export class CobolBlockParser extends BaseBlockParser {
         // Reject hyphenated identifiers like X-REPLACING by checking the next char
         if (word === 'COPY') {
           sawCopy = true;
+          copyWordsSeen = 0;
+          expectCopyLibrary = false;
         } else if (word === 'REPLACE') {
           inReplaceContext = true;
         } else if (word === 'REPLACING' && sawCopy) {
           inReplaceContext = true;
+        } else if (sawCopy) {
+          // Words inside an in-progress COPY statement. word 0 is the copybook
+          // name; `OF`/`IN <lib>` may qualify it. A block-opening verb past the
+          // copybook name ends a period-less COPY, so drop sawCopy — this stops
+          // a later REPLACING from being treated as part of this COPY.
+          if (copyWordsSeen === 0) {
+            copyWordsSeen = 1;
+          } else if (expectCopyLibrary) {
+            expectCopyLibrary = false;
+          } else if (word === 'OF' || word === 'IN') {
+            expectCopyLibrary = true;
+          } else if (COPY_TERMINATING_VERBS.has(word)) {
+            sawCopy = false;
+          } else {
+            copyWordsSeen++;
+          }
         }
         i = end;
         continue;
@@ -627,9 +680,66 @@ export class CobolBlockParser extends BaseBlockParser {
       // state where the rest of the statement is ambiguous. We must not
       // suppress real keywords past that ambiguity.
       if (this.hasUnterminatedPseudoTextBetween(absPos, position, excludedRegions)) continue;
+      // A period-less COPY statement otherwise extends to the next period (or
+      // end of source), wrongly swallowing later blocks. Only the copybook name
+      // (and an optional OF/IN library qualifier) may follow COPY; once a
+      // block-opening verb appears past the copybook name the COPY statement is
+      // over. If `position` is at or past that verb, it is not in the COPY.
+      const copyEnd = absPos + 4;
+      // `position + 1` so the block verb that sits exactly at `position` (the
+      // very keyword being classified) is itself recognised as the boundary.
+      const verbBoundary = this.findBlockVerbAfterCopybook(source, copyEnd, position + 1, excludedRegions);
+      if (verbBoundary >= 0 && position >= verbBoundary) continue;
       return true;
     }
     return false;
+  }
+
+  // Scans from just after a COPY keyword for the first block-opening verb that
+  // appears past the copybook name. The copybook name is the first word after
+  // COPY; an optional `OF`/`IN <library>` qualifier may follow it. Returns the
+  // offset of that verb, or -1 when none is found before `limit`. Keywords
+  // inside excluded regions (strings, comments, EXEC blocks, pseudo-text) are
+  // skipped so they cannot be mistaken for a statement boundary.
+  private findBlockVerbAfterCopybook(source: string, copyEnd: number, limit: number, excludedRegions: ExcludedRegion[]): number {
+    const WORD_PATTERN = /[a-zA-Z0-9][a-zA-Z0-9_-]*/g;
+    WORD_PATTERN.lastIndex = copyEnd;
+    let wordIndex = 0;
+    let expectLibrary = false;
+    let match = WORD_PATTERN.exec(source);
+    while (match !== null && match.index < limit) {
+      const wordPos = match.index;
+      if (this.isInExcludedRegion(wordPos, excludedRegions)) {
+        match = WORD_PATTERN.exec(source);
+        continue;
+      }
+      const upper = match[0].toUpperCase();
+      // Word 0 is the copybook name itself — never a statement boundary.
+      if (wordIndex === 0) {
+        wordIndex++;
+        match = WORD_PATTERN.exec(source);
+        continue;
+      }
+      // `COPY name OF lib` / `COPY name IN lib`: the library name follows the
+      // OF/IN qualifier and is also part of the COPY statement.
+      if (expectLibrary) {
+        expectLibrary = false;
+        match = WORD_PATTERN.exec(source);
+        continue;
+      }
+      if (upper === 'OF' || upper === 'IN') {
+        expectLibrary = true;
+        match = WORD_PATTERN.exec(source);
+        continue;
+      }
+      // A block-opening verb after the copybook name ends the COPY statement.
+      if (this.keywords.blockOpen.some((kw) => kw === upper.toLowerCase())) {
+        return wordPos;
+      }
+      wordIndex++;
+      match = WORD_PATTERN.exec(source);
+    }
+    return -1;
   }
 
   // Returns true if there is an excluded region between `from` and `to` that
