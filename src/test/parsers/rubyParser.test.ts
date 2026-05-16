@@ -3948,5 +3948,42 @@ end`;
     });
   });
 
+  suite('Regression: end in ternary value position is not a block close', () => {
+    test('should not treat end after ternary colon as a block close', () => {
+      const source = 'def m\n  x ? a : end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The def must pair with the real end (offset 20), not the ternary end (offset 16)
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, 20);
+    });
+
+    test('should not produce an end token for end in ternary value position', () => {
+      const source = 'def m\n  x ? a : end\nend';
+      const tokens = parser.getTokens(source);
+      const ternaryEnd = tokens.find((t) => t.value === 'end' && t.startOffset === 16);
+      assert.strictEqual(ternaryEnd, undefined, 'end at offset 16 (ternary value) must not be tokenized');
+    });
+
+    test('should still treat end followed by scope resolution as a block close', () => {
+      const source = 'def m\n  1\nend::CONST';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat end followed by method call as a block close', () => {
+      const source = 'def m\n  1\nend.to_s';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat case-when end with symbol branch as a block close', () => {
+      const source = 'def m\n  case x\n  when :a\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'case'));
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'def'));
+    });
+  });
+
   generateCommonTests(config);
 });
