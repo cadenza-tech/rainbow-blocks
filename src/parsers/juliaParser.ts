@@ -510,9 +510,19 @@ export class JuliaBlockParser extends BaseBlockParser {
               return false;
             }
           }
-          // Unmatched '[' (no closing ']') means the bracket is unclosed (likely during editing)
-          // Keywords after it should still be valid block keywords
+          // Unmatched '[' (no closing ']') means the bracket is unclosed (likely during editing).
           if (!this.hasMatchingCloseBracket(source, position + 3, excludedRegions)) {
+            // For an unclosed indexing bracket, an `end` that is the first non-whitespace
+            // token after `[` (e.g., `a[end`) is the lastindex reference, not a block
+            // close. Treat it as inside indexing brackets so it is not mis-paired with a
+            // surrounding block opener. Other `end`s after the unclosed `[` (separated by
+            // identifiers, newlines, or other tokens) keep their block-keyword meaning so
+            // the trailing real `end` still pairs with its opener.
+            if (isIndexing && isOnlyWhitespaceBetween(source, i + 1, position, excludedRegions)) {
+              return true;
+            }
+            // Otherwise keep the editing-friendly behavior: the keyword after the unclosed
+            // bracket is still a valid block keyword.
             return false;
           }
           return isIndexing;
