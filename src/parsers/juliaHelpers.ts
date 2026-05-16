@@ -1,7 +1,7 @@
 // Julia helper functions: pure utility functions with no parser state dependencies
 
 import type { ExcludedRegion } from '../types';
-import { isInExcludedRegion } from './parserUtils';
+import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
 // Callbacks for base parser methods needed by scanning functions
 export interface JuliaHelperCallbacks {
@@ -620,25 +620,6 @@ export function hasCommaAtDepthZero(source: string, start: number, end: number, 
     }
   }
   return false;
-}
-
-// Finds the excluded region containing pos using binary search; returns null if not found
-function findExcludedRegionAt(pos: number, regions: ExcludedRegion[]): ExcludedRegion | null {
-  let left = 0;
-  let right = regions.length - 1;
-  while (left <= right) {
-    const mid = Math.floor((left + right) / 2);
-    const region = regions[mid];
-    if (pos >= region.start && pos < region.end) {
-      return region;
-    }
-    if (pos < region.start) {
-      right = mid - 1;
-    } else {
-      left = mid + 1;
-    }
-  }
-  return null;
 }
 
 // Checks if there is only whitespace (or comment-style excluded regions) between two positions.

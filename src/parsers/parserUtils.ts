@@ -1,6 +1,6 @@
 // Shared utility functions used across multiple parsers
 
-import type { LanguageKeywords, OpenBlock, Token, TokenType } from '../types';
+import type { ExcludedRegion, LanguageKeywords, OpenBlock, Token, TokenType } from '../types';
 
 // Find the last opener in the stack matching the given keyword value
 // Used by Ada, VHDL, Fortran, COBOL, Octave (case-insensitive) and Bash, AppleScript (case-sensitive)
@@ -274,4 +274,27 @@ export function isInExcludedRegion(pos: number, regions: { start: number; end: n
   }
 
   return false;
+}
+
+// Binary search to find the excluded region containing a position; returns null if none
+// Standalone version for use in helper modules; see also BaseBlockParser.findExcludedRegionAt
+export function findExcludedRegionAt(pos: number, regions: ExcludedRegion[]): ExcludedRegion | null {
+  let left = 0;
+  let right = regions.length - 1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const region = regions[mid];
+
+    if (pos >= region.start && pos < region.end) {
+      return region;
+    }
+    if (pos < region.start) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
+    }
+  }
+
+  return null;
 }
