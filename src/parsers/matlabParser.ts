@@ -524,6 +524,19 @@ export class MatlabBlockParser extends BaseBlockParser {
         if (this.isInsideParensOrBrackets(source, token.startOffset, excludedRegions)) {
           return false;
         }
+        // Reject block_middle keywords immediately preceded by a binary expression
+        // operator (`1 + case`, `2 * otherwise`). Such a keyword is an operand, not a
+        // real intermediate; registering it would corrupt the switch/if structure.
+        // Symmetric with the isValidBlockOpen operator check for block openers.
+        if (this.isPrecededByBinaryOperator(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+        // Reject block_middle keywords immediately preceded by `@` (function handle
+        // prefix, e.g. `@case`). The `@` puts the keyword in identifier-reference
+        // context, so it is not a real intermediate. Symmetric with isValidBlockOpen.
+        if (this.isPrecededByAtSign(source, token.startOffset)) {
+          return false;
+        }
         // Reject block_middle keywords used as function calls in expression context
         // (`y = case(value)`, `z = otherwise(x)`). Treating these as intermediates
         // would corrupt switch-case structure.
