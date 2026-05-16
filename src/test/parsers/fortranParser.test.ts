@@ -5377,5 +5377,60 @@ end if`;
     });
   });
 
+  suite('Regression: keyword split across continuation line', () => {
+    // When a keyword is split across a free-form continuation (e.g. `end do`
+    // written as `en&` / `d do`), the trailing physical line `d do` carries the
+    // tail of a split keyword. The bare-regex tokenizer would otherwise emit a
+    // phantom `do` opener from inside `d do`, stealing a later `end do` and
+    // orphaning the real `do`. Suppress keyword tokens on such continuation
+    // lines (the physical line begins with an identifier char, not `&`, and the
+    // prior line's continuation `&` directly follows an identifier char).
+    test('should pair the real do, not a phantom do, when end do is split', () => {
+      const source = `do i=1,5
+  x=1
+en&
+d do
+end do`;
+      const pairs = parser.parse(source);
+      // Exactly one pair, opened by the real `do` at offset 0 (not the phantom
+      // `do` inside the split `d do` continuation line).
+      assertSingleBlock(pairs, 'do', 'end do');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'pair must be opened by the real `do` at offset 0, not a phantom `do`');
+    });
+
+    test('should not tokenize a phantom do inside a split d do line', () => {
+      const source = `do i=1,5
+en&
+d do`;
+      const tokens = parser.getTokens(source);
+      // Only the real `do` opener at offset 0; the `do` inside `d do` is suppressed.
+      const doTokens = tokens.filter((t) => t.value.toLowerCase() === 'do');
+      assert.strictEqual(doTokens.length, 1, `expected only the real do token, got: ${JSON.stringify(doTokens.map((t) => t.startOffset))}`);
+      assert.strictEqual(doTokens[0].startOffset, 0);
+    });
+
+    test('should not suppress a keyword on a continuation line after a non-identifier &', () => {
+      // `if (cond) &` ends with `&` preceded by `)` (non-identifier), so the
+      // continuation line `then` starts a fresh token and must not be suppressed.
+      const source = `if (cond) &
+then
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still detect end &\\n do compound close (continuation after end)', () => {
+      // `end &` has `&` preceded by whitespace, so the `do` on the next line is
+      // a fresh token and the existing `end &\n do` compound detection applies.
+      const source = `do i=1,5
+end &
+do`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'do');
+      assert.strictEqual(pairs[0].closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end do');
+    });
+  });
+
   generateCommonTests(config);
 });
