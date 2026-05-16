@@ -399,6 +399,14 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
         return false;
       }
+      // Reject block opener immediately followed by a binary expression operator or a
+      // compound assignment (`for + 1;`, `while * 2`, `for += 1`, `if -= 1`). Such forms
+      // use the reserved word as an operand or an assignment target, not a block opener;
+      // treating them as block_open destroys outer block pairing. Symmetric to the
+      // preceding-operator check above.
+      if (this.isFollowedByBinaryOperator(source, position + keyword.length, keyword)) {
+        return false;
+      }
     }
     // Reject block opener used as a command-syntax argument (`clear if`, `clear for`,
     // `disp while`, etc.). The leading identifier is a command and the keyword is a
@@ -1004,6 +1012,63 @@ export class MatlabBlockParser extends BaseBlockParser {
       i++;
     }
     return i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=');
+  }
+
+  // Returns true when a block-opener keyword (whose end is `afterPos`) is immediately
+  // followed (after whitespace) by an operator that makes the keyword an operand or an
+  // assignment target rather than a real block opener:
+  //   * A compound assignment (`+= -= *= /= ^= \= .^= .*=` ...) — the keyword is the
+  //     assignment target (`for += 1` ≡ `for = for + 1`). Rejected for every keyword.
+  //   * A strictly-binary operator (`* / ^ \ < > & |` or `:`) and the comparison
+  //     operators (`== ~= != <= >=`) — these can never start an expression, so the
+  //     keyword is the left operand (`while * 2`). Rejected for every keyword.
+  //   * For `for`/`parfor` only, also the prefix-capable operators `+ - ~ !` — a
+  //     for-header must be `for var = ...`, so it can never start with any operator
+  //     (`for + 1`). `if`/`while`/`switch` take an expression that legitimately can
+  //     start with a unary `+ - ~ !` (e.g. `if ~isempty(x)`), so those are NOT rejected.
+  // A single `=` (plain assignment, e.g. `for = 5`) is intentionally NOT handled here —
+  // isFollowedBySimpleAssignment covers that variable-name case.
+  private isFollowedByBinaryOperator(source: string, afterPos: number, keyword: string): boolean {
+    let i = afterPos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    if (i >= source.length) {
+      return false;
+    }
+    const ch = source[i];
+    const next = i + 1 < source.length ? source[i + 1] : '';
+    // Compound assignment: operator char (optionally `.`-prefixed) directly followed by
+    // `=`, but not the comparison operators `==`/`~=`/`<=`/`>=`/`!=`.
+    if (next === '=') {
+      if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '^' || ch === '\\' || ch === '&' || ch === '|') {
+        return true;
+      }
+    }
+    // `.`-prefixed compound assignment (`.^=`, `.*=`, `./=`, `.\=`).
+    if (ch === '.' && i + 2 < source.length && source[i + 2] === '=') {
+      const op = next;
+      if (op === '*' || op === '/' || op === '^' || op === '\\') {
+        return true;
+      }
+    }
+    // Strictly-binary operators that can never begin an expression.
+    if ('*/^\\<>&|:'.includes(ch)) {
+      return true;
+    }
+    // Comparison operators built on `=`/`~`/`!`: `==`, `~=`, `!=`.
+    if (ch === '=' && next === '=') {
+      return true;
+    }
+    if ((ch === '~' || ch === '!') && next === '=') {
+      return true;
+    }
+    // for/parfor headers must be `for var = ...` and can never start with any operator,
+    // including the prefix-capable `+ - ~ !`.
+    if ((keyword === 'for' || keyword === 'parfor') && (ch === '+' || ch === '-' || ch === '~' || ch === '!')) {
+      return true;
+    }
+    return false;
   }
 
   // Checks if a character is a comment prefix (overridden in Octave to include #)
