@@ -2501,6 +2501,26 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-16: invalid identifier-is statement', () => {
+    test('should not treat is in bare identifier statement as block intermediate', () => {
+      const source = 'package p is\n  my_signal\n  is something;\nend package;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      // `my_signal is something;` is invalid VHDL: the second `is` must not pollute
+      // the package intermediates. Only the package's own `is` remains.
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should keep is as real intermediate for entity header on its own line', () => {
+      const source = 'entity counter\n  is\nend entity;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+      // `entity counter` has no `is` of its own, so the line-start `is` legitimately
+      // belongs to the entity header and must remain an intermediate.
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   suite('Regression: component instantiation vs declaration', () => {
     test('should not treat component instantiation with label as block opener', () => {
       // Bug: 'inst: component ...' with simple 'end' causes component/end pairing,
