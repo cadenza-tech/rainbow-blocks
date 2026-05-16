@@ -780,6 +780,23 @@ unterminated heredoc`;
       assert.doesNotThrow(() => parser.parse(source));
     });
 
+    test('should not stack overflow on a long run of time prefixes', () => {
+      // isAtCommandPosition recurses once per `time` prefix when validating the
+      // trailing keyword; a long chain must not exhaust the call stack.
+      const source = `${'time '.repeat(6000)}if true; then echo; fi`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not stack overflow on a long run of environment variable prefixes', () => {
+      // isAtCommandPosition recurses once per `VAR=value` assignment prefix.
+      let prefixes = '';
+      for (let n = 0; n < 6000; n++) {
+        prefixes += `A${n}=${n} `;
+      }
+      const source = `${prefixes}if true; then echo; fi`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
     test('should handle real-world bash script', () => {
       const source = `#!/bin/bash
 
