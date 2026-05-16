@@ -506,7 +506,12 @@ export function isOnDpiLine(source: string, position: number, excludedRegions: E
   return /^(?:import|export)\s+"DPI[^"]*"/.test(lineBeforeKeyword);
 }
 
-// Returns true if position is inside unmatched parentheses (e.g., port list)
+// Returns true if position is inside a properly closed pair of parentheses
+// (e.g., a port list `(...)`). An unclosed `(` before `position` is incomplete
+// syntax (the user is still typing) and must NOT suppress later keywords: it
+// would otherwise treat every following construct as part of a port list. Only
+// when the innermost enclosing `(` is actually closed by a matching `)` at or
+// after `position` is `position` considered to be inside parentheses.
 export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VerilogValidationCallbacks): boolean {
   let depth = 0;
   for (let i = 0; i < position; i++) {
@@ -516,7 +521,22 @@ export function isInsideParens(source: string, position: number, excludedRegions
       if (depth > 0) depth--;
     }
   }
-  return depth > 0;
+  if (depth === 0) return false;
+  // Confirm the innermost enclosing `(` is closed at or after `position`:
+  // scan forward until the depth drops below its value at `position`.
+  let forwardDepth = depth;
+  for (let i = position; i < source.length; i++) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
+    if (source[i] === '(') {
+      forwardDepth++;
+    } else if (source[i] === ')') {
+      forwardDepth--;
+      if (forwardDepth < depth) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // case-statement openers. Used to decide whether a label colon belongs to a
