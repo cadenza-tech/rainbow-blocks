@@ -2140,6 +2140,72 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: block opener followed by binary operator is not block_open', () => {
+    test('should not treat for followed by + as block_open', () => {
+      // `for + 1;` uses the reserved word `for` as an operand of `+` — invalid MATLAB.
+      // Treating `for` as a block opener consumes the `if`-block end and breaks pairing.
+      // Lines: 0 = function f, 1 = for + 1, 2 = if true, 3 = inner end, 4 = outer end.
+      const source = 'function f\n  for + 1;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.openKeyword.line, 2);
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+
+    test('should not treat while followed by * as block_open', () => {
+      const source = 'function f\n  while * 2;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat for followed by compound assignment += as block_open', () => {
+      const source = 'function f\n  for += 1;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat if followed by compound assignment -= as block_open', () => {
+      const source = 'function f\n  if -= 1;\n  switch x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat switch followed by / as block_open', () => {
+      const source = 'function f\n  switch / 2;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should still treat for followed by an identifier as block opener', () => {
+      // Sanity check: a real `for` header (`for i = 1:5`) must remain a block opener.
+      const source = 'function f\n  for i = 1:5\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.line, 1);
+    });
+
+    test('should still treat for followed by ( as block opener', () => {
+      // `for (i = 1:5)` parenthesised header must remain a block opener.
+      const source = 'function f\n  for (i = 1:5)\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.line, 1);
+    });
+  });
+
   suite('Regression 2026-05-09: command-syntax argument is not block_open', () => {
     test('should treat clear if as command-syntax (if is string argument)', () => {
       // `clear if` is command-syntax: `clear` is a command and `if` is its string argument.
