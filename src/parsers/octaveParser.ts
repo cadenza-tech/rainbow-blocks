@@ -652,6 +652,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
             // Validate intermediate keyword against opener type
             if (middleValue === 'else' || middleValue === 'elseif') {
               if (topOpener !== 'if') break;
+              // `else` must be the last branch of an `if`: reject a duplicate
+              // `else` and an `elseif` appearing after `else` — both are syntax
+              // errors and must not be recorded as intermediates.
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawElse = intermediates.some((t) => t.value.toLowerCase() === 'else');
+              if (sawElse) break;
             } else if (middleValue === 'case' || middleValue === 'otherwise') {
               if (topOpener !== 'switch') break;
               // Reject case after otherwise — switch semantics require otherwise to be last,
@@ -661,6 +667,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
               if (sawOtherwise && (middleValue === 'case' || middleValue === 'otherwise')) break;
             } else if (middleValue === 'catch') {
               if (topOpener !== 'try') break;
+              // Octave allows at most one `catch` per `try` block. A duplicate is
+              // a syntax error and must not be recorded as an intermediate.
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawCatch = intermediates.some((t) => t.value.toLowerCase() === 'catch');
+              if (sawCatch) break;
             } else if (middleValue === 'unwind_protect_cleanup') {
               if (topOpener !== 'unwind_protect') break;
               // Octave allows at most one unwind_protect_cleanup per unwind_protect block.
