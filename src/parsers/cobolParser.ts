@@ -458,6 +458,14 @@ export class CobolBlockParser extends BaseBlockParser {
       if (this.isInExcludedRegion(pos, excludedRegions)) {
         continue;
       }
+      // Skip keywords used as a copybook name in a COPY statement (e.g.,
+      // `COPY IF.`). tokenize() drops these from the token stream; this
+      // pre-pass must drop them too, otherwise a copybook name like the `IF`
+      // in `COPY IF.` is pushed onto the opener stack here and steals the
+      // matching END-IF from the real opener, dropping the whole pair.
+      if (this.isInCopyStatement(source, pos, excludedRegions)) {
+        continue;
+      }
       // Skip hyphenated identifiers
       if (pos > 0 && source[pos - 1] === '-') {
         continue;
