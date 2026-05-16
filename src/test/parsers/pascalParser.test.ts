@@ -3000,6 +3000,36 @@ until done`;
     });
   });
 
+  suite('Regression 2026-05-16: record after less-than comparison in prior statement', () => {
+    test('should detect record type definition after a < comparison in a preceding statement', () => {
+      // The bare `<` in `const C = 1 < 2;` belongs to a prior statement. The `record`
+      // in the following type declaration must not be treated as a generic constraint.
+      const source = `const C = 1 < 2;
+type
+  TR = record
+    X: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should detect record type definition when an unbalanced < is far away in a prior statement', () => {
+      const source = `var
+  A: Boolean;
+begin
+  A := X < Y;
+end;
+type
+  TR = record
+    X: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const recordPair = findBlock(pairs, 'record');
+      assert.strictEqual(recordPair.closeKeyword.value, 'end');
+    });
+  });
+
   suite('Regression 2026-05-16: type section class after preceding begin-end block', () => {
     test('should detect class type definition in type section following a begin-end block', () => {
       // The `begin..end` of `procedure Foo` precedes a `type` section. The first
