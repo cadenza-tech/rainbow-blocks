@@ -264,8 +264,6 @@ end if`;
     generateExcludedRegionTests(config);
   });
 
-  suite('Excluded regions - Strings', () => {});
-
   suite('Case insensitivity', () => {
     test('should handle uppercase keywords', () => {
       const source = `IF (condition) THEN

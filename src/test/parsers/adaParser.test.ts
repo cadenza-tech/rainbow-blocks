@@ -263,8 +263,6 @@ end if;`;
     generateExcludedRegionTests(config);
   });
 
-  suite('Excluded regions - Strings', () => {});
-
   suite('Excluded regions - Character literals', () => {
     test('should handle character literals', () => {
       const source = `C : Character := 'a';
