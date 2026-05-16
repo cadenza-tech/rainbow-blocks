@@ -3123,5 +3123,33 @@ end try`;
     });
   });
 
+  suite('Regression: parenthesized `to` in tell target is not a one-liner marker', () => {
+    test('should detect tell application (path to me) as multi-line block', () => {
+      const source = 'tell application (path to me)\n  display dialog "hi"\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should detect nested tell (path to me) preserving both block pairs', () => {
+      const source = 'tell app\n  tell (path to me)\n    activate\n  end tell\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outerTell = pairs.find((p) => p.openKeyword.startOffset === 0);
+      const innerTell = pairs.find((p) => p.openKeyword.startOffset !== 0 && p.openKeyword.value === 'tell');
+      assert.ok(outerTell, 'outer tell at offset 0 should be paired');
+      assert.ok(innerTell, 'inner tell (path to me) should be paired');
+      assert.ok(
+        innerTell.closeKeyword.startOffset < outerTell.closeKeyword.startOffset,
+        'inner tell close must come before outer tell close (LIFO)'
+      );
+    });
+
+    test('should still treat top-level `to` after parenthesized target as one-liner', () => {
+      const source = 'tell (window 1) to activate';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
