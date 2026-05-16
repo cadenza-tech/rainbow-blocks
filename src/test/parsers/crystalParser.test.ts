@@ -4153,5 +4153,80 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: block-incompatible intermediate keywords (CR4)', () => {
+    test('should not add rescue to class intermediates', () => {
+      const source = 'class C\n  rescue\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not add when to def intermediates', () => {
+      const source = 'def foo\n  when x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not add elsif to case intermediates', () => {
+      const source = 'case x\n  elsif y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not add ensure to module intermediates', () => {
+      const source = 'module M\n  ensure\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still add rescue and ensure to def intermediates', () => {
+      const source = 'def foo\nrescue\nensure\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], ['rescue', 'ensure']);
+    });
+
+    test('should still add rescue and ensure to begin intermediates', () => {
+      const source = 'begin\nrescue\nensure\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue', 'ensure']);
+    });
+
+    test('should still add when and else to case intermediates', () => {
+      const source = 'case x\nwhen 1\nwhen 2\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['when', 'when', 'else']);
+    });
+
+    test('should still add elsif and else to if intermediates', () => {
+      const source = 'if cond\nelsif y\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['elsif', 'else']);
+    });
+
+    test('should still add rescue to a do-block', () => {
+      const source = '[1].each do |x|\nrescue\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should attach when to inner case, not outer def', () => {
+      const source = 'def foo\n  case x\n  when 1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const casePair = findBlock(pairs, 'case');
+      assertIntermediates(casePair, ['when']);
+      const defPair = findBlock(pairs, 'def');
+      assertIntermediates(defPair, []);
+    });
+  });
+
   generateCommonTests(config);
 });
