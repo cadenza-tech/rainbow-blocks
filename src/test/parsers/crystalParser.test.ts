@@ -3627,18 +3627,18 @@ end`;
     });
   });
 
-  suite('Regression: block keyword after macro template should not be postfix', () => {
-    test('should detect if block after {% %} macro template', () => {
+  suite('Regression: block keyword after {% %} macro statement should not be postfix', () => {
+    test('should detect if block after {% %} macro statement', () => {
       const pairs = parser.parse('{% x %} if condition\n  body\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
 
-    test('should detect unless block after {{ }} macro template', () => {
-      const pairs = parser.parse('{{ x }} unless condition\n  body\nend');
+    test('should detect unless block after {% %} macro statement', () => {
+      const pairs = parser.parse('{% x %} unless condition\n  body\nend');
       assertSingleBlock(pairs, 'unless', 'end');
     });
 
-    test('should detect while block after {% %} macro template', () => {
+    test('should detect while block after {% %} macro statement', () => {
       const pairs = parser.parse('{% x %} while condition\n  body\nend');
       assertSingleBlock(pairs, 'while', 'end');
     });
@@ -4124,6 +4124,32 @@ end`;
       const source = 'abstract \\\ndef foo\nclass Bar\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
+  suite('Regression 2026-05-16: postfix conditional after {{ }} macro expression (CR3)', () => {
+    test('should treat if after {{ }} macro expression as postfix inside a macro body', () => {
+      const source = 'macro foo\n  {{ x }} if cond\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'macro', 'end');
+    });
+
+    test('should treat if after {{ }} macro expression as postfix at top level', () => {
+      const source = '{{ x }} if cond\n body\n end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat unless after {{ }} macro expression as postfix', () => {
+      const source = '{{ x }} unless condition\n  body\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat if on its own line after {{ }} as a block opener', () => {
+      const source = '{{ x }}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
