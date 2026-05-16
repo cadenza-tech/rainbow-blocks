@@ -3843,6 +3843,43 @@ end`;
     });
   });
 
+  suite('Regression: iterator do after then or inside parens is not a loop do', () => {
+    test('should treat do after then in while header as iterator block do', () => {
+      const source = 'while c then arr.map do |x| x end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'do' && p.closeKeyword?.value === 'end'),
+        'do should be paired with end (iterator block)'
+      );
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'while' && p.closeKeyword?.value === 'end'),
+        'while should be paired with end'
+      );
+    });
+
+    test('should treat do inside parens of while condition as iterator block do', () => {
+      const source = 'while (compute do |x| x end)\n  body\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'do' && p.closeKeyword?.value === 'end'),
+        'do should be paired with end (iterator block inside parens)'
+      );
+      assert.ok(
+        pairs.find((p) => p.openKeyword.value === 'while' && p.closeKeyword?.value === 'end'),
+        'while should be paired with end'
+      );
+    });
+
+    test('should still treat real do after while-then as loop do for the inner while', () => {
+      const source = 'while a then while b do\n  body\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.find((p) => p.openKeyword.value === 'while'));
+    });
+  });
+
   suite('Regression 2026-05-06: char literal escape with trailing newline', () => {
     test('should not consume newline as char target in ?\\C-<newline>', () => {
       const source = '?\\C-\nif true\nend';
