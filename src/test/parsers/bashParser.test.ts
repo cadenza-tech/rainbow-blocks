@@ -2081,8 +2081,6 @@ esac`;
     });
   });
 
-  generateCommonTests(config);
-
   suite('Token positions - language-specific', () => {
     test('should have correct column numbers', () => {
       const source = `{
@@ -6052,4 +6050,6 @@ fi`;
       assertSingleBlock(pairs, 'if', 'fi');
     });
   });
+
+  generateCommonTests(config);
 });
