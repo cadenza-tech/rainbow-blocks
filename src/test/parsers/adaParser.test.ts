@@ -3400,7 +3400,7 @@ end if;`;
       return lines.join('\n');
     }
 
-    test('should parse 1200 nested if blocks well under one second', () => {
+    test('should parse 1200 nested if blocks without quadratic slowdown', () => {
       const source = buildNestedIfs(1200);
       // Warm-up to stabilize against JIT and module init.
       parser.parse(source);
@@ -3411,9 +3411,10 @@ end if;`;
       // Pre-fix `isInsideParens` scanned from each opener back to offset 0,
       // giving O(n^2) behavior (~10s at this depth). The bounded backward scan
       // keeps each lookup O(1); the parse then stays well under the threshold.
-      // The 2000ms threshold leaves wide headroom over the post-fix time
-      // (~0.1s) while still failing hard on the pre-fix quadratic blow-up.
-      assert.ok(elapsed < 2000, `parse took ${elapsed}ms (expected < 2000ms; pre-fix was ~10s)`);
+      // The precise scaling guard is the ratio test below; this absolute bound
+      // is generous (8000ms) so coverage instrumentation and CI contention do
+      // not flake it, while still failing hard on the pre-fix ~10s blow-up.
+      assert.ok(elapsed < 8000, `parse took ${elapsed}ms (expected < 8000ms; pre-fix was ~10s)`);
     });
 
     test('should not scale quadratically between 500 and 2000 nested if blocks', () => {

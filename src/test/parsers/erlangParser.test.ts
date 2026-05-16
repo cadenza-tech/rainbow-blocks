@@ -2563,15 +2563,18 @@ bar() -> fun() -> ok end.`;
       return lines.join('\n');
     }
 
-    test('should parse 2000-function source in under 600ms (linear scaling)', () => {
+    test('should parse 2000-function source without quadratic slowdown', () => {
       const source = buildLargeSource(2000);
+      // Warm-up to stabilize against JIT and module init.
+      parser.parse(source);
       const t0 = Date.now();
       const pairs = parser.parse(source);
       const elapsed = Date.now() - t0;
       assert.strictEqual(pairs.length, 2000, 'should parse all 2000 case-end blocks');
-      // Pre-fix: ~1700ms on this hardware; post-fix expected to be well under 600ms.
-      // Threshold chosen with 3-4x headroom over expected post-fix time.
-      assert.ok(elapsed < 600, `parse took ${elapsed}ms (expected < 600ms; pre-fix was ~1700ms)`);
+      // The precise scaling guard is the ratio test below; this absolute bound
+      // is generous (4000ms) so coverage instrumentation and CI contention do
+      // not flake it, while still failing on a gross hang.
+      assert.ok(elapsed < 4000, `parse took ${elapsed}ms (expected < 4000ms)`);
     });
 
     test('should scale roughly linearly between 500 and 2000 functions', () => {

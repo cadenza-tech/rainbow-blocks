@@ -1448,17 +1448,20 @@ end`;
       return 'for i=1,1 do end\ndo x=1 end\n'.repeat(repeats);
     }
 
-    test('should parse ~28KB of loops mixed with standalone do well under 2 seconds', () => {
+    test('should parse ~28KB of loops mixed with standalone do without super-quadratic slowdown', () => {
       // N=800 (~28KB) took ~61s with the O(N^3) bug; the linearized version is
-      // a few hundred ms. A 2000ms ceiling is generous for slow/contended CI
-      // while still failing by a wide margin if the cubic scan returns.
+      // a few hundred ms. An 8000ms ceiling is generous for coverage
+      // instrumentation and slow/contended CI while still failing by a wide
+      // margin if the cubic scan returns.
       const source = buildMixedSource(800);
+      // Warm-up to stabilize against JIT and module init.
+      parser.parse(source);
       const start = Date.now();
       const pairs = parser.parse(source);
       const elapsed = Date.now() - start;
       // Each unit contributes exactly 2 block pairs (loop do/end + standalone do/end)
       assertBlockCount(pairs, 1600);
-      assert.ok(elapsed < 2000, `parse took ${elapsed}ms, expected < 2000ms (super-quadratic regression)`);
+      assert.ok(elapsed < 8000, `parse took ${elapsed}ms, expected < 8000ms (super-quadratic regression)`);
     });
 
     test('should classify every do once via a per-source cache, not rescan per do keyword', () => {

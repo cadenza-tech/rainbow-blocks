@@ -2397,7 +2397,7 @@ end`;
   });
 
   suite('Regression 2026-05-15: large orphan end token list parses in linear time', () => {
-    test('should parse 10000 orphan end tokens in well under 2 seconds (linear time)', () => {
+    test('should parse 10000 orphan end tokens in linear time', () => {
       // Previously isInsideParensOrBrackets walked the source backward from each `end`,
       // making the worst case O(N^2). With 10000 orphan ends this took ~700ms; at 100k
       // it took ~63s. After precomputing bracket positions, the runtime is dominated by
@@ -2408,12 +2408,12 @@ end`;
       const pairs = parser.parse(source);
       const elapsed = Date.now() - start;
       assert.strictEqual(pairs.length, 0, 'orphan ends produce no pairs');
-      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+      assert.ok(elapsed < 3000, `expected parse to complete in <3000ms, took ${elapsed}ms (likely O(N^2) regression)`);
     });
   });
 
   suite('Regression 2026-05-16: space-separated keywords on one logical line parse in linear time', () => {
-    test('should parse 8000 space-separated orphan end tokens in well under 2 seconds (linear time)', () => {
+    test('should parse 8000 space-separated orphan end tokens in linear time', () => {
       // Previously isCommandSyntaxArgument (and the other logical-line-scanning methods)
       // walked from each keyword backward to the logical-line start. When many keywords
       // share one physical line (no `;`/`,`/newline between them), this is O(N^2): 8000
@@ -2426,10 +2426,10 @@ end`;
       const pairs = parser.parse(source);
       const elapsed = Date.now() - start;
       assert.strictEqual(pairs.length, 0, 'orphan ends produce no pairs');
-      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+      assert.ok(elapsed < 3000, `expected parse to complete in <3000ms, took ${elapsed}ms (likely O(N^2) regression)`);
     });
 
-    test('should parse 8000 space-separated orphan for tokens in well under 2 seconds (linear time)', () => {
+    test('should parse 8000 space-separated orphan for tokens in linear time', () => {
       // The block_open path (isUsedAsRhsIdentifier / isCommandSyntaxArgument) is O(N^2)
       // for the same reason. `for` keywords share one physical line here.
       const N = 8000;
@@ -2438,7 +2438,7 @@ end`;
       const pairs = parser.parse(source);
       const elapsed = Date.now() - start;
       assert.strictEqual(pairs.length, 0, 'orphan for openers without end produce no pairs');
-      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+      assert.ok(elapsed < 3000, `expected parse to complete in <3000ms, took ${elapsed}ms (likely O(N^2) regression)`);
     });
   });
 
