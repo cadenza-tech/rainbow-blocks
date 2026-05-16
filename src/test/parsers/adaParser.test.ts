@@ -2750,6 +2750,44 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-16: simple end followed by return statement must not merge', () => {
+    test('should not merge end<newline>return<identifier> into a compound end return', () => {
+      // An Ada 2012 extended return closes with `end return;` (no designator).
+      // A simple `end` on one line followed by `return Tmp;` on the next is a
+      // block close plus an independent return statement, and the two must not
+      // be collapsed into a compound `end return`. Otherwise the enclosing
+      // declare block loses its closing `end` and is orphaned.
+      const source =
+        'function Compute return Integer is\nbegin\n  declare\n    Tmp : Integer := 0;\n  begin\n    Tmp := 5;\n  end\n  return Tmp;\nend Compute;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const declarePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'declare');
+      assert.ok(declarePair, 'declare block must be paired');
+      assert.strictEqual(declarePair.closeKeyword.value.toLowerCase(), 'end');
+      const functionPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'function');
+      assert.ok(functionPair, 'function block must be paired');
+    });
+
+    test('should still recognize end return; as a compound end of an extended return', () => {
+      const source = 'function F return Integer is\nbegin\n  return R : Integer := 0 do\n    R := 42;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const returnBlock = findBlock(pairs, 'return');
+      assert.match(returnBlock.closeKeyword.value.toLowerCase(), /^end\s+return$/);
+    });
+
+    test('should keep end; and return statement separate when on the same line', () => {
+      // `end; return Foo;` — the `;` after `end` already terminates the close;
+      // the following `return Foo;` is an independent statement.
+      const source = 'function F return Integer is\nbegin\n  declare\n    Foo : Integer := 1;\n  begin\n    null;\n  end; return Foo;\nend F;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const declarePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'declare');
+      assert.ok(declarePair, 'declare block must be paired');
+      assert.strictEqual(declarePair.closeKeyword.value.toLowerCase(), 'end');
+    });
+  });
+
   suite('Regression: when intermediate inside Ada 2012 extended-return', () => {
     test('should attach when as intermediate of return block when used in exception handler', () => {
       const source =
