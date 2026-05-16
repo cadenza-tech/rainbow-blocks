@@ -144,12 +144,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
     // 'tell ... to action' on one line is a one-liner, not a block
     if (keyword === 'tell') {
-      // Reject `tell(` function-call form (e.g., `set x to tell()`, `tell ()`).
-      // Allow optional whitespace between the keyword and `(` to mirror the
-      // compound-keyword handling (`with timeout (5)`).
-      let parenScan = position + keyword.length;
-      while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
-      if (parenScan < source.length && source[parenScan] === '(') {
+      // Reject the `tell()` function-call form (e.g., `set x to tell()`, `tell ()`),
+      // but only when the parentheses are empty. `tell (window 1)` and `tell(window 1)`
+      // are valid blocks targeting a parenthesized object specifier, so a non-empty
+      // `(...)` must not be rejected. Optional whitespace before `(` is allowed.
+      if (this.isEmptyParenCall(source, position + keyword.length)) {
         return false;
       }
       if (this.isTellToOneLiner(source, position, excludedRegions)) {
@@ -1034,6 +1033,19 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     return pairs;
+  }
+
+  // Checks if an empty parenthesized call `()` starts at `pos`, allowing optional
+  // ASCII whitespace before `(` and whitespace-only content between the parens.
+  // `tell ()`, `tell( )`, and `tell  ( )` are function-call forms (rejected),
+  // whereas `tell (window 1)` carries a real object specifier and must NOT match.
+  private isEmptyParenCall(source: string, pos: number): boolean {
+    let i = pos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+    if (i >= source.length || source[i] !== '(') return false;
+    i++;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+    return i < source.length && source[i] === ')';
   }
 
   // Checks if 'tell' is followed by 'to' on the same line (one-liner form)
