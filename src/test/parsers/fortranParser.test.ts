@@ -5315,5 +5315,67 @@ end block data`;
     });
   });
 
+  suite('Regression: matchBlocks crossed-pair rejection', () => {
+    // A compound `end <type>` must not pair with an opener if doing so crosses an
+    // intervening opener whose own compound close is still pending later in the
+    // token stream. Best-effort parsing prefers leaving the outer opener as an
+    // orphan (no color) over producing a crossed pair (VS Code Bracket Pair
+    // Colorization anchor-set principle; Tree-sitter cost-minimization principle).
+    test('should reject crossed end if when an inner do is still pending', () => {
+      const source = `if (a) then
+  do i=1,10
+end if
+end do`;
+      const pairs = parser.parse(source);
+      // `do` / `end do` is the only valid pair; `if` stays orphan (no crossing).
+      assertSingleBlock(pairs, 'do', 'end do');
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'if'),
+        'if must remain orphan: pairing it with `end if` would cross the inner do'
+      );
+    });
+
+    test('should reject crossed end program when an inner do is still pending', () => {
+      const source = `program p
+  do i=1,10
+end program
+end do`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'program'),
+        'program must remain orphan: pairing it with `end program` would cross the inner do'
+      );
+    });
+
+    test('should reject crossed end module when an inner subroutine is still pending', () => {
+      const source = `module m
+  subroutine s
+end module
+end subroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'module'),
+        'module must remain orphan: pairing it with `end module` would cross the inner subroutine'
+      );
+    });
+
+    test('should still pair properly nested if/do without false rejection', () => {
+      const source = `if (a) then
+  do i=1,10
+  end do
+end if`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end do');
+      assert.strictEqual(doPair.nestLevel, 1);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end if');
+      assert.strictEqual(ifPair.nestLevel, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
