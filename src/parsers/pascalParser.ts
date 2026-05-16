@@ -4,7 +4,7 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import { findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 import type { PascalValidationCallbacks } from './pascalValidation';
-import { isIfThenElse, isInsideParens, isTypeDeclarationOf, isVariantRecordCase, TYPE_MODIFIERS } from './pascalValidation';
+import { buildRecordContextMap, isIfThenElse, isInsideParens, isTypeDeclarationOf, isVariantRecordCase, TYPE_MODIFIERS } from './pascalValidation';
 
 // Keywords that indicate comparison context (= is comparison, not type definition)
 const COMPARISON_CONTEXT_KEYWORDS = new Set([
@@ -41,6 +41,11 @@ const STATEMENT_CONTEXT_SCOPE_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm
 const DECLARATION_CONTEXT_SCOPE_KEYWORDS = new Set(['type', 'var', 'const']);
 
 export class PascalBlockParser extends BaseBlockParser {
+  // Per-parse map from `case` keyword offsets to whether they sit inside a record block.
+  // Built once at the start of tokenize() so variant-record-case detection is O(1) per
+  // `case` rather than re-scanning the whole source each time.
+  private recordContextMap: Map<number, boolean> = new Map();
+
   private get validationCallbacks(): PascalValidationCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
@@ -74,7 +79,7 @@ export class PascalBlockParser extends BaseBlockParser {
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
-      if (isVariantRecordCase(source, position, excludedRegions, this.validationCallbacks)) {
+      if (isVariantRecordCase(source, position, excludedRegions, this.validationCallbacks, this.recordContextMap)) {
         return false;
       }
     }
@@ -940,6 +945,10 @@ export class PascalBlockParser extends BaseBlockParser {
 
   // Override tokenize to handle case-insensitivity (Pascal is case-insensitive)
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Build the record-context map once per parse so each `case` keyword can resolve
+    // "inside a record" in O(1) instead of an O(N) backward scan.
+    this.recordContextMap = buildRecordContextMap(source, excludedRegions, this.validationCallbacks);
+
     const tokens: Token[] = [];
     const allKeywords = [...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle];
 

@@ -34,14 +34,211 @@ export function isInsideParens(source: string, position: number, excludedRegions
   return false;
 }
 
+// Skips whitespace, newlines, and excluded regions backward from `start` (inclusive).
+// Returns the index of the first significant character, or -1 if none.
+function skipWsExcludedBackward(source: string, start: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): number {
+  let i = start;
+  while (i >= 0) {
+    if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+      i--;
+      continue;
+    }
+    const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+    if (region) {
+      i = region.start - 1;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+// Skips whitespace, newlines, and excluded regions forward from `start` (inclusive).
+// Returns the index of the first significant character, or source.length if none.
+function skipWsExcludedForward(source: string, start: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): number {
+  let i = start;
+  while (i < source.length) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r') {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+// The structural role a block keyword plays for record-context tracking.
+//  - 'open-record': record/object — an enclosing block of this kind means "inside a record"
+//  - 'open-block': begin/class/interface/try/asm — a non-record block boundary
+//  - 'close': end — closes the nearest block
+//  - 'ignore': the keyword is not a block boundary here (forward decl, class-of, field type, etc.)
+type RecordContextRole = 'open-record' | 'open-block' | 'close' | 'ignore';
+
+// Classifies a block keyword occurrence for record-context tracking. This mirrors the
+// per-keyword accept/reject logic that the record scan needs: 'class'/'object'/'interface'
+// have several non-block uses (forward declarations, class-of references, field types,
+// method modifiers) that must not count as block boundaries.
+function recordContextKeywordRole(
+  source: string,
+  keywordStart: number,
+  keyword: string,
+  excludedRegions: ExcludedRegion[],
+  callbacks: PascalValidationCallbacks
+): RecordContextRole {
+  const lowerSource = source.toLowerCase();
+  switch (keyword) {
+    case 'end':
+      return 'close';
+    case 'begin':
+    case 'try':
+    case 'asm':
+      return 'open-block';
+    case 'record':
+      return 'open-record';
+    case 'object': {
+      // Skip 'object' in method pointer syntax: `procedure of object`
+      const oi = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
+      if (oi >= 1 && lowerSource.slice(oi - 1, oi + 1) === 'of' && (oi - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[oi - 2]))) {
+        return 'ignore';
+      }
+      // Skip 'object' as field type reference (preceded by ':')
+      if (oi >= 0 && source[oi] === ':') {
+        return 'ignore';
+      }
+      return 'open-record';
+    }
+    case 'interface': {
+      const ii = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
+      // Skip 'interface' as field type reference (preceded by ':')
+      if (ii >= 0 && source[ii] === ':') {
+        return 'ignore';
+      }
+      // Skip 'interface' as forward declaration (interface; or interface(IParent);)
+      if (isForwardDeclarationAfter(source, keywordStart + 9, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
+      return 'open-block';
+    }
+    case 'class': {
+      const ci = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
+      // Skip 'class' as field type reference (preceded by ':')
+      if (ci >= 0 && source[ci] === ':') {
+        return 'ignore';
+      }
+      // Skip 'class' as forward declaration (class; or class(Parent);)
+      if (isForwardDeclarationAfter(source, keywordStart + 5, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
+      // Skip 'class of' (class reference type, no matching end)
+      {
+        const ck = skipWsExcludedForward(source, keywordStart + 5, excludedRegions, callbacks);
+        if (ck + 1 < source.length && lowerSource.slice(ck, ck + 2) === 'of' && (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))) {
+          return 'ignore';
+        }
+      }
+      // Check if preceded by '=' (type definition): skip method modifier check
+      let eqCheck = ci;
+      let foundModifier = true;
+      while (foundModifier && eqCheck >= 0 && /[a-zA-Z]/.test(source[eqCheck])) {
+        foundModifier = false;
+        let wordStart = eqCheck;
+        while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
+        const modWord = lowerSource.slice(wordStart, eqCheck + 1);
+        if (TYPE_MODIFIERS.includes(modWord)) {
+          foundModifier = true;
+          eqCheck = wordStart - 1;
+          while (eqCheck >= 0 && (source[eqCheck] === ' ' || source[eqCheck] === '\t' || source[eqCheck] === '\n' || source[eqCheck] === '\r'))
+            eqCheck--;
+        }
+      }
+      if (eqCheck < 0 || source[eqCheck] !== '=') {
+        // Skip 'class' as method modifier (followed by function, procedure, var, etc.)
+        const cj = skipWsExcludedForward(source, keywordStart + 6, excludedRegions, callbacks);
+        const afterClass = lowerSource.slice(cj, cj + 12);
+        if (/^(function|procedure|var|property|constructor|destructor|operator)\b/.test(afterClass)) {
+          return 'ignore';
+        }
+      }
+      return 'open-block';
+    }
+    default:
+      return 'ignore';
+  }
+}
+
+// Block keywords scanned for record-context tracking
+const RECORD_CONTEXT_KEYWORD_PATTERN = /\b(begin|end|record|object|class|interface|try|asm|case)\b/gi;
+
+// Builds a map from each `case` keyword start offset to whether that `case` sits inside a
+// record block. This replaces per-`case` backward scans (which were O(N) each, O(N^2)
+// overall) with a single forward sweep: a stack tracks enclosing block openers, and each
+// `case` resolves "inside a record" by inspecting the nearest non-`case` enclosing block.
+//
+// `case` blocks are transparent for the record question (a `case` is never a record), but
+// a standalone `case` still has a matching `end`, so it is pushed; a variant `case` has no
+// own `end`, so it is not pushed.
+export function buildRecordContextMap(source: string, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): Map<number, boolean> {
+  const map = new Map<number, boolean>();
+  // Stack of enclosing block kinds: 'record'/'object' count as record context,
+  // 'block' is a non-record block, 'case' is transparent for the record question.
+  const stack: ('record' | 'block' | 'case')[] = [];
+
+  for (let match = RECORD_CONTEXT_KEYWORD_PATTERN.exec(source); match !== null; match = RECORD_CONTEXT_KEYWORD_PATTERN.exec(source)) {
+    const keywordStart = match.index;
+    if (callbacks.isInExcludedRegion(keywordStart, excludedRegions)) {
+      continue;
+    }
+    const keyword = match[1].toLowerCase();
+
+    if (keyword === 'case') {
+      // The record question for this `case`: the nearest non-`case` enclosing block.
+      let inRecord = false;
+      for (let s = stack.length - 1; s >= 0; s--) {
+        if (stack[s] === 'case') continue;
+        inRecord = stack[s] === 'record';
+        break;
+      }
+      map.set(keywordStart, inRecord);
+      // A standalone case has its own matching `end`; a variant case does not.
+      if (!isVariantCase(source, keywordStart, excludedRegions, callbacks)) {
+        stack.push('case');
+      }
+      continue;
+    }
+
+    const role = recordContextKeywordRole(source, keywordStart, keyword, excludedRegions, callbacks);
+    if (role === 'close') {
+      if (stack.length > 0) stack.pop();
+    } else if (role === 'open-record') {
+      stack.push('record');
+    } else if (role === 'open-block') {
+      stack.push('block');
+    }
+    // 'ignore' keywords are not block boundaries
+  }
+
+  return map;
+}
+
 // Checks if 'case' at position is a variant record case (tagged or tagless)
+// `recordContextMap` (built once per parse) provides O(1) "inside a record" lookup.
 export function isVariantRecordCase(
   source: string,
   position: number,
   excludedRegions: ExcludedRegion[],
-  callbacks: PascalValidationCallbacks
+  callbacks: PascalValidationCallbacks,
+  recordContextMap: Map<number, boolean>
 ): boolean {
-  if (!isInsideRecord(source, position, excludedRegions, callbacks)) {
+  if (!recordContextMap.get(position)) {
     return false;
   }
   // Scan forward from after 'case', skipping whitespace and excluded regions, looking for identifier
@@ -93,265 +290,6 @@ export function isVariantRecordCase(
     if (k + 2 <= source.length && /^of\b/i.test(source.slice(k, k + 3))) {
       return true; // Tagless variant
     }
-  }
-  return false;
-}
-
-// Checks if a position is inside a record block (for variant case detection)
-export function isInsideRecord(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): boolean {
-  const lowerSource = source.toLowerCase();
-  let depth = 0;
-  let i = position - 1;
-  while (i >= 0) {
-    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
-      i--;
-      continue;
-    }
-    // Look for 'end', 'begin', 'record', 'object', 'class', 'interface',
-    // 'try', 'case', 'asm'
-    // 'begin' and other block openers cancel out 'end'
-    if (
-      i >= 4 &&
-      lowerSource.slice(i - 4, i + 1) === 'begin' &&
-      (i - 5 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 5])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      if (depth > 0) depth--;
-      else return false;
-      i -= 5;
-      continue;
-    }
-    if (
-      i >= 2 &&
-      lowerSource.slice(i - 2, i + 1) === 'end' &&
-      (i - 3 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 3])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      depth++;
-      i -= 3;
-      continue;
-    }
-    if (
-      i >= 5 &&
-      lowerSource.slice(i - 5, i + 1) === 'record' &&
-      (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      if (depth === 0) return true;
-      depth--;
-      i -= 6;
-      continue;
-    }
-    if (
-      i >= 5 &&
-      lowerSource.slice(i - 5, i + 1) === 'object' &&
-      (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      // Skip 'object' in method pointer syntax: procedure of object, function of object
-      let oi = i - 6;
-      while (oi >= 0) {
-        if (source[oi] === ' ' || source[oi] === '\t' || source[oi] === '\n' || source[oi] === '\r') {
-          oi--;
-          continue;
-        }
-        const rgn = callbacks.findExcludedRegionAt(oi, excludedRegions);
-        if (rgn) {
-          oi = rgn.start - 1;
-          continue;
-        }
-        break;
-      }
-      if (oi >= 1 && lowerSource.slice(oi - 1, oi + 1) === 'of' && (oi - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[oi - 2]))) {
-        i -= 6;
-        continue;
-      }
-      // Skip 'object' as field type reference (preceded by ':')
-      if (oi >= 0 && source[oi] === ':') {
-        i -= 6;
-        continue;
-      }
-      if (depth === 0) return true;
-      depth--;
-      i -= 6;
-      continue;
-    }
-    // 'class' closes an 'end' (class...end pairs are not records)
-    if (
-      i >= 4 &&
-      lowerSource.slice(i - 4, i + 1) === 'class' &&
-      (i - 5 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 5])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      // Skip 'class' as field type reference (preceded by ':')
-      let ci = i - 5;
-      while (ci >= 0) {
-        if (source[ci] === ' ' || source[ci] === '\t' || source[ci] === '\n' || source[ci] === '\r') {
-          ci--;
-          continue;
-        }
-        const rgn = callbacks.findExcludedRegionAt(ci, excludedRegions);
-        if (rgn) {
-          ci = rgn.start - 1;
-          continue;
-        }
-        break;
-      }
-      if (ci >= 0 && source[ci] === ':') {
-        i -= 5;
-        continue;
-      }
-      // Skip 'class' as forward declaration (class; or class(Parent);)
-      if (isForwardDeclarationAfter(source, i + 1, excludedRegions, callbacks)) {
-        i -= 5;
-        continue;
-      }
-      // Skip 'class of' (class reference type, no matching end)
-      // Newlines and comments between 'class' and 'of' do not change the meaning per Pascal grammar.
-      {
-        let ck = i + 1;
-        while (ck < source.length) {
-          if (source[ck] === ' ' || source[ck] === '\t' || source[ck] === '\n' || source[ck] === '\r') {
-            ck++;
-            continue;
-          }
-          if (callbacks.isInExcludedRegion(ck, excludedRegions)) {
-            const rgn = callbacks.findExcludedRegionAt(ck, excludedRegions);
-            if (rgn) {
-              ck = rgn.end;
-              continue;
-            }
-          }
-          break;
-        }
-        if (ck + 1 < source.length && lowerSource.slice(ck, ck + 2) === 'of' && (ck + 2 >= source.length || !/[a-zA-Z0-9_]/.test(source[ck + 2]))) {
-          i -= 5;
-          continue;
-        }
-      }
-      // Check if preceded by '=' (type definition): skip method modifier check
-      {
-        let eqCheck = ci;
-        // Skip type modifiers (abstract, sealed, packed) to find '='
-        // Loop to handle multiple modifiers (e.g., 'sealed abstract class')
-        let foundModifier = true;
-        while (foundModifier && eqCheck >= 0 && /[a-zA-Z]/.test(source[eqCheck])) {
-          foundModifier = false;
-          let wordStart = eqCheck;
-          while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
-          const word = lowerSource.slice(wordStart, eqCheck + 1);
-          if (TYPE_MODIFIERS.includes(word)) {
-            foundModifier = true;
-            eqCheck = wordStart - 1;
-            while (eqCheck >= 0 && (source[eqCheck] === ' ' || source[eqCheck] === '\t' || source[eqCheck] === '\n' || source[eqCheck] === '\r'))
-              eqCheck--;
-          }
-        }
-        // If preceded by '=', it's a type definition - don't check for method modifier
-        if (eqCheck < 0 || source[eqCheck] !== '=') {
-          // Skip 'class' as method modifier (followed by function, procedure, var, property, constructor, destructor, operator)
-          let cj = i + 2;
-          while (cj < source.length) {
-            if (callbacks.isInExcludedRegion(cj, excludedRegions)) {
-              const region = callbacks.findExcludedRegionAt(cj, excludedRegions);
-              if (region) {
-                cj = region.end;
-                continue;
-              }
-              cj++;
-              continue;
-            }
-            if (source[cj] === ' ' || source[cj] === '\t' || source[cj] === '\n' || source[cj] === '\r') {
-              cj++;
-              continue;
-            }
-            break;
-          }
-          const afterClass = lowerSource.slice(cj, cj + 12);
-          if (/^(function|procedure|var|property|constructor|destructor|operator)\b/.test(afterClass)) {
-            i -= 5;
-            continue;
-          }
-        }
-      }
-      if (depth > 0) depth--;
-      else return false;
-      i -= 5;
-      continue;
-    }
-    // 'interface' closes an 'end'
-    if (
-      i >= 8 &&
-      lowerSource.slice(i - 8, i + 1) === 'interface' &&
-      (i - 9 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 9])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      // Skip 'interface' as field type reference (preceded by ':')
-      let ii = i - 9;
-      while (ii >= 0) {
-        if (source[ii] === ' ' || source[ii] === '\t' || source[ii] === '\n' || source[ii] === '\r') {
-          ii--;
-          continue;
-        }
-        const rgn = callbacks.findExcludedRegionAt(ii, excludedRegions);
-        if (rgn) {
-          ii = rgn.start - 1;
-          continue;
-        }
-        break;
-      }
-      if (ii >= 0 && source[ii] === ':') {
-        i -= 9;
-        continue;
-      }
-      // Skip 'interface' as forward declaration (interface; or interface(IParent);)
-      if (isForwardDeclarationAfter(source, i + 1, excludedRegions, callbacks)) {
-        i -= 9;
-        continue;
-      }
-      if (depth > 0) depth--;
-      else return false;
-      i -= 9;
-      continue;
-    }
-    // 'try' closes an 'end'
-    if (
-      i >= 2 &&
-      lowerSource.slice(i - 2, i + 1) === 'try' &&
-      (i - 3 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 3])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      if (depth > 0) depth--;
-      else return false;
-      i -= 3;
-      continue;
-    }
-    // Track standalone case...end pairs (depth >= 1) only when the case is NOT a variant case
-    // Variant cases have parenthesized field lists after 'of' labels, e.g. 0: (Field: Type)
-    // Standalone cases have statements after labels, e.g. 1: WriteLn
-    if (
-      i >= 3 &&
-      lowerSource.slice(i - 3, i + 1) === 'case' &&
-      (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      if (depth >= 1 && !isVariantCase(source, i - 3, excludedRegions, callbacks)) depth--;
-      i -= 4;
-      continue;
-    }
-    // 'asm' closes an 'end'
-    if (
-      i >= 2 &&
-      lowerSource.slice(i - 2, i + 1) === 'asm' &&
-      (i - 3 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 3])) &&
-      (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
-    ) {
-      if (depth > 0) depth--;
-      else return false;
-      i -= 3;
-      continue;
-    }
-    i--;
   }
   return false;
 }
