@@ -223,6 +223,13 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (j < source.length && source[j] === ':') {
         return false;
       }
+      // Reject `do'` — a `'` here is the transpose operator on a variable named
+      // `do` (`do 'str'` is likewise the command-syntax call `do('str')`).
+      // Either way `do` is not a do/until opener; pairing it with a following
+      // `until` produces a spurious block and breaks outer pairing.
+      if (j < source.length && source[j] === "'") {
+        return false;
+      }
       // Reject `do` used as a command-syntax argument (`disp do` → `disp('do')`).
       // The pattern is `<identifier> <whitespace> do` at statement start where the
       // identifier is not a recognized keyword. Treating such `do` as a block open
