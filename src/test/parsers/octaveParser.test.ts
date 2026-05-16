@@ -1930,25 +1930,46 @@ end`;
     });
   });
 
-  suite('Regression 2026-05-15: do followed by line comment is function call', () => {
-    test('should not treat do followed by % comment then ( as do/until block', () => {
-      // `do % comment\n  (1, 2);` is a function call across the comment, not a
-      // do/until block. The function-call skip loop must consume `%`-style line
-      // comments before reaching the `(`.
+  suite('Regression 2026-05-15: do followed by line comment ends the statement', () => {
+    test('should treat do followed by % comment then ( as a do/until opener', () => {
+      // Octave line comments (`%...`) do not continue a statement — only `...`
+      // and `\` do. So `do % comment` ends the `do` statement and `do` is a
+      // do/until block opener. The next line `(1, 2);` is an independent
+      // statement, not `do(1, 2)`. With no `until`, the `do` opener is an
+      // orphan and blocks the stack, so function/end is not paired.
       const source = 'function f\n  do % this is a comment\n  (1, 2);\nend';
       const pairs = parser.parse(source);
       const doPair = pairs.find((p) => p.openKeyword.value === 'do');
-      assert.strictEqual(doPair, undefined, 'do %... ( should be a function call across comment');
-      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(doPair, undefined, 'orphan do (no until) produces no pair');
+      const functionPair = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.strictEqual(functionPair, undefined, 'orphan do blocks function/end pairing');
     });
 
-    test('should not treat do followed by # comment then ( as do/until block', () => {
-      // Octave-style line comment `#` must also be skipped between `do` and `(`.
+    test('should treat do followed by # comment then ( as a do/until opener', () => {
+      // Octave-style line comment `#` also ends the `do` statement; the next
+      // line is independent and `do` is a do/until block opener.
       const source = 'function f\n  do # this is a comment\n  (1, 2);\nend';
       const pairs = parser.parse(source);
       const doPair = pairs.find((p) => p.openKeyword.value === 'do');
-      assert.strictEqual(doPair, undefined, 'do #... ( should be a function call across comment');
-      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(doPair, undefined, 'orphan do (no until) produces no pair');
+      const functionPair = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.strictEqual(functionPair, undefined, 'orphan do blocks function/end pairing');
+    });
+
+    test('should pair do/until when do has a trailing % comment and ( body', () => {
+      // `do % comment` then a line starting with `(`/`[`/`{` is a valid
+      // do/until block: the line comment does not continue the statement, so
+      // the body line is not `do(...)`. The block must pair with `until`.
+      const source = 'do  % loop start\n  [a, b] = f();\nuntil done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should pair do/until when do has a trailing # comment and ( body', () => {
+      // Same as above with an Octave-style `#` comment.
+      const source = 'do  # loop start\n  (x) = f();\nuntil done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
     });
   });
 
