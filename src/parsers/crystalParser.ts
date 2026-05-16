@@ -50,6 +50,11 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
   'select'
 ]);
 
+// `abstract def` declarations have no body and no `end`. This matches `abstract`
+// immediately before `def`, allowing only spaces/tabs and backslash line
+// continuations (\<LF>, \<CRLF>, \<CR>) between the two keywords.
+const ABSTRACT_DEF_PATTERN = /\babstract(?:[ \t]+|[ \t]*\\(?:\r\n|\r|\n)[ \t]*)+$/;
+
 // Crystal interpolation check: %Q, %W, %I, %x, %r and bare % interpolate
 function isCrystalInterpolatingPercent(specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -737,9 +742,13 @@ export class CrystalBlockParser extends BaseBlockParser {
 
     // 'abstract def' has no body and no 'end'.
     // Allow backslash line continuation (\<LF>, \<CRLF>, \<CR>) between `abstract` and `def`.
+    // Only suppress when the matched `abstract` keyword is real code: an `abstract`
+    // appearing inside a comment or string ending with a trailing backslash (e.g.
+    // `# abstract \`) must not suppress the genuine `def` on the following line.
     if (keyword === 'def') {
       const textBefore = source.slice(0, position);
-      if (/\babstract(?:[ \t]+|[ \t]*\\(?:\r\n|\r|\n)[ \t]*)+$/.test(textBefore)) {
+      const abstractMatch = ABSTRACT_DEF_PATTERN.exec(textBefore);
+      if (abstractMatch && !this.isInExcludedRegion(abstractMatch.index, excludedRegions)) {
         return false;
       }
       // Crystal 1.0+ shorthand: `def name [(args)] [: type] = expr` — no body, no end
