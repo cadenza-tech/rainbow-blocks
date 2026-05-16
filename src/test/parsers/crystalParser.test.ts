@@ -4093,5 +4093,19 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: method call with regex literal argument (CR2)', () => {
+    test('should treat method /regex/ as a regex argument, not division', () => {
+      const source = 'def f\n  x = match /do/\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not leak keywords from a method call regex argument', () => {
+      const source = 'check /if/\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
