@@ -2206,6 +2206,60 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-16: end followed by compound assignment is not block_close', () => {
+    test('should not treat end followed by += as block close', () => {
+      // `end += 1;` compound-assigns the reserved word `end` as a variable — invalid
+      // MATLAB. Treating the line-1 `end` as a block close mis-pairs the if block.
+      // Lines: 0 = if true, 1 = end += 1, 2 = outer end.
+      const source = 'if true\n  end += 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'if should pair with the last end');
+    });
+
+    test('should not treat end followed by -= as block close', () => {
+      const source = 'if true\n  end -= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end followed by *= as block close', () => {
+      const source = 'if true\n  end *= 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end followed by ^= as block close', () => {
+      const source = 'if true\n  end ^= 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should still treat a real end as block close when followed by == comparison', () => {
+      // `end == 1` is a comparison, not a compound assignment. The `end` here is a
+      // genuine block close of the for loop; only the `==` follows it. The for/end
+      // pair must still be detected.
+      const source = 'for i = 1:3\n  x = 1;\nend == 1;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should still treat a real end as block close when followed by ~= comparison', () => {
+      const source = 'for i = 1:3\n  x = 1;\nend ~= 1;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should still treat a real end as block close when followed by >= comparison', () => {
+      const source = 'for i = 1:3\n  x = 1;\nend >= 1;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   suite('Regression 2026-05-09: command-syntax argument is not block_open', () => {
     test('should treat clear if as command-syntax (if is string argument)', () => {
       // `clear if` is command-syntax: `clear` is a command and `if` is its string argument.
