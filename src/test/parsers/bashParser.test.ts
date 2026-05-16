@@ -6016,6 +6016,24 @@ fi`;
     });
   });
 
+  suite('Regression: << inside [[ ]] must not be parsed as a heredoc', () => {
+    test('should still detect if/fi when [[ ]] condition contains <<', () => {
+      // `[[ a << b ]]` is invalid bash, but the `<<` inside [[ ]] must not be
+      // treated as a heredoc operator (which would extend an excluded region to
+      // EOF and swallow the following if/fi block).
+      const source = 'if [[ a << b ]]; then\n echo x\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still parse a real heredoc outside [[ ]]', () => {
+      // Sanity check: a genuine heredoc outside [[ ]] is still an excluded region.
+      const source = 'if true; then\ncat <<EOF\nfi inside heredoc\nEOF\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   suite('Regression: unclosed [[ must not disable comment detection', () => {
     test('should still detect if/fi after a comment that follows an unclosed [[', () => {
       // The unclosed `[[` must not put findExcludedRegions into double-bracket
