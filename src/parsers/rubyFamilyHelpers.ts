@@ -112,6 +112,17 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
     if (regexPrecedingKeywords.has(word)) {
       return true;
     }
+    // Method-call regex argument: `method /regex/`. When an identifier is
+    // followed by whitespace, then /, then a non-whitespace character, the /
+    // starts a regex literal passed as an argument (e.g. `str.match /re/`).
+    // This matches the Ruby/Crystal disambiguation rule: `a / b` (spaces both
+    // sides) stays division, `a /b` is a regex argument.
+    if (i < pos - 1) {
+      const after = source[pos + 1];
+      if (after !== undefined && after !== ' ' && after !== '\t' && after !== '\n' && after !== '\r' && after !== '=') {
+        return true;
+      }
+    }
   }
 
   return false;
