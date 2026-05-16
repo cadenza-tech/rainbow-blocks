@@ -3000,5 +3000,62 @@ until done`;
     });
   });
 
+  suite('Regression 2026-05-16: type section class after preceding begin-end block', () => {
+    test('should detect class type definition in type section following a begin-end block', () => {
+      // The `begin..end` of `procedure Foo` precedes a `type` section. The first
+      // declaration in that type section (`TBar = class`) must still be a block opener.
+      const source = `procedure Foo;
+begin
+  X := 1;
+end;
+
+type
+  TBar = class
+    Y: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'begin', 0);
+      assertNestLevel(pairs, 'class', 0);
+      const classPair = findBlock(pairs, 'class');
+      assert.strictEqual(classPair.closeKeyword.value, 'end');
+    });
+
+    test('should detect class type definition in type section following a try-end block', () => {
+      const source = `begin
+  try
+    X := 1;
+  except
+  end;
+end;
+
+type
+  TBar = class
+    Y: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      const classPair = findBlock(pairs, 'class');
+      assert.strictEqual(classPair.openKeyword.value, 'class');
+      assert.strictEqual(classPair.closeKeyword.value, 'end');
+    });
+
+    test('should detect object type definition in type section following a repeat block', () => {
+      const source = `begin
+  repeat
+    X := 1;
+  until Done;
+end;
+
+type
+  TBar = object
+    Y: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      const objectPair = findBlock(pairs, 'object');
+      assert.strictEqual(objectPair.openKeyword.value, 'object');
+      assert.strictEqual(objectPair.closeKeyword.value, 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
