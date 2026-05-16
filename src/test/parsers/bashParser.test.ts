@@ -761,6 +761,25 @@ unterminated heredoc`;
       assertSingleBlock(pairs, '{', '}');
     });
 
+    test('should not stack overflow on deeply nested unterminated command substitutions', () => {
+      // Each `$(` opens a command substitution; without closers the matcher
+      // recurses once per level. Deep enough input must not crash parse().
+      const source = '$('.repeat(8000);
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not stack overflow on deeply nested unterminated parameter expansions', () => {
+      // `${` matcher recurses per nesting level (the claim that `${` is safe is false).
+      const source = '${'.repeat(12000);
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not stack overflow on deeply nested unterminated arithmetic expansions', () => {
+      // `$((` arithmetic-expansion matcher recurses through command-substitution skipping.
+      const source = '$(('.repeat(8000);
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
     test('should handle real-world bash script', () => {
       const source = `#!/bin/bash
 
