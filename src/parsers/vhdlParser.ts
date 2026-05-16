@@ -540,6 +540,91 @@ export class VhdlBlockParser extends BaseBlockParser {
     return skipPositions;
   }
 
+  // Detects compound `end <type>` forms whose `end` and the type keyword are separated
+  // by one or more block comments (`/* ... */`), e.g. `end /* note */ process`.
+  // VHDL-2008 (LRM 15.9) treats a comment as whitespace, so such a form is a single
+  // compound end. COMPOUND_END_PATTERN only allows spaces/tabs, so this scan supplements
+  // it. The gap between `end` and the type keyword must contain ONLY spaces, tabs and
+  // single-line block comments: a newline anywhere in the gap (including inside a
+  // multi-line block comment, or a line comment terminator) disqualifies the form,
+  // keeping it consistent with the same-line-only rule for plain whitespace separators.
+  // Detected entries are merged into compoundEndPositions so the rest of tokenize and
+  // mergeCompoundEndTokens handle them like any other compound end.
+  private findCommentSeparatedCompoundEnds(
+    source: string,
+    excludedRegions: ExcludedRegion[],
+    alreadyMatched: Set<number>
+  ): Map<number, { keyword: string; length: number; endType: string }> {
+    const result = new Map<number, { keyword: string; length: number; endType: string }>();
+    const endPattern = /\bend\b/gi;
+    for (const m of source.matchAll(endPattern)) {
+      const endStart = m.index;
+      // Skip `end` already covered by the same-line regex, or inside excluded regions.
+      if (alreadyMatched.has(endStart)) continue;
+      if (this.isInExcludedRegion(endStart, excludedRegions)) continue;
+      let i = endStart + 3;
+      let crossedComment = false;
+      // Skip a run of spaces/tabs and single-line block comments. Abort on newline,
+      // a multi-line block comment, or any other character.
+      let gapValid = true;
+      while (i < source.length) {
+        const ch = source[i];
+        if (ch === ' ' || ch === '\t') {
+          i++;
+          continue;
+        }
+        if (ch === '/' && i + 1 < source.length && source[i + 1] === '*') {
+          const region = this.findExcludedRegionAt(i, excludedRegions);
+          if (!region) {
+            gapValid = false;
+            break;
+          }
+          // Reject a block comment that itself spans a newline.
+          if (source.slice(region.start, region.end).includes('\n') || source.slice(region.start, region.end).includes('\r')) {
+            gapValid = false;
+            break;
+          }
+          crossedComment = true;
+          i = region.end;
+          continue;
+        }
+        break;
+      }
+      // Require at least one comment in the gap; pure-whitespace gaps are the regex's job.
+      if (!gapValid || !crossedComment || i >= source.length) continue;
+      if (!/[a-zA-Z]/.test(source[i])) continue;
+      const typeStart = i;
+      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+      const firstWord = source.slice(typeStart, i).toLowerCase();
+      // Resolve the (possibly two-word) compound type. `package`/`protected` may be
+      // followed by `body`, and `postponed` by `process`, within the same valid gap.
+      let endType = firstWord;
+      let typeEnd = i;
+      if (firstWord === 'package' || firstWord === 'protected' || firstWord === 'postponed') {
+        let j = i;
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+        const secondStart = j;
+        while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
+        const secondWord = source.slice(secondStart, j).toLowerCase();
+        if ((firstWord !== 'postponed' && secondWord === 'body') || (firstWord === 'postponed' && secondWord === 'process')) {
+          endType = firstWord === 'postponed' ? 'process' : firstWord;
+          typeEnd = j;
+        } else if (firstWord === 'postponed') {
+          // `postponed` alone is not a compound end type.
+          continue;
+        }
+      }
+      if (!COMPOUND_END_TYPES.includes(endType)) continue;
+      if (!this.isValidBlockClose(source.slice(endStart, typeEnd), source, endStart, excludedRegions)) continue;
+      result.set(endStart, {
+        keyword: source.slice(endStart, typeEnd),
+        length: typeEnd - endStart,
+        endType
+      });
+    }
+    return result;
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // First, find all compound end keywords and their positions
@@ -604,6 +689,14 @@ export class VhdlBlockParser extends BaseBlockParser {
         }
       }
       match = COMPOUND_END_PATTERN.exec(source);
+    }
+
+    // Supplement with compound ends whose `end` and type keyword are separated by
+    // block comments (e.g. `end /* c */ process`). COMPOUND_END_PATTERN only allows
+    // spaces/tabs between the two words, so these forms are detected here separately.
+    const commentSeparated = this.findCommentSeparatedCompoundEnds(source, excludedRegions, new Set(compoundEndPositions.keys()));
+    for (const [pos, info] of commentSeparated) {
+      compoundEndPositions.set(pos, info);
     }
 
     // Detect trailing label positions after each compound end. The grammar permits
