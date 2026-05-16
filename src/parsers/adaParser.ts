@@ -832,11 +832,11 @@ export class AdaBlockParser extends BaseBlockParser {
 
       // 'and then' short-circuit: 'and' is not a keyword, so scan backward from 'then'
       // skipping whitespace and excluded regions (comments between 'and' and 'then').
-      // Discard the 'then' token whenever the preceding word ends with 'and' — even
-      // when 'and' is preceded by a word character (e.g. `Test_and`, `1and`). These
-      // are invalid identifiers but the trailing 'then' would otherwise be tracked
-      // twice as an intermediate (once for the malformed `Test_and then` and once
-      // for the genuine if-`then` later on the same line).
+      // Discard the 'then' token only when the preceding word is a standalone
+      // 'and' keyword (proper word boundaries on both sides). An identifier that
+      // merely *ends* with the letters 'and' (e.g. `Command`, `Operand`,
+      // `Demand`) is not the short-circuit operator, so the trailing 'then' is
+      // the genuine if/elsif-`then` and must be kept as an intermediate.
       if (lowerValue === 'then') {
         let j = token.startOffset - 1;
         // Skip whitespace, newlines, and excluded regions backward
@@ -856,10 +856,11 @@ export class AdaBlockParser extends BaseBlockParser {
           }
           break;
         }
-        // Check if the word ending at j is 'and' (regardless of what precedes it,
-        // so malformed inputs like `Test_and then` are also collapsed to a single
-        // `then` intermediate).
-        if (j >= 2 && source.slice(j - 2, j + 1).toLowerCase() === 'and' && !this.isInExcludedRegion(j - 2, excludedRegions)) {
+        // The word ending at j is the short-circuit 'and' only when 'and'
+        // occupies positions [j-2, j] with ASCII/Unicode word boundaries on
+        // both sides. isAdaWordAt rejects `Test_and`/`1and` (left side is a
+        // word character) so their trailing 'then' is not collapsed away.
+        if (j >= 2 && isAdaWordAt(source, j - 2, 'and') && !this.isInExcludedRegion(j - 2, excludedRegions)) {
           continue;
         }
       }

@@ -72,10 +72,11 @@ export function matchCharacterLiteral(source: string, pos: number): ExcludedRegi
 }
 
 // Checks if a given word appears at the given position with word boundaries
-// (ASCII identifier chars + non-ASCII Unicode letters are treated as word chars).
+// (ASCII identifier chars and non-ASCII, non-whitespace characters are treated
+// as word chars; Unicode whitespace such as NBSP or U+2028 is a boundary).
 export function isAdaWordAt(source: string, pos: number, word: string): boolean {
   if (source.slice(pos, pos + word.length).toLowerCase() !== word) return false;
-  const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+  const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || (ch.charCodeAt(0) > 127 && !isAdaWhitespace(ch));
   if (pos > 0 && isWordChar(source[pos - 1])) return false;
   if (pos + word.length < source.length && isWordChar(source[pos + word.length])) return false;
   return true;
