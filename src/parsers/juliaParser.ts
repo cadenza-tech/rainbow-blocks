@@ -141,12 +141,16 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Returns true if the intermediate keyword is valid for the given opener.
   // - catch/finally: only valid for try
-  // - else/elseif: only valid for if
+  // - else: valid for if and for try (Julia 1.8+ supports try/catch/else/finally)
+  // - elseif: only valid for if
   private isIntermediateValidForOpener(intermediate: string, opener: string): boolean {
     if (intermediate === 'catch' || intermediate === 'finally') {
       return opener === 'try';
     }
-    if (intermediate === 'else' || intermediate === 'elseif') {
+    if (intermediate === 'else') {
+      return opener === 'if' || opener === 'try';
+    }
+    if (intermediate === 'elseif') {
       return opener === 'if';
     }
     return true;
