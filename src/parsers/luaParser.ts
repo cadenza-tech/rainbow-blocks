@@ -364,11 +364,17 @@ export class LuaBlockParser extends BaseBlockParser {
           stack.push({ token, intermediates: [] });
           break;
 
-        case 'block_middle':
-          if (stack.length > 0) {
-            stack[stack.length - 1].intermediates.push(token);
+        case 'block_middle': {
+          // then/else/elseif are if-block section boundaries; a `repeat` block
+          // cannot own them. If a repeat is open on top of the stack, route the
+          // middle keyword to the topmost non-repeat opener instead, mirroring
+          // how `end` skips `repeat` to close the block below it.
+          const middleIndex = findLastNonRepeatIndex(stack);
+          if (middleIndex >= 0) {
+            stack[middleIndex].intermediates.push(token);
           }
           break;
+        }
 
         case 'block_close': {
           // until only closes repeat
