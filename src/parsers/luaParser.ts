@@ -23,6 +23,13 @@ export class LuaBlockParser extends BaseBlockParser {
   // Cache is keyed by source string identity (parse() recomputes per source).
   private loopPositionCache: { source: string; positions: number[]; lengths: number[] } | null = null;
 
+  // Cache of the per-source classification of every `do` keyword as a loop `do`
+  // (true) or a standalone `do` block opener (false). Built in a single O(N)
+  // pass; without it, isDoPartOfLoop re-scanned the prefix per `do`, making a
+  // file mixing loops with standalone `do` blocks O(N^2)-O(N^3) and able to
+  // hang. Keyed by source string identity (parse() recomputes per source).
+  private doClassificationCache: { source: string; classification: Map<number, boolean> } | null = null;
+
   // Validates block open keywords, excluding do that's part of while/for loop
   // Also rejects keywords preceded by '.' or ':' (table field/method access like t.end, obj:repeat)
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -114,120 +121,84 @@ export class LuaBlockParser extends BaseBlockParser {
     return this.loopPositionCache;
   }
 
-  // Returns the index of the largest entry in `sortedPositions` that is < target,
-  // or -1 if none. sortedPositions must be strictly increasing.
-  private upperBoundLessThan(sortedPositions: number[], target: number): number {
-    let lo = 0;
-    let hi = sortedPositions.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (sortedPositions[mid] < target) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
+  // Builds (and caches) the classification of every `do` keyword in the source
+  // as either a loop `do` (the `do` that opens a for/while body) or a
+  // standalone `do` block opener.
+  //
+  // Performance: a single left-to-right pass over the pre-computed block
+  // keyword list assigns every `do` at once, using a block-opener stack. This
+  // is O(N) for a file of N keywords. The former approach re-scanned the
+  // prefix for each `do` (slicing the source and running matchAll), which made
+  // a file mixing loops with standalone `do` blocks O(N^2)-O(N^3) and could
+  // hang. isDoPartOfLoop now just looks up this cached map in O(1).
+  //
+  // Stack-pairing rules mirror matchBlocks: `end` closes the topmost non-repeat
+  // block, `until` closes the topmost `repeat`. A `do` is a loop `do` exactly
+  // when the topmost stack entry is a for/while still awaiting its `do`.
+  private getDoClassification(source: string, excludedRegions: ExcludedRegion[]): Map<number, boolean> {
+    if (this.doClassificationCache !== null && this.doClassificationCache.source === source) {
+      return this.doClassificationCache.classification;
+    }
+
+    const blockPattern = /\b(do|for|while|function|if|repeat|end|until)\b/g;
+    const classification = new Map<number, boolean>();
+    // Stack entries: kind plus, for loops, whether their `do` was seen yet.
+    const stack: { kind: 'loop' | 'function' | 'if' | 'repeat'; hasDo: boolean }[] = [];
+
+    for (const match of source.matchAll(blockPattern)) {
+      const pos = match.index;
+      if (this.isInExcludedRegion(pos, excludedRegions)) continue;
+      if (this.isAdjacentToUnicodeLetter(source, pos, match[0].length)) continue;
+      if (this.isPrecededByDotOrColon(source, pos, excludedRegions)) continue;
+      if (this.isAfterGoto(source, pos, excludedRegions)) continue;
+
+      const word = match[1];
+      if (word === 'for' || word === 'while') {
+        stack.push({ kind: 'loop', hasDo: false });
+      } else if (word === 'function' || word === 'if' || word === 'repeat') {
+        stack.push({ kind: word, hasDo: false });
+      } else if (word === 'do') {
+        const top = stack.length > 0 ? stack[stack.length - 1] : null;
+        if (top !== null && top.kind === 'loop' && !top.hasDo) {
+          // Closes the open for/while header: this `do` belongs to the loop.
+          top.hasDo = true;
+          classification.set(pos, true);
+        } else {
+          // No loop awaiting a `do`: this is a standalone do...end block.
+          stack.push({ kind: 'loop', hasDo: true });
+          classification.set(pos, false);
+        }
+      } else if (word === 'end') {
+        // `end` closes the topmost block that is not a `repeat`
+        for (let i = stack.length - 1; i >= 0; i--) {
+          if (stack[i].kind !== 'repeat') {
+            stack.splice(i, 1);
+            break;
+          }
+        }
+      } else if (word === 'until') {
+        // `until` closes the topmost `repeat`
+        for (let i = stack.length - 1; i >= 0; i--) {
+          if (stack[i].kind === 'repeat') {
+            stack.splice(i, 1);
+            break;
+          }
+        }
       }
     }
-    return lo - 1;
+
+    this.doClassificationCache = { source, classification };
+    return classification;
   }
 
-  // Checks if do at position is part of a while/for loop (not standalone)
-  // Searches backwards from do position, crossing newlines since Lua allows multi-line loop headers
+  // Checks if do at position is part of a while/for loop (not standalone).
+  // Delegates to a per-source O(N) classification map (see getDoClassification),
+  // so each call is an O(1) lookup. getLoopPositions is still invoked to keep
+  // the loopPositionCache populated for callers/tests that rely on it.
   private isDoPartOfLoop(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    const { positions: loopPositions, lengths: loopLengths } = this.getLoopPositions(source, excludedRegions);
-
-    // Check matches in reverse order (closest first)
-    const startIdx = this.upperBoundLessThan(loopPositions, position);
-    for (let m = startIdx; m >= 0; m--) {
-      const loopAbsolutePos = loopPositions[m];
-      const loopLength = loopLengths[m];
-
-      // Find the matching 'do' for this loop keyword, accounting for nested loops
-      // Each nested for/while consumes one do, so we track nesting
-      // Also track other block openers (function, if, repeat) that can contain standalone do
-      const afterLoopStart = loopAbsolutePos + loopLength;
-      const searchRange = source.slice(afterLoopStart, position + 2);
-      const blockPattern = /\b(do|for|while|function|if|repeat|end|until)\b/g;
-      const matches = [...searchRange.matchAll(blockPattern)];
-
-      let nestedLoopDepth = 0;
-      // Track nested loop do...end blocks that need their end consumed
-      let nestedLoopEndDepth = 0;
-      let otherBlockDepth = 0;
-      let foundOurDo = false;
-      // Track depths at which for/while inside non-loop blocks await their do keyword
-      const pendingLoopDoDepths: number[] = [];
-
-      for (const innerMatch of matches) {
-        const absolutePos = afterLoopStart + innerMatch.index;
-        if (this.isInExcludedRegion(absolutePos, excludedRegions)) {
-          continue;
-        }
-        if (this.isAdjacentToUnicodeLetter(source, absolutePos, innerMatch[0].length)) {
-          continue;
-        }
-        if (this.isPrecededByDotOrColon(source, absolutePos, excludedRegions)) {
-          continue;
-        }
-        // Skip keywords used as the target of `goto <label>`; they are label
-        // names, not block keywords, and must not affect loop scope tracking.
-        if (this.isAfterGoto(source, absolutePos, excludedRegions)) {
-          continue;
-        }
-        const word = innerMatch[1];
-        // Track non-loop block openers (function, if, repeat) that can contain standalone do
-        if (word === 'function' || word === 'if' || word === 'repeat') {
-          otherBlockDepth++;
-        } else if ((word === 'end' || word === 'until') && otherBlockDepth > 0) {
-          otherBlockDepth--;
-          // Remove pending loop-dos at depths above the new otherBlockDepth
-          // (their for/while was closed without a matching do)
-          while (pendingLoopDoDepths.length > 0 && pendingLoopDoDepths[pendingLoopDoDepths.length - 1] > otherBlockDepth) {
-            pendingLoopDoDepths.pop();
-          }
-        } else if (otherBlockDepth > 0) {
-          // Inside a non-loop block, track sub-blocks so their end keywords
-          // don't prematurely close the outer scope
-          if (word === 'for' || word === 'while') {
-            otherBlockDepth++;
-            pendingLoopDoDepths.push(otherBlockDepth);
-          } else if (word === 'do') {
-            if (pendingLoopDoDepths.length > 0 && pendingLoopDoDepths[pendingLoopDoDepths.length - 1] === otherBlockDepth) {
-              pendingLoopDoDepths.pop();
-            } else {
-              otherBlockDepth++;
-            }
-          }
-        } else if ((word === 'end' || word === 'until') && nestedLoopEndDepth > 0) {
-          // Consume end that closes a nested loop's do...end block
-          nestedLoopEndDepth--;
-        } else if (word === 'end' || word === 'until') {
-          // end/until at depth 0 with no pending closers means the loop scope ended
-          break;
-        } else if (word === 'for' || word === 'while') {
-          // Nested loop found; its do will be consumed by this nested loop
-          nestedLoopDepth++;
-        } else if (word === 'do') {
-          if (nestedLoopDepth > 0) {
-            // This do belongs to a nested loop
-            nestedLoopDepth--;
-            nestedLoopEndDepth++;
-          } else if (absolutePos === position) {
-            // This is our do, and it belongs to this loop
-            foundOurDo = true;
-            break;
-          } else {
-            // A different do at depth 0 before our position - this loop already has a do
-            break;
-          }
-        }
-      }
-
-      if (foundOurDo) {
-        return true;
-      }
-    }
-
-    return false;
+    // Keep the loop-position cache populated (used elsewhere and pinned by tests)
+    this.getLoopPositions(source, excludedRegions);
+    return this.getDoClassification(source, excludedRegions).get(position) === true;
   }
 
   // Filters out middle keywords preceded by '.' or ':' (table field/method access)
