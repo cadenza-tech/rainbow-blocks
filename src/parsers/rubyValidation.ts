@@ -401,6 +401,66 @@ export function isPostfixConditional(
   return true;
 }
 
+// Checks whether a 'do' at doPos is prevented from being the loop separator of the
+// loop keyword at loopPos. A 'do' is blocked when, between the loop keyword and the
+// 'do', either (1) a `then` keyword appears (the loop body is already opened, so the
+// 'do' belongs to an iterator inside the body), or (2) the 'do' sits at a positive
+// bracket nesting depth (it is inside a parenthesized sub-expression of the condition,
+// e.g. `while (compute do |x| x end)`), so it is an iterator block, not the separator.
+function isDoBlockedFromLoopKeyword(
+  source: string,
+  loopPos: number,
+  doPos: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: RubyValidationCallbacks
+): boolean {
+  let depth = 0;
+  let i = loopPos;
+  while (i < doPos) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+    }
+    const ch = source[i];
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      if (depth > 0) depth--;
+      i++;
+      continue;
+    }
+    // `then` keyword: only counts as a real keyword when bounded by word boundaries
+    // and not part of a method call (`.then`), scope resolution (`::then`), or a
+    // variable name (`@then`, `$then`).
+    if (ch === 't' && source.slice(i, i + 4) === 'then') {
+      const before = source[i - 1];
+      const after = source[i + 4];
+      const wordBefore = before !== undefined && /[a-zA-Z0-9_]/.test(before);
+      const wordAfter = after !== undefined && /[a-zA-Z0-9_]/.test(after);
+      if (!wordBefore && !wordAfter) {
+        const prefixed =
+          before === '@' ||
+          before === '$' ||
+          (before === '.' && !(i > 1 && source[i - 2] === '.')) ||
+          (before === ':' && i > 1 && source[i - 2] === ':');
+        if (!prefixed) {
+          return true;
+        }
+      }
+      i += 4;
+      continue;
+    }
+    i++;
+  }
+  return depth > 0;
+}
+
 // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
 export function isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: RubyValidationCallbacks): boolean {
   // Find logical line start (following backslash continuations)
@@ -476,6 +536,12 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
         if (prevChar === '.' && !(doAbsolutePos > 1 && source[doAbsolutePos - 2] === '.')) {
           continue;
         }
+      }
+      // Skip 'do' that is shielded from the loop keyword by a `then` keyword or by
+      // an enclosing parenthesized sub-expression: such a 'do' is an iterator block,
+      // not the loop separator. Keep scanning for a later, unshielded 'do'.
+      if (isDoBlockedFromLoopKeyword(source, loopAbsolutePos, doAbsolutePos, excludedRegions, callbacks)) {
+        continue;
       }
       // This is the first valid 'do' after the loop keyword
       if (doAbsolutePos === position) {
