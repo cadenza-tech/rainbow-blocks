@@ -3000,6 +3000,54 @@ until done`;
     });
   });
 
+  suite('Regression 2026-05-16: standalone case with paren-starting arm before record variant case', () => {
+    test('should not let a standalone case with a parenthesized arm break record variant case detection', () => {
+      // A record method body contains `case Y of 9: (HandleNine); end;` — a standalone
+      // case whose arm starts with '('. This must not be mistaken for a variant case,
+      // otherwise the record's variant `case Integer of` is wrongly treated as a block
+      // opener and the record is left without its closing `end`.
+      const source = `TRec = record
+  procedure M;
+  begin
+    case Y of
+      9: (HandleNine);
+    end;
+  end;
+  case Integer of
+    0: (V: Integer);
+end;`;
+      const pairs = parser.parse(source);
+      // The outer `case Integer of` is a record variant case (not a block).
+      // Blocks: record-end, the method begin-end, and the inner standalone case-end.
+      assertBlockCount(pairs, 3);
+      const recordPair = findBlock(pairs, 'record');
+      assert.strictEqual(recordPair.closeKeyword.value, 'end');
+      // The record must pair with the final `end` (the last `end` token in the source).
+      assert.strictEqual(recordPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+      // The inner standalone `case Y of` is a real block.
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.openKeyword.startOffset, source.indexOf('case'));
+    });
+
+    test('should still detect a genuine record variant case after a method with a standalone case', () => {
+      // Same shape but the method's standalone case has a normal (non-paren) arm.
+      const source = `TRec = record
+  procedure M;
+  begin
+    case Y of
+      9: WriteLn;
+    end;
+  end;
+  case Integer of
+    0: (V: Integer);
+end;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const recordPair = findBlock(pairs, 'record');
+      assert.strictEqual(recordPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Performance: record with many variant case statements', () => {
     test('should parse a record with hundreds of variant case statements without quadratic blowup', () => {
       // Build a single record containing many variant `case` parts. With the prior
