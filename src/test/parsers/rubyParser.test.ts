@@ -3656,6 +3656,39 @@ end`;
     });
   });
 
+  suite('Regression: endless method definition without space before =', () => {
+    test('should not treat endless def without space before = as a block opener', () => {
+      const pairs = parser.parse('class X\n  def a=1\nend');
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should still treat normal def as a block opener alongside endless def without space', () => {
+      const pairs = parser.parse('class X\n  def a=1\n  def b\n    1\n  end\nend');
+      assert.strictEqual(pairs.length, 2);
+      const classPair = pairs.find((p) => p.openKeyword.value === 'class');
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(classPair);
+      assert.ok(defPair);
+    });
+
+    test('should not treat endless def with parameter list and no space before = as a block opener', () => {
+      const pairs = parser.parse('class X\n  def a()=1\nend');
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat endless predicate def without space before = as a block opener', () => {
+      const pairs = parser.parse('class X\n  def valid?=true\nend');
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should still treat multi-line setter method as a block opener', () => {
+      const pairs = parser.parse('class X\n  def name=(v)\n    @name = v\n  end\nend');
+      assert.strictEqual(pairs.length, 2);
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(defPair);
+    });
+  });
+
   suite('Regression: multi-heredoc with bare delimiters after identifier', () => {
     test('should accept bare multi-heredoc list after identifier', () => {
       const source = 'raise <<A, <<A\nfirst\nA\nif true\nelse\nend\nA\ndef foo\nend\n';
