@@ -339,6 +339,19 @@ export class CobolBlockParser extends BaseBlockParser {
         }
         continue;
       }
+      // EXEC/EXECUTE ... END-EXEC block: skip the whole block. Its body is a
+      // foreign sub-language (SQL/CICS/...), so a REPLACE/REPLACING token inside
+      // it must NOT alter COBOL pseudo-text state. Without this skip, a REPLACE
+      // in an EXEC body sets inReplaceContext=true; since EXEC blocks need no
+      // terminating period, the flag would leak past END-EXEC and mis-classify
+      // later `==` as pseudo-text delimiters.
+      if (ch === 'E' || ch === 'e') {
+        const execRegion = matchExecBlock(source, i, this.helperCallbacks);
+        if (execRegion) {
+          i = execRegion.end;
+          continue;
+        }
+      }
       // `==` pseudo-text delimiter: if currently in a recognised REPLACE
       // context, record the opening offset and skip past the closing `==`.
       if (ch === '=' && i + 1 < source.length && source[i + 1] === '=') {
