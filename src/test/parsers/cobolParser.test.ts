@@ -1882,6 +1882,30 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should still pair IF/END-IF when COPY IF. appears between them', () => {
+      // Bug: computeValidPositions did not consult isInCopyStatement, so the
+      // copybook name in `COPY IF.` was pushed onto the opener stack and
+      // consumed the trailing END-IF, leaving the real IF X opener unmatched.
+      const source = 'IF X\n  DISPLAY A\nCOPY IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'IF X on line 0 should be the opener');
+    });
+
+    test('should still pair PERFORM/END-PERFORM when COPY PERFORM. appears between them', () => {
+      const source = 'PERFORM UNTIL Z\n  DISPLAY A\nCOPY PERFORM.\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'PERFORM on line 0 should be the opener');
+    });
+
+    test('should still pair EVALUATE/END-EVALUATE when COPY EVALUATE. appears between them', () => {
+      const source = 'EVALUATE Z\n  WHEN A\nCOPY EVALUATE.\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'EVALUATE on line 0 should be the opener');
+    });
   });
 
   suite('Regression 2026-04-30: fixed-format string literal continuation (column-7 hyphen)', () => {
