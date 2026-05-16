@@ -1494,5 +1494,62 @@ end`;
     });
   });
 
+  suite('Regression: intermediates inside an open repeat must attach to the enclosing if', () => {
+    // Bug: matchBlocks unconditionally pushed every block_middle (then/else/
+    // elseif) onto the topmost stack entry. When a `repeat` block is open on
+    // top of an `if`, an else/elseif/then that semantically belongs to the
+    // `if` was wrongly attached to the `repeat`'s intermediates. `then`,
+    // `else` and `elseif` are if-block section boundaries; `repeat` cannot
+    // own them. The fix routes the middle keyword to the topmost non-repeat
+    // opener (mirroring how `end` skips `repeat` to close the block below it).
+    test('should attach else to the enclosing if, not to an open repeat', () => {
+      const source = 'if a then\nrepeat\nelse\nuntil x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // The `else` belongs to if..end, alongside `then`
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword.value, 'end');
+      assertIntermediates(ifBlock, ['then', 'else']);
+      // The repeat..until pair owns no intermediates
+      const repeatBlock = findBlock(pairs, 'repeat');
+      assert.strictEqual(repeatBlock.closeKeyword.value, 'until');
+      assertIntermediates(repeatBlock, []);
+    });
+
+    test('should attach elseif to the enclosing if, not to an open repeat', () => {
+      const source = 'if a then\nrepeat\nelseif b then\nuntil x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      // `then`, `elseif` and the elseif's `then` all belong to the if block
+      assertIntermediates(ifBlock, ['then', 'elseif', 'then']);
+      const repeatBlock = findBlock(pairs, 'repeat');
+      assertIntermediates(repeatBlock, []);
+    });
+
+    test('should attach else to the inner if when an if encloses a repeat above an outer if', () => {
+      // Outer if -> inner if -> repeat (all open). The `else` must land on the
+      // inner if (closest non-repeat opener), not on the repeat above it.
+      const source = 'if a then\nif b then\nrepeat\nelse\nuntil x\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const repeatBlock = findBlock(pairs, 'repeat');
+      assertIntermediates(repeatBlock, []);
+      // Exactly one if block carries the `else`; the other carries only `then`
+      const ifBlocks = pairs.filter((p) => p.openKeyword.value === 'if');
+      assert.strictEqual(ifBlocks.length, 2);
+      const withElse = ifBlocks.filter((p) => p.intermediates.some((t) => t.value === 'else'));
+      assert.strictEqual(withElse.length, 1, 'exactly one if block should own the else');
+    });
+
+    test('should still attach else to a top-of-stack repeat-free if block', () => {
+      // Sanity check: with no repeat on the stack, behavior is unchanged.
+      const source = 'if a then\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+  });
+
   generateCommonTests(config);
 });
