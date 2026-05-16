@@ -307,17 +307,44 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
   return true;
 }
 
+// Upper bound on the number of characters the isInsideParens backward scan may
+// visit while at paren depth 0 before giving up. A parenthesized Ada
+// conditional / quantified expression containing an if/case/for keyword spans
+// only a small region (well under a few hundred characters in practice), so a
+// generous cap of 2048 characters never rejects real code, while it keeps the
+// scan O(1) per call — without it, deeply nested blocks (each opener scanning
+// back to offset 0) degrade to O(n^2).
+const MAX_PAREN_SCAN_CHARS = 2048;
+
 // Checks if position is inside parentheses using proper nesting tracking
 // Ada 2012 conditional/case expressions can appear inside any parentheses,
 // including function call arguments: F(X, if A > 0 then B else C)
 export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: AdaValidationCallbacks): boolean {
   let parenDepth = 0;
   let crossedNewline = false;
+  let scannedChars = 0;
   for (let i = position - 1; i >= 0; i--) {
+    // At paren depth 0 the position is not yet known to be inside any
+    // parentheses. If the scan has visited more characters than any real
+    // parenthesized expression would contain, stop early: an unmatched `(`
+    // that far back is an in-progress edit and would be rejected anyway.
+    // This bound (counting every iteration, including skipped comment /
+    // string characters) is what keeps the scan O(1) per call.
+    scannedChars++;
+    if (parenDepth === 0 && scannedChars > MAX_PAREN_SCAN_CHARS) {
+      return false;
+    }
     if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
     const ch = source[i];
     if (ch === '\n' || ch === '\r') {
       crossedNewline = true;
+    }
+    // A top-level `;` terminates the previous statement. Ada parentheses
+    // cannot span a statement boundary, so at paren depth 0 a `;` means the
+    // position is not inside parentheses. This also bounds the scan to the
+    // current statement.
+    if (ch === ';' && parenDepth === 0) {
+      return false;
     }
     if (ch === ')') {
       parenDepth++;
