@@ -2724,6 +2724,35 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Bug ER3: block-closing end before , and => must not be a map key', () => {
+    test('should pair begin-end when end follows a comma and precedes =>', () => {
+      // 'begin' opens a block; the 'end' that closes it happens to precede ', =>'
+      // It is a real block close, not a map key
+      const source = '#{begin a, end => v}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair begin-end when end follows a comma and precedes :=', () => {
+      const source = '#{begin a, end := v}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still treat end as a map key when no block opener precedes it', () => {
+      // No unclosed block opener: 'end' here is a genuine map key
+      const source = '#{case => value, end => done}\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair case-end when end before , => closes a case block', () => {
+      const source = '#{case X of 1 -> a end => v}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
   suite('Bug ER2: intermediate keyword inside brackets must not be registered', () => {
     test('should register the real after, not the record field name after', () => {
       // 'after' as a record field name inside #r{...} must not be the registered intermediate
