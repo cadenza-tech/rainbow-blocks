@@ -15,6 +15,8 @@ import {
 } from './verilogHelpers';
 import type { VerilogValidationCallbacks } from './verilogValidation';
 import {
+  getPrecedingLabelColonWord,
+  isEnclosingBlockCase,
   isFollowedByWord,
   isInsideParens,
   isOnDpiLine,
@@ -586,6 +588,20 @@ export class VerilogBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Returns true when the keyword at `position` follows a label colon whose label
+  // name is itself a reserved word AND the enclosing block is a case statement.
+  // In that situation the preceding `<keyword> :` is a case_item label (its name
+  // happens to be a reserved word) and the keyword after the colon is the real
+  // block opener, so the generic label-colon suppression must be skipped.
+  private isCaseItemLabelKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const labelWord = getPrecedingLabelColonWord(source, position, excludedRegions, this.validationCallbacks);
+    if (labelWord === null) {
+      return false;
+    }
+    // Scan backward from just before the label word to find the enclosing block.
+    return isEnclosingBlockCase(source, labelWord.wordStart - 1, excludedRegions, this.keywords, this.validationCallbacks);
+  }
+
   // Validates block open: control keywords need a following 'begin' to be valid
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords preceded by dot (hierarchical reference like inst.begin, .begin(signal))
@@ -639,9 +655,16 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
     }
 
-    // Reject keywords used as block labels (e.g., begin : module, fork : begin)
+    // Reject keywords used as block labels (e.g., begin : module, fork : begin).
+    // Exception: in `<keyword> : <keyword>` form, when the preceding word is itself a
+    // reserved word used as a case-item label name (e.g., `case (s) begin: begin ... end`),
+    // the keyword AFTER the colon is the real block opener — not a label name — so it
+    // must not be suppressed. This only applies inside an enclosing case statement;
+    // outside a case, `<keyword> : <name>` is a named block whose leading keyword opens it.
     if (isPrecededByLabelColon(source, position, excludedRegions, this.keywords, this.validationCallbacks)) {
-      return false;
+      if (!this.isCaseItemLabelKeyword(source, position, excludedRegions)) {
+        return false;
+      }
     }
 
     // Reject control keywords used as a label name (e.g., `wait : begin`, `if : begin`).

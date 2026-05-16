@@ -200,22 +200,31 @@ export function skipBackwardWhitespaceAndComments(
   return pos;
 }
 
-// Returns true if keyword at position is preceded by a label colon (e.g., begin : module, end : end)
-export function isPrecededByLabelColon(
+// Information about the word that precedes a label colon: the word text and the
+// offset where it starts. Returned by getPrecedingLabelColonWord when `position`
+// is immediately preceded by a single `:` (a label colon).
+export interface LabelColonWord {
+  word: string;
+  wordStart: number;
+}
+
+// When `position` is immediately preceded by a label colon (`<word> : keyword`),
+// returns the preceding word and its start offset; otherwise returns null.
+// Rejects scope-resolution `::` and colons inside excluded regions.
+export function getPrecedingLabelColonWord(
   source: string,
   position: number,
   excludedRegions: ExcludedRegion[],
-  keywords: LanguageKeywords,
   callbacks: VerilogValidationCallbacks
-): boolean {
+): LabelColonWord | null {
   let j = position - 1;
   // Skip whitespace including newlines (label name and `:` may span lines)
   while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) {
     j--;
   }
-  if (j < 0 || source[j] !== ':') return false;
-  if (j > 0 && source[j - 1] === ':') return false;
-  if (callbacks.isInExcludedRegion(j, excludedRegions)) return false;
+  if (j < 0 || source[j] !== ':') return null;
+  if (j > 0 && source[j - 1] === ':') return null;
+  if (callbacks.isInExcludedRegion(j, excludedRegions)) return null;
   let k = j - 1;
   while (k >= 0 && (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r')) {
     k--;
@@ -235,17 +244,29 @@ export function isPrecededByLabelColon(
       k--;
     }
   }
-  if (k < 0) return false;
+  if (k < 0) return null;
   const wordEnd = k;
   while (k >= 0 && /[a-zA-Z0-9_]/.test(source[k])) {
     k--;
   }
   if (wordEnd > k) {
-    const word = source.slice(k + 1, wordEnd + 1);
-    const allKeywords = new Set([...keywords.blockOpen, ...keywords.blockClose]);
-    return allKeywords.has(word);
+    return { word: source.slice(k + 1, wordEnd + 1), wordStart: k + 1 };
   }
-  return false;
+  return null;
+}
+
+// Returns true if keyword at position is preceded by a label colon (e.g., begin : module, end : end)
+export function isPrecededByLabelColon(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  keywords: LanguageKeywords,
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const labelWord = getPrecedingLabelColonWord(source, position, excludedRegions, callbacks);
+  if (labelWord === null) return false;
+  const allKeywords = new Set([...keywords.blockOpen, ...keywords.blockClose]);
+  return allKeywords.has(labelWord.word);
 }
 
 // Returns true if keyword is preceded by a modifier keyword that indicates a non-block usage
@@ -496,6 +517,61 @@ export function isInsideParens(source: string, position: number, excludedRegions
     }
   }
   return depth > 0;
+}
+
+// case-statement openers. Used to decide whether a label colon belongs to a
+// case_item (whose label name may be a reserved word).
+const CASE_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez', 'randcase']);
+
+// Scans backward from `fromPos` to find the nearest enclosing unclosed block
+// opener and returns true when it is a case-statement (case/casex/casez/randcase).
+// Each block-close keyword increments a depth counter; each block-open keyword
+// either decrements it (closing an inner block) or, at depth 0, is the enclosing
+// opener. Reserved-word keywords used as label names are rare enough that the
+// approximate scan is acceptable; an incorrect result only falls back to the
+// existing label-colon suppression behavior.
+export function isEnclosingBlockCase(
+  source: string,
+  fromPos: number,
+  excludedRegions: ExcludedRegion[],
+  keywords: LanguageKeywords,
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const openSet = new Set(keywords.blockOpen);
+  const closeSet = new Set(keywords.blockClose);
+  let depth = 0;
+  let i = fromPos;
+  while (i >= 0) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      i = region ? region.start - 1 : i - 1;
+      continue;
+    }
+    if (!/[a-zA-Z0-9_]/.test(source[i])) {
+      i--;
+      continue;
+    }
+    // Collect the identifier word ending at i
+    let wordStart = i;
+    while (wordStart >= 0 && /[a-zA-Z0-9_]/.test(source[wordStart])) {
+      wordStart--;
+    }
+    // Reject identifier chunks touching `$` or `\` (system tasks / escaped identifiers)
+    const boundaryChar = wordStart >= 0 ? source[wordStart] : '';
+    const word = source.slice(wordStart + 1, i + 1);
+    if (boundaryChar !== '$' && boundaryChar !== '\\') {
+      if (closeSet.has(word)) {
+        depth++;
+      } else if (openSet.has(word)) {
+        if (depth === 0) {
+          return CASE_OPEN_KEYWORDS.has(word);
+        }
+        depth--;
+      }
+    }
+    i = wordStart;
+  }
+  return false;
 }
 
 // Scans forward from a control keyword to find 'begin' before any statement terminator
