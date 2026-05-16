@@ -188,21 +188,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
           j += bsCont[0].length;
           continue;
         }
-        // Line comments (`%...` or `#...`) are equivalent to whitespace+newline
-        // here: they end the physical line but the logical statement continues
-        // on the next non-comment, non-blank line.
+        // Line comments (`%...` or `#...`) do NOT continue a statement in Octave —
+        // only `...` and `\` do. So `do % comment` ends the `do` statement: the
+        // next line is an independent statement, not `do(...)`. Consume the
+        // comment body up to (but not including) the line terminator, then break:
+        // reaching the newline confirms no `(` can follow `do` on the same
+        // logical line, so this `do` is a do/until opener, not a function call.
         if (this.isCommentChar(source[j])) {
           while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
             j++;
           }
-          // Consume the line terminator (\r, \n, or \r\n).
-          if (j < source.length && source[j] === '\r') {
-            j++;
-            if (j < source.length && source[j] === '\n') j++;
-          } else if (j < source.length && source[j] === '\n') {
-            j++;
-          }
-          continue;
+          break;
         }
         break;
       }
