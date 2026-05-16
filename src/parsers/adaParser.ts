@@ -379,8 +379,25 @@ export class AdaBlockParser extends BaseBlockParser {
           break;
         }
         if (lookahead >= source.length || source[lookahead] !== ';') {
-          match = COMPOUND_END_PATTERN.exec(source);
-          continue;
+          // The designator lookahead did not reach a terminating `;`. This is
+          // either a genuinely separate construct (e.g., `end\nloop\n  null;`)
+          // or a same-line compound end that is simply missing its trailing
+          // `;` (e.g., `end if` on one line followed by `end P;`).
+          //
+          // Distinguish the two by the separator between `end` and the type
+          // keyword: when it contains no line terminator, `end` and the type
+          // keyword sit on the same line, which Ada syntax only permits when
+          // they form a single compound end. Accept it as an (unterminated)
+          // compound end so the type keyword is not misread as a fresh block
+          // opener that swallows the enclosing block. When the separator spans
+          // a newline, the type keyword belongs to a separate construct and
+          // must remain an independent token.
+          const separator = fullMatch.slice(3, fullMatch.length - match[1].length);
+          const separatorHasNewline = /[\r\n]/.test(separator);
+          if (separatorHasNewline) {
+            match = COMPOUND_END_PATTERN.exec(source);
+            continue;
+          }
         }
         const endType = match[1].toLowerCase();
         // Preserve original casing and whitespace in keyword value so callers
