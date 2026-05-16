@@ -1615,6 +1615,35 @@ end entity;`;
     });
   });
 
+  suite('Regression 2026-05-16: compound end split by block comment', () => {
+    test('should treat end /* comment */ process as a single compound end', () => {
+      const source = 'architecture a of t is\nbegin\n  p1: process begin null;\n  end /* comment */ process;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const processPair = findBlock(pairs, 'process');
+      // VHDL-2008 treats a comment as whitespace, so the comment-separated `end process`
+      // pairs with the process block instead of leaving an orphan block_open.
+      assert.strictEqual(processPair.closeKeyword.value, 'end /* comment */ process');
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value, 'end architecture');
+    });
+
+    test('should handle end loop split by block comment', () => {
+      const source = 'process begin\n  for i in 0 to 3 loop\n    null;\n  end /* done */ loop;\nend process;';
+      const pairs = parser.parse(source);
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(forPair.closeKeyword.value, 'end /* done */ loop');
+    });
+
+    test('should not treat end-comment-process with newline inside comment as compound end', () => {
+      const source = 'process\nbegin\n  null;\nend /* multi\nline */ process;';
+      const pairs = parser.parse(source);
+      // A comment that itself spans a newline makes the separator non-blank, so the
+      // form is NOT a compound end: end closes process simply, second process orphaned.
+      assertSingleBlock(pairs, 'process', 'end');
+    });
+  });
+
   suite('Bug 17: isInSignalAssignment missing end boundary', () => {
     test('should not treat else after end process as signal assignment else', () => {
       const source = 'process\nbegin\nend process;\nif cond then\n  null;\nelse\n  null;\nend if;';
