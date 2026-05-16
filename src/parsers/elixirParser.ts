@@ -809,6 +809,12 @@ export class ElixirBlockParser extends BaseBlockParser {
     if (c === ',') {
       return true;
     }
+    // Followed by a closing bracket: the keyword is the last element of a
+    // parenthesized condition / list / tuple (e.g., "if(cond) do", "if [case] do",
+    // "if {cond} do"). cond/case is a value, do belongs to the outer block keyword.
+    if (c === ')' || c === ']' || c === '}') {
+      return true;
+    }
     // Check if directly followed by "do" with word boundary
     if (source.slice(j, j + 2) === 'do') {
       const afterDo = source[j + 2];
