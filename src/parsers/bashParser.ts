@@ -118,6 +118,13 @@ export class BashBlockParser extends BaseBlockParser {
         i++;
         continue;
       }
+      // Skip heredoc detection when inside [[ ]]: redirections are not allowed
+      // there, so `<<` is never a heredoc operator (e.g. `[[ a << b ]]` is invalid
+      // bash, but the `<<` must not extend an excluded region to EOF).
+      if (doubleBracketDepth > 0 && source[i] === '<' && i + 1 < source.length && source[i + 1] === '<') {
+        i++;
+        continue;
+      }
       const result = this.tryMatchExcludedRegion(source, i);
       if (result) {
         // If region starts after current position (heredoc opener line gap),
