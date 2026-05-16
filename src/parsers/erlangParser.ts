@@ -435,9 +435,13 @@ export class ErlangBlockParser extends BaseBlockParser {
           if (k >= 0 && source[k] === '{' && k > 0 && source[k - 1] === '#') {
             return false;
           }
-          // Also filter 'end' preceded by comma (non-first map key)
+          // Also filter 'end' preceded by comma (non-first map key), but only when it is
+          // not actually closing a block. An 'end' that closes an unclosed opener earlier
+          // in the same #{...} scope (e.g. #{begin a, end => v}) is a real block close.
           if (k >= 0 && source[k] === ',') {
-            return false;
+            if (!this.hasUnclosedOpenerInMapScope(source, token.startOffset, excludedRegions)) {
+              return false;
+            }
           }
         }
       } else if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:%[^\n\r]*(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(afterToken)) {
@@ -499,6 +503,73 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   private isCatchExpressionPrefix(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     return isCatchExpressionPrefix(source, position, excludedRegions, this.erlangHelperCallbacks);
+  }
+
+  // Returns true if there is an unclosed block opener between the enclosing #{ and the
+  // 'end' keyword at `endOffset`, meaning that 'end' closes a block rather than acting as
+  // a map key. Locates the enclosing #{ by a backward brace-depth scan, then scans forward
+  // counting real block openers (not map keys) against intervening block-closing 'end's.
+  private hasUnclosedOpenerInMapScope(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Backward scan: find the enclosing #{ start
+    let braceDepth = 0;
+    let mapStart = -1;
+    for (let i = endOffset - 1; i >= 0; i--) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '}') {
+        braceDepth++;
+        continue;
+      }
+      if (ch === '{') {
+        if (braceDepth === 0) {
+          if (i > 0 && source[i - 1] === '#') {
+            mapStart = i + 1;
+          }
+          break;
+        }
+        braceDepth--;
+      }
+    }
+    if (mapStart < 0) {
+      return false;
+    }
+    // Forward scan from #{ to the 'end' token: count real openers vs block-closing 'end's
+    let depth = 0;
+    let i = mapStart;
+    while (i < endOffset) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      if (/[a-z]/i.test(ch) && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
+        let wordEnd = i;
+        while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) {
+          wordEnd++;
+        }
+        const word = source.slice(i, wordEnd);
+        if (BLOCK_OPENER_KEYWORDS.has(word) && !this.isMapKeyKeyword(source, wordEnd)) {
+          depth++;
+        } else if (word === 'end' && !this.isMapKeyKeyword(source, wordEnd)) {
+          depth = Math.max(0, depth - 1);
+        }
+        i = wordEnd;
+        continue;
+      }
+      i++;
+    }
+    return depth > 0;
+  }
+
+  // Returns true if the source immediately after `pos` (the position right after a keyword)
+  // is a map key/update arrow (=> or :=), allowing surrounding whitespace and comments.
+  private isMapKeyKeyword(source: string, pos: number): boolean {
+    return /^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:%[^\n\r]*(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(source.slice(pos));
   }
 
   // Returns true if the keyword at `position` sits inside an unclosed (), [], or {} scope
