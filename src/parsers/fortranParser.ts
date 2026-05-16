@@ -7,6 +7,7 @@ import {
   findLineEnd,
   isAfterDoubleColon,
   isBlockWhereOrForall,
+  isOnKeywordSplittingContinuationLine,
   isPrecedingContinuationKeyword,
   isTypeSpecifier,
   matchElseWhere,
@@ -839,6 +840,15 @@ export class FortranBlockParser extends BaseBlockParser {
         this.isFortranEndConstructName(source, startOffset) ||
         this.isFortranOpenConstructName(source, startOffset, keyword)
       ) {
+        continue;
+      }
+
+      // Skip keywords on a free-form continuation line that carries the tail of
+      // a keyword split across the continuation (e.g. `end do` written as `en&`
+      // then `d do`). The bare-regex tokenizer would otherwise emit a phantom
+      // keyword token from the split fragment, stealing a later close and
+      // orphaning the real opener. Suppression keeps the BlockPair set sound.
+      if (isOnKeywordSplittingContinuationLine(source, startOffset)) {
         continue;
       }
 

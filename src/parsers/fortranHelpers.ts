@@ -766,3 +766,103 @@ export function matchElseWhere(source: string, afterElse: number, excludedRegion
   }
   return null;
 }
+
+// Finds the index of the continuation `&` of a physical line, i.e. an `&` that
+// is the last significant token of the line (only whitespace and an optional
+// inline `!` comment may follow it). String literals are skipped so an `&`
+// inside a string is not mistaken for a continuation marker. Returns -1 when
+// the line does not end with a continuation `&`.
+function findLineContinuationAmpIndex(source: string, lineStart: number, lineEnd: number): number {
+  let lastAmp = -1;
+  let i = lineStart;
+  while (i < lineEnd) {
+    const ch = source[i];
+    // Skip string literals (Fortran uses doubled quotes as escape)
+    if (ch === "'" || ch === '"') {
+      i++;
+      while (i < lineEnd) {
+        if (source[i] === ch) {
+          if (i + 1 < lineEnd && source[i + 1] === ch) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    // An inline comment ends the line; the continuation `&` (if any) precedes it
+    if (ch === '!') {
+      break;
+    }
+    if (ch === '&') {
+      lastAmp = i;
+    }
+    i++;
+  }
+  if (lastAmp < 0) {
+    return -1;
+  }
+  // The `&` must be the last significant char: only whitespace may follow it
+  // (an inline comment was already excluded by breaking at `!`).
+  for (let k = lastAmp + 1; k < lineEnd; k++) {
+    if (source[k] !== ' ' && source[k] !== '\t' && source[k] !== '!') {
+      return -1;
+    }
+    if (source[k] === '!') {
+      break;
+    }
+  }
+  return lastAmp;
+}
+
+// Detects whether `position` sits on a free-form continuation line that carries
+// the tail of a keyword split across the continuation (e.g. `end do` written as
+// `en&` then `d do`). On such a line the bare-regex tokenizer would emit a
+// phantom keyword token from a split-keyword fragment, so the caller suppresses
+// keyword tokenization here.
+//
+// In free-form Fortran a word token is split across a continuation ONLY when no
+// whitespace separates the fragments: an `&` with whitespace on either side is a
+// token separator, so `change &\n  team` is two tokens (`change`, `team`) and
+// must NOT be suppressed. The line therefore qualifies only when BOTH hold:
+//   (1) the current physical line has NO leading whitespace and its first char
+//       is an identifier char (not `&`): the fragment must abut column 1;
+//   (2) the previous physical line ends with a continuation `&` whose IMMEDIATELY
+//       preceding char (no whitespace skipped) is an identifier char: the word
+//       token straddles the `&`, so this line's head continues that word.
+export function isOnKeywordSplittingContinuationLine(source: string, position: number): boolean {
+  const lineStart = findLineStart(source, position);
+  // The split-keyword fragment must start at column 1 (no leading whitespace):
+  // any leading whitespace makes the continuation token-separated.
+  const firstChar = lineStart < source.length ? source[lineStart] : '';
+  if (firstChar === '' || firstChar === '\n' || firstChar === '\r' || firstChar === ' ' || firstChar === '\t' || firstChar === '&') {
+    return false;
+  }
+  // The continued head must be an identifier char to form a split keyword
+  if (!/[A-Za-z0-9_]/.test(firstChar)) {
+    return false;
+  }
+  // No previous physical line
+  if (lineStart === 0) {
+    return false;
+  }
+  // Locate the end of the previous physical line (char before its line break).
+  // lineStart - 1 is the line break; handle CRLF (`\r\n`) as a two-char break.
+  let prevLineEnd = lineStart - 1;
+  if (source[prevLineEnd] === '\n' && prevLineEnd > 0 && source[prevLineEnd - 1] === '\r') {
+    prevLineEnd--;
+  }
+  // prevLineEnd is now the line break char; the previous line is [prevLineStart, prevLineEnd)
+  const prevLineStart = findLineStart(source, prevLineEnd);
+  const ampIdx = findLineContinuationAmpIndex(source, prevLineStart, prevLineEnd);
+  if (ampIdx < 0) {
+    return false;
+  }
+  // The char IMMEDIATELY before the `&` (no whitespace skipped) must be an
+  // identifier char: only then does a word token straddle the continuation.
+  const beforeAmp = ampIdx - 1;
+  return beforeAmp >= prevLineStart && /[A-Za-z0-9_]/.test(source[beforeAmp]);
+}
