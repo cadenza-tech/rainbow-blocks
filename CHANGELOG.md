@@ -5,6 +5,65 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.47] - 2026-05-16
+
+### Fixed
+
+- Ada: Keep the if-then intermediate after an identifier ending in `and` (`Command`, `Operand`)
+- Ada: Treat a same-line compound end without a trailing semicolon as a compound close
+- Ada: Reject the `end return` compound merge when no trailing semicolon follows
+- Ada: Keep `or` as a select intermediate after a non-semicolon-terminated alternative body
+- Ada: Bound the `isInsideParens` backward scan to avoid quadratic slowdown on deep nesting
+- AppleScript: Allow `tell` with a parenthesized object specifier (`tell (window 1)`)
+- AppleScript: Ignore parenthesized `to` (`path to me`) in `tell` one-liner detection
+- Bash: Prevent stack overflow on deeply nested `$(...)` and `${...}` expansions
+- Bash: Prevent stack overflow from long `time` and environment-variable command-prefix chains
+- Bash: Skip double-bracket mode for an unclosed `[[` so following comments and blocks survive
+- Bash: Skip heredoc detection for `<<` inside `[[ ]]` conditionals
+- COBOL: Skip EXEC blocks in the pseudo-text scan so `REPLACE` does not leak past `END-EXEC`
+- COBOL: Skip `COPY` copybook names in the opener-position scan (`COPY IF.`)
+- COBOL: End a period-less `COPY` statement at the following block verb
+- COBOL: Keep a next-line `WHEN`/`ELSE` intermediate after a line ending in an operand introducer
+- COBOL: Register `WHEN`/`ELSE` on the enclosing block past an unclosed inner block
+- Crystal: Recognize a regex literal passed as a method argument (`str.match /re/`), shared with Ruby
+- Crystal: Skip `abstract def` detection when `abstract` is inside a comment or string
+- Crystal: Treat a keyword after a `{{ }}` macro expression as a postfix conditional
+- Crystal: Skip intermediate keywords incompatible with the enclosing block
+- Elixir: Treat a block keyword before a closing bracket as a value, not a block opener
+- Erlang: Support all OTP 27 sigil delimiters (`()`, `[]`, `{}`, `<>`, `/`, `|`, `` ` ``, `#`, `.`)
+- Erlang: Skip `of`/`after`/`else` inside brackets when collecting intermediates
+- Erlang: Recognize a block-closing `end` before a comma and map arrow
+- Fortran: Reject crossed compound-end pairs in `matchBlocks`
+- Fortran: Skip keywords split across continuation lines (`en&` then `d do`)
+- Julia: Support the `try`/`catch`/`else`/`finally` `else` clause as a `try` intermediate (Julia 1.8+)
+- Julia: Treat `end` after an unclosed indexing bracket as `lastindex`
+- Julia: Recognize more operators before `end` so it is not a block close
+- Lua: Classify `do` keywords in a single O(N) pass to avoid a hang on loop-heavy files
+- Lua: Attach intermediates to the enclosing `if` past an open `repeat` block
+- MATLAB: Cache logical-line boundaries to avoid O(N^2) scanning of many keywords on one line
+- MATLAB: Reject a block opener followed by a binary operator
+- MATLAB: Reject `end` followed by a compound assignment
+- MATLAB: Reject a block_middle keyword after a binary operator or `@` handle
+- Octave: Treat a line comment after `do` as the end of the statement
+- Octave: Reject `do` followed by field access as a block opener
+- Octave: Reject `do` followed by a transpose quote as a block opener
+- Octave: Reject out-of-order and duplicate `else`/`elseif`/`catch` intermediates
+- Pascal: Detect `type`-section declarations after a `begin`/`end` block
+- Pascal: Reject a bare `<` comparison as a generic-constraint bracket before `record`
+- Pascal: Replace the quadratic record scan with a single-pass context map
+- Pascal: Require a field-list body for variant-case detection
+- Ruby: Detect endless method definitions without a space before `=` (`def a=1`)
+- Ruby: Treat `do` after `then` or inside parentheses as an iterator block in loops
+- Ruby: Skip `end` in a ternary value position from being a block close
+- Verilog: Skip block keywords only inside closed brace expressions
+- Verilog: Treat a keyword after a case-item label as a real block opener
+- Verilog: Reject the `case` keyword used as an identifier in an assignment
+- Verilog: Treat an unclosed `(` as not enclosing the `interface` keyword
+- VHDL: Equalize nest levels of blocks in sibling generate branches
+- VHDL: Recognize compound end keywords split by block comments
+- VHDL: Fall back to simple-end pairing for an orphan `end generate`
+- VHDL: Skip `is` in invalid bare-identifier statements
+
 ## [1.1.46] - 2026-05-16
 
 ### Fixed
@@ -1853,6 +1912,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.47]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.46...v1.1.47
 [1.1.46]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.45...v1.1.46
 [1.1.45]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.44...v1.1.45
 [1.1.44]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.43...v1.1.44
