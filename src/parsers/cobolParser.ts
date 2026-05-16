@@ -1259,18 +1259,24 @@ export class CobolBlockParser extends BaseBlockParser {
           break;
 
         case 'block_middle': {
-          if (stack.length > 0) {
-            const middleValue = token.value.toLowerCase();
-            const topOpener = stack[stack.length - 1].token.value.toLowerCase();
-            // ELSE only applies to IF blocks
-            if (middleValue === 'else' && topOpener !== 'if') {
-              break;
-            }
-            // WHEN only applies to EVALUATE and SEARCH blocks
-            if (middleValue === 'when' && topOpener !== 'evaluate' && topOpener !== 'search') {
-              break;
-            }
-            stack[stack.length - 1].intermediates.push(token);
+          // ELSE belongs to the nearest enclosing IF; WHEN to the nearest
+          // enclosing EVALUATE or SEARCH. The owner is not necessarily the
+          // stack top: an unclosed inner block (e.g. PERFORM) may sit above it.
+          // Search the stack downward instead of only inspecting the top, so
+          // ELSE/WHEN is not silently dropped when an inner block is unclosed.
+          const middleValue = token.value.toLowerCase();
+          let ownerIndex = -1;
+          if (middleValue === 'else') {
+            ownerIndex = findLastOpenerByType(stack, 'if', true);
+          } else if (middleValue === 'when') {
+            // WHEN matches the innermost EVALUATE or SEARCH — take whichever
+            // opener sits higher (deeper) on the stack.
+            const evaluateIndex = findLastOpenerByType(stack, 'evaluate', true);
+            const searchIndex = findLastOpenerByType(stack, 'search', true);
+            ownerIndex = Math.max(evaluateIndex, searchIndex);
+          }
+          if (ownerIndex >= 0) {
+            stack[ownerIndex].intermediates.push(token);
           }
           break;
         }
