@@ -43,6 +43,13 @@ const DATA_NAME_VERBS = new Set([
   'REMAINDER'
 ]);
 
+// The subset of DATA_NAME_VERBS that are operand introducers rather than
+// statement verbs (TO/BY/INTO/...). When the backward WHEN/ELSE walk crosses a
+// newline on its first hop and lands on one of these, the introducer belongs
+// to the *previous* line's (incomplete) statement; the next line's WHEN/ELSE is
+// a new statement's control-flow keyword and must not be suppressed.
+const OPERAND_INTRODUCERS = new Set(['TO', 'INTO', 'FROM', 'OF', 'IN', 'USING', 'AT', 'BY', 'GIVING', 'REMAINDER']);
+
 // Block-opening verbs (uppercase). When such a verb appears past the copybook
 // name of a COPY statement, the COPY statement is over: a period-less COPY does
 // not extend across a following block-opening statement. Used by the
@@ -914,6 +921,12 @@ export class CobolBlockParser extends BaseBlockParser {
         crossedNewline = true;
       }
       const word = source.slice(wordStart, wordEnd).toUpperCase();
+      // A first hop that crosses a newline onto a bare operand introducer
+      // (`MOVE X TO` <newline> WHEN) means the introducer belongs to the prior
+      // line's incomplete statement. The next line's WHEN/ELSE starts a new
+      // statement and is a real control-flow intermediate — do not suppress it.
+      // Checked before DATA_NAME_VERBS so introducers like TO stop here.
+      if (hopCrossedNewline && OPERAND_INTRODUCERS.has(word)) return false;
       if (DATA_NAME_VERBS.has(word)) return true;
       // Once we have crossed a newline, we examine exactly one preceding word on the
       // prior line; no further walk-back is permitted. The operand chain logically
