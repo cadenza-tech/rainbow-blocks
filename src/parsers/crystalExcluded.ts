@@ -644,12 +644,14 @@ export function isPostfixConditional(source: string, position: number, excludedR
     }
     const region = findRegionAt(ci, excludedRegions);
     if (region) {
-      // Line comments (#) and macro templates ({% %}, {{ }}) don't count as
-      // content for postfix-conditional detection. Strings, literals, and
-      // regex do count.
+      // Line comments (#) and {% %} macro control statements don't count as
+      // content for postfix-conditional detection. {% %} emits no value, so a
+      // following keyword cannot be a postfix modifier on it. A {{ }} macro
+      // expression, by contrast, evaluates to a value (e.g. `{{ x }} if cond`),
+      // so it counts as content just like strings, literals, and regex.
       const isComment = source[region.start] === '#';
-      const isMacroTemplate = source[region.start] === '{' && (source[region.start + 1] === '%' || source[region.start + 1] === '{');
-      if (!isComment && !isMacroTemplate) {
+      const isMacroStatement = source[region.start] === '{' && source[region.start + 1] === '%';
+      if (!isComment && !isMacroStatement) {
         hasNonExcludedContent = true;
       }
       ci = region.end;
