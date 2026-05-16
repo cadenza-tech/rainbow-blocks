@@ -3554,38 +3554,7 @@ end`;
       const pairs = parser.parse('for x in arr\n  if cond\n    x\n  end\nend');
       assertBlockCount(pairs, 2);
     });
-  });
 
-  suite('Regression: failed heredoc with invalid identifier', () => {
-    test('should not exclude code after <<-"x y" with space in identifier', () => {
-      const pairs = parser.parse('<<-"x y"\nif true\nend');
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should not exclude code after <<-"1FOO" with digit-starting identifier', () => {
-      const pairs = parser.parse('<<-"1FOO"\nif true\nend');
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should not exclude code after <<-"FOO BAR" with space in identifier', () => {
-      const pairs = parser.parse('<<-"FOO BAR"\nif true\nend');
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-  });
-
-  suite('Bug investigation: confirmed bugs', () => {
-    test('should not treat ? after closing bracket as blocking if', () => {
-      const pairs = parser.parse('(x)?if true\n  1\nend');
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-
-    test('should handle heredoc with quote in body', () => {
-      const pairs = parser.parse('"#{<<-EOF}\nheredoc " quote\nEOF\n"\nif true\nend');
-      assertSingleBlock(pairs, 'if', 'end');
-    });
-  });
-
-  suite('Regression tests', () => {
     test('should handle character literal ?{ inside macro string interpolation', () => {
       const pairs = parser.parse('{% "#{?{}" %}\nif true\nend');
       assertSingleBlock(pairs, 'if', 'end');
@@ -3625,6 +3594,35 @@ end`;
       const source = "'\\o7777' do\nend";
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
+  suite('Regression: failed heredoc with invalid identifier', () => {
+    test('should not exclude code after <<-"x y" with space in identifier', () => {
+      const pairs = parser.parse('<<-"x y"\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not exclude code after <<-"1FOO" with digit-starting identifier', () => {
+      const pairs = parser.parse('<<-"1FOO"\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not exclude code after <<-"FOO BAR" with space in identifier', () => {
+      const pairs = parser.parse('<<-"FOO BAR"\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug investigation: confirmed bugs', () => {
+    test('should not treat ? after closing bracket as blocking if', () => {
+      const pairs = parser.parse('(x)?if true\n  1\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle heredoc with quote in body', () => {
+      const pairs = parser.parse('"#{<<-EOF}\nheredoc " quote\nEOF\n"\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
     });
   });
 
