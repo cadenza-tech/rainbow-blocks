@@ -543,11 +543,16 @@ export class PascalBlockParser extends BaseBlockParser {
   }
 
   // Returns true when the position is inside a generic constraint angle bracket, e.g.
-  // `function Bar<T: record>: T;`. Scans backward from the position for an unbalanced '<'
-  // before reaching the start of source. The scan respects excluded regions and balances
-  // nested '< >' brackets. '>=' / '<=' / '>>' / '<<' are skipped to avoid mistaking
-  // comparison/shift operators for generic brackets. ';' inside generics is a parameter
-  // separator (e.g. `<T1; T2: record>`), not a statement boundary, so it is skipped.
+  // `function Bar<T: record>: T;`. Scans backward from the position for a candidate
+  // unbalanced '<', then forward-validates that the '<' has a matching '>' enclosing the
+  // position. The scan respects excluded regions and balances nested '< >' brackets.
+  // '>=' / '<=' / '>>' / '<<' are skipped to avoid mistaking comparison/shift operators
+  // for generic brackets. ';' inside generics is a parameter separator (e.g.
+  // `<T1; T2: record>`), not a statement boundary, so the backward scan skips it.
+  //
+  // Forward-validation distinguishes a real generic clause from a bare comparison '<' in
+  // a prior statement: a comparison like `const C = 1 < 2;` has no matching '>' after the
+  // position, so the candidate is rejected and the keyword is treated as a block opener.
   private isInsideGenericConstraint(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let depth = 0;
     let i = position - 1;
@@ -573,10 +578,53 @@ export class PascalBlockParser extends BaseBlockParser {
           i--;
           continue;
         }
-        if (depth === 0) return true;
+        if (depth === 0) {
+          // Candidate opening '<' found. Confirm it closes with a matching '>' that
+          // appears after the position. A bare comparison '<' has no such match.
+          return this.hasMatchingGenericClose(source, i, position, excludedRegions);
+        }
         depth--;
       }
       i--;
+    }
+    return false;
+  }
+
+  // Forward-validates a candidate generic opening '<' at openPos: scans forward balancing
+  // nested '< >' (skipping '>=' / '<=' / '>>' / '<<' operators and excluded regions) and
+  // returns true only when the matching '>' is found at or after enclosePos.
+  private hasMatchingGenericClose(source: string, openPos: number, enclosePos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 1;
+    let i = openPos + 1;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === '<') {
+        // Skip '<=' (comparison) and '<<' (shift)
+        if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '<')) {
+          i += 2;
+          continue;
+        }
+        depth++;
+      } else if (ch === '>') {
+        // Skip '>=' (comparison) and '>>' (shift)
+        if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '>')) {
+          i += 2;
+          continue;
+        }
+        depth--;
+        if (depth === 0) {
+          // The matching '>' must be at or after the keyword being validated.
+          return i >= enclosePos;
+        }
+      }
+      i++;
     }
     return false;
   }
