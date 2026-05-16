@@ -94,7 +94,15 @@ export class BashBlockParser extends BaseBlockParser {
     while (i < source.length) {
       // Track [[ and ]] to maintain doubleBracketDepth
       // Only track [[ at command position to avoid false positives (e.g., echo [[ would poison # detection)
-      if (source[i] === '[' && i + 1 < source.length && source[i + 1] === '[' && this.isDoubleBracketCommand(source, i)) {
+      // An unclosed [[ (no matching ]] ahead) must not enter double-bracket mode,
+      // otherwise comment/string detection stays disabled for the rest of the source.
+      if (
+        source[i] === '[' &&
+        i + 1 < source.length &&
+        source[i + 1] === '[' &&
+        this.isDoubleBracketCommand(source, i) &&
+        this.hasDoubleBracketClose(source, i + 2)
+      ) {
         doubleBracketDepth++;
         i += 2;
         continue;
@@ -471,6 +479,18 @@ export class BashBlockParser extends BaseBlockParser {
         word === 'done' ||
         word === 'esac'
       ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Checks whether a matching `]]` exists at or after `from`.
+  // findExcludedRegions uses this so an unclosed `[[` does not poison `#`/string
+  // detection for the rest of the source.
+  private hasDoubleBracketClose(source: string, from: number): boolean {
+    for (let k = from; k + 1 < source.length; k++) {
+      if (source[k] === ']' && source[k + 1] === ']') {
         return true;
       }
     }
