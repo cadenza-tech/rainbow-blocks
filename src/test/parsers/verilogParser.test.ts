@@ -3179,6 +3179,37 @@ endmodule`;
     });
   });
 
+  suite('Regression: unclosed brace must not suppress later block keywords', () => {
+    test('should still detect module-endmodule with an unclosed concatenation brace', () => {
+      // Bug: an unclosed `{` (incomplete concatenation) made the backward brace
+      // scan return true for every later keyword, suppressing all subsequent
+      // block tokens. The `module`/`endmodule` pair must still be detected.
+      const source = 'module top;\n  assign bus = {hi,\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still detect block keywords after an unclosed brace inside a begin block', () => {
+      // Same bug reproduced inside a begin block: an unclosed `{` must not
+      // suppress the trailing `end`/`endmodule` tokens.
+      const source = 'module top;\n  initial begin\n    x = {a, b\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value === 'module' && p.closeKeyword?.value === 'endmodule'),
+        'module should still pair with endmodule'
+      );
+    });
+
+    test('should still suppress block keywords inside a properly closed brace', () => {
+      // Sanity: closed-brace suppression must continue to work after the fix.
+      const source = 'module m;\n  initial begin\n    a = {begin: 1};\n  end\nendmodule';
+      const beginTokens = parser.getTokens(source).filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 1, 'only the real `initial begin` should be tokenized');
+      assert.strictEqual(beginTokens[0].startOffset, source.indexOf('begin'));
+    });
+  });
+
   suite('Regression: declaration keywords suppress reserved-word identifiers', () => {
     test('should not treat endmodule as block_close after localparam', () => {
       // Bug: `localparam endmodule = 1;` declares a parameter named `endmodule`.
