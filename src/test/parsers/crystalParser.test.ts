@@ -1408,6 +1408,25 @@ end`;
       const pairs = parser.parse('[1, 2].each do |item|\n  puts item\nend');
       assertSingleBlock(pairs, 'do', 'end');
     });
+
+    test('should treat while-do as single block when do is on the next line', () => {
+      const pairs = parser.parse('while x\ndo\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat until-do as single block when do is on the next line', () => {
+      const pairs = parser.parse('until x\ndo\nend');
+      assertSingleBlock(pairs, 'until', 'end');
+    });
+
+    test('should still treat method-block do inside a while loop as its own block', () => {
+      const pairs = parser.parse('while x\n  arr.each do |i|\n  end\nend');
+      assertBlockCount(pairs, 2);
+      const whilePair = findBlock(pairs, 'while');
+      assert.strictEqual(whilePair.closeKeyword.value, 'end');
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword.value, 'end');
+    });
   });
 
   suite('Rescue modifier', () => {
