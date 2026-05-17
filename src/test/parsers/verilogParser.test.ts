@@ -2120,6 +2120,31 @@ endmodule`;
     });
   });
 
+  suite('Bug: default inside unclosed statement block misattributed to outer case', () => {
+    test('should not attach default to outer case when inside an unclosed fork block', () => {
+      // default appears inside an unclosed fork block, so it is not at a case_item
+      // position. It must not become an intermediate of the case/endcase pair.
+      const source = 'case(a)\nfork\ndefault: x;\njoin\nendcase';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assertIntermediates(casePair, []);
+    });
+
+    test('should not attach default to outer case when inside an unclosed begin block', () => {
+      const source = 'case(a)\nbegin\ndefault: x;\nend\nendcase';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assertIntermediates(casePair, []);
+    });
+
+    test('should not attach default to outer case when inside nested unclosed begin blocks', () => {
+      const source = 'case(a)\nbegin\nbegin\ndefault: x;\nend\nend\nendcase';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assertIntermediates(casePair, []);
+    });
+  });
+
   suite('Regression: assert property false positive', () => {
     test('should not detect property in assert property as block open', () => {
       const tokens = parser.getTokens('assert property (@(posedge clk) a |-> b);');
