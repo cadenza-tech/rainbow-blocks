@@ -1,0 +1,4 @@
+{
+  "include": ["out/parsers/**"],
+  "reporter": ["text", "html", "json"]
+}

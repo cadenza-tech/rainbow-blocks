@@ -111,7 +111,7 @@
     "check": "biome check",
     "check:fix": "biome check --write",
     "test": "vscode-test",
-    "test:coverage": "yarn run pretest && vscode-test --coverage"
+    "test:coverage": "yarn run compile-tests && c8 mocha --ui tdd --timeout 60000 \"out/test/parsers/**/*.test.js\""
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
@@ -120,7 +120,9 @@
     "@types/vscode": "^1.42.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
+    "c8": "^10.1.3",
     "esbuild": "^0.27.3",
+    "mocha": "^11.7.5",
     "npm-run-all": "^4.1.5",
     "ovsx": "^0.10.9",
     "typescript": "^5.9.3"

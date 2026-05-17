@@ -17,9 +17,5 @@ export default defineConfig({
       },
       launchArgs: ['--disable-extensions', ...profileLaunchArgs]
     }
-  ],
-  coverage: {
-    exclude: ['**/test/**'],
-    reporter: ['text', 'html', 'json']
-  }
+  ]
 });
