@@ -3158,5 +3158,40 @@ type
     });
   });
 
+  suite('Regression 2026-05-18: variant record case with non-identifier tag', () => {
+    test('should treat case with anonymous ordinal type tag as variant case', () => {
+      // FreePascal allows an anonymous enumerated type as the variant selector tag:
+      // `case (Foo) of`. The tag starts with '(' rather than an identifier, so the
+      // variant `case` must still be recognized (no own `end`) and `end` closes
+      // the `record`.
+      const source = `type R = record
+ case (Foo) of
+ 0: (a: Byte);
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should treat case with numeric selector tag as variant case', () => {
+      // `case 1 of` uses a numeric literal as the selector tag. Although this is
+      // invalid Pascal, the variant `case` must not be treated as a block opener:
+      // the `end` should close the enclosing `record`, not the `case`.
+      const source = 'var r: record case 1 of 0:(a:byte) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+
+    test('should still treat a standalone case with parenthesized selector expression as a block', () => {
+      // Outside a record, `case (x + 1) of` is an ordinary case statement whose
+      // selector is a parenthesized expression. It must remain a real block and
+      // not be misclassified as a variant case.
+      const source = `case (x + 1) of
+  1: DoOne;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
