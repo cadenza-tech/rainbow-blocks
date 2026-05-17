@@ -5,6 +5,27 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.48] - 2026-05-17
+
+### Changed
+
+- Switch the `test:coverage` script to c8 and mocha for accurate parser branch-coverage measurement
+
+### Refactored
+
+- Julia: Split `juliaParser.ts` by extracting bracket-context helpers to `juliaBracketHelpers.ts` and lastindex helpers to `juliaLastindexHelpers.ts`
+- MATLAB: Split `matlabParser.ts` by extracting logical-line cache, pure scan, and excluded-region helpers to `matlabCacheHelpers.ts`, `matlabHelpers.ts`, and `matlabExcluded.ts`
+- COBOL: Split `cobolParser.ts` by extracting fixed-format helpers to `cobolFixedFormat.ts` and pseudo-text helpers to `cobolPseudoText.ts`
+- Ada/VHDL/Fortran/COBOL/Pascal: Extract the duplicated case-insensitive keyword pattern builder to `buildCaseInsensitiveKeywordPattern` in `parserUtils.ts`
+- Base parser: Extract the keyword pattern builder in `tokenize` to a dedicated `buildKeywordPattern` method
+- Extension: Extract the duplicated debounce timer cleanup into a `clearAllDebounceTimers` helper
+- Tests: Extract the duplicated nested-block nest-level test into a shared `generateNestedBlockTests` generator across 10 parser test files
+- Tests: Merge duplicate test suites, relocate `generateCommonTests` to file end, and remove empty suites across Bash, COBOL, Crystal, Ada, and Fortran test files
+
+### Tests
+
+- Improve branch coverage across the Ada, COBOL, Julia, Octave, and Verilog parser tests
+
 ## [1.1.47] - 2026-05-16
 
 ### Fixed
@@ -1912,6 +1933,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.48]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.47...v1.1.48
 [1.1.47]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.46...v1.1.47
 [1.1.46]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.45...v1.1.46
 [1.1.45]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.44...v1.1.45
