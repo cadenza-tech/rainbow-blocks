@@ -529,6 +529,19 @@ end`;
     });
   });
 
+  suite('Identifier-letter transpose vs string', () => {
+    test('should treat quote-letter after identifier as string, not transpose', () => {
+      // The transpose operator cannot follow an identifier letter and then a letter:
+      // `disp'end'` is `disp` followed by the string literal `'end'`. The `end` inside
+      // the string must not be tokenized, so `if` pairs with the LAST `end` (line 3),
+      // not the `end` inside the string on line 1.
+      const source = "if a\nx = disp'end'\nb = 2\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'if should pair with the real end on line 3');
+    });
+  });
+
   suite('Test helper methods - language-specific', () => {
     test('getExcludedRegions should return block comment', () => {
       const source = `%{
