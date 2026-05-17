@@ -1940,6 +1940,30 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
     });
+
+    test('should consume suffix after prefixed single backtick command inside interpolation', () => {
+      // cmd`...` is a prefixed command macro: the suffix `x` after the closing backtick
+      // is part of the macro region, so the whole double-quoted string stays a single
+      // excluded region and the keyword `end` inside it must not produce a block.
+      const source = '"x = $(cmd`echo end`x)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat Unicode-prefixed single backtick command inside interpolation', () => {
+      // A Unicode letter before the backtick (lambda`...`) marks a prefixed command macro.
+      const source = '"x = $(\u03bb`echo end`)"\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should consume suffix after prefixed triple backtick command inside interpolation', () => {
+      // cmd```...``` prefixed triple-backtick command macro; the suffix `sfx` is consumed
+      // as part of the macro, keeping `end` inside the excluded region.
+      const source = '"x = $(cmd```echo end```sfx)"\nfor i in 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
   });
 
   suite('Nested strings and commands in interpolation', () => {
@@ -2380,6 +2404,29 @@ end`;
     });
   });
 
+  suite('Branch coverage: keyword-like identifiers in array construction with end', () => {
+    test('should not pair end with an identifier containing a keyword prefix', () => {
+      // `[beginx, end]` is array construction; `beginx` is an identifier and the lone
+      // `end` has no matching block opener, so no block pair is produced.
+      const source = 'x = [beginx, end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair end with a keyword adjacent to a Unicode letter', () => {
+      const source = 'x = [\u03bbbegin, end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair end with a dot-preceded keyword in array construction', () => {
+      // `obj.begin` is field access, not a block opener; the lone `end` stays unpaired.
+      const source = 'x = [obj.begin, end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Coverage: uncovered branch paths', () => {
     // L165-167: isInExcludedRegion in hasBlockOpenerBetween - string in range between ( and for
     test('should skip excluded regions in hasBlockOpenerBetween', () => {
@@ -2677,6 +2724,54 @@ end`;
       const source = 'x = (if true 1 else 2 end)';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Branch coverage: block openers as identifiers inside parenthesized block expressions', () => {
+    test('should treat identifier containing a keyword prefix as non-opener before if', () => {
+      // `beginx` is a single identifier, not the `begin` keyword. The trailing `if`
+      // block expression inside the parens is still detected as a block.
+      const source = '(beginx if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should treat keyword adjacent to a Unicode letter as non-opener before if', () => {
+      // `lambda` + `begin` forms one identifier; only the `if` block expression counts.
+      const source = '(\u03bbbegin if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should treat dot-preceded keyword as field access before if', () => {
+      // `obj.begin` is field access, not the `begin` block keyword.
+      const source = '(obj.begin if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should pair abstract type block preceding an if block expression in parens', () => {
+      // `abstract type T end` is a real block opener/closer; the following `if` block
+      // expression pairs independently. Both are detected inside the parens.
+      const source = '(abstract type T end; if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const abstractPair = findBlock(pairs, 'abstract');
+      assert.strictEqual(abstractPair.closeKeyword.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value, 'end');
+    });
+
+    test('should treat abstract not followed by type as non-opener before if', () => {
+      // `abstract` without a following `type` keyword is a bare identifier, not a block
+      // opener; only the `if` block expression inside the parens is detected.
+      const source = '(abstract; if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
     });
   });
 
@@ -3480,6 +3575,23 @@ end`;
     });
   });
 
+  suite('Branch coverage: comments inside comprehension for/if scan range', () => {
+    test('should ignore a leading comment when scanning a comprehension filter', () => {
+      // A multi-line comment at the start of `[ ... ]` is skipped while locating the
+      // leading token; the `for`/`if` remain comprehension clauses, not blocks.
+      const source = '[#=c=# x for x in 1:3 if x > 0]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should ignore a comment in the middle of a comprehension filter scan', () => {
+      // A comment between the expression and `for` is skipped; still a comprehension.
+      const source = '[x #=c=# for x in 1:3 if x > 0]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: block keywords as block expressions inside indexing brackets', () => {
     test('should accept quote/end as block expression in indexing brackets', () => {
       const pairs = parser.parse('a[quote x = 1 end]');
@@ -4123,6 +4235,18 @@ end`;
       assertSingleBlock(pairs, 'function', 'end');
       const regions = parser.getExcludedRegions(source);
       assert.ok(regions.some((r) => source.slice(r.start, r.end) === ':end'));
+    });
+
+    test('should not treat :end as symbol literal after BMP-outside Unicode letter (surrogate pair)', () => {
+      // Counter-test for the surrogate-pair branch: when the code point at pos - 2 IS a
+      // Unicode letter, `:` follows an identifier and is not a symbol-literal start.
+      // U+1D49C (MATHEMATICAL SCRIPT CAPITAL A) is a Letter encoded as a surrogate pair.
+      const source = 'function foo()\n  x = a\u{1D49C}:end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const regions = parser.getExcludedRegions(source);
+      // No `:end` symbol literal: the BMP-outside letter makes `:` a non-symbol context.
+      assert.ok(!regions.some((r) => source.slice(r.start, r.end) === ':end'));
     });
   });
 
