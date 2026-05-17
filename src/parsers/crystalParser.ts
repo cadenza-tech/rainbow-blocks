@@ -858,8 +858,12 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
         continue;
       }
-      // Newline outside of parens terminates the scan
-      if (parenDepth === 0 && (c === '\n' || c === '\r')) {
+      // Newline or semicolon outside of parens terminates the def header.
+      // A `;` ends the def signature; anything after it is the body, so a
+      // `=` there (e.g. `def foo; x = 1; end`) is an assignment, not the
+      // Crystal 1.0 shorthand `def foo = expr`. Semicolons inside excluded
+      // regions (strings, comments) are already skipped above.
+      if (parenDepth === 0 && (c === '\n' || c === '\r' || c === ';')) {
         return false;
       }
       if (c === '#') {
