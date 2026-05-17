@@ -3449,5 +3449,137 @@ end if;`;
     });
   });
 
+  suite('Coverage: extended return statement edge cases', () => {
+    test('should not tokenize return as a block opener when only whitespace follows to end of source', () => {
+      // isExtendedReturn scans past whitespace and reaches end of source before
+      // any identifier appears - incomplete code being typed. The trailing
+      // `return` must not be tokenized as a block opener.
+      const source = 'function F return Integer is\nbegin\n  return  ';
+      const returnTokens = parser.getTokens(source).filter((t) => t.value.toLowerCase() === 'return');
+      assert.strictEqual(returnTokens.length, 0);
+    });
+
+    test('should treat an extended return with a parenthesized type mark as a block', () => {
+      // The type mark `Matrix(1 .. 10)` carries parentheses: the forward scan
+      // tracks paren depth so the `do` after the closing `)` is recognized.
+      const source = 'function F return Matrix is\nbegin\n  return R : Matrix(1 .. 10) do\n    R(1) := 0;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const returnBlock = findBlock(pairs, 'return');
+      assert.strictEqual(returnBlock.closeKeyword.value.toLowerCase(), 'end return');
+    });
+
+    test('should not treat an initialized return statement without do as a block', () => {
+      // `return R : Integer := 5;` reaches `;` before any `do`: an extended
+      // return statement with no body, so `return` is not a block opener.
+      const source = 'function F return Integer is\nbegin\n  return R : Integer := 5;\nend F;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat return as a block opener for a malformed := do', () => {
+      // `:= do` has no expression between the assignment operator and `do`, so
+      // the construct is malformed and `return` is not treated as a block opener.
+      const source = 'function F return Integer is\nbegin\n  return R : Integer := do\n    null;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat return as a block opener when do is immediately followed by a semicolon', () => {
+      // `do;` has no extended-return body - malformed - so `return` is not an opener.
+      const source = 'function F return Integer is\nbegin\n  return R : Integer do;\nend F;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not tokenize return as a block opener when the type mark runs to end of source without do', () => {
+      // Incomplete code: `return R : Integer` with no `do` and no terminator.
+      // The forward scan reaches end of source, so `return` is not an opener.
+      const source = 'function F return Integer is\nbegin\n  return R : Integer';
+      const returnTokens = parser.getTokens(source).filter((t) => t.value.toLowerCase() === 'return');
+      assert.strictEqual(returnTokens.length, 0);
+    });
+  });
+
+  suite('Coverage: bare or backward scan in select alternative detection', () => {
+    test('should keep a bare or as a select intermediate when the backward scan reaches a semicolon', () => {
+      // The first alternative body ends with a not-yet-terminated identifier;
+      // the backward scan walks past it to the `;` of the previous statement,
+      // which marks a select alternative boundary.
+      const source = 'select\n  accept A;\n  Pending\nor\n  accept B;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+
+    test('should keep a bare or as a select intermediate when the backward scan reaches a guard arrow', () => {
+      // `when Ready =>` with an empty alternative body: the `or` follows the
+      // guard arrow `=>`, which marks a select alternative boundary.
+      const source = 'select\n  when Ready =>\nor\n  accept B;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['when', 'or']);
+    });
+
+    test('should drop a wrapped boolean or when the backward scan crosses a comment to reach an assignment', () => {
+      // `Flag := A or B;` split so `or` starts its own line, with a line comment
+      // before the wrap. The backward scan steps over the comment region and
+      // reaches `:=`, so the `or` is a boolean operator, not an intermediate.
+      const source = 'procedure P is\n  Flag : Boolean := False;\nbegin\n  Flag := A -- note\n    or B;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should drop a wrapped boolean or when the backward scan steps over a parenthesized operand', () => {
+      // `Flag := (A) or B;` wrapped so `or` starts its own line. The backward
+      // scan steps over `)` and `(` before reaching `:=`.
+      const source = 'procedure P is\n  Flag : Boolean := False;\nbegin\n  Flag := (A)\n    or B;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+  });
+
+  suite('Coverage: intermediate and compound-end designator edge cases', () => {
+    test('should not leak exception as an intermediate when a comment precedes it in the declaration', () => {
+      // `Item : -- comment` then `exception;` on the next line. The backward
+      // scan from `exception` crosses the comment region and finds the `:` of
+      // the declaration, so `exception` is a type reference, not a handler.
+      const source = 'package P is\n  Item : -- an exception object\n    exception;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should treat a compound end with a dotted designator as a compound end token', () => {
+      // `end procedure Outer.Inner;` - the optional designator is a qualified
+      // (dotted) name; the designator lookahead consumes it up to the `;`.
+      const source = 'procedure Outer.Inner is\nbegin\n  null;\nend procedure Outer.Inner;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end procedure');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should skip the type declaration is when the type name is on its own line with CRLF endings', () => {
+      // A multi-line type declaration with the type name on a separate line and
+      // CRLF endings: the backward scan past the identifier line must consume
+      // the CR of the CRLF pair so the `is` is recognized as part of the decl.
+      const source = 'procedure P is\r\n  type\r\n  My_Type\r\n  is range 1 .. 10;\r\nbegin\r\n  null;\r\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should skip a type keyword inside a string literal when scanning a line for type declarations', () => {
+      // The line contains the word `type` inside a string literal as well as a
+      // real `type` declaration. The mid-line scan must ignore the string one.
+      const source = 'package P is\n  Label : String := "type name"; type T is Integer;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
+  });
+
   generateCommonTests(config);
 });
