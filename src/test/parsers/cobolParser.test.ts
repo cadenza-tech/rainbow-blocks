@@ -2345,6 +2345,29 @@ END-PERFORM`;
       const source = 'COPY ABC DEF GHI\nIF X\nREPLACING ==a== BY ==b==.';
       assert.strictEqual(pseudoCount(source), 0, 'extra data-name words are walked over until the IF verb ends the COPY');
     });
+
+    test('should end a period-less COPY at a following non-block verb so a later REPLACING is not pseudo-text', () => {
+      // Bug: getPseudoTextStarts only dropped the COPY state at a period or a
+      // block-opening verb. A non-block verb such as MOVE left sawCopy set, so a
+      // REPLACING in the next statement was wrongly treated as a COPY REPLACING
+      // and its ==...== delimiters became pseudo-text — hiding the IF/END-IF
+      // block inside them. A non-block COBOL verb past the copybook name ends
+      // the period-less COPY just like a block-opening verb does.
+      const source = 'COPY MYBOOK\nMOVE 1 TO X\nREPLACING == IF A\nEND-IF == BY ==B==';
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING after a period-less COPY plus MOVE verb is not in COPY context');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should still detect pseudo-text in a period-terminated COPY followed by a non-block verb', () => {
+      // Contrast: with a terminating period the COPY statement is properly
+      // closed; the following MOVE and REPLACING belong to separate statements,
+      // and the IF/END-IF block is detected as before.
+      const source = 'COPY MYBOOK.\nMOVE 1 TO X\nREPLACING == IF A\nEND-IF == BY ==B==';
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING in a separate statement is not pseudo-text');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
   });
 
   suite('Coverage: COPY detection skips strings and comments preceding the COPY keyword', () => {
