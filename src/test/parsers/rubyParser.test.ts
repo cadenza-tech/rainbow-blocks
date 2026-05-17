@@ -3986,5 +3986,37 @@ end`;
     });
   });
 
+  suite('Regression: comma-LtLt inside comment/string must not trigger heredoc on a shift line', () => {
+    test('should not treat a<<b as heredoc when a comment contains ", <<"', () => {
+      const source = 'x = a<<b # , <<\nif y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat a<<b as heredoc when a string literal contains ", <<"', () => {
+      const source = 'x = a<<b + ", <<z"\nif y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat a<<b as heredoc when interpolation contains ", <<"', () => {
+      const source = 'x = "#{a<<b}, <<z"\nif y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still accept a real multi-heredoc list with bare delimiters', () => {
+      const source = 'raise <<A, <<A\nfirst\nA\nif true\nelse\nend\nA\ndef foo\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat plain shift list a<<b, c<<d without comment as non-heredoc', () => {
+      const source = 'x = a<<b, c<<d\nif y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
