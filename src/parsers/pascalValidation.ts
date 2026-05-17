@@ -229,6 +229,27 @@ export function buildRecordContextMap(source: string, excludedRegions: ExcludedR
   return map;
 }
 
+// Skips a balanced parenthesized group starting at `openParen` (which must be a '(').
+// Excluded regions (comments, strings) are skipped. Returns the index just past the
+// matching ')', or source.length if the group is unterminated.
+function skipParenGroup(source: string, openParen: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): number {
+  let depth = 1;
+  let i = openParen + 1;
+  while (i < source.length && depth > 0) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+    }
+    if (source[i] === '(') depth++;
+    else if (source[i] === ')') depth--;
+    i++;
+  }
+  return i;
+}
+
 // Checks if 'case' at position is a variant record case (tagged or tagless)
 // `recordContextMap` (built once per parse) provides O(1) "inside a record" lookup.
 export function isVariantRecordCase(
@@ -241,7 +262,8 @@ export function isVariantRecordCase(
   if (!recordContextMap.get(position)) {
     return false;
   }
-  // Scan forward from after 'case', skipping whitespace and excluded regions, looking for identifier
+  // Scan forward from after 'case', skipping whitespace and excluded regions, to the
+  // selector tag.
   let j = position + 4; // skip 'case'
   while (j < source.length) {
     if (callbacks.isInExcludedRegion(j, excludedRegions)) {
@@ -259,37 +281,55 @@ export function isVariantRecordCase(
     }
     break;
   }
-  // Expect an identifier
-  if (j < source.length && /[a-zA-Z_]/i.test(source[j])) {
-    // Tagged variant: identifier followed by ':'
-    // Tagless variant: identifier followed by 'of'
-    let k = j;
+  if (j >= source.length) {
+    return false;
+  }
+  // Determine the end of the selector tag token. The tag is one of:
+  //  - an identifier (possibly qualified, e.g. Types.MyEnum)
+  //  - a parenthesized group: an anonymous ordinal type `(Foo, Bar)` (FreePascal) or a
+  //    numeric-tag-with-no-name variant. Only inside a record, so a parenthesized
+  //    selector expression of a standalone `case` is never reached here.
+  //  - a numeric literal (digits, `$hex`, `#charcode`) used as a (malformed) tag
+  let k: number;
+  if (/[a-zA-Z_]/i.test(source[j])) {
+    k = j;
     while (k < source.length && /[\w.]/i.test(source[k])) {
       k++;
     }
-    // Skip whitespace and excluded regions after identifier
-    while (k < source.length) {
-      if (callbacks.isInExcludedRegion(k, excludedRegions)) {
-        const region = callbacks.findExcludedRegionAt(k, excludedRegions);
-        if (region) {
-          k = region.end;
-          continue;
-        }
-        k++;
+  } else if (source[j] === '(') {
+    k = skipParenGroup(source, j, excludedRegions, callbacks);
+  } else if (/[0-9$#]/.test(source[j])) {
+    k = j;
+    while (k < source.length && /[\w$#]/i.test(source[k])) {
+      k++;
+    }
+  } else {
+    return false;
+  }
+  // Skip whitespace and excluded regions after the tag token
+  while (k < source.length) {
+    if (callbacks.isInExcludedRegion(k, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(k, excludedRegions);
+      if (region) {
+        k = region.end;
         continue;
       }
-      if (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r') {
-        k++;
-        continue;
-      }
-      break;
+      k++;
+      continue;
     }
-    if (k < source.length && source[k] === ':') {
-      return true; // Tagged variant
+    if (source[k] === ' ' || source[k] === '\t' || source[k] === '\n' || source[k] === '\r') {
+      k++;
+      continue;
     }
-    if (k + 2 <= source.length && /^of\b/i.test(source.slice(k, k + 3))) {
-      return true; // Tagless variant
-    }
+    break;
+  }
+  // Tagged variant: tag followed by ':' (the field-name-to-type colon).
+  if (k < source.length && source[k] === ':') {
+    return true;
+  }
+  // Tagless variant: tag followed by 'of'.
+  if (k + 2 <= source.length && /^of\b/i.test(source.slice(k, k + 3))) {
+    return true;
   }
   return false;
 }
