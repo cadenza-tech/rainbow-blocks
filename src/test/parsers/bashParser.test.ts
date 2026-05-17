@@ -6051,5 +6051,43 @@ fi`;
     });
   });
 
+  suite('Regression 2026-05-18: large scripts with many keywords parse in linear time', () => {
+    test('should parse 1000 sequential if-fi blocks in linear time', () => {
+      // Previously isInsideDoubleBracket / isInsideExtglob (and the backward scans
+      // in isAtCommandPosition) walked the source backward to file start from every
+      // keyword token. With ~1000 if-fi blocks (~3000 keyword tokens) this was O(N^2):
+      // n=500 took ~5.3s, n=1000 took ~27.5s. After precomputing the [[ ]] / extglob
+      // regions and reusing them via binary search, the parse stays well under 2s.
+      const N = 1000;
+      const block = 'if [ "$x" = "0" ]; then\n  echo "case 0"\nfi\n';
+      const source = block.repeat(N);
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      // Output must be unchanged: exactly N if-fi pairs, all at nest level 0.
+      assertBlockCount(pairs, N);
+      for (const pair of pairs) {
+        assert.strictEqual(pair.openKeyword.value, 'if');
+        assert.strictEqual(pair.closeKeyword.value, 'fi');
+        assert.strictEqual(pair.nestLevel, 0);
+      }
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+    });
+
+    test('should parse 2000 orphan close keywords in linear time', () => {
+      // Each orphan `fi` runs the full isValidBlockClose backward-scan chain
+      // (isInsideExtglob / isInsideDoubleBracket / isAtCommandPosition). Without
+      // precomputed regions every `fi` scans to file start, making this O(N^2).
+      const N = 2000;
+      const source = 'fi\n'.repeat(N);
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      // Orphan closes never form pairs.
+      assertNoBlocks(pairs);
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression)`);
+    });
+  });
+
   generateCommonTests(config);
 });
