@@ -4250,5 +4250,342 @@ end`;
     });
   });
 
+  suite('Branch coverage: lastindex operators inside for-led indexing brackets', () => {
+    test('should treat end-1 as lastindex in arr[for k in 1:end-1; v[k]; end]', () => {
+      // hasUnmatchedBlockOpenerBetweenInIndexing leading-for path: the indexing bracket
+      // content starts with a block-form `for`, so the leading-for is counted as a block
+      // opener (depth++). The `end-1` after `1:` is lastindex (followed by `-`), so it does
+      // NOT decrement depth; only the trailing real `end` closes the `for`.
+      const source = 'arr[for k in 1:end-1; v[k]; end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      const block = findBlock(pairs, 'for');
+      // The `for` pairs with the trailing `end` at offset 28, not the lastindex `end` at 16.
+      assert.strictEqual(block.openKeyword.startOffset, 4);
+      assert.strictEqual(block.closeKeyword?.startOffset, 28);
+    });
+
+    test('should treat end< as lastindex in arr[if end<2 1 else 0 end]', () => {
+      // `end<2` inside an indexing bracket: `end` followed by a bare `<` (not `<:`) is a
+      // lastindex expression, exercising the bare-`<` branch of isBinaryOperatorStart. The
+      // `if` pairs with the outer `end`, not the `end` of `end<2`.
+      const source = 'arr[if end<2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      const block = findBlock(pairs, 'if');
+      assert.strictEqual(block.openKeyword.startOffset, 4);
+      assert.strictEqual(block.closeKeyword?.startOffset, 22);
+    });
+
+    test('should treat end<3 as lastindex in arr[for k in 1:n; v[end<3]; end]', () => {
+      // Leading-for indexing bracket: the bracket content starts with a block-form `for`,
+      // and `v[end<3]` contains an `end<3` lastindex expression in a nested indexing
+      // bracket. The leading `for` is the only real block opener and pairs with the
+      // trailing `end`; the `end<3` is lastindex (followed by `<`), not block_close.
+      const source = 'arr[for k in 1:n; v[end<3]; end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      const block = findBlock(pairs, 'for');
+      assert.strictEqual(block.openKeyword.startOffset, 4);
+      assert.strictEqual(block.closeKeyword?.startOffset, 28);
+    });
+
+    test('should treat end== as lastindex in arr[if end==2 1 else 0 end]', () => {
+      // `end==2` inside an indexing bracket: `end` followed by `==` is lastindex. The `if`
+      // pairs with the outer `end`, not the `end` of `end==2`.
+      const source = 'arr[if end==2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      const block = findBlock(pairs, 'if');
+      assert.strictEqual(block.openKeyword.startOffset, 4);
+      assert.strictEqual(block.closeKeyword?.startOffset, 23);
+    });
+
+    test('should treat end<= as lastindex in arr[if end<=2 1 else 0 end]', () => {
+      const source = 'arr[if end<=2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 23);
+    });
+
+    test('should treat end>= as lastindex in arr[if end>=2 1 else 0 end]', () => {
+      const source = 'arr[if end>=2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 23);
+    });
+
+    test('should treat end> as lastindex in arr[if end>2 1 else 0 end]', () => {
+      // Bare `>` after `end` (not `>:`): lastindex expression.
+      const source = 'arr[if end>2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 22);
+    });
+
+    test('should treat end- as lastindex in arr[if end-1>0 1 else 0 end]', () => {
+      // `end` followed by binary `-`: lastindex expression.
+      const source = 'arr[if end-1>0 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 24);
+    });
+
+    test('should treat end* as lastindex in arr[if end*2>0 1 else 0 end]', () => {
+      const source = 'arr[if end*2>0 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 24);
+    });
+
+    test('should treat end/ as lastindex in arr[if end/2>0 1 else 0 end]', () => {
+      const source = 'arr[if end/2>0 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 24);
+    });
+
+    test('should treat end% as lastindex in arr[if end%2>0 1 else 0 end]', () => {
+      const source = 'arr[if end%2>0 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 24);
+    });
+
+    test('should treat end^ as lastindex in arr[if end^2>0 1 else 0 end]', () => {
+      const source = 'arr[if end^2>0 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.startOffset, 24);
+    });
+  });
+
+  suite('Branch coverage: comprehension for inside indexing brackets', () => {
+    test('should treat end as lastindex in comprehension arr[i for i in 1:end]', () => {
+      // hasUnmatchedBlockOpenerBetweenInIndexing comprehension-for path: `arr[...]` is an
+      // indexing bracket whose content `i for i in 1:end` is a generator. The `for` is a
+      // comprehension generator (not a block opener) and `end` is lastindex. No block pairs
+      // are produced and no `end` is tokenized as block_close.
+      const source = 'arr[i for i in 1:end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getTokens(source).length, 0);
+    });
+
+    test('should treat end as lastindex in comprehension arr[v[i] for i in 1:end if i>2]', () => {
+      // Comprehension generator with an `if` filter inside an indexing bracket. The `if` is
+      // a comprehension filter (not a block opener) so it is excluded once the `for x in y`
+      // pattern is seen; `end` after `1:` is lastindex.
+      const source = 'arr[v[i] for i in 1:end if i>2]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getTokens(source).length, 0);
+    });
+
+    test('should treat if as comprehension filter in arr[1 for i in 1:n if c end]', () => {
+      // hasUnmatchedBlockOpenerBetweenInIndexing comprehension-filter path: the trailing
+      // `end` is validated against the indexing bracket whose content is the comprehension
+      // `1 for i in 1:n if c`. After `for i in 1:n` is recognized the `if` becomes a filter
+      // (excluded from openers), so no unmatched block opener exists and the `end` is
+      // lastindex. No block pairs and no tokens are produced.
+      const source = 'arr[1 for i in 1:n if c end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getTokens(source).length, 0);
+    });
+
+    test('should not treat for inside identifier xfor as a generator in arr[xfor + v[end] end]', () => {
+      // Word-boundary path in the comprehension-`for` detection: the identifier `xfor`
+      // contains the substring `for` but is preceded by `x` (an identifier char), so it is
+      // not the `for` keyword. The trailing `end` is validated against the `arr[...]`
+      // bracket; with no real block opener it is lastindex. No tokens are produced.
+      const source = 'arr[xfor + v[end] end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getTokens(source).length, 0);
+    });
+
+    test('should not treat for inside identifier forx as a generator in arr[forx + v[end] end]', () => {
+      // Word-boundary path: the identifier `forx` contains `for` but is followed by `x`
+      // (an identifier char), so it is not the `for` keyword. The trailing `end` is
+      // lastindex inside the `arr[...]` bracket. No tokens are produced.
+      const source = 'arr[forx + v[end] end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getTokens(source).length, 0);
+    });
+
+    test('should not treat begin embedded in Unicode identifier as opener in for-led bracket', () => {
+      // isAdjacentToUnicodeLetter path in the opener loop: `xβbegin` is a single identifier
+      // where `begin` is adjacent to the Unicode letter β, so it is not the `begin` keyword.
+      // The leading `for` is the only real block opener and pairs with the trailing `end`.
+      const source = 'arr[for i in 1:n; xβbegin; end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      const block = findBlock(pairs, 'for');
+      assert.strictEqual(block.openKeyword.startOffset, 4);
+      assert.strictEqual(block.closeKeyword?.startOffset, 27);
+    });
+  });
+
+  suite('Branch coverage: bare begin filtered as firstindex inside indexing brackets', () => {
+    test('should treat bare begin as firstindex in arr[begin x] without colon', () => {
+      // allUnmatchedOpenersAreFilteredBegins: inside an indexing bracket, a bare `begin`
+      // (not followed by `:`) is filtered as firstindex. The bracket has an unmatched
+      // opener (`begin`), but since every unmatched opener is a filtered `begin`, the
+      // `end` of the surrounding function is the only real block_close.
+      const source = 'function f(arr)\n  x = arr[begin x]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should treat bare begin as firstindex in arr[begin] alone', () => {
+      // A lone bare `begin` inside the indexing bracket: filtered as firstindex.
+      const source = 'function f(arr)\n  x = arr[begin]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should pair inner if-end and keep begin firstindex in arr[begin if c 1 end x]', () => {
+      // The indexing bracket has a filtered `begin` plus a real `if ... end` block. The
+      // inner `if` pairs with its own `end` inside the bracket; the `begin` is filtered as
+      // firstindex; the surrounding function pairs with the trailing real `end`.
+      const source = 'function f(arr)\n  x = arr[begin if c 1 end x]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword?.line, 2);
+      assert.strictEqual(ifBlock.openKeyword.line, 1);
+      assert.strictEqual(ifBlock.closeKeyword?.line, 1);
+    });
+  });
+
+  suite('Branch coverage: begin/end inside parens within indexing brackets', () => {
+    test('should treat begin/end as firstindex/lastindex in arr[(begin x end)]', () => {
+      // allUnmatchedBeginsAreFirstindex / allUnmatchedOpenersAreFilteredBeginsInsideIndexing:
+      // a bare `begin` (no colon) inside `(...)` that is itself inside an indexing bracket
+      // `arr[...]`. The outer indexing bracket causes the parser to filter `begin` as
+      // firstindex and `end` as lastindex; only the function's trailing `end` is block_close.
+      const source = 'function f(arr)\n  return arr[(begin x end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should treat begin/end as firstindex/lastindex in arr[(begin:end)]', () => {
+      // `begin:` firstindex form inside parens within an indexing bracket. The `end` after
+      // the colon is lastindex; the function pairs with the trailing real `end`.
+      const source = 'function f(arr)\n  return arr[(begin:end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should treat begin/end as firstindex/lastindex in arr[(begin v[end] end)]', () => {
+      // allUnmatchedBeginsAreFirstindex with a nested indexing bracket inside the paren:
+      // the `v[end]` is a nested indexing bracket so the helper tracks `[`/`]` depth and
+      // does not let the inner lastindex `end` cancel the `begin`. The outer indexing
+      // bracket still filters `begin`/`end` as firstindex/lastindex; only the function's
+      // trailing `end` is block_close.
+      const source = 'function f(arr)\n  return arr[(begin v[end] end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should treat begin/end as firstindex/lastindex in arr[v[1] + (begin x end)]', () => {
+      // allUnmatchedOpenersAreFilteredBeginsInsideIndexing backward-scan path: a completed
+      // nested indexing bracket `v[1]` precedes the paren group. The backward scan from the
+      // paren start tracks `]`/`[` depth so the `v[1]` brackets do not get mistaken for the
+      // enclosing indexing bracket; the real enclosing `arr[` is found and `begin`/`end`
+      // are filtered as firstindex/lastindex.
+      const source = 'function f(arr)\n  return arr[v[1] + (begin x end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should skip comment when scanning back for the enclosing indexing bracket', () => {
+      // allUnmatchedOpenersAreFilteredBeginsInsideIndexing backward-scan path with an
+      // excluded region: a `#=...=#` comment sits between the enclosing `[` and the paren
+      // group. The backward scan skips the comment characters and still finds the
+      // enclosing indexing bracket, so `begin`/`end` are filtered.
+      const source = 'function f(arr)\n  return arr[v + #=c=# (begin x end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should ignore keyword inside nested indexing bracket in arr[(begin v[while] end)]', () => {
+      // allUnmatchedBeginsAreFirstindex bracket-depth path: a nested indexing bracket
+      // `v[while]` sits inside the paren group. The helper tracks `[`/`]` depth and skips
+      // block-opener detection while inside `[...]`, so the `while` keyword text inside
+      // `v[while]` is not counted as a block opener. The outer indexing bracket filters
+      // `begin`/`end` as firstindex/lastindex; only the function's trailing `end` is
+      // block_close.
+      const source = 'function f(arr)\n  return arr[(begin v[while] end)]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+  });
+
+  suite('Branch coverage: end after comparison operator is not block_close', () => {
+    test('should not treat a == end as block_close (equality operator)', () => {
+      // isPrecededByBinaryOperator comparison branch: the `=` immediately before `end` is
+      // preceded by another `=` (so it is the `==` equality operator). `end` directly after
+      // `==` is invalid syntax outside indexing brackets and must not be block_close, so the
+      // function pairs with its trailing real `end`.
+      const source = 'function f()\n  x = a == end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat a != end as block_close (not-equal operator)', () => {
+      // The `=` before `end` is preceded by `!` (the `!=` operator).
+      const source = 'function f()\n  x = a != end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat a <= end as block_close (less-than-or-equal operator)', () => {
+      // The `=` before `end` is preceded by `<` (the `<=` operator).
+      const source = 'function f()\n  x = a <= end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat a >= end as block_close (greater-than-or-equal operator)', () => {
+      // The `=` before `end` is preceded by `>` (the `>=` operator).
+      const source = 'function f()\n  x = a >= end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat a < end as block_close (bare less-than operator)', () => {
+      // isPrecededByBinaryOperator bare `<`/`>` branch: a bare `<` (not part of `<:`) right
+      // before `end`. `end` directly after `<` is invalid syntax and must not be block_close.
+      const source = 'function f()\n  x = a < end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat a > end as block_close (bare greater-than operator)', () => {
+      // A bare `>` (not part of `>:`) right before `end`.
+      const source = 'function f()\n  x = a > end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
