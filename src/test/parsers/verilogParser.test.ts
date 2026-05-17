@@ -3373,5 +3373,274 @@ endmodule`;
     });
   });
 
+  suite('Coverage: matchVerilogString CR-only line continuation', () => {
+    test('should treat backslash-CR (no following LF) as line continuation', () => {
+      // matchVerilogString: `\<CR>` where the CR is NOT followed by LF (old-Mac line
+      // ending) is a line continuation. The CR at end-of-source means the `source[i+2]`
+      // lookahead short-circuits, so the 2-char skip path is taken.
+      const source = '"unterminated string with module keyword\\\r';
+      const tokens = parser.getTokens(source);
+      // The entire string (including the CR continuation) is one excluded region;
+      // `module` inside it is not tokenized.
+      assert.strictEqual(tokens.length, 0);
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
+    test('should continue string across backslash-CR back into following content', () => {
+      // The string opened on line 1 continues across `\<CR>` and is only terminated by
+      // the bare LF after `endmodule`. No module/endmodule pair is formed because both
+      // keywords sit inside the string region.
+      const source = '"line one\\\rmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+    });
+  });
+
+  suite('Coverage: matchAttribute string with CRLF line continuation', () => {
+    test('should treat backslash-CRLF inside attribute string as line continuation', () => {
+      // matchAttribute: a string inside `(* ... *)` whose `\<CRLF>` continuation is
+      // followed by a closing `"` before the attribute closer `*)`. The CR-LF pair is
+      // consumed as a 2-char newline and the string continues.
+      const source = '(* attr = "line1\\\r\nline2" *) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      // The attribute (including the continued string) is excluded; module/endmodule
+      // after it pair normally.
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const regions = parser.getExcludedRegions(source);
+      const attrRegion = regions.find((r) => r.start === 0);
+      assert.ok(attrRegion, 'attribute should be an excluded region');
+      assert.strictEqual(source.slice(attrRegion.end - 2, attrRegion.end), '*)');
+    });
+
+    test('should treat backslash-CR inside attribute string as line continuation', () => {
+      // CR-only continuation: `\<CR>` (CR not followed by LF) consumes a 1-char newline.
+      const source = '(* attr = "line1\\\rline2" *) module m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Coverage: matchAttribute string bare-newline with no closer', () => {
+    test('should exclude to end of source when attribute string is unterminated and no closer follows', () => {
+      // matchAttribute: a string inside `(* ... *)` terminated by a bare newline, after
+      // which no `*)` exists anywhere. Per best-effort parsing the malformed attribute is
+      // excluded to end of source so stray keywords are not mistakenly tokenized.
+      const source = '(* attr = "unterminated has begin keyword\nmodule m here\nendmodule keyword too';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.length, 0);
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+      const regions = parser.getExcludedRegions(source);
+      const attrRegion = regions.find((r) => r.start === 0);
+      assert.ok(attrRegion, 'malformed attribute should be an excluded region');
+      assert.strictEqual(attrRegion.end, source.length);
+    });
+  });
+
+  suite('Coverage: matchAttribute single-line comment inside attribute', () => {
+    test('should skip a // line comment containing keywords inside an attribute', () => {
+      // matchAttribute: `// ...` inside `(* ... *)` runs to end of line; block keywords
+      // in the comment must not be tokenized.
+      const source = '(* attr // begin end module endmodule\n= 1 *) module m;\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Coverage: matchDefineDirective block comment in define body', () => {
+    test('should skip a terminated block comment containing keywords in define body', () => {
+      // matchDefineDirective: a complete `/* ... */` block comment inside the `define
+      // body; block keywords inside it are not tokenized and the define ends at EOL.
+      const source = '`define M /* begin end module */ value\nmodule m;\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should continue define past backslash-LF inside an unterminated block comment', () => {
+      // matchDefineDirective: an unterminated `/*` in the define body that hits a newline
+      // preceded by a single backslash (odd count) is a line continuation; the define and
+      // the comment both continue onto the next physical line.
+      const source = '`define M /* unterminated \\\nstill comment\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      // The define region spans both continued lines; `module`/`endmodule` after it pair.
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const regions = parser.getExcludedRegions(source);
+      const defineRegion = regions.find((r) => r.start === 0);
+      assert.ok(defineRegion, '`define should be an excluded region');
+      // The define ends at the second newline (no backslash before it), not the first.
+      assert.strictEqual(defineRegion.end, source.indexOf('still comment') + 'still comment'.length);
+    });
+
+    test('should end define at CRLF newline inside an unterminated block comment', () => {
+      // matchDefineDirective: an unterminated `/*` in the define body that hits a CRLF
+      // newline with no continuation backslash ends the define at that newline. The CR is
+      // consumed into the region and the LF marks the (exclusive) region end.
+      const source = '`define M /* unterminated\r\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const regions = parser.getExcludedRegions(source);
+      const defineRegion = regions.find((r) => r.start === 0);
+      assert.ok(defineRegion, '`define should be an excluded region');
+      // The define ends at the LF of the CRLF pair (CR included, LF excluded).
+      assert.strictEqual(defineRegion.end, source.indexOf('\n'));
+    });
+  });
+
+  suite('Coverage: matchPragmaDirective non-protect directives', () => {
+    test('should exclude a non-protect `pragma directive line only', () => {
+      // matchPragmaDirective: a `pragma directive that is not `protect begin` is excluded
+      // up to end of line; arguments are not tokenized.
+      const source = 'module a;\nendmodule\n`pragma reset all\nmodule b;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const regions = parser.getExcludedRegions(source);
+      const pragmaRegion = regions.find((r) => source.slice(r.start, r.start + 7) === '`pragma');
+      assert.ok(pragmaRegion, '`pragma should be an excluded region');
+      // Single-line exclusion: ends at the newline after `pragma reset all`.
+      assert.strictEqual(pragmaRegion.end, source.indexOf('\n', pragmaRegion.start));
+    });
+
+    test('should exclude `pragma protect with no whitespace after protect as a single line', () => {
+      // isPragmaProtectBegin: `protect` immediately followed by end-of-line (no trailing
+      // whitespace) is not `protect begin`, so the directive is a plain single-line pragma.
+      const source = '`pragma protect\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should exclude `pragma protect <other> (not begin) as a single line', () => {
+      // isPragmaProtectBegin: `protect` followed by a token other than `begin` /
+      // `begin_protected` is a plain single-line pragma, not a protected-region opener.
+      const source = '`pragma protect key_keyowner="acme"\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat `pragma protect beginfoo as a protected-region opener', () => {
+      // isPragmaProtectBegin: `begin` followed by an identifier character (`beginfoo`)
+      // fails the word-boundary check, so it is not the `begin` keyword.
+      const source = '`pragma protect beginfoo\nmodule m;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should recognize `pragma protect begin/end with a tab separator', () => {
+      // isPragmaProtectBegin / isPragmaProtectEnd: a tab (not just a space) is accepted
+      // as the whitespace between `protect` and `begin`/`end`.
+      const source = 'module a;\nendmodule\n`pragma protect\tbegin\nbegin x = 1; end\n`pragma protect\tend\nmodule b;\nendmodule';
+      const pairs = parser.parse(source);
+      // The protected region (with the tab-separated directives) excludes the inner
+      // begin/end; both module pairs outside it still parse.
+      assertBlockCount(pairs, 2);
+      const moduleA = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line === 0);
+      assert.ok(moduleA, 'module a should pair');
+      const moduleB = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line >= 5);
+      assert.ok(moduleB, 'module b should pair');
+    });
+  });
+
+  suite('Coverage: findPragmaProtectEnd skips non-end pragma directives', () => {
+    test('should find the matching `pragma protect end past intervening non-end pragmas', () => {
+      // findPragmaProtectEnd: after `pragma protect begin, several `pragma directives that
+      // are not `protect end` (a non-protect pragma, `protect` with no trailing whitespace,
+      // `protect <other>`, and `protect end<identifier>`) are skipped until the real
+      // `pragma protect end is found. The whole begin..end span is excluded.
+      const source = [
+        'module a;',
+        'endmodule',
+        '`pragma protect begin',
+        '`pragma reset',
+        '`pragma protect',
+        '`pragma protect key_block="data"',
+        '`pragma protect endgame',
+        '`pragma protect end',
+        'module b;',
+        'endmodule'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      // Block keywords inside the protected region are excluded; the two module pairs
+      // outside it still parse.
+      assertBlockCount(pairs, 2);
+      const moduleA = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line === 0);
+      assert.ok(moduleA, 'module a should pair');
+      const moduleB = pairs.find((p) => p.openKeyword.value === 'module' && p.openKeyword.line >= 8);
+      assert.ok(moduleB, 'module b should pair');
+      const regions = parser.getExcludedRegions(source);
+      const protectRegion = regions.find((r) => r.start === source.indexOf('`pragma protect begin'));
+      assert.ok(protectRegion, 'protect region should be excluded');
+      // The exclusion extends through the real `pragma protect end line.
+      const realEnd = source.indexOf('`pragma protect end\n');
+      assert.strictEqual(protectRegion.end, source.indexOf('\n', realEnd));
+    });
+  });
+
+  suite('Coverage: matchMacroArgList strings and comments in argument list', () => {
+    test('should skip an escaped quote inside a macro-argument string', () => {
+      // matchMacroArgList: a `\"` inside a string argument is an escape, not the string
+      // terminator; the string (and any keyword inside it) stays excluded.
+      const source = 'module a;\n`MY_MACRO("escaped \\" quote with begin keyword")\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should skip a // line comment inside a macro argument list', () => {
+      // matchMacroArgList: `// ...` inside `MACRO(...)` runs to end of line; keywords in
+      // the comment are not tokenized.
+      const source = 'module a;\n`MY_MACRO(x, // begin end keyword\n y)\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should skip a block comment inside a macro argument list', () => {
+      // matchMacroArgList: a `/* ... */` block comment inside `MACRO(...)` is skipped;
+      // keywords in the comment are not tokenized.
+      const source = 'module a;\n`MY_MACRO(x, /* begin end keyword */ y)\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should track nested parentheses inside a macro argument list', () => {
+      // matchMacroArgList: a nested `(` inside the argument list increments the paren
+      // depth so the inner `)` does not prematurely close the macro region.
+      const source = 'module a;\n`MY_MACRO(outer(begin), tail)\nendmodule';
+      const tokens = parser.getTokens(source);
+      // `begin` inside the nested parens is excluded as part of the macro args.
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
