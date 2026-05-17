@@ -774,6 +774,81 @@ export function isForIn(source: string, position: number, excludedRegions: Exclu
   return /^[ \t]*for\b/.test(before);
 }
 
+// Returns the start offset of the physical line containing pos
+function findPhysicalLineStart(source: string, pos: number): number {
+  let lineStart = pos;
+  while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+    lineStart--;
+  }
+  return lineStart;
+}
+
+// Checks whether everything between `from` and `to` on the source is whitespace
+function isBlankBetween(source: string, from: number, to: number): boolean {
+  for (let i = from; i < to; i++) {
+    const c = source[i];
+    if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Detects `do` placed on a physical line on its own where the preceding
+// non-blank physical line is a loop header (`while`/`until`/`for`).
+// Crystal allows the optional `do` of a loop to wrap onto the next line:
+//   while x
+//   do
+//   end
+// In that case the `do` is a loop separator, not a block opener. The `do`
+// must be the first token on its physical line (only whitespace before it,
+// no preceding `;`), so method-block forms like `arr.each do` are excluded
+// because `do` there is not at the physical line start.
+function isLoopDoAcrossPhysicalLines(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  const doLineStart = findPhysicalLineStart(source, position);
+  // `do` must be the first token on its physical line (whitespace only before it)
+  if (!isBlankBetween(source, doLineStart, position)) {
+    return false;
+  }
+  // Walk back over preceding blank physical lines to the previous non-blank line
+  let cursor = doLineStart;
+  while (cursor > 0) {
+    let prevLineEnd = cursor - 1;
+    if (source[prevLineEnd] === '\n' && prevLineEnd > 0 && source[prevLineEnd - 1] === '\r') {
+      prevLineEnd--;
+    }
+    const prevLineStart = findPhysicalLineStart(source, prevLineEnd);
+    if (isBlankBetween(source, prevLineStart, prevLineEnd)) {
+      cursor = prevLineStart;
+      continue;
+    }
+    // Found the previous non-blank physical line: check it starts with a loop keyword
+    const loopHeader = /^[ \t]*(while|until|for)\b/.exec(source.slice(prevLineStart, prevLineEnd));
+    if (!loopHeader) {
+      return false;
+    }
+    const loopKeywordPos = prevLineStart + loopHeader[0].length - loopHeader[1].length;
+    if (isInExcludedRegion(loopKeywordPos, excludedRegions)) {
+      return false;
+    }
+    // Reject loop keywords preceded by dot, ::, @ or $ (method calls / variables)
+    if (loopKeywordPos > 0) {
+      const prevChar = source[loopKeywordPos - 1];
+      if (prevChar === '$' || prevChar === '@') {
+        return false;
+      }
+      if (prevChar === ':' && loopKeywordPos > 1 && source[loopKeywordPos - 2] === ':') {
+        return false;
+      }
+      if (prevChar === '.' && !(loopKeywordPos > 1 && source[loopKeywordPos - 2] === '.')) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
 export function isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   const lineStart = findLogicalLineStart(source, position, excludedRegions);
@@ -846,5 +921,8 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
     }
   }
 
-  return false;
+  // Fallback: handle `do` wrapped onto the line after a `while`/`until`/`for`
+  // header. findLogicalLineStart only joins backslash continuations, so a plain
+  // newline between the loop keyword and `do` is not covered by the scan above.
+  return isLoopDoAcrossPhysicalLines(source, position, excludedRegions);
 }
