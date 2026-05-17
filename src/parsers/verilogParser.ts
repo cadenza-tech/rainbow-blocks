@@ -914,8 +914,16 @@ export class VerilogBlockParser extends BaseBlockParser {
               const openerValue = stack[si].token.value;
               const isPreprocessorBlock = openerValue.startsWith('`');
               if (isPreprocessorMiddle === isPreprocessorBlock) {
-                // 'default' only attaches to case/casex/casez blocks
+                // 'default' only attaches to case/casex/casez/randcase blocks
                 if (isCaseMiddle && openerValue !== 'case' && openerValue !== 'casex' && openerValue !== 'casez' && openerValue !== 'randcase') {
+                  // A statement-block opener (begin/fork) establishes a scope where
+                  // 'default' is no longer at a case_item position. Stop scanning
+                  // instead of skipping past it: attaching 'default' to a case
+                  // below would be a false intermediate. Leaving it unattached
+                  // (uncolored) is preferred over an incorrect attachment.
+                  if (openerValue === 'begin' || openerValue === 'fork') {
+                    break;
+                  }
                   continue;
                 }
                 stack[si].intermediates.push(token);
