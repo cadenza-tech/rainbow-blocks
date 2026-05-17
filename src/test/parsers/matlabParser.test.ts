@@ -1881,6 +1881,21 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-18: section keyword assignment across line continuation', () => {
+    test('should reject properties as section keyword when = is after a ... line continuation', () => {
+      // `properties ...\n= 5` is `properties = 5` split across a line continuation —
+      // an invalid section-keyword usage just like the same-line `properties = 5`.
+      // The keyword must be rejected and the user's stray inner `end` absorbed via the
+      // phantom mechanism, so classdef pairs with the LAST end (line 5), leaving a
+      // single classdef/end pair.
+      const source = 'classdef C\nproperties ...\n= 5\nx\nend\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 5, 'classdef should pair with the LAST end');
+      assert.strictEqual(pairs.length, 1, 'only the classdef/end pair should be produced');
+    });
+  });
+
   suite('Regression 2026-05-09: case as function call vs block_middle', () => {
     test('should not treat case() function call inside switch as intermediate', () => {
       // `case(value)` inside a function body that is also inside a switch should be
