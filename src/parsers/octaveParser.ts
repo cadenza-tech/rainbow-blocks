@@ -882,19 +882,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
           return cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp));
         })();
       if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar) || isSurrogatePairLetter) {
-        // After a digit, check if ' starts a string (e.g., [1'text'])
-        if (/[0-9]/.test(prevChar)) {
-          const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
-          if (nextChar && /[a-zA-Z_]/.test(nextChar)) {
-            // Fall through to string matching
-          } else {
-            return { start: pos, end: pos + 1 };
-          }
-        } else if (prevChar === "'") {
-          // Quote immediately after another quote: still transpose
-          // A'' = two transposes, each ' follows a value (result of prior transpose)
-          return { start: pos, end: pos + 1 };
-        } else {
+        // This `'` sits in a transpose position (it follows a value-like character).
+        // The transpose operator cannot be validly followed by an identifier character
+        // (letter or `_`): in that case the `'` actually begins a string literal, e.g.
+        // `disp'end'` is `disp` followed by the string `'end'`, and `[1'text']` is
+        // `1` followed by `'text'`. So fall through to string matching when the next
+        // character is an identifier char; otherwise treat it as transpose. `A''`
+        // (double transpose) stays transpose because the second `'` is followed by
+        // another `'` (not an identifier char).
+        const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
+        if (!(nextChar && /[a-zA-Z_]/.test(nextChar))) {
           return { start: pos, end: pos + 1 };
         }
       }
