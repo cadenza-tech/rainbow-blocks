@@ -324,7 +324,8 @@ export class MatlabBlockParser extends BaseBlockParser {
         } else {
           const nextChar = source[nextPos];
           // Allowed: newline, EOF, '(' (attribute list), '%' (comment), language-specific comment chars,
-          // and statement-empty markers ';', ',', ':' (e.g., `properties;` is a valid empty section)
+          // and statement-empty markers ';', ',' (e.g., `properties;` is a valid empty section).
+          // ':' is NOT allowed: MATLAB has no label syntax, so `properties:` is invalid usage.
           if (
             nextChar !== '\n' &&
             nextChar !== '\r' &&
@@ -332,7 +333,6 @@ export class MatlabBlockParser extends BaseBlockParser {
             nextChar !== '%' &&
             nextChar !== ';' &&
             nextChar !== ',' &&
-            nextChar !== ':' &&
             !this.isCommentChar(nextChar)
           ) {
             // Phantom: line-start section keyword with operator/punctuation after.

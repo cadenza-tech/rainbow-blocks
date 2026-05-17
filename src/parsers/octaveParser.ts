@@ -286,6 +286,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     const region = this.findExcludedRegionAt(nextPos, excludedRegions);
     if (region) return false;
     const nextChar = source[nextPos];
+    // ':' is NOT allowed: Octave has no label syntax, so `properties:` is invalid usage.
     return (
       nextChar !== '\n' &&
       nextChar !== '\r' &&
@@ -293,7 +294,6 @@ export class OctaveBlockParser extends MatlabBlockParser {
       nextChar !== '%' &&
       nextChar !== ';' &&
       nextChar !== ',' &&
-      nextChar !== ':' &&
       !this.isCommentChar(nextChar)
     );
   }
