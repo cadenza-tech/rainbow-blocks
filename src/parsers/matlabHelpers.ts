@@ -1,4 +1,7 @@
-// MATLAB pure scan helpers: keyword-context detection by source character inspection
+// MATLAB scan helpers: keyword-context detection by source and excluded-region scanning
+
+import type { ExcludedRegion } from '../types';
+import { findExcludedRegionAt } from './parserUtils';
 
 // Checks if position is at line start allowing leading whitespace.
 // Also skips a leading UTF-8/UTF-16 BOM (U+FEFF) so files saved with a byte-order mark
@@ -174,5 +177,155 @@ export function isKeywordUsedAsFunctionCall(source: string, position: number, ke
     return true;
   }
 
+  return false;
+}
+
+// Returns true when `end` at position is preceded by an expression operator that makes
+// `end` an operand outside any array-indexing context. Such uses (`x = end`, `x = 1:end`,
+// `x = ~end`, `for i = end-1:5`) are invalid MATLAB outside indexing; treating them as
+// block_close destroys outer block pairing. The for-header range check (isEndInForHeaderRange)
+// is invoked before this and handles legitimate `for i = N:end` / `for i = end:N` cases.
+export function isPrecededByBinaryOperator(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
+  let i = position - 1;
+  while (i >= 0) {
+    // Skip excluded regions backward for line continuations (... in MATLAB and \ in Octave).
+    // The continuation region spans from the marker through the trailing newline; jumping
+    // to region.start - 1 lands us on the character that immediately precedes the
+    // continuation on the previous logical line.
+    if (excludedRegions) {
+      const region = findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
+        i = region.start - 1;
+        continue;
+      }
+    }
+    if (source[i] === ' ' || source[i] === '\t') {
+      i--;
+      continue;
+    }
+    // A bare newline reached during backward scan may sit immediately after a `...`
+    // (or `\`) line continuation. matchSingleLineComment for `...` ends at the newline
+    // start, so an excluded region whose end == nlStart and which begins with `.` or `\`
+    // signals a continuation; in that case we keep walking past the prior logical line.
+    if ((source[i] === '\n' || source[i] === '\r') && excludedRegions) {
+      let nlStart = i;
+      if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') {
+        nlStart = i - 1;
+      }
+      const regionBeforeNl = findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+      if (regionBeforeNl?.end === nlStart && (source[regionBeforeNl.start] === '.' || source[regionBeforeNl.start] === '\\')) {
+        i = regionBeforeNl.start - 1;
+        continue;
+      }
+    }
+    break;
+  }
+  if (i < 0) return false;
+  const ch = source[i];
+  // Operators that put `end` in an expression context.
+  // `\` is MATLAB's left-division operator; treat it like other binary operators.
+  // `!` is logical-NOT (Octave) / a unary operator; `!end` puts `end` in operand context.
+  if ('+*/^<>&|~:\\!'.includes(ch)) return true;
+  // `=` marks an operator. Both single `=` (assignment) and compound comparison operators
+  // (`==`, `>=`, `<=`, `!=`, `~=`) put `end` in expression context (operand): `end` on the
+  // RHS / after a comparison is invalid outside indexing, so return true to reject the
+  // bogus block_close.
+  if (ch === '=') {
+    return true;
+  }
+  // `-` could be unary; treat it as a value-context marker (i.e. end is operand) when
+  // (a) it follows a value-like char (binary minus), or
+  // (b) it follows `=`, `(`, `,`, `;`, `[`, `{`, or another operator (unary minus on RHS).
+  if (ch === '-') {
+    let j = i - 1;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+    if (j < 0) return false;
+    const prev = source[j];
+    if (/[a-zA-Z0-9_)\]}]/.test(prev)) return true;
+    if (prev === '=' || prev === '(' || prev === ',' || prev === ';' || prev === '[' || prev === '{') return true;
+    if ('+*/^<>&|~:\\!'.includes(prev)) return true;
+    return false;
+  }
+  return false;
+}
+
+// Checks if position is preceded by dot (possibly with whitespace: s . end)
+// Handles ... line continuation: obj. ...\n    end is struct field access
+export function isPrecededByDot(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
+  let i = position - 1;
+  while (i >= 0) {
+    // Skip excluded regions backward for line continuations (... and \ in Octave)
+    if (excludedRegions) {
+      const region = findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
+        i = region.start - 1;
+        continue;
+      }
+    }
+    if (source[i] === ' ' || source[i] === '\t') {
+      i--;
+      continue;
+    }
+    // Skip newlines that are immediately after an excluded region that is a ... line continuation
+    // matchSingleLineComment sets region.end to the newline position, so check if any
+    // excluded region ends exactly at this newline position AND starts with '.' (continuation)
+    if ((source[i] === '\n' || source[i] === '\r') && excludedRegions) {
+      let nlStart = i;
+      if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') {
+        nlStart = i - 1;
+      }
+      const regionBeforeNl = findExcludedRegionAt(nlStart > 0 ? nlStart - 1 : 0, excludedRegions);
+      const regionBeforeLf = findExcludedRegionAt(i > 0 ? i - 1 : 0, excludedRegions);
+      if (
+        (regionBeforeNl?.end === nlStart && (source[regionBeforeNl.start] === '.' || source[regionBeforeNl.start] === '\\')) ||
+        (regionBeforeLf?.end === i && (source[regionBeforeLf.start] === '.' || source[regionBeforeLf.start] === '\\'))
+      ) {
+        i = nlStart - 1;
+        continue;
+      }
+      // Note: bare trailing dot without ... is NOT a continuation in MATLAB/Octave
+      // obj.\nend means end is on a new line (not preceded by dot for struct access)
+    }
+    break;
+  }
+  // Distinguish struct field access dot (obj.end, data1.end) from numeric decimal point (10.)
+  if (i >= 0 && source[i] === '.') {
+    // Scan backward past digits, hex letters, and hex/binary prefix letters that form numeric literals
+    let j = i - 1;
+    while (j >= 0 && /[0-9a-fA-FxXbB_]/.test(source[j])) {
+      j--;
+    }
+    // Check for numeric literal patterns: digits only, exponent (1e5), imaginary (1i/5j),
+    // hex prefix (0xFF), binary prefix (0b1010)
+    if (j < i - 1) {
+      const numPart = source.slice(j + 1, i);
+      // Reject when the run is preceded by another `.` — this means
+      // the digits are part of a larger expression like `1.5.end`, not a clean numeric literal
+      const beforeNum = j >= 0 ? source[j] : '';
+      if (beforeNum === '.') {
+        return true;
+      }
+      // Reject scientific notation followed by `.` (e.g., `1e5.end`):
+      // `1e5.` is not a valid number suffix, so `.end` is struct field access
+      if (/[eE]/.test(numPart)) {
+        return true;
+      }
+      // Pure digits, hex literals (0x...), binary literals (0b...), or digits with suffixes
+      // followed by `.keyword` form invalid syntax (e.g., `10.end`, `0xFF.if`).
+      // When keyword directly abuts the dot (no whitespace/continuation), treat as filtered
+      // to avoid breaking outer block highlighting. When separated, the dot is a decimal
+      // point and the keyword is a separate statement opener.
+      if (
+        (/^[0-9][0-9a-fA-F_]*$/.test(numPart) || /^0[xX][0-9a-fA-F_]+$/.test(numPart) || /^0[bB][01_]+$/.test(numPart)) &&
+        (j < 0 || !(/[a-zA-Z_]/.test(source[j]) || /\p{L}/u.test(source[j])))
+      ) {
+        if (i + 1 === position) {
+          return true;
+        }
+        return false;
+      }
+    }
+    return true;
+  }
   return false;
 }
