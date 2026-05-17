@@ -3,7 +3,7 @@
 import type { ExcludedRegion } from '../types';
 import { isFixedFormatCommentLine } from './cobolFixedFormat';
 import type { CobolHelperCallbacks } from './cobolHelpers';
-import { COPY_TERMINATING_VERBS, matchExecBlock } from './cobolHelpers';
+import { COPY_TERMINATING_NONBLOCK_VERBS, COPY_TERMINATING_VERBS, matchExecBlock } from './cobolHelpers';
 import { isInExcludedRegion } from './parserUtils';
 
 // Single-pass scan to collect all period positions that are not inside
@@ -158,8 +158,10 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
       i++;
       continue;
     }
-    // Newline: also resets COPY state if we are not in a REPLACE chain.
-    // Period termination is the canonical statement end, so just advance.
+    // Newline: not a statement boundary on its own. A period-less COPY is
+    // ended by the next statement verb (handled in the identifier scan below),
+    // not by a line break, so just advance — COPY state is preserved across
+    // newlines until either a period or a following statement verb is seen.
     if (ch === '\n' || ch === '\r') {
       i++;
       continue;
@@ -280,16 +282,18 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
         inReplaceContext = true;
       } else if (sawCopy) {
         // Words inside an in-progress COPY statement. word 0 is the copybook
-        // name; `OF`/`IN <lib>` may qualify it. A block-opening verb past the
+        // name; `OF`/`IN <lib>` may qualify it. Any statement verb past the
         // copybook name ends a period-less COPY, so drop sawCopy — this stops
-        // a later REPLACING from being treated as part of this COPY.
+        // a later REPLACING from being treated as part of this COPY. Both
+        // block-opening verbs (IF, PERFORM, ...) and non-block verbs (MOVE,
+        // SET, ...) end the COPY; only data-name words are walked over.
         if (copyWordsSeen === 0) {
           copyWordsSeen = 1;
         } else if (expectCopyLibrary) {
           expectCopyLibrary = false;
         } else if (word === 'OF' || word === 'IN') {
           expectCopyLibrary = true;
-        } else if (COPY_TERMINATING_VERBS.has(word)) {
+        } else if (COPY_TERMINATING_VERBS.has(word) || COPY_TERMINATING_NONBLOCK_VERBS.has(word)) {
           sawCopy = false;
         } else {
           copyWordsSeen++;

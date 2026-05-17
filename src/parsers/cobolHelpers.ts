@@ -30,6 +30,34 @@ export const COPY_TERMINATING_VERBS = new Set([
   'DIVIDE'
 ]);
 
+// Non-block COBOL Procedure Division verbs (uppercase) that do not open a block
+// pair. A COPY statement accepts only `copybook-name [OF/IN library] [SUPPRESS]
+// [REPLACING ...]`; once one of these statement verbs appears past the copybook
+// name it begins a new statement, so a period-less COPY is over even though the
+// verb is not a block opener. Kept distinct from COPY_TERMINATING_VERBS, which
+// covers only the block-opening verbs.
+export const COPY_TERMINATING_NONBLOCK_VERBS = new Set([
+  'MOVE',
+  'SET',
+  'INITIALIZE',
+  'INSPECT',
+  'GO',
+  'GOBACK',
+  'STOP',
+  'EXIT',
+  'CONTINUE',
+  'OPEN',
+  'CLOSE',
+  'CANCEL',
+  'ALTER',
+  'RELEASE',
+  'MERGE',
+  'SORT',
+  'UNLOCK',
+  'EXAMINE',
+  'TRANSFORM'
+]);
+
 // Callbacks for parser methods that remain in CobolBlockParser. The optional cache
 // callbacks are populated by the parser before each parse so that pseudo-text /
 // COPY-context checks (called once per `==` delimiter) avoid re-scanning the
@@ -365,12 +393,14 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
   return -1;
 }
 
-// Scans from just after a COPY keyword for the first block-opening verb that
+// Scans from just after a COPY keyword for the first statement verb that
 // appears past the copybook name. The copybook name is the first word after
-// COPY; an optional `OF`/`IN <library>` qualifier may follow it. Returns the
-// offset of that verb, or -1 when none is found before `limit`. Strings, *>
-// inline comments, fixed-format comment lines and >> directive lines are
-// skipped so keywords inside them are not mistaken for a statement boundary.
+// COPY; an optional `OF`/`IN <library>` qualifier may follow it. A statement
+// verb is either a block-opening verb (IF, PERFORM, ...) or a non-block verb
+// (MOVE, SET, ...) — both end a period-less COPY. Returns the offset of that
+// verb, or -1 when none is found before `limit`. Strings, *> inline comments,
+// fixed-format comment lines and >> directive lines are skipped so keywords
+// inside them are not mistaken for a statement boundary.
 function findBlockVerbAfterCopy(source: string, copyEnd: number, limit: number, callbacks: CobolHelperCallbacks): number {
   let i = copyEnd;
   let wordIndex = 0;
@@ -418,7 +448,7 @@ function findBlockVerbAfterCopy(source: string, copyEnd: number, limit: number, 
         expectLibrary = true;
         continue;
       }
-      if (COPY_TERMINATING_VERBS.has(upper)) {
+      if (COPY_TERMINATING_VERBS.has(upper) || COPY_TERMINATING_NONBLOCK_VERBS.has(upper)) {
         return wordStart;
       }
       wordIndex++;
@@ -484,9 +514,10 @@ export function isInCopyStatement(source: string, posBeforeKeyword: number, call
     }
     if (inString) continue;
     // A period-less COPY otherwise extends to the next period (or end of
-    // source), wrongly swallowing later statements. Once a block-opening verb
-    // appears past the copybook name the COPY statement is over; if the queried
-    // position is at or past that verb it is not inside the COPY statement.
+    // source), wrongly swallowing later statements. Once a statement verb
+    // (block-opening or non-block) appears past the copybook name the COPY
+    // statement is over; if the queried position is at or past that verb it is
+    // not inside the COPY statement.
     const verbBoundary = findBlockVerbAfterCopy(source, absPos + 4, posBeforeKeyword + 1, callbacks);
     if (verbBoundary >= 0 && posBeforeKeyword >= verbBoundary) continue;
     return true;
