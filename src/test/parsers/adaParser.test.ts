@@ -1,6 +1,7 @@
 import * as assert from 'node:assert';
 import { isOrElseShortCircuit } from '../../parsers/adaHelpers';
 import { AdaBlockParser } from '../../parsers/adaParser';
+import type { Token } from '../../types';
 import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
 import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
@@ -3471,6 +3472,78 @@ end if;`;
       const source = 'X := F((if A then 1 else 2));\nif B then\n  null;\nend if;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
+  suite('Regression 2026-05-18: flat compound-end block lists must not match in quadratic time', () => {
+    // Subclass to expose the protected matchBlocks for isolated timing. The
+    // crossing-detection pre-computation lives entirely inside matchBlocks, so
+    // measuring matchBlocks alone (separately from tokenize and from the base
+    // class O(n^2) nest-level recalculation) pins the regression precisely.
+    class MatchBlocksProbe extends AdaBlockParser {
+      runMatchBlocks(tokens: Token[]): ReturnType<AdaBlockParser['parse']> {
+        return this.matchBlocks(tokens);
+      }
+    }
+
+    // Builds N non-nested `if X<i> then null; end if;` blocks, one per line.
+    // Each block contributes a compound-end (`end if`) token, which is what the
+    // crossing-detection pre-computation accumulates.
+    function buildFlatIfs(n: number): string {
+      const lines: string[] = [];
+      for (let i = 0; i < n; i++) {
+        lines.push(`if X${i} then null; end if;`);
+      }
+      return lines.join('\n');
+    }
+
+    test('should produce one correct pair per block for a large flat block list', () => {
+      // Output-equivalence guard for the performance refactor: the count-based
+      // crossing pre-computation must yield the exact same BlockPair set as the
+      // previous suffix-array implementation.
+      const n = 3000;
+      const pairs = parser.parse(buildFlatIfs(n));
+      assertBlockCount(pairs, n);
+      for (const pair of pairs) {
+        assert.strictEqual(pair.openKeyword.value.toLowerCase(), 'if');
+        assert.match(pair.closeKeyword.value.toLowerCase(), /^end[ \t]if$/);
+        assert.strictEqual(pair.nestLevel, 0, 'flat blocks are all at nest level 0');
+        assert.ok(pair.openKeyword.startOffset < pair.closeKeyword.startOffset);
+      }
+    });
+
+    test('should match a flat compound-end block list in well under a second', () => {
+      const probe = new MatchBlocksProbe();
+      // Tokenize once so the timed section measures matchBlocks in isolation:
+      // the crossing-detection pre-computation is the only superlinear term
+      // inside matchBlocks (the base class O(n^2) nest-level recalculation runs
+      // in parse(), not matchBlocks, and so cannot mask or flake this guard).
+      const blockCount = 16000;
+      const tokens = probe.getTokens(buildFlatIfs(blockCount));
+      // One warm-up to stabilize against JIT and module init; the post-fix run
+      // is so fast that no further repetition is needed.
+      probe.runMatchBlocks(tokens);
+
+      const t0 = Date.now();
+      const pairs = probe.runMatchBlocks(tokens);
+      const elapsed = Date.now() - t0;
+
+      // Output is unchanged by the performance fix: every block still pairs.
+      assert.strictEqual(pairs.length, blockCount, 'every flat block must still pair');
+
+      // Pre-fix, the crossing pre-computation accumulated remaining compound-end
+      // types with `acc = [type, ...acc]`, copying the growing array for every
+      // compound end. That is O(n^2) in time and, because every prefix slot
+      // retained a distinct array, O(n^2) in memory: at this block count the
+      // pre-fix code ran for multiple seconds (and at larger counts exhausted
+      // the heap). The count-based pre-computation runs in tens of milliseconds
+      // and uses O(1) extra memory. The 1000ms bound sits ~70x above the
+      // post-fix time (so coverage instrumentation and CI contention cannot
+      // flake it) yet well below the pre-fix multi-second floor.
+      assert.ok(
+        elapsed < 1000,
+        `matchBlocks on ${blockCount} flat blocks took ${elapsed}ms (expected < 1000ms; pre-fix O(n^2) pre-computation took multiple seconds)`
+      );
     });
   });
 
