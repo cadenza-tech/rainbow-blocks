@@ -5,6 +5,27 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.49] - 2026-05-18
+
+### Fixed
+
+- Ada: Pair compound `end` keywords (`end if`, `end loop`, etc.) separated by U+0085 (NEL) or other Unicode whitespace, instead of mismatching the innermost block
+- Ada: Replace the quadratic compound-end crossing precomputation so large flat block lists parse in linear time and no longer exhaust the heap
+- Bash: Make keyword validation linear-time for large scripts by precomputing `[[ ]]` and parenthesis regions instead of per-keyword backward scans
+- Bash: Prevent crossing block pairs when `done` or `}` closes an enclosing opener over an inner unmatched block
+- COBOL: Treat an identifier-trailing hyphen as part of a data name so `WHEN`/`ELSE` after a hyphen-continued line is detected as an intermediate keyword
+- COBOL: End a period-less `COPY` statement at a following non-block verb so a later `REPLACING` is not misdetected as pseudo-text
+- Crystal: Stop treating a semicolon-delimited `def` body assignment (`def foo; x = 1; end`) as a bodyless shorthand definition
+- Crystal: Recognize a loop `do` wrapped onto the next line (`while x` then `do`) as the loop separator
+- MATLAB: Skip `...` line continuations when detecting classdef section keyword assignment (`properties ...` then `= 5`)
+- MATLAB / Octave: Reject a classdef section keyword followed by `:` (`properties:`) as invalid usage instead of opening a block
+- MATLAB / Octave: Treat a quote that follows an identifier letter as a string start, not a transpose operator (`disp'end'`), so keywords inside the string are excluded
+- Octave: Skip form feed and vertical tab when detecting a `do` assignment so `do` is not misread as a block opener
+- Pascal: Recognize a variant record `case` whose selector tag is a parenthesized anonymous type or a numeric literal
+- Ruby: Skip comment and string content when detecting multi-heredoc lists so a `, <<` inside a comment no longer misdetects a shift operator as a heredoc
+- Ruby: Skip `then` as an intermediate keyword for blocks (`def`, `class`, `module`, `begin`, `for`) that cannot take a `then` clause
+- Verilog: Skip `default` attachment past statement-block openers (`begin`/`fork`) so a `default` inside an unclosed block is not attached to an outer `case`
+
 ## [1.1.48] - 2026-05-17
 
 ### Changed
@@ -1933,6 +1954,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.49]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.48...v1.1.49
 [1.1.48]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.47...v1.1.48
 [1.1.47]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.46...v1.1.47
 [1.1.46]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.45...v1.1.46
