@@ -1041,25 +1041,26 @@ export class AdaBlockParser extends BaseBlockParser {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
 
-    // Pre-compute the set of compound-end types available *after* each token
-    // index. Used to detect when picking a deeper opener (via
-    // findLastOpenerByType) would create a crossed pair with an intervening
-    // opener that has its own compound end still ahead in the token stream.
-    // remainingEndTypes[i] = multiset of compound-end types at tokens with
-    // index >= i (e.g., 'if', 'loop', 'case', ...).
-    const compoundEndTypesAt: string[][] = new Array(tokens.length + 1);
-    {
-      let acc: string[] = [];
-      compoundEndTypesAt[tokens.length] = acc;
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        const t = tokens[i];
-        if (t.type === 'block_close') {
-          const m = t.value.toLowerCase().match(COMPOUND_END_CLOSE_PATTERN);
-          if (m) {
-            acc = [m[1], ...acc];
-          }
+    // Pre-compute the multiset of compound-end types over *all* tokens. Used
+    // to detect when picking a deeper opener (via findLastOpenerByType) would
+    // create a crossed pair with an intervening opener that has its own
+    // compound end still ahead in the token stream.
+    //
+    // `remainingCompoundCounts` is consumed as the count of compound-end types
+    // strictly *after* the token currently being processed: the main loop
+    // decrements a token's own contribution as it reaches it (see the
+    // block_close case), so the map always reflects tokens at index >
+    // tokenIndex. A single forward-decrement keeps both the build and every
+    // crossing check O(1) per token; an earlier suffix-array implementation
+    // rebuilt a growing array per compound end, which was O(n^2) on flat
+    // block lists.
+    const remainingCompoundCounts = new Map<string, number>();
+    for (const t of tokens) {
+      if (t.type === 'block_close') {
+        const m = t.value.toLowerCase().match(COMPOUND_END_CLOSE_PATTERN);
+        if (m) {
+          remainingCompoundCounts.set(m[1], (remainingCompoundCounts.get(m[1]) ?? 0) + 1);
         }
-        compoundEndTypesAt[i] = acc;
       }
     }
     const openerCompoundEndType = (openerKw: string): string | null => {
@@ -1153,6 +1154,11 @@ export class AdaBlockParser extends BaseBlockParser {
             const endType = compoundMatch[1];
             let matchIndex = -1;
 
+            // This compound end was counted in remainingCompoundCounts; remove
+            // its own contribution so the map reflects only tokens *after* it
+            // (index > tokenIndex) for the crossing check below.
+            remainingCompoundCounts.set(endType, (remainingCompoundCounts.get(endType) ?? 0) - 1);
+
             // Special case: 'end loop' can close 'for', 'while', or 'loop'
             if (endType === 'loop') {
               matchIndex = findLastOpenerForLoop(stack);
@@ -1185,16 +1191,11 @@ export class AdaBlockParser extends BaseBlockParser {
             // `declare` is excluded for the same reason: it pairs with a
             // simple `end` and has no compound-end form.
             if (matchIndex >= 0 && matchIndex < stack.length - 1) {
-              const remaining = compoundEndTypesAt[tokenIndex + 1] ?? [];
-              const remainingCounts = new Map<string, number>();
-              for (const ty of remaining) {
-                remainingCounts.set(ty, (remainingCounts.get(ty) ?? 0) + 1);
-              }
               for (let s = matchIndex + 1; s < stack.length; s++) {
                 const above = stack[s].token.value.toLowerCase();
                 if (above === 'begin' || above === 'declare') continue;
                 const ty = openerCompoundEndType(above);
-                if (ty !== null && (remainingCounts.get(ty) ?? 0) > 0) {
+                if (ty !== null && (remainingCompoundCounts.get(ty) ?? 0) > 0) {
                   matchIndex = -1;
                   break;
                 }
