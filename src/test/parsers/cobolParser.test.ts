@@ -2440,5 +2440,231 @@ END-PERFORM`;
     });
   });
 
+  suite('Coverage: fixed-format string-literal continuation branches', () => {
+    // findFixedFormStringContinuation joins an unterminated literal with a
+    // column-7 `-` continuation line. The literal's region must span both
+    // halves; keywords in the continuation prep area must not be tokenised.
+
+    test('should join a literal across a CRLF line ending', () => {
+      // Newline before the continuation line is CRLF. The literal region must
+      // still span both halves so the IF/END-IF placed inside the literal
+      // padding do not pair, while the real IF/END-IF after it does.
+      const source = '           DISPLAY "AAA\r\n      -    "BBB".\r\n           IF X\r\n           END-IF.';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(cont.end > source.indexOf('"BBB"') + 4, 'continuation region must span past the second quote across CRLF');
+      assertSingleBlock(parser.parse(source), 'IF', 'END-IF');
+    });
+
+    test('should join a literal across a CR-only line ending', () => {
+      // Old-macOS CR-only newline before the continuation line.
+      const source = '           DISPLAY "AAA\r      -    "BBB".\r           IF X\r           END-IF.';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(cont.end > source.indexOf('"BBB"') + 4, 'continuation region must span past the second quote across CR');
+      assertSingleBlock(parser.parse(source), 'IF', 'END-IF');
+    });
+
+    test('should skip a fully blank line before the continuation line', () => {
+      // A blank line (no column-7 indicator) between the two literal halves is
+      // ignored per COBOL spec; the continuation still joins.
+      const source = '           DISPLAY "AAA\n\n      -    "BBB".';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(cont.end > source.indexOf('"BBB"') + 4, 'continuation region must span past the blank line to the second quote');
+    });
+
+    test('should skip a whitespace-only short line before the continuation line', () => {
+      // A line shorter than 7 columns that is whitespace-only is treated as
+      // blank and skipped.
+      const source = '           DISPLAY "AAA\n   \n      -    "BBB".';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(cont.end > source.indexOf('"BBB"') + 4, 'continuation region must span past the short blank line');
+    });
+
+    test('should skip a whitespace-only line beyond column 7 before the continuation line', () => {
+      // A line with a blank column-7 indicator and only whitespace afterwards
+      // is a blank line and is skipped.
+      const source = '           DISPLAY "AAA\n                   \n      -    "BBB".';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(cont.end > source.indexOf('"BBB"') + 4, 'continuation region must span past the whitespace-only line');
+    });
+
+    test('should skip a column-7 star comment line before the continuation line', () => {
+      // A `*` comment line between the two halves is skipped; keywords inside
+      // the comment are not tokenised either.
+      const source = '           DISPLAY "AAA\n      * NOTE IF END-IF\n      -    "BBB".';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(
+        cont.start < source.indexOf('IF') && cont.end > source.indexOf('END-IF'),
+        'continuation region must absorb the intervening comment line'
+      );
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should skip a fixed-format debug line before the continuation line', () => {
+      // A column-7 `D` debug line (digit in the sequence area, non-identifier
+      // char after `D`) is skipped; the continuation still joins.
+      const source = '           DISPLAY "AAA\n0001  D IF X END-IF\n      -    "BBB".';
+      const regions = parser.getExcludedRegions(source);
+      const cont = regions.find((r) => source[r.start] === '"');
+      assert.ok(cont, 'expected a string region starting at the opening quote');
+      assert.ok(
+        cont.start < source.indexOf('IF') && cont.end > source.indexOf('END-IF'),
+        'continuation region must absorb the intervening debug line'
+      );
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should not treat a column-7 D line as debug when the sequence area has no digit', () => {
+      // No digit in the sequence area means `D` is not a fixed-format debug
+      // indicator; it is also not the `-` continuation indicator, so the
+      // continuation is abandoned and only the first literal half is excluded.
+      const source = '           DISPLAY "AAA\n      D     "BBB"';
+      const regions = parser.getExcludedRegions(source);
+      const firstHalf = regions.find((r) => r.start === source.indexOf('"AAA'));
+      assert.ok(firstHalf, 'expected the first literal half as its own region');
+      assert.strictEqual(firstHalf.end, source.indexOf('"AAA') + 4, 'unterminated literal stops at the first newline when continuation fails');
+    });
+
+    test('should not treat a column-7 D line as debug when D is followed by an identifier char', () => {
+      // Sequence area has a digit but the char after `D` is an identifier
+      // char, so the line is not a debug line; `D` is not `-` either, so the
+      // continuation is abandoned.
+      const source = '           DISPLAY "AAA\n0001  DX    "BBB"';
+      const regions = parser.getExcludedRegions(source);
+      const firstHalf = regions.find((r) => r.start === source.indexOf('"AAA'));
+      assert.ok(firstHalf, 'expected the first literal half as its own region');
+      assert.strictEqual(firstHalf.end, source.indexOf('"AAA') + 4, 'unterminated literal stops at the first newline when continuation fails');
+    });
+
+    test('should abandon continuation when the next line has a non-hyphen column-7 indicator', () => {
+      // A letter in column 7 is neither blank, comment, debug, nor the `-`
+      // continuation indicator: the literal is left unterminated.
+      const source = '           DISPLAY "AAA\n       X CODE';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1, 'only the unterminated first half is excluded');
+      assert.strictEqual(regions[0].end, source.indexOf('"AAA') + 4, 'region stops at the first newline');
+    });
+
+    test('should abandon continuation when a short line has non-blank content', () => {
+      // A line shorter than 7 columns with non-whitespace content cannot be a
+      // continuation line and is not skipped as blank.
+      const source = '           DISPLAY "AAA\n   XY';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1, 'only the unterminated first half is excluded');
+      assert.strictEqual(regions[0].end, source.indexOf('"AAA') + 4, 'region stops at the first newline');
+    });
+
+    test('should abandon continuation when the sequence area is not digits or whitespace', () => {
+      // Letters in columns 1-6 are not a valid fixed-format sequence area, so
+      // the line cannot be a continuation line.
+      const source = '           DISPLAY "AAA\nABCDEF-   "BBB"';
+      const regions = parser.getExcludedRegions(source);
+      const firstHalf = regions.find((r) => r.start === source.indexOf('"AAA'));
+      assert.ok(firstHalf, 'expected the first literal half as its own region');
+      assert.strictEqual(firstHalf.end, source.indexOf('"AAA') + 4, 'region stops at the first newline when the sequence area is invalid');
+    });
+
+    test('should abandon continuation when a hyphen line has no opening quote', () => {
+      // A valid column-7 `-` line with no matching opening quote in area B is
+      // not a string continuation; the literal stays unterminated.
+      const source = '           DISPLAY "AAA\n      -    NOQUOTE HERE';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1, 'only the unterminated first half is excluded');
+      assert.strictEqual(regions[0].end, source.indexOf('"AAA') + 4, 'region stops at the first newline');
+    });
+
+    test('should leave the literal unterminated when the source ends right after the newline', () => {
+      // The unterminated literal hits a newline that is the end of source;
+      // there is no continuation line to scan.
+      const source = '           DISPLAY "AAA\n';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1, 'only the unterminated first half is excluded');
+      assert.strictEqual(regions[0].end, source.indexOf('"AAA') + 4, 'region stops at the first newline');
+    });
+
+    test('should abandon continuation when a tab overshoots column 6 in the continuation sequence area', () => {
+      // A tab in the sequence area jumps the visual column past 6, so the
+      // line is treated as a short line; the remaining text is non-blank, so
+      // the continuation is abandoned.
+      const source = '           DISPLAY "AAA\n12\t-"BBB"';
+      const regions = parser.getExcludedRegions(source);
+      const firstHalf = regions.find((r) => r.start === source.indexOf('"AAA'));
+      assert.ok(firstHalf, 'expected the first literal half as its own region');
+      assert.strictEqual(firstHalf.end, source.indexOf('"AAA') + 4, 'region stops at the first newline when a tab overshoots column 6');
+    });
+
+    test('should abandon continuation when a tab is the entire sequence area of the next line', () => {
+      // The next line is a lone tab followed by `-"BBB"`. The tab overshoots
+      // visual column 6, so the line is a short line whose content (just the
+      // tab) is whitespace-only — it is skipped as blank. The scan then
+      // revisits the line at the `-`, a non-newline character, which is not a
+      // valid continuation start, so the literal is left unterminated.
+      const source = '           DISPLAY "AAA\n\t-"BBB"';
+      const regions = parser.getExcludedRegions(source);
+      const firstHalf = regions.find((r) => r.start === source.indexOf('"AAA'));
+      assert.ok(firstHalf, 'expected the first literal half as its own region');
+      assert.strictEqual(firstHalf.end, source.indexOf('"AAA') + 4, 'region stops at the first newline when the tab-only line is skipped');
+    });
+
+    test('should leave the literal unterminated when a whitespace-only line beyond column 7 ends the source', () => {
+      // A blank column-7 line followed only by whitespace running to the end
+      // of source is skipped, after which there is no continuation line.
+      const source = '           DISPLAY "AAA\n             ';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1, 'only the unterminated first half is excluded');
+      assert.strictEqual(regions[0].end, source.indexOf('"AAA') + 4, 'region stops at the first newline');
+    });
+  });
+
+  suite('Coverage: ELSE/WHEN context detection at source boundaries', () => {
+    test('should drop an orphan ELSE preceded only by whitespace at the start of source', () => {
+      // isPrecedingWordDataNameVerb and isInExpressionContext both run their
+      // backward scans off the start of the buffer. The orphan ELSE produces
+      // no pair and does not poison the following real IF/END-IF block.
+      const source = '   ELSE\nIF X\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'the trailing IF gains no intermediate from the orphan ELSE');
+    });
+
+    test('should drop an orphan WHEN preceded only by whitespace at the start of source', () => {
+      const source = '  WHEN X\nEVALUATE Y\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'the trailing EVALUATE gains no intermediate from the orphan WHEN');
+    });
+
+    test('should drop an orphan ELSE preceded by a separator at the start of source', () => {
+      // isPrecedingWordDataNameVerb skips the leading `,` separator, then runs
+      // its backward scan off the start of the buffer.
+      const source = '  , ELSE\nIF X\n  DISPLAY "OK"\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'the trailing IF gains no intermediate from the orphan ELSE');
+    });
+
+    test('should register ELSE as an IF intermediate after a long run of plain data names', () => {
+      // isPrecedingWordDataNameVerb caps its backward walk at 32 words. A run
+      // of 35 non-verb words exhausts the cap without finding a data-name
+      // verb, so ELSE is treated as a real control-flow intermediate.
+      const words = Array.from({ length: 35 }, (_, n) => `WX${n + 1}`).join(' ');
+      const source = `IF X\n${words} ELSE\nEND-IF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+  });
+
   generateCommonTests(config);
 });
