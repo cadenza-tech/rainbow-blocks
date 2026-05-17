@@ -2152,6 +2152,35 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE as 2nd target of GIVING list is data name');
     });
+
+    test('should register WHEN as EVALUATE intermediate when the previous line ends with an identifier-trailing hyphen', () => {
+      // Bug: isInExpressionContext treated the `-` ending `VAR-` (an identifier
+      // with a trailing hyphen on the prior line) as a subtraction operator, so
+      // WHEN on the next line was dropped as a data-name operand. A `-` directly
+      // after an identifier char is part of a hyphenated COBOL data name, not an
+      // arithmetic operator, so WHEN remains a real EVALUATE intermediate.
+      const source = 'EVALUATE TRUE\nMOVE A TO VAR-\n  WHEN VAR-1\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+
+    test('should register ELSE as IF intermediate when the previous line ends with an identifier-trailing hyphen', () => {
+      const source = 'IF X\n  MOVE A TO VAR-\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+
+    test('should still treat WHEN as data name when preceded by a real subtraction operator after a number', () => {
+      // Guard: the hyphen-vs-operator fix must not regress genuine subtraction.
+      // `X - WHEN` has whitespace between the digit/identifier and `-`, so the
+      // `-` is a subtraction operator and WHEN is an operand, not an intermediate.
+      const source = 'EVALUATE X\n  COMPUTE Y = X - WHEN\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after a real subtraction operator is a data name');
+    });
   });
 
   suite('Regression 2026-05-09: ELSE/WHEN expression context honors excluded regions', () => {
