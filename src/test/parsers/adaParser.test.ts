@@ -2914,6 +2914,31 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-18: compound end with U+0085 NEL separator must use type-based matching', () => {
+    test('should pair if/end if (not the intervening for-loop) when separator is U+0085 (NEL)', () => {
+      // `end<NEL>if` is a compound end: matchBlocks must scan the stack by type
+      // and pair it with the `if` opener, leaving the unclosed inner `for ...
+      // loop` as an orphan (anchor-set principle). tokenize already recognizes
+      // the compound end via the Unicode-aware COMPOUND_END_PATTERN; the
+      // matchBlocks compound-end regex must use the same Unicode separator
+      // class. JS `\s` does not match U+0085, so a `\s`-based regex misreads
+      // `end<NEL>if` as a simple `end` and closes the top-of-stack `for`.
+      const source = 'if X then\n  for I in 1..3 loop\n    null;\nendif;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should leave end loop unpaired when separator is U+0085 and only an if opener exists', () => {
+      // `end<NEL>loop` is a compound end of type `loop`; with only an `if`
+      // opener on the stack, type-based matching finds no for/while/loop opener
+      // and the compound end stays unpaired (no forced fallback). A `\s`-based
+      // regex would instead treat it as a simple `end` and wrongly close `if`.
+      const source = 'if Condition then\n  X := 1;\nendloop;';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression 2026-05-08: exit when X inside begin must not register when as intermediate', () => {
     test('should leave begin intermediates empty when exit when is used without exception handler', () => {
       const source = 'begin\n   exit when X;\nend;';
