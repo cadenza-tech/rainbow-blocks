@@ -52,15 +52,26 @@ const COMPOUND_END_TYPES = [
 // Keywords that can precede 'begin' and are closed together with it
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
 
+// Character class (regex source, without the enclosing brackets) for the
+// separators allowed between 'end' and the type keyword of a compound end.
+// Covers Ada LRM 2.1 format_effector (HT, VT, FF, CR, LF, NEL) and the Unicode
+// Zs category (NBSP, U+1680, U+2000-200A, U+202F, U+205F, U+3000), plus Unicode
+// line/paragraph separators (LS U+2028, PS U+2029). Defined once so tokenize
+// and matchBlocks classify the same separator set: JS `\s` does not match
+// U+0085 (NEL), so the two stages must not diverge on `\s` vs. this class.
+const COMPOUND_END_SEPARATOR_CHARS = ' \\t\\v\\f\\r\\n\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000';
+
 // Pattern to match compound end keywords (case insensitive)
 // Allows whitespace, newlines, and -- line comments between 'end' and the type keyword.
-// Separator class covers Ada LRM 2.1 format_effector (HT, VT, FF, CR, LF, NEL) and the
-// Unicode Zs category (NBSP, U+1680, U+2000-200A, U+202F, U+205F, U+3000), plus Unicode
-// line/paragraph separators (LS U+2028, PS U+2029).
 const COMPOUND_END_PATTERN = new RegExp(
-  `\\bend(?:[ \\t\\v\\f\\r\\n\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
+
+// Re-extracts the type keyword from a compound-end token's value (e.g.,
+// 'end<sep>if' -> 'if'). Uses COMPOUND_END_SEPARATOR_CHARS so it accepts the
+// exact separator set tokenize used to build the token (including U+0085 NEL).
+const COMPOUND_END_CLOSE_PATTERN = new RegExp(`^end(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n]*)+(\\w+)`);
 
 export class AdaBlockParser extends BaseBlockParser {
   // Most recent source string and excluded regions seen by parse(). Used by
@@ -1036,7 +1047,6 @@ export class AdaBlockParser extends BaseBlockParser {
     // opener that has its own compound end still ahead in the token stream.
     // remainingEndTypes[i] = multiset of compound-end types at tokens with
     // index >= i (e.g., 'if', 'loop', 'case', ...).
-    const compoundCloseRegex = /^end(?:\s|--[^\r\n]*)+(\w+)/;
     const compoundEndTypesAt: string[][] = new Array(tokens.length + 1);
     {
       let acc: string[] = [];
@@ -1044,7 +1054,7 @@ export class AdaBlockParser extends BaseBlockParser {
       for (let i = tokens.length - 1; i >= 0; i--) {
         const t = tokens[i];
         if (t.type === 'block_close') {
-          const m = t.value.toLowerCase().match(compoundCloseRegex);
+          const m = t.value.toLowerCase().match(COMPOUND_END_CLOSE_PATTERN);
           if (m) {
             acc = [m[1], ...acc];
           }
@@ -1138,7 +1148,7 @@ export class AdaBlockParser extends BaseBlockParser {
 
           // Check if it's a compound end (allow whitespace, newlines, and Ada
           // line comments between 'end' and the type keyword)
-          const compoundMatch = closeValue.match(/^end(?:\s|--[^\r\n]*)+(\w+)/);
+          const compoundMatch = closeValue.match(COMPOUND_END_CLOSE_PATTERN);
           if (compoundMatch) {
             const endType = compoundMatch[1];
             let matchIndex = -1;
