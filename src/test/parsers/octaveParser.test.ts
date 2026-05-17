@@ -1051,6 +1051,27 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not treat do followed by form feed and = as block open', () => {
+      // A form feed (\f) is horizontal whitespace, so `do\f= 1;` is an assignment to
+      // a variable named `do` (invalid since `do` is reserved). Like `do = 1;`, `do`
+      // must not open a do/until block — `do` and `until` are both orphans.
+      const source = 'do\f= 1;\nuntil y';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do followed by \\f and = should not open a do/until block');
+      assert.strictEqual(pairs.length, 0, 'do and until are both orphans');
+    });
+
+    test('should not treat do followed by vertical tab and compound assignment as block open', () => {
+      // A vertical tab (\v) is horizontal whitespace, so `do\v+= 1;` is a compound
+      // assignment to a variable named `do`. `do` must not open a do/until block.
+      const source = 'do\v+= 1;\nuntil y';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do followed by \\v and += should not open a do/until block');
+      assert.strictEqual(pairs.length, 0, 'do and until are both orphans');
+    });
   });
 
   suite('end as variable name', () => {
