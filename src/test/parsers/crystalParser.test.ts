@@ -4227,5 +4227,29 @@ end`;
     });
   });
 
+  suite('Regression: semicolon-delimited def body assignment', () => {
+    test('should pair single-line def with semicolon-delimited assignment body', () => {
+      const source = 'def foo; x = 1; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should pair def and class for instance-variable assignment in semicolon body', () => {
+      const source = 'class C\n  def m; @x = 1; end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classPair = findBlock(pairs, 'class');
+      assert.strictEqual(classPair.closeKeyword.value, 'end');
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword.value, 'end');
+    });
+
+    test('should still treat genuine shorthand def name = expr as bodyless', () => {
+      const source = 'def foo = 1';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
