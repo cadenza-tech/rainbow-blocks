@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { computeEnclosingParenAtPos } from './bashCacheHelpers';
 import {
   isCommentStart,
   isDollarHashVariable,
@@ -20,7 +21,6 @@ import {
   matchParameterExpansion,
   matchProcessSubstitution
 } from './bashStringHelpers';
-import { computeEnclosingParenAtPos } from './bashCacheHelpers';
 import type { BashValidationCallbacks } from './bashValidation';
 import { isAtCommandPosition, isCasePattern } from './bashValidation';
 import { findExcludedRegionAt, findLastOpenerByType } from './parserUtils';
