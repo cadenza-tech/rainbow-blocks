@@ -2061,5 +2061,23 @@ end`;
     });
   });
 
+  suite('Coverage: typed-end keyword followed by trailing content', () => {
+    test('should accept a typed end keyword followed by whitespace and a semicolon', () => {
+      // `endif` followed by a space then `;` - the trailing-content scan skips
+      // the whitespace and accepts `;` as a valid statement separator.
+      const source = 'if x\n  y = 1;\nendif ;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should accept a typed end keyword followed by a comment', () => {
+      // `endfor` followed by a `#` line comment - a comment ends the statement,
+      // so the typed-end keyword is still a valid block close.
+      const source = 'for i = 1:3\n  y = i;\nendfor # done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'endfor');
+    });
+  });
+
   generateCommonTests(config);
 });
