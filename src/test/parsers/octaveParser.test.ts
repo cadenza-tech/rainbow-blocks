@@ -1175,6 +1175,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'classdef', 'end');
     });
+
+    test('should not treat properties followed by colon as block open (Octave)', () => {
+      // Octave has no label syntax; `:` is the range operator, so `properties:` is
+      // invalid section-keyword usage. The keyword must be rejected and the user's
+      // stray inner `end` absorbed via the phantom mechanism, so classdef pairs with
+      // the LAST end (line 4), producing a single classdef/end pair.
+      const source = 'classdef C\nproperties:\nx\nend\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 4, 'classdef should pair with the LAST end');
+      assert.strictEqual(pairs.length, 1, 'only the classdef/end pair should be produced');
+    });
   });
 
   suite('Bug: typed close keywords skip past intervening unclosed blocks', () => {

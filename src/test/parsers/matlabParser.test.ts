@@ -1442,6 +1442,18 @@ end`;
       findBlock(pairs, 'properties');
     });
 
+    test('should not treat properties followed by colon as block open', () => {
+      // MATLAB has no label syntax; `:` is the range operator, so `properties:` is
+      // invalid section-keyword usage. The keyword must be rejected and the user's
+      // stray inner `end` absorbed via the phantom mechanism, so classdef pairs with
+      // the LAST end (line 4), producing a single classdef/end pair.
+      const source = 'classdef C\nproperties:\nx\nend\nend';
+      const pairs = parser.parse(source);
+      const classdefBlock = findBlock(pairs, 'classdef');
+      assert.strictEqual(classdefBlock.closeKeyword.line, 4, 'classdef should pair with the LAST end');
+      assert.strictEqual(pairs.length, 1, 'only the classdef/end pair should be produced');
+    });
+
     test('should still accept methods followed by line continuation as block open', () => {
       const source = 'classdef MyClass\n  methods ...\n    (Access = public)\n    function f()\n    end\n  end\nend';
       const pairs = parser.parse(source);
