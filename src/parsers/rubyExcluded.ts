@@ -1,7 +1,7 @@
 // Ruby excluded region helpers: heredoc and multi-line comment matching
 
 import type { ExcludedRegion } from '../types';
-import { findLineCommentAndStringRegions, isInsideRegion } from './parserUtils';
+import { findLineCommentAndStringRegions, findLineStart, isInsideRegion } from './parserUtils';
 
 // Ruby reserved words that cannot be heredoc terminators.
 // Uppercase identifiers (BEGIN, END, __ENCODING__, __LINE__, __FILE__) are
@@ -79,6 +79,40 @@ export function matchMultiLineComment(source: string, pos: number): ExcludedRegi
   return { start: pos, end: i };
 }
 
+// Heredoc terminators followed by ', <<' on the same line, e.g. `raise <<A, <<A`,
+const COMMA_LTLT_PATTERN = /,[ \t]*<</g;
+
+// Determines whether the line containing the `<<` at `ltLtPos` has a subsequent
+// ', <<' pattern that belongs to real code (a multi-heredoc list), as opposed to
+// text inside a comment, string literal, or interpolation. The whole line is
+// scanned -- not just the slice after `<<` -- so that a string/comment opened
+// earlier on the line (or the `<<` sitting inside an interpolation) is detected.
+function hasCodeCommaLtLt(source: string, ltLtPos: number): boolean {
+  const lineStart = findLineStart(source, ltLtPos);
+  let lineEnd = ltLtPos;
+  while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+    lineEnd++;
+  }
+  const lineContent = source.slice(lineStart, lineEnd);
+  const commentOrStringRegions = findLineCommentAndStringRegions(lineContent, ['~', '-'], ['"', "'", '`']);
+  const ltLtRelative = ltLtPos - lineStart;
+
+  COMMA_LTLT_PATTERN.lastIndex = 0;
+  let match = COMMA_LTLT_PATTERN.exec(lineContent);
+  while (match !== null) {
+    // Only consider ', <<' occurrences after the focused `<<` operator
+    if (match.index > ltLtRelative) {
+      const commaIndex = match.index;
+      const subLtLtIndex = match.index + match[0].length - 2;
+      if (!isInsideRegion(commaIndex, commentOrStringRegions) && !isInsideRegion(subLtLtIndex, commentOrStringRegions)) {
+        return true;
+      }
+    }
+    match = COMMA_LTLT_PATTERN.exec(lineContent);
+  }
+  return false;
+}
+
 // Matches heredoc, handling multiple heredocs on same line
 export function matchHeredoc(source: string, pos: number): { contentStart: number; end: number } | null {
   // Reject bare <<IDENT when preceded by identifier/number/closing bracket (likely shift operator)
@@ -102,14 +136,11 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
         const followingWord = followingWordMatch ? followingWordMatch[2] : '';
         const isRubyKeyword = RUBY_KEYWORDS.has(followingWord);
         if (!isFlaggedHeredoc && (!skippedSpace || isRubyKeyword)) {
-          // Exception: if the rest of the line contains ', <<' pattern, this is a
+          // Exception: if the rest of the line contains a ', <<' pattern, this is a
           // multi-heredoc list (e.g. `raise <<A, <<A`), not a shift operator. Accept.
-          let lineEnd = pos;
-          while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-            lineEnd++;
-          }
-          const restOfLine = source.slice(pos + 2, lineEnd);
-          if (!/,\s*<</.test(restOfLine)) {
+          // The ', <<' must be real code, not text inside a comment, string literal,
+          // or interpolation -- a comment such as `x = a<<b # , <<` is still a shift.
+          if (!hasCodeCommaLtLt(source, pos)) {
             return null;
           }
         }
