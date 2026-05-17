@@ -20,9 +20,10 @@ import {
   matchParameterExpansion,
   matchProcessSubstitution
 } from './bashStringHelpers';
+import { computeEnclosingParenAtPos } from './bashCacheHelpers';
 import type { BashValidationCallbacks } from './bashValidation';
 import { isAtCommandPosition, isCasePattern } from './bashValidation';
-import { findLastOpenerByType } from './parserUtils';
+import { findExcludedRegionAt, findLastOpenerByType } from './parserUtils';
 
 // Keywords that are closed by `done`
 const DONE_OPENERS = new Set(['for', 'while', 'until', 'select']);
@@ -71,10 +72,25 @@ function skipWhitespaceAndContinuationBackwardLocal(source: string, pos: number)
 }
 
 export class BashBlockParser extends BaseBlockParser {
+  // Per-parse cache: content regions of `[[ ]]` conditional expressions, sorted by
+  // start. Populated by findExcludedRegions so isInsideDoubleBracket answers in
+  // O(log N) via binary search instead of walking the source backward each call.
+  private doubleBracketRegions: ExcludedRegion[] = [];
+  // Per-parse cache: innermost enclosing unmatched `(` offset for every position.
+  // Populated by tokenize() before super.tokenize() so isInsideExtglob and the
+  // array-literal check in isAtCommandPosition answer in O(1) instead of O(N).
+  // null when no parse is in progress (defensive fallback to the slow scan).
+  private enclosingParenAtPos: Int32Array | null = null;
+  // The source string of the in-progress parse, cached so the isInsideArrayLiteral
+  // callback (which only receives a position) can inspect characters around the
+  // enclosing `(`. null when no parse is in progress.
+  private cachedSource: string | null = null;
+
   private get validationCallbacks(): BashValidationCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
-      findExcludedRegionAt: (pos, regions) => this.findExcludedRegionAt(pos, regions)
+      findExcludedRegionAt: (pos, regions) => this.findExcludedRegionAt(pos, regions),
+      isInsideArrayLiteral: (pos) => this.isInsideArrayLiteral(pos)
     };
   }
 
@@ -87,6 +103,10 @@ export class BashBlockParser extends BaseBlockParser {
   // Finds excluded regions: comments, strings, heredocs, parameter expansions
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     const regions: ExcludedRegion[] = [];
+    // Reset the [[ ]] region cache for this parse and record content regions as
+    // doubleBracketDepth transitions through 0.
+    const doubleBracketRegions: ExcludedRegion[] = [];
+    let doubleBracketContentStart = -1;
     let i = 0;
     // Track [[ ]] depth: # is not a comment character inside [[ ]] conditional expressions
     let doubleBracketDepth = 0;
@@ -103,12 +123,22 @@ export class BashBlockParser extends BaseBlockParser {
         this.isDoubleBracketCommand(source, i) &&
         this.hasDoubleBracketClose(source, i + 2)
       ) {
+        // Record the content region start only when entering double-bracket mode
+        // from depth 0 (the common, non-nested case).
+        if (doubleBracketDepth === 0) {
+          doubleBracketContentStart = i + 2;
+        }
         doubleBracketDepth++;
         i += 2;
         continue;
       }
       if (source[i] === ']' && i + 1 < source.length && source[i + 1] === ']' && doubleBracketDepth > 0) {
         doubleBracketDepth--;
+        // Close the content region when returning to depth 0.
+        if (doubleBracketDepth === 0 && doubleBracketContentStart >= 0) {
+          doubleBracketRegions.push({ start: doubleBracketContentStart, end: i });
+          doubleBracketContentStart = -1;
+        }
         i += 2;
         continue;
       }
@@ -185,6 +215,12 @@ export class BashBlockParser extends BaseBlockParser {
         i++;
       }
     }
+
+    // Publish the [[ ]] content regions for binary-search lookup by
+    // isInsideDoubleBracket. An unclosed [[ never enters double-bracket mode
+    // (hasDoubleBracketClose gate), so doubleBracketContentStart is always
+    // resolved here; the regions stay sorted by construction.
+    this.doubleBracketRegions = doubleBracketRegions;
 
     return regions;
   }
@@ -505,49 +541,62 @@ export class BashBlockParser extends BaseBlockParser {
   }
 
   // Checks if position is inside [[ ... ]] conditional expression
-  // Keywords inside [[ ]] are string operands, not commands
-  private isInsideDoubleBracket(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    for (let k = position - 1; k >= 0; k--) {
-      if (this.isInExcludedRegion(k, excludedRegions)) continue;
-      const char = source[k];
-      // Found ]] before [[ -> not inside double bracket
-      if (char === ']' && k > 0 && source[k - 1] === ']') {
-        return false;
-      }
-      // Found [[ -> check if it's at command position AND has a matching `]]` ahead.
-      // An unclosed `[[` should not poison the rest of the source.
-      if (char === '[' && k > 0 && source[k - 1] === '[') {
-        if (!this.isDoubleBracketCommand(source, k - 1)) return false;
-        for (let m = position; m < source.length - 1; m++) {
-          if (this.isInExcludedRegion(m, excludedRegions)) continue;
-          if (source[m] === ']' && source[m + 1] === ']') {
-            return true;
-          }
-        }
-        return false;
-      }
-    }
-    return false;
+  // Keywords inside [[ ]] are string operands, not commands.
+  // The [[ ]] content regions are pre-computed by findExcludedRegions, so this is
+  // an O(log N) binary search instead of a backward scan to file start.
+  private isInsideDoubleBracket(_source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    return findExcludedRegionAt(position, this.doubleBracketRegions) !== null;
   }
 
-  // Checks if position is inside a Bash extglob pattern ?(…), *(…), +(…), @(…), !(…)
-  private isInsideExtglob(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let parenDepth = 0;
-    for (let k = position - 1; k >= 0; k--) {
-      if (this.isInExcludedRegion(k, excludedRegions)) continue;
-      if (source[k] === ')') {
-        parenDepth++;
-      } else if (source[k] === '(') {
-        if (parenDepth === 0) {
-          return k > 0 && '?*+@!'.includes(source[k - 1]);
-        }
-        parenDepth--;
-      }
+  // Checks if position is inside a Bash extglob pattern ?(…), *(…), +(…), @(…), !(…).
+  // Uses the pre-computed enclosing-paren cache so the innermost unmatched `(` is
+  // found in O(1); a position is inside an extglob iff that `(` is prefixed by ?*+@!.
+  private isInsideExtglob(source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+    if (this.enclosingParenAtPos === null || position < 0 || position >= this.enclosingParenAtPos.length) {
+      return false;
     }
-    return false;
+    const openParen = this.enclosingParenAtPos[position];
+    return openParen > 0 && '?*+@!'.includes(source[openParen - 1]);
+  }
+
+  // Checks if position sits inside an unclosed `var=(...)` / `var+=(...)` array
+  // literal, where keywords are array element values rather than block tokens.
+  // Mirrors the former backward scan in isAtCommandPosition: the innermost
+  // enclosing unmatched `(` (from the pre-computed cache) opens an array literal
+  // iff it is immediately preceded by `=` of a `var=` / `var+=` assignment.
+  private isInsideArrayLiteral(position: number): boolean {
+    if (this.enclosingParenAtPos === null || position < 0 || position >= this.enclosingParenAtPos.length) {
+      return false;
+    }
+    return this.isArrayLiteralOpener(this.enclosingParenAtPos[position]);
+  }
+
+  // Checks whether the `(` at parenIndex opens a `var=(...)` / `var+=(...)` array
+  // literal. parenIndex < 0 means no enclosing paren.
+  private isArrayLiteralOpener(parenIndex: number): boolean {
+    if (parenIndex <= 0) return false;
+    const source = this.cachedSource;
+    if (source === null || source[parenIndex - 1] !== '=') return false;
+    let varEnd = parenIndex - 1;
+    if (varEnd > 0 && source[varEnd - 1] === '+') {
+      varEnd--;
+    }
+    let varPos = varEnd - 1;
+    while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
+      varPos--;
+    }
+    const varStart = varPos + 1;
+    return varStart < varEnd && /[a-zA-Z_]/.test(source[varStart]);
   }
 
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Pre-compute the enclosing-paren cache before super.tokenize(): that call
+    // runs isValidBlockOpen / isValidBlockClose for every keyword match, which in
+    // turn call isInsideExtglob and (via isAtCommandPosition) isInsideArrayLiteral.
+    // Without the cache those scan the source backward, making parsing O(N^2).
+    this.cachedSource = source;
+    this.enclosingParenAtPos = computeEnclosingParenAtPos(source, excludedRegions);
+
     let tokens = super.tokenize(source, excludedRegions);
 
     // Validate block_middle keywords at command position (echo then, echo else, etc.)

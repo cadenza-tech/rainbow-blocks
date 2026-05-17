@@ -7,6 +7,9 @@ import { findLineStart } from './parserUtils';
 export interface BashValidationCallbacks {
   isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean;
   findExcludedRegionAt: (pos: number, regions: ExcludedRegion[]) => ExcludedRegion | null;
+  // Returns true when `pos` sits inside an unclosed `var=(...)` / `var+=(...)`
+  // array literal. Backed by the parser's pre-computed enclosing-paren cache.
+  isInsideArrayLiteral: (pos: number) => boolean;
 }
 
 // Skips backward through one value character (or a balanced brace expansion {…}).
@@ -85,45 +88,12 @@ export function isAtCommandPosition(
   // Each iteration evaluates one keyword position; `time`/`VAR=` prefixes
   // reassign `position` to the preceding word and continue the loop.
   while (true) {
-    // Check if the keyword sits inside an unclosed array literal `var=(...)` / `var+=(...)`.
-    // Inside array literals, keywords are values rather than block tokens.
-    {
-      let depth = 0;
-      let scan = position - 1;
-      while (scan >= 0) {
-        if (callbacks.isInExcludedRegion(scan, excludedRegions)) {
-          const region = callbacks.findExcludedRegionAt(scan, excludedRegions);
-          if (region) {
-            scan = region.start - 1;
-            continue;
-          }
-        }
-        const c = source[scan];
-        if (c === ')') {
-          depth++;
-        } else if (c === '(') {
-          if (depth === 0) {
-            // Unmatched `(` — check if it opens an array literal
-            if (scan > 0 && source[scan - 1] === '=') {
-              let varEnd = scan - 1;
-              if (varEnd > 0 && source[varEnd - 1] === '+') {
-                varEnd--;
-              }
-              let varPos = varEnd - 1;
-              while (varPos >= 0 && /[a-zA-Z0-9_]/.test(source[varPos])) {
-                varPos--;
-              }
-              const varStart = varPos + 1;
-              if (varStart < varEnd && /[a-zA-Z_]/.test(source[varStart])) {
-                return false;
-              }
-            }
-            break;
-          }
-          depth--;
-        }
-        scan--;
-      }
+    // Check if the keyword sits inside an unclosed array literal `var=(...)` /
+    // `var+=(...)`. Inside array literals, keywords are values rather than block
+    // tokens. The check uses the parser's pre-computed enclosing-paren cache so
+    // it is O(1) instead of a backward scan to file start (avoids O(N^2)).
+    if (callbacks.isInsideArrayLiteral(position)) {
+      return false;
     }
 
     let i = position - 1;
