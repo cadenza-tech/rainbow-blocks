@@ -61,6 +61,12 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
   'ensure'
 ]);
 
+// Open keywords whose blocks can take a `then` clause separator.
+// `then` is only a section boundary for if/unless/while/until/case. In
+// def/class/module/begin/for/do/while-until bodies a bare `then` is not a
+// syntactic element, so it must not be collected as an intermediate.
+const THEN_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 'while', 'until', 'case']);
+
 // Ruby interpolation check: %q, %w, %i, %s do not interpolate
 function isRubyInterpolatingPercent(_specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -98,11 +104,18 @@ export class RubyBlockParser extends BaseBlockParser {
 
         case 'block_middle':
           if (stack.length > 0) {
+            const topKeyword = stack[stack.length - 1].token.value;
             // 'in' is only a true intermediate inside `case` (Ruby 3.0+ pattern matching).
             // In `for x in collection` it is a syntactic separator (skip).
             // In `if/unless/while/until/begin/...` it is the pattern-matching operator
             // (Ruby 3.0+, e.g. `if x in 1`), also not a section boundary -- skip.
-            if (token.value === 'in' && stack[stack.length - 1].token.value !== 'case') {
+            if (token.value === 'in' && topKeyword !== 'case') {
+              break;
+            }
+            // 'then' is a clause separator only for if/unless/while/until/case. A bare
+            // 'then' inside a def/class/module/begin/for/do body is not a syntactic
+            // element, so it must not be attached as an intermediate.
+            if (token.value === 'then' && !THEN_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
               break;
             }
             stack[stack.length - 1].intermediates.push(token);
