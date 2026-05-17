@@ -780,7 +780,14 @@ export class BashBlockParser extends BaseBlockParser {
           }
 
           if (matchIndex >= 0) {
-            const openBlock = stack.splice(matchIndex, 1)[0];
+            // Openers above the matched index were opened more recently and have
+            // now met a close keyword that cannot close them (e.g. `if` still open
+            // when `done` arrives). Per the anchor-set principle, terminate those
+            // scopes as unclosed (orphan, left uncolored) instead of letting their
+            // own close keyword cross-pair past this one. Truncating the stack to
+            // `matchIndex` drops them and removes the matched opener in one step.
+            const openBlock = stack[matchIndex];
+            stack.length = matchIndex;
             pairs.push({
               openKeyword: openBlock.token,
               closeKeyword: token,
