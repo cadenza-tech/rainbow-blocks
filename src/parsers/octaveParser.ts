@@ -538,7 +538,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
   protected isFollowedByAssignment(source: string, afterPos: number): boolean {
     let i = afterPos;
     while (i < source.length) {
-      if (source[i] === ' ' || source[i] === '\t') {
+      // Skip horizontal whitespace: space, tab, vertical tab (\v), and form feed (\f).
+      // \v and \f are included so `do\f= 1;` / `do\v+= 1;` are detected as assignments
+      // to a variable named `do`, matching isHorizontalWhitespace's definition.
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\v' || source[i] === '\f') {
         i++;
         continue;
       }
