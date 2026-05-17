@@ -243,6 +243,31 @@ export class MatlabBlockParser extends BaseBlockParser {
     return isAtLineStartForSectionKeyword(source, position);
   }
 
+  // Advances past spaces/tabs and `...` line continuations starting at `from`,
+  // returning the offset of the first significant character. A `...` continuation
+  // is recorded as an excluded region whose `start` is the first `.` and whose `end`
+  // is the line terminator; this skips the whole region plus the trailing newline so
+  // that, e.g., `properties ...\n= 5` is seen as `properties = 5`.
+  private skipWhitespaceAndContinuations(source: string, from: number, excludedRegions: ExcludedRegion[]): number {
+    let i = from;
+    while (i < source.length) {
+      if (source[i] === ' ' || source[i] === '\t') {
+        i++;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && region.start === i && source[region.start] === '.') {
+        // Jump past the `...` continuation region and its trailing newline (CRLF, CR, or LF).
+        i = region.end;
+        if (i < source.length && source[i] === '\r') i++;
+        if (i < source.length && source[i] === '\n') i++;
+        continue;
+      }
+      break;
+    }
+    return i;
+  }
+
   // Reject struct field access for block openers (s.if, s.for, s . if, etc)
   // Reject classdef section keywords used as function calls (properties(obj))
   // Reject keywords used as function handles (@if, @while, @function)
@@ -257,11 +282,10 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (this.isKeywordUsedAsFunctionCall(source, position, keyword)) {
         return false;
       }
-      // Check if keyword is used as a variable (followed by =, but not ==)
-      let afterPos = position + keyword.length;
-      while (afterPos < source.length && (source[afterPos] === ' ' || source[afterPos] === '\t')) {
-        afterPos++;
-      }
+      // Check if keyword is used as a variable (followed by =, but not ==).
+      // Skip whitespace AND `...` line continuations so `properties ...\n= 5` is
+      // detected as the same assignment form as the same-line `properties = 5`.
+      const afterPos = this.skipWhitespaceAndContinuations(source, position + keyword.length, excludedRegions);
       if (afterPos < source.length && source[afterPos] === '=' && (afterPos + 1 >= source.length || source[afterPos + 1] !== '=')) {
         // Phantom: if this section keyword is at line-start, the user may have written
         // a stray `end` for it. Record the position so matchBlocks can absorb the
