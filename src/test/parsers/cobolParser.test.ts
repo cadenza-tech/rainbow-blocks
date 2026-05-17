@@ -2239,5 +2239,206 @@ END-PERFORM`;
     });
   });
 
+  suite('Coverage: matchExecBlock rejects malformed EXEC forms', () => {
+    test('should not treat EXEC as an EXEC block when no sub-language keyword follows on the same line', () => {
+      // matchExecBlock requires `[ \t]+<keyword>` after EXEC; a newline does not
+      // satisfy it, so EXEC is not an excluded region and the trailing IF/END-IF
+      // block is still detected.
+      const source = 'EXEC\nSQL X END-EXEC\nIF Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 0, 'EXEC followed by a newline must not form an EXEC block');
+    });
+
+    test('should not treat a bare EXEC at end of source as an EXEC block', () => {
+      const source = 'IF Y\nEND-IF\nEXEC';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 0, 'A bare EXEC with nothing after it must not form an EXEC block');
+    });
+
+    test('should not treat EXEC SQL as an EXEC block when a non-ASCII letter follows the sub-language keyword', () => {
+      // The captured sub-language token is `SQL`, but it is immediately followed
+      // by `é`; matchExecBlock rejects this so the real word is `SQLé`, not `SQL`.
+      const source = 'EXEC SQLé END-EXEC\nIF Y\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 0, 'EXEC SQLé must not be recognised as an EXEC SQL block');
+    });
+  });
+
+  suite('Coverage: period-less COPY boundary detection across skipped regions', () => {
+    // findBlockVerbAfterCopy must skip *> comments, string literals and >>/comment
+    // lines so a verb word hidden inside them is not mistaken for the statement
+    // boundary. A period-less COPY ends at the first real block-opening verb past
+    // the copybook name, so a later REPLACING is not in COPY context and its
+    // ==...== delimiters are not pseudo-text.
+    function pseudoCount(source: string): number {
+      return parser.getExcludedRegions(source).filter((r) => source.slice(r.start, r.start + 2) === '==').length;
+    }
+
+    test('should skip a *> comment in a period-less COPY when locating the block verb', () => {
+      const source = 'COPY ABC *> PERFORM here\nDISPLAY X\nREPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING after a period-less COPY plus block verb is not in COPY context');
+    });
+
+    test('should skip a string literal in a period-less COPY when locating the block verb', () => {
+      const source = "COPY ABC 'PERFORM' DISPLAY X\nREPLACING ==a== BY ==b==.";
+      assert.strictEqual(pseudoCount(source), 0, 'a verb word inside a string must not act as the COPY boundary');
+    });
+
+    test('should skip a >> directive line in a period-less COPY when locating the block verb', () => {
+      const source = 'COPY ABC\n>> PERFORM\nDISPLAY X\nREPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 0, 'a verb word on a >> directive line must not act as the COPY boundary');
+    });
+
+    test('should treat an OF library qualifier as part of a period-less COPY', () => {
+      const source = 'COPY ABC OF LIB\nIF X\nREPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 0, 'OF LIB is part of COPY, the boundary is the later IF verb');
+    });
+
+    test('should treat an IN library qualifier as part of a period-less COPY', () => {
+      const source = 'COPY ABC IN LIB\nIF X\nREPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 0, 'IN LIB is part of COPY, the boundary is the later IF verb');
+    });
+
+    test('should still detect pseudo-text in a well-formed COPY OF library REPLACING', () => {
+      // Contrast: a properly period-terminated COPY ... OF lib REPLACING keeps the
+      // ==...== delimiters as pseudo-text excluded regions.
+      const source = 'COPY ABC OF LIB REPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 2, 'OF library qualifier must not break pseudo-text detection');
+    });
+
+    test('should skip data-name words past the copybook name before reaching the block verb', () => {
+      const source = 'COPY ABC DEF GHI\nIF X\nREPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 0, 'extra data-name words are walked over until the IF verb ends the COPY');
+    });
+  });
+
+  suite('Coverage: COPY detection skips strings and comments preceding the COPY keyword', () => {
+    function pseudoCount(source: string): number {
+      return parser.getExcludedRegions(source).filter((r) => source.slice(r.start, r.start + 2) === '==').length;
+    }
+
+    test('should skip a string literal that precedes the COPY keyword within the statement', () => {
+      // isInCopyStatement scans the statement for a COPY keyword; a string literal
+      // before COPY must be skipped so its content is not misread. The period-less
+      // COPY still ends at the IF verb, so the later REPLACING is not pseudo-text.
+      const source = "MOVE 'lit' TO Z COPY ABC\nIF X\nREPLACING ==a== BY ==b==.";
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING after a period-less COPY plus block verb is not in COPY context');
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(
+        regions.some((r) => source.slice(r.start, r.end) === "'lit'"),
+        'the string literal before COPY should be an excluded region'
+      );
+    });
+
+    test('should skip a *> inline comment that precedes the COPY keyword within the statement', () => {
+      const source = 'MOVE Z *> note\n COPY ABC\nIF X\nREPLACING ==a== BY ==b==.';
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING after a period-less COPY plus block verb is not in COPY context');
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(
+        regions.some((r) => source.slice(r.start, r.end).startsWith('*>')),
+        'the *> comment before COPY should be an excluded region'
+      );
+    });
+
+    test('should skip a string with doubled quotes that precedes the COPY keyword within the statement', () => {
+      // The string scan must treat the doubled '' as an escaped quote, not as the
+      // end of the literal, so the COPY keyword after it is still recognised.
+      const source = "MOVE 'a''b' TO Z COPY ABC\nIF X\nREPLACING ==a== BY ==b==.";
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING after a period-less COPY plus block verb is not in COPY context');
+      const regions = parser.getExcludedRegions(source);
+      assert.ok(
+        regions.some((r) => source.slice(r.start, r.end) === "'a''b'"),
+        'the doubled-quote string before COPY should be a single excluded region'
+      );
+    });
+
+    test('should skip an unterminated string that precedes the COPY keyword within the statement', () => {
+      // A string broken by a newline is treated as ending at the line break; the
+      // COPY keyword on the following line is still recognised.
+      const source = "MOVE 'unterminated\n COPY ABC\nIF X\nREPLACING ==a== BY ==b==.";
+      assert.strictEqual(pseudoCount(source), 0, 'REPLACING after a period-less COPY plus block verb is not in COPY context');
+    });
+
+    test('should not treat a COPY keyword that is inside a *> comment as a real COPY statement', () => {
+      // The *> comment runs to end of line and swallows `COPY ABC`, so there is no
+      // real COPY statement and the later REPLACING is not pseudo-text.
+      const source = 'MOVE Z *> note COPY ABC\nIF X\nREPLACING ==a== BY ==b==.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(pseudoCount(source), 0, 'a commented-out COPY does not create a COPY statement');
+    });
+  });
+
+  suite('Coverage: multi-pair pseudo-text chains after hyphenated identifiers', () => {
+    function pseudoCount(source: string): number {
+      return parser.getExcludedRegions(source).filter((r) => source.slice(r.start, r.start + 2) === '==').length;
+    }
+
+    test('should not treat chained ==...== as pseudo-text after the hyphenated identifier COPY-RECORD', () => {
+      // COPY-RECORD is a data name, not the COPY keyword, so REPLACING is not in a
+      // COPY statement. The backward scanner walks the whole ==a== BY ==b== ==c== BY
+      // ==d== chain and finds no real COPY context, so nothing is excluded.
+      const source = 'COPY-RECORD REPLACING ==A== BY ==B== ==C== BY ==D==.\nIF X\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pseudoCount(source), 0, 'chained delimiters after COPY-RECORD are not pseudo-text');
+    });
+
+    test('should not treat chained ==...== as pseudo-text after the hyphenated identifier MY-REPLACE', () => {
+      // MY-REPLACE is a data name, not the REPLACE keyword.
+      const source = 'MY-REPLACE ==A== BY ==B== ==C== BY ==D==.\nIF X\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pseudoCount(source), 0, 'chained delimiters after MY-REPLACE are not pseudo-text');
+    });
+  });
+
+  suite('Coverage: pseudo-text delimiters with no preceding context', () => {
+    test('should not treat ==...== at the start of source as pseudo-text', () => {
+      // The backward scan from the ==...== runs off the start of the buffer with
+      // only whitespace, so there is no REPLACING/REPLACE/ALSO context.
+      const source = '   ==a== BY ==b==';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getExcludedRegions(source).length, 0, 'orphan ==...== is left unexcluded');
+    });
+
+    test('should not treat ==...== preceded only by ALSO at the start of source as pseudo-text', () => {
+      const source = 'ALSO ==a==';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getExcludedRegions(source).length, 0, 'ALSO without a preceding REPLACE is not pseudo-text context');
+    });
+
+    test('should not treat ==...== preceded only by BY at the start of source as pseudo-text', () => {
+      const source = 'BY ==a==';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getExcludedRegions(source).length, 0, 'BY without a preceding REPLACING/REPLACE is not pseudo-text context');
+    });
+
+    test('should not treat a chained ==...== ==...== preceded only by BY at the start of source as pseudo-text', () => {
+      // The backward scanner walks the ==a== ==b== chain past BY and runs off the
+      // start of the buffer without finding a REPLACING/REPLACE context.
+      const source = 'BY ==a== ==b==';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getExcludedRegions(source).length, 0, 'a BY-led chain at the start of source is not pseudo-text context');
+    });
+
+    test('should not treat a ==...== BY ==...== chain preceded only by BY at the start of source as pseudo-text', () => {
+      const source = 'BY ==a== BY ==b==';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      assert.strictEqual(parser.getExcludedRegions(source).length, 0, 'a BY-separated chain at the start of source is not pseudo-text context');
+    });
+  });
+
   generateCommonTests(config);
 });
