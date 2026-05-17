@@ -4018,5 +4018,63 @@ end`;
     });
   });
 
+  suite('Regression: then is not an intermediate of blocks that cannot take then', () => {
+    test('should not collect then as intermediate of a def block', () => {
+      const source = 'def m\n  a then b\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'def');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect then as intermediate of a class block', () => {
+      const source = 'class C\n  a then b\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'class');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect then as intermediate of a module block', () => {
+      const source = 'module M\n  a then b\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'module');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect then as intermediate of a begin block', () => {
+      const source = 'begin\n  a then b\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'begin');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect then as intermediate of a for block', () => {
+      const source = 'for i in 1..3\n then\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'for');
+      assertIntermediates(pair, []);
+    });
+
+    test('should still collect then as intermediate of an if block', () => {
+      const source = 'if x then\n  1\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'if');
+      assertIntermediates(pair, ['then']);
+    });
+
+    test('should still collect then as intermediate of a case block', () => {
+      const source = 'case x\nwhen 1 then\n  1\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'case');
+      assertIntermediates(pair, ['when', 'then']);
+    });
+
+    test('should still collect then as intermediate of an unless block', () => {
+      const source = 'unless x then\n  1\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'unless');
+      assertIntermediates(pair, ['then']);
+    });
+  });
+
   generateCommonTests(config);
 });
