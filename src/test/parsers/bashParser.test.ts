@@ -6089,5 +6089,55 @@ fi`;
     });
   });
 
+  suite('Regression 2026-05-18: close keyword must not produce crossing block pairs', () => {
+    // Asserts no two pairs cross: for any two pairs A and B, their open/close
+    // offset ranges are either disjoint or properly nested, never interleaved.
+    function assertNoCrossingPairs(pairs: ReturnType<BashBlockParser['parse']>) {
+      for (const a of pairs) {
+        for (const b of pairs) {
+          if (a === b) continue;
+          const aOpen = a.openKeyword.startOffset;
+          const aClose = a.closeKeyword.startOffset;
+          const bOpen = b.openKeyword.startOffset;
+          const bClose = b.closeKeyword.startOffset;
+          const crossing = aOpen < bOpen && bOpen < aClose && aClose < bClose;
+          assert.ok(!crossing, `crossing pair detected: [${aOpen},${aClose}] interleaves [${bOpen},${bClose}]`);
+        }
+      }
+    }
+
+    test('should orphan inner if when done closes the enclosing for loop', () => {
+      // `done` closes `for`; the `if` still open on the stack met a `done` it
+      // cannot close, so it is terminated unclosed. Without the fix, `for->done`
+      // and `if->fi` crossed (if opened inside for but fi closed after done).
+      const source = 'for i in 1; do\n  if x; then\ndone\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assertNoCrossingPairs(pairs);
+    });
+
+    test('should orphan inner brace group when fi closes the enclosing if block', () => {
+      // `fi` closes `if`; the `{` still open met a `fi` it cannot close, so it is
+      // terminated unclosed. Without the fix, `if->fi` and `{->}` crossed.
+      const source = 'if x; then { y; fi; }';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertNoCrossingPairs(pairs);
+    });
+
+    test('should still pair properly nested for/if blocks', () => {
+      // Sanity check: when nesting is well-formed, the inner if/fi pair is kept
+      // and reported as nested inside the for/done pair.
+      const source = 'for i in 1; do\n  if x; then\n    echo y\n  fi\ndone';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNoCrossingPairs(pairs);
+      const forBlock = findBlock(pairs, 'for');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(forBlock.nestLevel, 0);
+      assert.strictEqual(ifBlock.nestLevel, 1);
+    });
+  });
+
   generateCommonTests(config);
 });
