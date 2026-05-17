@@ -257,6 +257,16 @@ export function isInExpressionContext(source: string, position: number, excluded
   }
   if (i < 0) return false;
   const ch = source[i];
+  // A `-` directly after an identifier character (letter/digit/_) is the
+  // trailing hyphen of a hyphenated COBOL data name (e.g., `VAR-`), not a
+  // subtraction operator. Treating it as an operator would wrongly drop a
+  // following WHEN/ELSE. A genuine subtraction operator is separated from its
+  // left operand by whitespace, so it would not reach this branch.
+  // This is `-` specific: COBOL identifiers continue with `-`, never with the
+  // other arithmetic operators `+`/`*`/`/`.
+  if (ch === '-' && i > 0 && /[a-zA-Z0-9_]/.test(source[i - 1])) {
+    return false;
+  }
   // Arithmetic operators: + - * / = < >
   // Separators: , ;
   // Open parenthesis: (   — followed token is an operand inside an expression.
