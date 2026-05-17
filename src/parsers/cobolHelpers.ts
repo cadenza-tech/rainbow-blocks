@@ -6,7 +6,7 @@ import type { ExcludedRegion } from '../types';
 // name of a COPY statement, the COPY statement is over: a period-less COPY does
 // not extend across a following block-opening statement. Kept in sync with
 // CobolBlockParser.keywords.blockOpen.
-const COPY_TERMINATING_VERBS = new Set([
+export const COPY_TERMINATING_VERBS = new Set([
   'PERFORM',
   'IF',
   'EVALUATE',
