@@ -17,7 +17,6 @@ import type { VerilogValidationCallbacks } from './verilogValidation';
 import {
   getPrecedingLabelColonWord,
   isEnclosingBlockCase,
-  isFollowedByOpenParen,
   isFollowedByWord,
   isInsideParens,
   isOnDpiLine,
@@ -639,15 +638,14 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject case-statement keywords misused as identifiers on the right-hand side
-    // of an assignment (e.g., `x = case;`, `y <= casex;`, `b = randcase;`). A
-    // case keyword never appears as an expression operand, so a preceding
-    // assignment operator means it is being used as an identifier. The `case (expr)`
-    // statement form is kept by skipping this check when an opening paren follows.
-    if (
-      CASE_KEYWORDS.has(keyword) &&
-      isPrecededByAssignmentOperator(source, position, excludedRegions, this.validationCallbacks) &&
-      !isFollowedByOpenParen(source, position, keyword.length, excludedRegions, this.validationCallbacks)
-    ) {
+    // of an assignment (e.g., `x = case;`, `y <= casex;`, `b = randcase;`,
+    // `x = case(y);`). A case keyword can only appear at statement position and
+    // never as an expression operand, so a preceding assignment operator means it
+    // is being used as an identifier — regardless of whether an opening paren
+    // follows. (A following `(` does not rescue the `case (expr)` statement form
+    // here because a case statement cannot legally appear after an assignment
+    // operator in the first place.)
+    if (CASE_KEYWORDS.has(keyword) && isPrecededByAssignmentOperator(source, position, excludedRegions, this.validationCallbacks)) {
       return false;
     }
 

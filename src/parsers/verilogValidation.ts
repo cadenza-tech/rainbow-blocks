@@ -617,33 +617,6 @@ export function isPrecededByAssignmentOperator(
   return true;
 }
 
-// Returns true when the char after the keyword at `position` (skipping whitespace
-// and comments) is an opening parenthesis. Used to keep the normal `case (expr)`
-// statement form recognized even if it appears in an unusual context.
-export function isFollowedByOpenParen(
-  source: string,
-  position: number,
-  keywordLength: number,
-  excludedRegions: ExcludedRegion[],
-  callbacks: VerilogValidationCallbacks
-): boolean {
-  let i = position + keywordLength;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-      i++;
-      continue;
-    }
-    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
-      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
-      i = region ? region.end : i + 1;
-      continue;
-    }
-    break;
-  }
-  return i < source.length && source[i] === '(';
-}
-
 // Scans forward from a control keyword to find 'begin' before any statement terminator
 export function scanForBeginAfterControl(
   source: string,
