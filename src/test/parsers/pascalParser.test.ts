@@ -3193,6 +3193,29 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-19: asm after > or ] is not a block opener', () => {
+    test('should not treat asm after > comparison operator as a block opener', () => {
+      // `a > asm` puts `asm` in expression context after a comparison operator.
+      // It must not be tokenized as a block opener, otherwise the following `end`
+      // is mispaired into a spurious asm/end block.
+      const source = 'a > asm b end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const asmToken = parser.getTokens(source).find((t) => t.value === 'asm');
+      assert.strictEqual(asmToken, undefined, 'asm after > must not be tokenized as a block opener');
+    });
+
+    test('should not treat asm after ] array-index close as a block opener', () => {
+      // `arr[0] asm` puts `asm` right after an array-index `]`. As an expression
+      // context it must not open an asm block, so no asm/end pair is produced.
+      const source = 'arr[0] asm b end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const asmToken = parser.getTokens(source).find((t) => t.value === 'asm');
+      assert.strictEqual(asmToken, undefined, 'asm after ] must not be tokenized as a block opener');
+    });
+  });
+
   suite('Regression 2026-05-19: single-line asm must not swallow following valid blocks', () => {
     test('should not let an unterminated single-line asm consume following case and begin blocks', () => {
       // The asm body and the trailing `case ... end;` both contain a `;` on the same
