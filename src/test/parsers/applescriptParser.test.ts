@@ -3148,5 +3148,41 @@ end try`;
     });
   });
 
+  suite('Regression: crossing blocks must not produce overlapping pairs', () => {
+    test('should not produce geometrically overlapping pairs for interleaved tell/if', () => {
+      // `end tell` closes the outer `tell` while the inner `if` is still open, then
+      // `end if` would close `if` — the two resulting pairs cross each other. Per the
+      // anchor-set / cost-minimization principle no two overlapping BlockPairs may be
+      // emitted; at most one of the crossing constructs is paired, the other stays orphan.
+      const source = 'tell application "x"\nif a then\nbeep\nend tell\nend if';
+      const pairs = parser.parse(source);
+      for (let a = 0; a < pairs.length; a++) {
+        for (let b = a + 1; b < pairs.length; b++) {
+          const pa = pairs[a];
+          const pb = pairs[b];
+          const aStart = pa.openKeyword.startOffset;
+          const aEnd = pa.closeKeyword.startOffset;
+          const bStart = pb.openKeyword.startOffset;
+          const bEnd = pb.closeKeyword.startOffset;
+          const crossing = (aStart < bStart && bStart < aEnd && aEnd < bEnd) || (bStart < aStart && aStart < bEnd && bEnd < aEnd);
+          assert.ok(!crossing, `Pairs ${pa.openKeyword.value}/${pb.openKeyword.value} cross each other`);
+        }
+      }
+    });
+
+    test('should still pair both blocks for correctly nested tell/if', () => {
+      const source = 'tell application "x"\nif a then\nbeep\nend if\nend tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const tellPair = findBlock(pairs, 'tell');
+      const ifPair = findBlock(pairs, 'if');
+      assert.ok(
+        tellPair.openKeyword.startOffset < ifPair.openKeyword.startOffset &&
+          ifPair.closeKeyword.startOffset < tellPair.closeKeyword.startOffset,
+        'if must be fully contained within tell'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
