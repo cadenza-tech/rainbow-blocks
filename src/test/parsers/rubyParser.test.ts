@@ -4076,5 +4076,30 @@ end`;
     });
   });
 
+  suite('Regression: def detection adjacent to Unicode identifiers', () => {
+    test('should treat fooαdef as identifier and keep following do as block opener', () => {
+      const source = 'fooαdef do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should treat αdef as identifier and keep following do as block opener', () => {
+      const source = 'αdef do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still treat standalone def do as method definition', () => {
+      const pairs = parser.parse('def do\n  1\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still treat ASCII foo_def do as identifier with do block opener', () => {
+      const source = 'foo_def do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
