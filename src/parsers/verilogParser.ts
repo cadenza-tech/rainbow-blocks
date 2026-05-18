@@ -18,6 +18,7 @@ import {
   getPrecedingLabelColonWord,
   isEnclosingBlockCase,
   isFollowedByWord,
+  isInsideParenHeaderControlBody,
   isInsideParens,
   isOnDpiLine,
   isPrecededByAssertionVerb,
@@ -374,6 +375,13 @@ export class VerilogBlockParser extends BaseBlockParser {
           return false;
         }
         if (this.isInsideBraceExpression(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+        // Reject `default` that is the single-statement body of a parenthesized
+        // control header (e.g., `if (c) default: x = 1;`). There it is inside the
+        // control statement's body, not a case_item label, so it must not become
+        // a case `block_middle` intermediate.
+        if (isInsideParenHeaderControlBody(source, token.startOffset, excludedRegions, this.validationCallbacks)) {
           return false;
         }
         let j = token.endOffset;

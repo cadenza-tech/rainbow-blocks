@@ -617,6 +617,57 @@ export function isPrecededByAssignmentOperator(
   return true;
 }
 
+// Control keywords that take a parenthesized header `(condition)` immediately
+// followed by their single-statement body. When a `default` keyword sits right
+// after such a header's closing `)`, it is inside that single statement body,
+// not at a case_item position — e.g. `if (c) default: x = 1;`.
+const PAREN_HEADER_CONTROL_KEYWORDS: ReadonlySet<string> = new Set(['if', 'for', 'while', 'foreach', 'repeat']);
+
+// Returns true when the `default` keyword at `position` is the single-statement
+// body of a parenthesized-header control statement (if/for/while/foreach/repeat).
+// Detection: the nearest non-trivia char before `position` is `)`, that `)`
+// matches an earlier `(`, and the word immediately before that `(` is one of the
+// paren-header control keywords. In that situation `default` is a misused
+// identifier-like token inside the control body, not a case_item label, so it
+// must not be tokenized as a case `block_middle`.
+// A case statement's own header `case (expr) default: ...` is intentionally NOT
+// matched because the word before `(` is `case`/`casex`/`casez`/`randcase`,
+// which is excluded from PAREN_HEADER_CONTROL_KEYWORDS.
+export function isInsideParenHeaderControlBody(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const closeParenPos = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
+  if (closeParenPos < 0 || source[closeParenPos] !== ')') return false;
+  if (callbacks.isInExcludedRegion(closeParenPos, excludedRegions)) return false;
+  // Walk back from the `)` to its matching `(`, tracking nested parens and
+  // skipping excluded regions (comments/strings) so parens inside them are ignored.
+  let depth = 1;
+  let i = closeParenPos - 1;
+  while (i >= 0 && depth > 0) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      i = region ? region.start - 1 : i - 1;
+      continue;
+    }
+    if (source[i] === ')') depth++;
+    else if (source[i] === '(') depth--;
+    if (depth > 0) i--;
+  }
+  if (depth !== 0 || i < 0) return false;
+  // i points at the matching `(`; find the word immediately before it.
+  let w = skipBackwardWhitespaceAndComments(source, i - 1, excludedRegions, callbacks);
+  if (w < 0 || !/[a-zA-Z0-9_]/.test(source[w])) return false;
+  const wordEnd = w;
+  while (w >= 0 && /[a-zA-Z0-9_]/.test(source[w])) w--;
+  // Reject when the word boundary touches `$` (system tasks) or `\` (escaped id).
+  if (w >= 0 && (source[w] === '$' || source[w] === '\\')) return false;
+  const word = source.slice(w + 1, wordEnd + 1);
+  return PAREN_HEADER_CONTROL_KEYWORDS.has(word);
+}
+
 // Scans forward from a control keyword to find 'begin' before any statement terminator
 export function scanForBeginAfterControl(
   source: string,
