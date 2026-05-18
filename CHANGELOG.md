@@ -5,6 +5,34 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.50] - 2026-05-19
+
+### Fixed
+
+- Ada / VHDL: Bound the `isValidLoopOpen` backward scan so files with many `loop` keywords validate in linear time instead of O(n²)
+- AppleScript: Discard inner unclosed openers when a close keyword would otherwise produce crossing block pairs (interleaved `tell`/`if`)
+- AppleScript: Close a chevron `«...»` at the first `»` instead of depth-counting, so an extra `«` no longer swallows the rest of the file
+- AppleScript: Attach `else`/`else if` to the nearest ancestor `if` block when it is not the innermost open block
+- COBOL: Use the tab-expanded visual column for the fixed-format identification area so tab-indented keywords there are excluded
+- COBOL: Treat `>>` as a compiler directive only when it is the first non-blank token on a line, not mid-expression
+- COBOL: Keep `ELSE`/`WHEN` as an intermediate keyword when the previous line ends with a dangling relational or arithmetic operator
+- Crystal: Skip an `end` immediately after a range operator (`(1..end)`) so it is not treated as a block close
+- Crystal: Skip an `end` in ternary value position (`cond ? a : end`) so it is not treated as a block close
+- Crystal: Treat `%%` as a modulo operator instead of a percent-literal start that swallows the rest of the source
+- Elixir: Treat a block keyword used as a function name after a definition keyword (`def unless(x) do`) as an identifier, not a block opener
+- Erlang: Detect real blocks (`fun`/`begin`) inside a `-define` tuple body instead of filtering every keyword there
+- Erlang: Filter bare reserved words inside a `-define` list literal so they do not mispair with a later `end`
+- Erlang: Filter a bare reserved word inside `-define` grouping parentheses so it does not mispair with a later `end`
+- Julia: Precompute a bracket index per parse so block-keyword validation runs in linear time instead of O(n²)
+- MATLAB: Skip duplicate `else`/`otherwise`/`catch` intermediates so an invalid extra `catch` or `else` is not recorded twice
+- Octave: Treat vertical tab and form feed as token separators when detecting a command-syntax `do` argument
+- Pascal: Restrict the single-line `asm` `;`-comment scan so `; end` no longer bloats the excluded region to end-of-file and loses following blocks
+- Pascal: Reject `asm` after `>` or `]` in block-open validation, matching the asm excluded-region check
+- Ruby: Treat a Unicode identifier character before `def` as a keyword boundary so `fooαdef do` keeps its `do`/`end` pair
+- Ruby: Treat a `rescue` after a continuation-operator line as a clause start so it is kept as a `begin` intermediate
+- Verilog: Suppress a `case` keyword right after an assignment operator regardless of a following `(`
+- Verilog: Skip `default` inside a single-statement control body so it is not attached to an outer `case`
+
 ## [1.1.49] - 2026-05-18
 
 ### Fixed
@@ -1954,6 +1982,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.50]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.49...v1.1.50
 [1.1.49]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.48...v1.1.49
 [1.1.48]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.47...v1.1.48
 [1.1.47]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.46...v1.1.47
