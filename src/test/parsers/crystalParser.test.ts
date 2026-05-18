@@ -4289,5 +4289,17 @@ end`;
     });
   });
 
+  suite('Regression: end in ternary value position should not be tokenized as block_close', () => {
+    test('should not pair def with end in ternary value slot', () => {
+      // `end` is a reserved word and cannot be a ternary value; the `end` after
+      // `? a :` must not be tokenized as block_close. The `def` block must pair
+      // with the trailing `end` on the last line, not the in-ternary one.
+      const source = 'def foo\n  x = cond ? a : end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
