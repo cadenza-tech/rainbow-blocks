@@ -235,6 +235,25 @@ export function endsWithContinuationOperator(
 
 // Checks if 'rescue' is used as a postfix modifier (e.g., risky rescue nil)
 export function isPostfixRescue(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: RubyValidationCallbacks): boolean {
+  // `rescue` always starts a new clause inside a begin/def/module/class body, so it
+  // never continues the previous logical line. When the physical line above `rescue`
+  // ends with an implicit-continuation operator (e.g. `x = 1 +`, `foo(`), that line is
+  // an incomplete expression -- joining `rescue` onto it would mis-detect it as a
+  // postfix rescue. Treat such a `rescue` as having no preceding content (not postfix).
+  // Backslash continuation is excluded here: `begin \<NL>rescue` legitimately joins to
+  // `begin rescue`, which the block-keyword check below already handles correctly.
+  let physicalLineStart = position;
+  while (physicalLineStart > 0 && source[physicalLineStart - 1] !== '\n' && source[physicalLineStart - 1] !== '\r') {
+    physicalLineStart--;
+  }
+  if (physicalLineStart > 0) {
+    const prevNewline = physicalLineStart - 1;
+    const prevLineEnd = source[prevNewline] === '\n' && prevNewline > 0 && source[prevNewline - 1] === '\r' ? prevNewline - 1 : prevNewline;
+    const endsWithBackslash = prevLineEnd > 0 && source[prevLineEnd - 1] === '\\';
+    if (!endsWithBackslash && endsWithContinuationOperator(source, prevLineEnd, excludedRegions, callbacks)) {
+      return false;
+    }
+  }
   const lineStart = findLogicalLineStart(source, position, excludedRegions, callbacks);
   // Find last semicolon in original source (not after replace) to avoid index mapping errors
   // Skip semicolons that are part of $; global variable
