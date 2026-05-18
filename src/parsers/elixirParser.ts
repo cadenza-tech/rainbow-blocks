@@ -241,6 +241,13 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // A block keyword that immediately follows a definition keyword (def/defp/defmacro/...)
+    // is a function name being defined (e.g., `def unless(x) do ... end`), not a block opener.
+    // The def..end pair must be produced; the inner keyword must not steal the `end`.
+    if (this.isFunctionNameAfterDefinitionKeyword(source, position, excludedRegions)) {
+      return false;
+    }
+
     // Reject function call form with multiple args: keyword followed by '(' containing a comma
     // e.g., if(cond, do: val) is a function call, not a block
     // But allow parenthesized condition: if(true) do...end is a valid block
@@ -578,7 +585,13 @@ export class ElixirBlockParser extends BaseBlockParser {
         // Skip function call pattern: keyword followed by '(' (e.g., if(cond, do: val))
         // because do: inside parens won't be seen at depth 0 to decrement innerBlockDepth
         // Skip value form: "if cond do" where cond is a variable name that happens to be a keyword
-        if (this.isBlockKeywordAt(source, i) && !this.isBlockKeywordFunctionCall(source, i)) {
+        // Skip function-name form: a block keyword right after a definition keyword
+        // (e.g., the `cond` in `def cond x do`) is the function name, not an inner block.
+        if (
+          this.isBlockKeywordAt(source, i) &&
+          !this.isBlockKeywordFunctionCall(source, i) &&
+          !this.isFunctionNameAfterDefinitionKeyword(source, i, excludedRegions)
+        ) {
           let kwLen = 0;
           let kwName = '';
           for (const kw of ElixirBlockParser.DO_BLOCK_KEYWORDS) {
@@ -784,6 +797,50 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
     }
     return false;
+  }
+
+  // Checks if a block keyword at `position` is the function name being defined, i.e. it
+  // immediately follows a definition keyword (def/defp/defmacro/defguard/...).
+  // In Elixir `def unless(x) do ... end` defines a function named `unless`; the inner
+  // keyword is an identifier, not a block opener. Only the def..end pair must be produced.
+  // The definition keyword and the function name are separated only by spaces/tabs/newlines
+  // (no `.` so module-qualified names like `MyApp.If` are not misidentified).
+  private isFunctionNameAfterDefinitionKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Scan backward over whitespace (including newlines) to the previous token's last char.
+    let j = position - 1;
+    while (j >= 0) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[j];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        j--;
+        continue;
+      }
+      break;
+    }
+    if (j < 0) return false;
+
+    // The previous token must be an ASCII identifier ending here.
+    if (!/[a-zA-Z0-9_]/.test(source[j])) return false;
+    let wordStart = j;
+    while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+      wordStart--;
+    }
+    const word = source.slice(wordStart, j + 1);
+    if (!DEFINITION_KEYWORDS.has(word)) return false;
+
+    // Reject `.`/`@`-prefixed words (method call / module attribute) so e.g. `Foo.def`
+    // is not treated as a real definition keyword.
+    if (wordStart > 0) {
+      const before = source[wordStart - 1];
+      if (before === '.' || before === '@') return false;
+    }
+    return true;
   }
 
   // Checks if a block keyword is used as a bare value rather than starting a nested block
