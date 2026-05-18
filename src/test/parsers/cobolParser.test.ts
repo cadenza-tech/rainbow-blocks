@@ -812,6 +812,25 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
+
+    test('should not treat mid-line >> as a compiler directive', () => {
+      // Bug: a compiler directive `>>` must be the first non-blank token on a
+      // line. A `>>` appearing mid-expression is not a directive, so the rest
+      // of the line must still be tokenised. Treating it as a directive
+      // excluded END-PERFORM and left PERFORM orphaned.
+      const source = 'PERFORM 3 TIMES >> note END-PERFORM\nDISPLAY Z';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('should still treat >> as a directive when preceded only by a fixed-format sequence area', () => {
+      // Guard: a `>>` directive may appear after the 6-char sequence area in
+      // fixed format. The first non-blank token (skipping the sequence area)
+      // is still `>>`, so it must be excluded.
+      const source = '000100 >>SOURCE FORMAT IS FREE\nIF X > 0\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
   });
 
   suite('Excluded regions - EXEC blocks', () => {
