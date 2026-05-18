@@ -1858,6 +1858,37 @@ endmodule`;
       assertSingleBlock(pairs, 'module', 'endmodule');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'default should not attach to module block');
     });
+
+    test('should not attach default inside a single-statement if body to outer case', () => {
+      // Bug: `if (c) default: x = 1;` puts `default:` inside the single-statement
+      // body of `if`. That `default` is not a case_item, but the backward scan for
+      // a case opener skipped past the `if` control opener (continue) and reached
+      // the outer case, falsely attaching `default` as its intermediate.
+      const source = 'case (s)\n  1: if (c) default: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.intermediates.length, 0, 'default inside if body should not attach to outer case');
+    });
+
+    test('should not attach default inside a single-statement for body to outer case', () => {
+      const source = 'case (s)\n  1: for (i=0;i<2;i=i+1) default: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.intermediates.length, 0, 'default inside for body should not attach to outer case');
+    });
+
+    test('should still attach default to case nested inside a single-statement if body', () => {
+      // Sanity: a real nested case inside `if`'s single-statement body still owns
+      // its own `default`. The control opener is closed by endcase before the
+      // backward scan from `default` runs, so the scan finds the inner case.
+      const source = 'case (s)\n  1: if (c) case (t)\n    2: y = 1;\n    default: y = 0;\n  endcase\nendcase';
+      const pairs = parser.parse(source);
+      const inner = pairs.find((p) => p.openKeyword.value === 'case' && p.intermediates.length > 0);
+      assert.ok(inner, 'inner case should own the default intermediate');
+      assert.strictEqual(inner.intermediates[0].value, 'default');
+      const outer = pairs.find((p) => p.openKeyword.value === 'case' && p.intermediates.length === 0);
+      assert.ok(outer, 'outer case should have no intermediate');
+    });
   });
 
   suite('Regression: matchAttribute comment skip', () => {
