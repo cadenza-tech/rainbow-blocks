@@ -4301,5 +4301,17 @@ end`;
     });
   });
 
+  suite('Regression: %% should be treated as modulo operator, not percent literal', () => {
+    test('should not swallow following blocks when %% appears as modulo operator', () => {
+      // `a %% b` is `a % (% b)` (modulo applied twice); the first `%` is a modulo
+      // operator, not a percent-literal start. Treating it as a percent literal
+      // swallows the rest of the source as an unterminated literal, hiding the
+      // following if/end block.
+      const source = 'x = a %% b\nif cond\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
