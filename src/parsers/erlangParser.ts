@@ -1009,17 +1009,92 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (attrName === 'record' && insideUnmatchedBrace && !insideNestedCall) {
       return false;
     }
-    // For -define, the body (after the first top-level ',') contains real expressions,
-    // but only outside tuple braces and outside nested function calls.
-    if (attrName === 'define' && sawCommaAtTopLevel && !insideUnmatchedBrace && !insideNestedCall) {
+    // For -define, the body (after the first top-level ',') contains real expressions
+    // outside nested function calls. Tuple braces ({...}) inside the body still hold
+    // real expressions too: a real block (fun(...)/begin/case...) is recognized while a
+    // bare reserved word stays filtered.
+    if (attrName === 'define' && sawCommaAtTopLevel && !insideNestedCall) {
       // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
       // itself, so it's a reserved-word reference, not a real block opener.
-      if (this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
+      if (!insideUnmatchedBrace && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
         return true;
+      }
+      // Inside a tuple brace: filter only bare reserved words, keep real blocks.
+      if (insideUnmatchedBrace) {
+        return this.isBareReservedWordInDefineBody(source, pos, span, excludedRegions);
       }
       return false;
     }
     return true;
+  }
+
+  // Returns true if the block keyword at `pos` is a bare reserved word inside the body of
+  // `-define` macro `span`, rather than part of a real block (fun(...)/begin.../end).
+  // The macro body is scanned once: openers whose next significant character is a separator
+  // (',' or a closing bracket) are bare; `fun` not followed by '(' is a reference; `end`
+  // with no matching opener on the stack is bare. A keyword that participates in a matched
+  // open/close pair is a real block element and is not filtered.
+  private isBareReservedWordInDefineBody(source: string, pos: number, span: AttributeSpan, excludedRegions: ExcludedRegion[]): boolean {
+    if (span.bodyCommaPos < 0) {
+      return false;
+    }
+    const bodyStart = span.bodyCommaPos + 1;
+    const bodyEnd = Math.min(span.endParen, source.length);
+    // Stack of real opener offsets; matched openers/closers and stack contents are real blocks.
+    const openerStack: number[] = [];
+    const realOffsets = new Set<number>();
+    let i = bodyStart;
+    while (i < bodyEnd) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      // Word start: only consider identifier-leading characters not preceded by an
+      // identifier/'?'/'#'/'.' character (those are atoms, macros, record/field access).
+      if (/[a-z]/i.test(ch) && (i === 0 || !/[a-zA-Z0-9_?#.]/.test(source[i - 1]))) {
+        let wordEnd = i;
+        while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) {
+          wordEnd++;
+        }
+        const word = source.slice(i, wordEnd);
+        if (word === 'end') {
+          const opener = openerStack.pop();
+          if (opener !== undefined) {
+            realOffsets.add(opener);
+            realOffsets.add(i);
+          }
+        } else if (word === 'fun') {
+          // A real anonymous fun is always written `fun(`; otherwise it is a fun reference.
+          let k = wordEnd;
+          while (k < bodyEnd && /[ \t\r\n]/.test(source[k])) {
+            k++;
+          }
+          if (k < bodyEnd && source[k] === '(') {
+            openerStack.push(i);
+          }
+        } else if (BLOCK_OPENER_KEYWORDS.has(word)) {
+          // begin/if/case/receive/try/maybe: a bare reserved word is immediately followed
+          // by a separator (',' or a closing bracket); a real block opener is followed by
+          // an expression or guard.
+          let k = wordEnd;
+          while (k < bodyEnd && /[ \t\r\n]/.test(source[k])) {
+            k++;
+          }
+          const next = k < bodyEnd ? source[k] : '';
+          if (next !== ',' && next !== ')' && next !== ']' && next !== '}' && next !== '') {
+            openerStack.push(i);
+          }
+        }
+        i = wordEnd;
+        continue;
+      }
+      i++;
+    }
+    // The keyword at `pos` is a real block element only if it took part in a matched pair
+    // or remains on the opener stack (an unclosed but real opener).
+    return !realOffsets.has(pos) && !openerStack.includes(pos);
   }
 
   // Binary-search for the attribute span enclosing `position` (openParen < position < endParen).
