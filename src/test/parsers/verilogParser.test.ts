@@ -3352,6 +3352,19 @@ endmodule`;
       assert.ok(!tokens.some((t) => t.value === 'randcase'), '`randcase` after `=` must not be tokenized as block_open');
     });
 
+    test('should not tokenize `case` followed by `(` as block_open on the right-hand side of `=`', () => {
+      // Bug: `x = case(y);` uses `case` as an identifier. The opening paren after
+      // `case` made the suppression skip (it was kept to rescue the `case (expr)`
+      // statement form), so `case` was tokenized as block_open and falsely paired
+      // with the trailing `endcase`. A case keyword can never be an expression
+      // operand, so a preceding assignment operator must suppress it regardless of
+      // a following paren.
+      const source = 'x = case(y);\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'case'), '`case(y)` after `=` must not be tokenized as block_open');
+      assertNoBlocks(parser.parse(source));
+    });
+
     test('should still parse a normal case statement', () => {
       // Sanity: `case (expr)` at statement position must remain a real block.
       const pairs = parser.parse('case (sel)\n  1: x = a;\n  default: x = b;\nendcase');
