@@ -521,8 +521,42 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.type === 'block_middle' && token.value === 'in') {
         return !isForIn(source, token.startOffset, excludedRegions);
       }
+      // Filter out `end` placed after a range operator (.. or ...). `end` is a
+      // reserved word and cannot be the RHS of a range expression, so this is
+      // invalid syntax; treating it as block_close mis-pairs surrounding blocks
+      // (e.g., `for x in (1..end)\n  ...\nend` would pair the inner `end` with `for`).
+      if (token.value === 'end' && this.isPrecededByRangeOperator(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       return true;
     });
+  }
+
+  // Checks if the keyword at position is immediately preceded by a range operator
+  // (.. or ...). Whitespace is permitted between the operator and the keyword.
+  // Skips characters inside excluded regions.
+  private isPrecededByRangeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    // Need at least two consecutive dots to form .. (or ...)
+    if (i < 1 || source[i] !== '.' || source[i - 1] !== '.') {
+      return false;
+    }
+    return true;
   }
 
   // Stack-based pairing that mirrors the base algorithm, but only attaches an
