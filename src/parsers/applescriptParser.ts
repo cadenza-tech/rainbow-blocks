@@ -1019,7 +1019,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           }
 
           if (matchIndex >= 0) {
-            const openBlock = stack.splice(matchIndex, 1)[0];
+            // Any openers pushed after matchIndex are inner scopes that the matched
+            // opener encloses. Closing the matched opener while those inner scopes are
+            // still unclosed would let their own close keywords pair into geometrically
+            // crossing BlockPairs. Per the anchor-set / cost-minimization principle,
+            // discard those inner openers as unclosed so the matched pair stays the only
+            // non-overlapping result; their orphan close keywords are left uncolored.
+            const removed = stack.splice(matchIndex);
+            const openBlock = removed[0];
             pairs.push({
               openKeyword: openBlock.token,
               closeKeyword: token,
