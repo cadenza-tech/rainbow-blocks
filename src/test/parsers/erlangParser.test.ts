@@ -2806,5 +2806,35 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: real blocks inside -define tuple body', () => {
+    test('should detect fun/end inside -define tuple body', () => {
+      const pairs = parser.parse('-define(M, {tag, fun() -> ok end}).');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should detect begin/end inside -define tuple body', () => {
+      const pairs = parser.parse('-define(N, {tag, begin ok end}).');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should detect case/end inside -define tuple body', () => {
+      const pairs = parser.parse('-define(M, {tag, case X of _ -> ok end}).');
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should detect fun/end inside nested -define tuple body', () => {
+      const pairs = parser.parse('-define(N, {outer, {tag, fun() -> ok end}}).');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should still filter bare keywords inside -define tuple body', () => {
+      // Bare reserved words {begin, end} stay filtered; only the later real block pairs
+      const source = '-define(MY_MACRO, {begin, end}).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, source.indexOf('begin\n  ok'));
+    });
+  });
+
   generateCommonTests(config);
 });
