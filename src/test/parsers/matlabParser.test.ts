@@ -1227,6 +1227,72 @@ end`;
       assertSingleBlock(pairs, 'try', 'end');
       assertIntermediates(pairs[0], ['catch']);
     });
+
+    test('should register at most one catch on a try block with duplicate catch', () => {
+      const source = `try
+catch a
+catch b
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      // MATLAB allows at most one catch per try; the second catch is invalid syntax
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should register at most one else on an if block with duplicate else', () => {
+      const source = `if a
+else
+else
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // else must be the last branch of an if; the second else is invalid syntax
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should reject elseif appearing after else on an if block', () => {
+      const source = `if a
+else
+elseif b
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // elseif after else is invalid syntax; only the else is recorded
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should register at most one otherwise on a switch block with duplicate otherwise', () => {
+      const source = `switch value
+otherwise
+otherwise
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      // only one otherwise is valid per switch; the second is invalid syntax
+      assertIntermediates(pairs[0], ['otherwise']);
+    });
+
+    test('should reject case appearing after otherwise on a switch block', () => {
+      const source = `switch value
+otherwise
+case 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      // case after otherwise is invalid; otherwise must be the last branch
+      assertIntermediates(pairs[0], ['otherwise']);
+    });
+
+    test('should accept multiple elseif and multiple case', () => {
+      const source = `if a
+elseif b
+elseif c
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // elseif is allowed to repeat
+      assertIntermediates(pairs[0], ['elseif', 'elseif']);
+    });
   });
 
   suite('Bug 2: isPrecededByDot with line continuation crossing newline', () => {
