@@ -950,7 +950,12 @@ export class ErlangBlockParser extends BaseBlockParser {
 
     let parenDepth = 0;
     let braceDepth = 0;
+    // List brackets are tracked separately from parens: an unmatched '[' before the
+    // keyword means the keyword sits inside a -define list literal, where bare reserved
+    // words must be filtered but real blocks (fun(...)/end) are kept (same as tuples).
+    let listDepth = 0;
     let insideUnmatchedBrace = false;
+    let insideUnmatchedList = false;
     let sawCommaAtTopLevel = false;
     let insideNestedCall = false;
     // Stop at openParen-1: anything before that is outside the attribute and irrelevant.
@@ -960,16 +965,18 @@ export class ErlangBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[i];
-      if (ch === ',' && parenDepth === 0 && braceDepth === 0) {
+      if (ch === ',' && parenDepth === 0 && braceDepth === 0 && listDepth === 0) {
         sawCommaAtTopLevel = true;
         continue;
       }
-      if (ch === ')' || ch === ']') {
+      if (ch === ')') {
         parenDepth++;
-      } else if (ch === '(' || ch === '[') {
+      } else if (ch === ']') {
+        listDepth++;
+      } else if (ch === '(') {
         if (parenDepth > 0) {
           parenDepth--;
-        } else if (ch === '(') {
+        } else {
           // Inner unmatched '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
           // Per the original algorithm we must check: is this '(' preceded by an identifier?
           let prevIdx = i - 1;
@@ -981,6 +988,13 @@ export class ErlangBlockParser extends BaseBlockParser {
           }
           // Continue scanning back; this is not the enclosing attribute paren
           // (the loop bound stopAt = span.openParen guarantees we stop before it).
+        }
+      } else if (ch === '[') {
+        if (listDepth > 0) {
+          listDepth--;
+        } else {
+          // Unmatched '[' at depth 0: the keyword sits inside a -define list literal.
+          insideUnmatchedList = true;
         }
       } else if (ch === '}') {
         braceDepth++;
@@ -1010,17 +1024,17 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
     // For -define, the body (after the first top-level ',') contains real expressions
-    // outside nested function calls. Tuple braces ({...}) inside the body still hold
-    // real expressions too: a real block (fun(...)/begin/case...) is recognized while a
-    // bare reserved word stays filtered.
+    // outside nested function calls. Tuple braces ({...}) and list brackets ([...])
+    // inside the body still hold real expressions too: a real block (fun(...)/begin/case...)
+    // is recognized while a bare reserved word stays filtered.
     if (attrName === 'define' && sawCommaAtTopLevel && !insideNestedCall) {
       // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
       // itself, so it's a reserved-word reference, not a real block opener.
-      if (!insideUnmatchedBrace && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
+      if (!insideUnmatchedBrace && !insideUnmatchedList && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
         return true;
       }
-      // Inside a tuple brace: filter only bare reserved words, keep real blocks.
-      if (insideUnmatchedBrace) {
+      // Inside a tuple brace or list bracket: filter only bare reserved words, keep real blocks.
+      if (insideUnmatchedBrace || insideUnmatchedList) {
         return this.isBareReservedWordInDefineBody(source, pos, span, excludedRegions);
       }
       return false;
