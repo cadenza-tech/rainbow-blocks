@@ -3193,5 +3193,25 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-19: single-line asm must not swallow following valid blocks', () => {
+    test('should not let an unterminated single-line asm consume following case and begin blocks', () => {
+      // The asm body and the trailing `case ... end;` both contain a `;` on the same
+      // physical line as their `end`. The asm `;`-line-comment scan must not keep
+      // skipping `end` candidates until EOF, swallowing the valid `case` and outer
+      // `begin` blocks into the asm excluded region.
+      const source = `procedure Fast;
+begin
+  asm mov eax, 1; end;
+  case x of 1: a; end;
+end;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(casePair, 'case block must be detected, not swallowed by asm');
+      assert.ok(beginPair, 'outer begin block must be detected, not swallowed by asm');
+    });
+  });
+
   generateCommonTests(config);
 });
