@@ -224,17 +224,36 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   return true;
 }
 
+// Upper bound on the number of characters isValidLoopOpen scans backward from
+// a `loop` keyword while looking for a for/while prefix. A for/while loop
+// header and its `loop` keyword span only a few lines in real Ada code, so a
+// generous 2048-character cap never rejects real code, while it keeps the scan
+// O(1) per call — without it, a file with many `loop` keywords degrades to
+// O(n^2) (every opener slicing and splitting all preceding source).
+const MAX_LOOP_PREFIX_SCAN_CHARS = 2048;
+
 // Validates 'loop': checks for preceding for/while prefix keywords
 export function isValidLoopOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: AdaValidationCallbacks): boolean {
-  const textBefore = source.slice(0, position);
+  // Bound the backward scan to the last MAX_LOOP_PREFIX_SCAN_CHARS characters.
+  // A for/while prefix farther back than that cannot be this loop's header, so
+  // the loop is then treated as a standalone opener. Snap the start to a line
+  // boundary so the first scanned line is whole and absolute offsets stay exact.
+  let scanStart = Math.max(0, position - MAX_LOOP_PREFIX_SCAN_CHARS);
+  if (scanStart > 0) {
+    while (scanStart < position && source[scanStart] !== '\n' && source[scanStart] !== '\r') {
+      scanStart++;
+    }
+    if (scanStart < position) {
+      scanStart += source[scanStart] === '\r' && source[scanStart + 1] === '\n' ? 2 : 1;
+    }
+  }
+  const textBefore = source.slice(scanStart, position);
   // Split on \r\n, \r, or \n to handle all line ending types
   const lineParts = textBefore.split(/\r\n|\r|\n/);
-  // Scan all preceding lines (no fixed cap) so that loop openers separated by many
-  // comment/continuation lines are still detected.
   const maxLines = lineParts.length;
 
   // Calculate absolute offset for the start of each line by scanning backward
-  let lineStartOffset = textBefore.length;
+  let lineStartOffset = position;
   for (let idx = 0; idx < maxLines; idx++) {
     const lineIdx = lineParts.length - 1 - idx;
     const lineText = lineParts[lineIdx];
