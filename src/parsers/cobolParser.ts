@@ -238,13 +238,14 @@ export class CobolBlockParser extends BaseBlockParser {
       // Skip keywords in the fixed-format identification area (cols 73-80, 0-based 72+).
       // This must mirror the same exclusion in tokenize() — otherwise a fake opener at
       // col >= 72 may pair with the real closer here, then be dropped by tokenize, leaving
-      // the real opener unmatched.
+      // the real opener unmatched. The column is the tab-expanded visual column (matching
+      // tokenize / tryMatchExcludedRegion / isFixedFormatCommentLine) so a keyword pushed
+      // past column 72 by tabs in the sequence area is also excluded.
       let lineStart = pos;
       while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
         lineStart--;
       }
-      const column = pos - lineStart;
-      if (column >= 72 && lineStart + 6 <= source.length) {
+      if (lineStart + 6 <= source.length && this.getVisualColumn(source, lineStart, pos) >= 72) {
         const sequenceArea = source.slice(lineStart, lineStart + 6);
         if (/^[ \t\d]{6}$/.test(sequenceArea)) {
           continue;
@@ -476,14 +477,14 @@ export class CobolBlockParser extends BaseBlockParser {
 
       // Skip keywords in the fixed-format identification area (columns 73-80, 0-based 72+).
       // Detect fixed format by checking the 6-char sequence area (cols 1-6) on the same line:
-      // it must consist of digits and whitespace only.
-      if (column >= 72) {
-        const lineStart = startOffset - column;
-        if (lineStart + 6 <= source.length) {
-          const sequenceArea = source.slice(lineStart, lineStart + 6);
-          if (/^[ \t\d]{6}$/.test(sequenceArea)) {
-            continue;
-          }
+      // it must consist of digits and whitespace only. The identification-area check uses
+      // the tab-expanded visual column (mirroring computeValidPositions and
+      // tryMatchExcludedRegion) so a keyword pushed past column 72 by tabs is also excluded.
+      const lineStart = startOffset - column;
+      if (lineStart + 6 <= source.length && this.getVisualColumn(source, lineStart, startOffset) >= 72) {
+        const sequenceArea = source.slice(lineStart, lineStart + 6);
+        if (/^[ \t\d]{6}$/.test(sequenceArea)) {
+          continue;
         }
       }
 
