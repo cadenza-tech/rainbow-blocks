@@ -1,11 +1,15 @@
 // Julia helper functions: pure utility functions with no parser state dependencies
 
 import type { ExcludedRegion } from '../types';
+import type { JuliaBracketIndex } from './juliaBracketIndex';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
-// Callbacks for base parser methods needed by scanning functions
+// Callbacks and pre-computed context passed to bracket-aware scanning functions.
+// `bracketIndex` lets backward scans locate the enclosing bracket in O(log n)
+// instead of rescanning the source prefix on every keyword.
 export interface JuliaHelperCallbacks {
   isAdjacentToUnicodeLetter: (source: string, startOffset: number, keywordLength: number) => boolean;
+  bracketIndex: JuliaBracketIndex;
 }
 
 // Checks if single quote at position is a transpose operator (not a character literal)

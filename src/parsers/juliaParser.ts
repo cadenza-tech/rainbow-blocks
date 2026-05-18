@@ -13,11 +13,17 @@ import {
   isInsideSquareBrackets,
   isLoneEndInArrayConstruction
 } from './juliaBracketHelpers';
+import { JuliaBracketIndex } from './juliaBracketIndex';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
 import { isSymbolStart, isTransposeOperator, skipJuliaInterpolation } from './juliaHelpers';
 import { isFollowedByBinaryOperator, isPrecededByBinaryOperator, isPrecededBySubtypeOperator } from './juliaLastindexHelpers';
 
 export class JuliaBlockParser extends BaseBlockParser {
+  // Bracket index cached per source string. Built lazily on the first bracket-context
+  // check of a tokenize pass and reused for every subsequent keyword in the same
+  // source, so the enclosing-bracket lookup stays O(log n) instead of rescanning
+  // the prefix per keyword (which made parsing O(N^2)).
+  private bracketIndexCache: { source: string; index: JuliaBracketIndex } | null = null;
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'if',
@@ -41,9 +47,23 @@ export class JuliaBlockParser extends BaseBlockParser {
     blockMiddle: ['elseif', 'else', 'catch', 'finally']
   };
 
-  private get juliaHelperCallbacks(): JuliaHelperCallbacks {
+  // Returns the bracket index for `source`, building it once and caching it by
+  // source identity. Every bracket-context check in a tokenize pass shares the
+  // same index, keeping enclosing-bracket lookups O(log n).
+  private getBracketIndex(source: string, excludedRegions: ExcludedRegion[]): JuliaBracketIndex {
+    if (this.bracketIndexCache !== null && this.bracketIndexCache.source === source) {
+      return this.bracketIndexCache.index;
+    }
+    const index = new JuliaBracketIndex(source, excludedRegions);
+    this.bracketIndexCache = { source, index };
+    return index;
+  }
+
+  // Builds the callbacks/context bundle passed to bracket-aware scanning helpers.
+  private buildHelperCallbacks(source: string, excludedRegions: ExcludedRegion[]): JuliaHelperCallbacks {
     return {
-      isAdjacentToUnicodeLetter: (s, o, l) => this.isAdjacentToUnicodeLetter(s, o, l)
+      isAdjacentToUnicodeLetter: (s, o, l) => this.isAdjacentToUnicodeLetter(s, o, l),
+      bracketIndex: this.getBracketIndex(source, excludedRegions)
     };
   }
 
@@ -253,7 +273,7 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if `end` is a lone `end` directly inside array construction `[...]`
   private isLoneEndInArrayConstruction(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isLoneEndInArrayConstruction(source, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isLoneEndInArrayConstruction(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if the `end` at position is followed by a binary operator
@@ -263,42 +283,42 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if position is inside any indexing bracket (a[...]) at any depth
   private isInsideAnyIndexingBracket(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideAnyIndexingBracket(source, position, excludedRegions);
+    return isInsideAnyIndexingBracket(source, position, this.getBracketIndex(source, excludedRegions));
   }
 
   // Checks if position is directly inside `[]` (for for/if comprehension check)
   private isInsideBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isInsideBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if position is inside indexing brackets only (not array construction)
   private isInsideIndexingBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideIndexingBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isInsideIndexingBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if `if` is a comprehension filter inside brackets (for...if pattern)
   private isComprehensionFilterInBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isComprehensionFilterInBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isComprehensionFilterInBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if `if` is a generator filter inside parentheses (for...if pattern)
   private isGeneratorFilterIf(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isGeneratorFilterIf(source, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isGeneratorFilterIf(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if position is inside unmatched parentheses (for generator expressions)
   private isInsideParentheses(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideParentheses(source, position, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isInsideParentheses(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if position is inside indexing square brackets (for other block keywords)
   private isInsideSquareBrackets(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideSquareBrackets(source, position, keyword, excludedRegions, this.keywords.blockOpen, this.juliaHelperCallbacks);
+    return isInsideSquareBrackets(source, position, keyword, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
   }
 
   // Checks if position is inside curly braces (type parameters like Dict{begin, end})
   private isInsideCurlyBraces(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideCurlyBraces(source, position, excludedRegions);
+    return isInsideCurlyBraces(position, this.getBracketIndex(source, excludedRegions));
   }
 
   // Tries to match an excluded region at the given position
