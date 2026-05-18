@@ -551,10 +551,29 @@ export class MatlabBlockParser extends BaseBlockParser {
             const topOpener = stack[stack.length - 1].token.value.toLowerCase();
             if (middleValue === 'else' || middleValue === 'elseif') {
               if (topOpener !== 'if') break;
+              // `else` must be the last branch of an `if`: reject a duplicate
+              // `else` and an `elseif` appearing after `else` — both are syntax
+              // errors and must not be recorded as intermediates. `elseif` may
+              // itself repeat any number of times, so only `else` is deduped.
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawElse = intermediates.some((t) => t.value.toLowerCase() === 'else');
+              if (sawElse) break;
             } else if (middleValue === 'case' || middleValue === 'otherwise') {
               if (topOpener !== 'switch') break;
+              // Reject `case` after `otherwise` — switch semantics require `otherwise`
+              // to be the last branch — and reject a duplicate `otherwise` (only one
+              // is valid per switch). `case` may itself repeat, so only `otherwise`
+              // is deduped.
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawOtherwise = intermediates.some((t) => t.value.toLowerCase() === 'otherwise');
+              if (sawOtherwise) break;
             } else if (middleValue === 'catch') {
               if (topOpener !== 'try') break;
+              // MATLAB allows at most one `catch` per `try` block. A duplicate is
+              // a syntax error and must not be recorded as an intermediate.
+              const intermediates = stack[stack.length - 1].intermediates;
+              const sawCatch = intermediates.some((t) => t.value.toLowerCase() === 'catch');
+              if (sawCatch) break;
             }
             stack[stack.length - 1].intermediates.push(token);
           }
