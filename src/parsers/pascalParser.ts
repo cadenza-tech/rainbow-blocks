@@ -157,7 +157,9 @@ export class PascalBlockParser extends BaseBlockParser {
           return true;
         }
         // Expression/declaration prefixes that disqualify `asm` as a block opener.
-        // `[asm]` (array index), `<asm>` (generic param), arithmetic ops are all identifier contexts.
+        // `[asm]` / `arr[0] asm` (array index), `<asm>` / `a > asm` (generic param or
+        // comparison), arithmetic ops are all identifier/expression contexts. The set
+        // must stay in sync with the backward check in addAsmExcludedRegions.
         if (
           prev === '.' ||
           prev === ':' ||
@@ -165,7 +167,9 @@ export class PascalBlockParser extends BaseBlockParser {
           prev === '(' ||
           prev === '=' ||
           prev === '[' ||
+          prev === ']' ||
           prev === '<' ||
+          prev === '>' ||
           prev === '+' ||
           prev === '-' ||
           prev === '*' ||
