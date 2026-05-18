@@ -3151,6 +3151,38 @@ end try`;
     });
   });
 
+  suite('Regression: else attaches to nearest ancestor if', () => {
+    test('should attach else to enclosing if even when an inner block is open', () => {
+      // `else` appears while a `repeat` is the direct parent; it must still attach
+      // to the nearest ancestor `if` rather than being silently dropped.
+      const source = 'if a then\nrepeat\nelse\nend repeat\nend if';
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      assertIntermediates(ifPair, ['else']);
+    });
+
+    test('should attach else if to enclosing if even when an inner block is open', () => {
+      const source = 'if a then\nrepeat\nelse if b then\nend repeat\nend if';
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      assertIntermediates(ifPair, ['else if']);
+    });
+
+    test('should drop else when no ancestor if exists', () => {
+      const source = 'repeat\nelse\nend repeat';
+      const pairs = parser.parse(source);
+      const repeatPair = findBlock(pairs, 'repeat');
+      assertIntermediates(repeatPair, []);
+    });
+
+    test('should still attach else to direct parent if', () => {
+      const source = 'if a then\nelse\nend if';
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      assertIntermediates(ifPair, ['else']);
+    });
+  });
+
   suite('Regression: chevron «...» does not nest', () => {
     test('should close chevron at the first » so trailing code is parsed normally', () => {
       // AppleScript raw Apple-event syntax «...» never nests; a stray inner «
