@@ -4101,5 +4101,35 @@ end`;
     });
   });
 
+  suite('Regression: rescue after continuation operator in begin block', () => {
+    test('should collect rescue as intermediate when prior line ends with + operator', () => {
+      const source = 'begin\n  x = 1 +\nrescue\n  y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should collect rescue as intermediate when prior line ends with comma', () => {
+      const source = 'begin\n  x = 1,\nrescue\n  y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should collect rescue as intermediate when prior line ends with open paren', () => {
+      const source = 'begin\n  foo(\nrescue\n  y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should still treat inline rescue as postfix after a complete multi-line expression', () => {
+      const source = 'begin\n  x = foo(1,\n 2)\nrescue\n  y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+  });
+
   generateCommonTests(config);
 });
