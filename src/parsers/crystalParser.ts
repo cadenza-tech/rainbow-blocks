@@ -528,6 +528,12 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.value === 'end' && this.isPrecededByRangeOperator(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Filter out `end` placed in the value position of a ternary expression
+      // (`cond ? a : end`). `end` is a reserved word and cannot be a value, so this
+      // is invalid syntax; treating it as block_close mis-pairs surrounding blocks.
+      if (token.value === 'end' && this.isEndInTernaryValuePosition(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       return true;
     });
   }
@@ -557,6 +563,65 @@ export class CrystalBlockParser extends BaseBlockParser {
       return false;
     }
     return true;
+  }
+
+  // Checks if `end` at position sits in the value position of a ternary expression
+  // (`cond ? value : end`). Such an `end` is immediately preceded by a standalone
+  // ternary colon: a `:` surrounded by whitespace, not part of `::` (scope resolution)
+  // and not a `label:`/symbol colon, with a matching ternary `?` earlier on the same
+  // line. Whitespace and excluded regions are skipped while scanning.
+  private isEndInTernaryValuePosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Scan back from `end`, skipping whitespace and excluded regions, to the colon
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    // The character immediately before `end` must be a colon
+    if (i < 0 || source[i] !== ':') {
+      return false;
+    }
+    // Reject scope resolution `::` (colon adjacent to another colon on either side)
+    if (source[i - 1] === ':' || source[i + 1] === ':') {
+      return false;
+    }
+    // A ternary colon is whitespace-surrounded; a `label:`/symbol colon is glued to
+    // its identifier. Require whitespace immediately before the colon.
+    const beforeColon = source[i - 1];
+    if (beforeColon === undefined || !(beforeColon === ' ' || beforeColon === '\t')) {
+      return false;
+    }
+    // Look for a matching ternary `?` earlier on the same line (stop at newline,
+    // statement separator `;`, or start of source). Skip excluded regions so that
+    // `?x` character literals and `?` inside strings/comments are ignored.
+    for (let j = i - 1; j >= 0; j--) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.start;
+          continue;
+        }
+      }
+      const ch = source[j];
+      if (ch === '\n' || ch === '\r' || ch === ';') {
+        return false;
+      }
+      if (ch === '?') {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Stack-based pairing that mirrors the base algorithm, but only attaches an
