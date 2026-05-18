@@ -956,6 +956,10 @@ export class ErlangBlockParser extends BaseBlockParser {
     let listDepth = 0;
     let insideUnmatchedBrace = false;
     let insideUnmatchedList = false;
+    // An unmatched '(' not preceded by an identifier is a grouping paren (e.g. -define(M, (begin))).
+    // Its contents are real expressions, so bare reserved words are filtered while real
+    // blocks are kept -- same treatment as tuple braces and list brackets.
+    let insideGroupingParen = false;
     let sawCommaAtTopLevel = false;
     let insideNestedCall = false;
     // Stop at openParen-1: anything before that is outside the attribute and irrelevant.
@@ -977,14 +981,17 @@ export class ErlangBlockParser extends BaseBlockParser {
         if (parenDepth > 0) {
           parenDepth--;
         } else {
-          // Inner unmatched '(' belongs to a nested function call (e.g. nested( in -define(MACRO, nested(begin))).
-          // Per the original algorithm we must check: is this '(' preceded by an identifier?
+          // Inner unmatched '(' is either a nested function call (e.g. nested( in
+          // -define(MACRO, nested(begin))) or a grouping paren (e.g. ( in -define(M, (begin))).
+          // It is a nested call only when preceded by an identifier; otherwise it groups.
           let prevIdx = i - 1;
           while (prevIdx >= 0 && /\s/.test(source[prevIdx])) {
             prevIdx--;
           }
           if (prevIdx >= 0 && /[a-zA-Z0-9_]/.test(source[prevIdx])) {
             insideNestedCall = true;
+          } else {
+            insideGroupingParen = true;
           }
           // Continue scanning back; this is not the enclosing attribute paren
           // (the loop bound stopAt = span.openParen guarantees we stop before it).
@@ -1024,17 +1031,23 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
     // For -define, the body (after the first top-level ',') contains real expressions
-    // outside nested function calls. Tuple braces ({...}) and list brackets ([...])
-    // inside the body still hold real expressions too: a real block (fun(...)/begin/case...)
-    // is recognized while a bare reserved word stays filtered.
+    // outside nested function calls. Tuple braces ({...}), list brackets ([...]) and
+    // grouping parens ((...)) inside the body still hold real expressions too: a real
+    // block (fun(...)/begin/case...) is recognized while a bare reserved word stays filtered.
     if (attrName === 'define' && sawCommaAtTopLevel && !insideNestedCall) {
       // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
       // itself, so it's a reserved-word reference, not a real block opener.
-      if (!insideUnmatchedBrace && !insideUnmatchedList && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
+      if (
+        !insideUnmatchedBrace &&
+        !insideUnmatchedList &&
+        !insideGroupingParen &&
+        this.isBareKeywordInDefineBody(source, pos, excludedRegions)
+      ) {
         return true;
       }
-      // Inside a tuple brace or list bracket: filter only bare reserved words, keep real blocks.
-      if (insideUnmatchedBrace || insideUnmatchedList) {
+      // Inside a tuple brace, list bracket or grouping paren: filter only bare reserved
+      // words, keep real blocks.
+      if (insideUnmatchedBrace || insideUnmatchedList || insideGroupingParen) {
         return this.isBareReservedWordInDefineBody(source, pos, span, excludedRegions);
       }
       return false;
