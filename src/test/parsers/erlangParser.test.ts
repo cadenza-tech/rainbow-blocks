@@ -2480,6 +2480,20 @@ bar() -> fun() -> ok end.`;
       const pairs = parser.parse('-define(M, (try risky() catch _:_ -> err end)).');
       assertSingleBlock(pairs, 'try', 'end');
     });
+
+    test('should filter bare reserved word inside grouping parens in -define body', () => {
+      // -define(M, (begin)) wraps a bare reserved word in grouping parens; it is not a
+      // real block. The unrelated 'end' after the macro must not be paired with it.
+      const tokens = parser.getTokens('-define(M, (begin)).\nbar() -> ok end.');
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0, 'bare begin in -define grouping parens should be filtered');
+    });
+
+    test('should not pair bare reserved word inside grouping parens with later end', () => {
+      const pairs = parser.parse('-define(M, (begin)).\nbar() -> ok end.');
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPair, undefined, 'bare begin in -define grouping parens should not pair with later end');
+    });
   });
 
   suite('Regression 2026-04-14: catch after Erlang word operators', () => {
