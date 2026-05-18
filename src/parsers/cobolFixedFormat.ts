@@ -238,6 +238,7 @@ export function matchCobolString(source: string, pos: number, quote: string): Ex
 // expression-like characters appearing inside them are not mistaken for real operators.
 export function isInExpressionContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   let i = position - 1;
+  let crossedNewline = false;
   // Skip whitespace including newlines (continuation across lines is permitted)
   // and any excluded regions (comments, directives, strings) encountered along the way.
   while (i >= 0) {
@@ -250,6 +251,7 @@ export function isInExpressionContext(source: string, position: number, excluded
     }
     const c = source[i];
     if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      if (c === '\n' || c === '\r') crossedNewline = true;
       i--;
       continue;
     }
@@ -265,6 +267,14 @@ export function isInExpressionContext(source: string, position: number, excluded
   // This is `-` specific: COBOL identifiers continue with `-`, never with the
   // other arithmetic operators `+`/`*`/`/`.
   if (ch === '-' && i > 0 && /[a-zA-Z0-9_]/.test(source[i - 1])) {
+    return false;
+  }
+  // A relational/arithmetic operator left dangling at the end of the previous
+  // line is an incomplete expression (editing in progress). A WHEN/ELSE on the
+  // following line is a real control-flow intermediate, not the operator's
+  // right operand, so operand suppression for these operators applies only
+  // when the operator is on the same physical line as the keyword.
+  if (crossedNewline && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '=' || ch === '<' || ch === '>')) {
     return false;
   }
   // Arithmetic operators: + - * / = < >
