@@ -844,7 +844,13 @@ export class PascalBlockParser extends BaseBlockParser {
         // is comment text and must not terminate the asm body.
         // Important: skip positions inside Pascal excluded regions (brace comments, paren-star
         // comments, strings) — a `;` inside such a region is not an asm-style line comment.
-        {
+        // Exception: an `end` on the same physical line as the `asm` keyword closes the
+        // block even when a `;` precedes it. For a single-line `asm ... ; end`, applying
+        // the `;`-line-comment rule would skip the closing `end` and keep skipping every
+        // subsequent `end` whose line carries a `;` (statement separators of valid Pascal
+        // code), swallowing the following blocks into the asm region.
+        const endOnAsmLine = !this.hasLineBreakBetween(source, asmStart, endPos);
+        if (!endOnAsmLine) {
           let k = endPos - 1;
           let foundSemi = false;
           while (k >= contentStart && source[k] !== '\n' && source[k] !== '\r') {
@@ -913,6 +919,17 @@ export class PascalBlockParser extends BaseBlockParser {
       regions.push(...asmRegions);
       regions.sort((a, b) => a.start - b.start);
     }
+  }
+
+  // Returns true when a CR or LF appears in source between `start` (inclusive) and
+  // `end` (exclusive). Used to test whether two offsets sit on the same physical line.
+  private hasLineBreakBetween(source: string, start: number, end: number): boolean {
+    for (let i = start; i < end; i++) {
+      if (source[i] === '\n' || source[i] === '\r') {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Matches brace comment: { ... }
