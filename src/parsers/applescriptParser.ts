@@ -972,12 +972,17 @@ export class ApplescriptBlockParser extends BaseBlockParser {
             stack.push({ token, intermediates: [] });
             break;
           }
-          // 'else' and 'else if' are only valid as intermediates of an 'if' block;
-          // ignore them in other contexts (e.g. 'else if' inside a 'try' block is a
-          // syntax error and must not attach to the enclosing block).
+          // 'else' and 'else if' are only valid as intermediates of an 'if' block.
+          // Attach to the nearest ancestor 'if' on the stack so the intermediate is
+          // preserved even when an inner block (e.g. 'repeat') is still open. When no
+          // ancestor 'if' exists the keyword is dropped (syntax error, e.g. inside a
+          // 'try' with no enclosing 'if').
           if (token.value === 'else' || token.value === 'else if') {
-            if (stack.length > 0 && stack[stack.length - 1].token.value === 'if') {
-              stack[stack.length - 1].intermediates.push(token);
+            for (let i = stack.length - 1; i >= 0; i--) {
+              if (stack[i].token.value === 'if') {
+                stack[i].intermediates.push(token);
+                break;
+              }
             }
             break;
           }
