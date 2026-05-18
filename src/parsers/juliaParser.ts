@@ -273,7 +273,13 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if `end` is a lone `end` directly inside array construction `[...]`
   private isLoneEndInArrayConstruction(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isLoneEndInArrayConstruction(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
+    return isLoneEndInArrayConstruction(
+      source,
+      position,
+      excludedRegions,
+      this.keywords.blockOpen,
+      this.buildHelperCallbacks(source, excludedRegions)
+    );
   }
 
   // Checks if the `end` at position is followed by a binary operator
@@ -298,7 +304,13 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if `if` is a comprehension filter inside brackets (for...if pattern)
   private isComprehensionFilterInBrackets(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    return isComprehensionFilterInBrackets(source, position, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
+    return isComprehensionFilterInBrackets(
+      source,
+      position,
+      excludedRegions,
+      this.keywords.blockOpen,
+      this.buildHelperCallbacks(source, excludedRegions)
+    );
   }
 
   // Checks if `if` is a generator filter inside parentheses (for...if pattern)
@@ -313,7 +325,14 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Checks if position is inside indexing square brackets (for other block keywords)
   private isInsideSquareBrackets(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
-    return isInsideSquareBrackets(source, position, keyword, excludedRegions, this.keywords.blockOpen, this.buildHelperCallbacks(source, excludedRegions));
+    return isInsideSquareBrackets(
+      source,
+      position,
+      keyword,
+      excludedRegions,
+      this.keywords.blockOpen,
+      this.buildHelperCallbacks(source, excludedRegions)
+    );
   }
 
   // Checks if position is inside curly braces (type parameters like Dict{begin, end})

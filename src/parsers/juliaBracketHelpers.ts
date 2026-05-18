@@ -71,22 +71,6 @@ function hasMatchingCloseBracket(source: string, from: number, excludedRegions: 
   return false;
 }
 
-// Checks if there is a matching ')' that closes the current paren group after 'from'
-function hasMatchingCloseParen(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
-  let depth = 1;
-  for (let i = from; i < source.length; i++) {
-    if (isInExcludedRegion(i, excludedRegions)) continue;
-    const ch = source[i];
-    if (ch === '(') {
-      depth++;
-    } else if (ch === ')') {
-      depth--;
-      if (depth === 0) return true;
-    }
-  }
-  return false;
-}
-
 // Forward-scan from `from` looking for the `end` that matches the current opener.
 // Returns true if a matching `end` is found before the enclosing indexing `]` closes.
 function hasMatchingEndBeforeBracketClose(

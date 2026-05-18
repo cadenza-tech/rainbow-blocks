@@ -1037,12 +1037,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     if (attrName === 'define' && sawCommaAtTopLevel && !insideNestedCall) {
       // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
       // itself, so it's a reserved-word reference, not a real block opener.
-      if (
-        !insideUnmatchedBrace &&
-        !insideUnmatchedList &&
-        !insideGroupingParen &&
-        this.isBareKeywordInDefineBody(source, pos, excludedRegions)
-      ) {
+      if (!insideUnmatchedBrace && !insideUnmatchedList && !insideGroupingParen && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
         return true;
       }
       // Inside a tuple brace, list bracket or grouping paren: filter only bare reserved

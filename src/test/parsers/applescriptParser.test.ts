@@ -3232,8 +3232,7 @@ end try`;
       const tellPair = findBlock(pairs, 'tell');
       const ifPair = findBlock(pairs, 'if');
       assert.ok(
-        tellPair.openKeyword.startOffset < ifPair.openKeyword.startOffset &&
-          ifPair.closeKeyword.startOffset < tellPair.closeKeyword.startOffset,
+        tellPair.openKeyword.startOffset < ifPair.openKeyword.startOffset && ifPair.closeKeyword.startOffset < tellPair.closeKeyword.startOffset,
         'if must be fully contained within tell'
       );
     });
