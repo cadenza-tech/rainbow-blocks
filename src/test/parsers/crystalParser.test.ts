@@ -4270,5 +4270,24 @@ end`;
     });
   });
 
+  suite('Regression: end after range operator should not be tokenized as block_close', () => {
+    test('should not pair for with end inside range expression (1..end)', () => {
+      // `end` is a reserved word and cannot be the RHS of a range; the `end` inside
+      // `(1..end)` must not be tokenized as block_close. The `for` block must pair
+      // with the trailing `end` on the last line, not the in-range one.
+      const source = 'for x in (1..end)\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair for with end inside exclusive range expression (1...end)', () => {
+      const source = 'for x in (1...end)\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
