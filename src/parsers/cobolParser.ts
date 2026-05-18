@@ -553,8 +553,11 @@ export class CobolBlockParser extends BaseBlockParser {
       }
     }
 
-    // >> compiler directives (>>IF, >>ELSE, >>END-IF, >>EVALUATE, etc.)
-    if (char === '>' && pos + 1 < source.length && source[pos + 1] === '>') {
+    // >> compiler directives (>>IF, >>ELSE, >>END-IF, >>EVALUATE, etc.).
+    // A directive must be the first non-blank token on its line. A `>>` that
+    // appears mid-expression is a relational/data context, not a directive, so
+    // the rest of the line must stay tokenised (e.g. PERFORM ... >> ... END-PERFORM).
+    if (char === '>' && pos + 1 < source.length && source[pos + 1] === '>' && this.isDirectiveLineStart(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -596,6 +599,24 @@ export class CobolBlockParser extends BaseBlockParser {
   // Calculates the visual column of a position, expanding tabs to 8-character stops
   private getVisualColumn(source: string, lineStart: number, pos: number): number {
     return getVisualColumn(source, lineStart, pos);
+  }
+
+  // Returns true when `pos` is the first non-blank token on its line — the
+  // position where a `>>` compiler directive is allowed. The leading run may be
+  // pure whitespace (free format) or a 6-char digit/whitespace sequence area
+  // followed by whitespace (fixed format).
+  private isDirectiveLineStart(source: string, pos: number): boolean {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    const prefix = source.slice(lineStart, pos);
+    // Free format: nothing but blanks before the directive.
+    if (/^[ \t]*$/.test(prefix)) {
+      return true;
+    }
+    // Fixed format: a digit/blank sequence area (cols 1-6) followed by blanks.
+    return /^[\d \t]{6}[ \t]*$/.test(prefix);
   }
 
   // Checks if a line starting at lineStart is a fixed-format column 7 comment line
