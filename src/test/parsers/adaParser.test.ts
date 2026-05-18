@@ -3679,5 +3679,46 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-19: many standalone loop openers must not validate in quadratic time', () => {
+    // Builds N standalone `loop` openers, one per line — no for/while prefix
+    // and no `;`, the exact shape that makes isValidLoopOpen scan every
+    // preceding line on each call.
+    function buildLoops(n: number): string {
+      return Array.from({ length: n }, () => 'loop').join('\n');
+    }
+
+    test('should leave every unclosed loop opener unpaired', () => {
+      // Output-equivalence guard: bounding the backward scan must not change
+      // the BlockPair set. N unclosed `loop` openers produce zero pairs.
+      const pairs = parser.parse(buildLoops(500));
+      assertNoBlocks(pairs);
+    });
+
+    test('should not scale quadratically between 1000 and 4000 loop openers', () => {
+      const small = buildLoops(1000);
+      const big = buildLoops(4000);
+      // Warm-up to stabilize timings against JIT and module init.
+      parser.parse(small);
+      parser.parse(big);
+      const t1 = Date.now();
+      parser.parse(small);
+      const smallMs = Date.now() - t1;
+      const t2 = Date.now();
+      parser.parse(big);
+      const bigMs = Date.now() - t2;
+      // 4x input: pre-fix isValidLoopOpen sliced and split all preceding
+      // source on every call, giving O(n^2) (~16x time). The bounded backward
+      // scan keeps each call O(1), so the ratio stays near-linear. A baseline
+      // floor avoids tripping on very fast small runs; 9x cleanly separates
+      // the post-fix (~4x) from the pre-fix (~16x) curve.
+      const baseline = Math.max(smallMs, 10);
+      const ratio = bigMs / baseline;
+      assert.ok(
+        ratio < 9,
+        `4000-loop parse took ${bigMs}ms vs 1000-loop ${smallMs}ms (ratio ${ratio.toFixed(1)}x; expected < 9x, was ~16x with O(n^2) isValidLoopOpen)`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
