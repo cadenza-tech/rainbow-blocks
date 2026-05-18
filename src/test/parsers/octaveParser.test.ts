@@ -1881,6 +1881,31 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-19: command-syntax do argument separated by VT/FF is not block_open', () => {
+    test('should not treat do as block_open when separated from command by vertical tab', () => {
+      // `disp\vdo` is command-syntax: a vertical tab (`\v`) is a valid horizontal
+      // whitespace token separator, so `disp\vdo` parses as `disp('do')`. The `do`
+      // is the string argument, NOT a do/until block opener. Treating it as an
+      // opener would pair it with the following `until` and produce a spurious
+      // block. Only function/end should pair; `until` stays orphan.
+      const source = 'function f\ndisp\vdo\nuntil x\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do separated by VT should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do as block_open when separated from command by form feed', () => {
+      // Same as the VT case but with a form feed (`\f`) separator. `disp\fdo`
+      // parses as the command-syntax call `disp('do')`.
+      const source = 'function f\ndisp\fdo\nuntil x\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do separated by FF should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression 2026-05-15: do followed by Unicode whitespace is function call', () => {
     test('should not treat do<NBSP>(...) as do/until block', () => {
       // U+00A0 NO-BREAK SPACE between `do` and `(` should still be treated as
