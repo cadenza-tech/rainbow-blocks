@@ -4461,5 +4461,76 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-19: block keyword used as function name after definition keyword', () => {
+    // A block keyword (if/unless/with/cond/case/...) immediately following a definition
+    // keyword (def/defp/defmacro/...) is a function name (identifier), not a block opener.
+    // e.g. `def unless(x) do ... end` defines a function named `unless`; only the def..end
+    // pair must be produced. Previously the inner keyword stayed a block_open and stole the
+    // `end`, orphaning the outer def.
+    test('should treat unless as a function name in def unless(x) do/end', () => {
+      const source = 'def unless(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should treat if as a function name in def if(x) do/end', () => {
+      const source = 'def if(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should treat if as a function name in defp if(x) do/end', () => {
+      const source = 'defp if(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defp', 'end');
+    });
+    test('should treat unless as a function name in defmacro unless(x) do/end', () => {
+      const source = 'defmacro unless(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmacro', 'end');
+    });
+    test('should treat with as a function name in def with(x) do/end', () => {
+      const source = 'def with(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should treat cond as a function name in def cond x do/end (no parens)', () => {
+      const source = 'def cond x do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should still pair def/end for def if(x, y) do/end (multi-arg)', () => {
+      const source = 'def if(x, y) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should still pair def/end for def is_valid(x) do/end (non-keyword name)', () => {
+      const source = 'def is_valid(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+    test('should still pair if/end for a normal if cond do/end', () => {
+      const source = 'if cond do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should still parse defmodule with a module name containing If', () => {
+      const source = 'defmodule MyApp.If do\n  def foo do\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defmodulePair = findBlock(pairs, 'defmodule');
+      assert.strictEqual(defmodulePair.openKeyword.line, 0);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.openKeyword.line, 1);
+    });
+    test('should keep the inner def as a block opener inside defmodule', () => {
+      const source = 'defmodule MyMod do\n  def unless(x) do\n    x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defmodulePair = findBlock(pairs, 'defmodule');
+      assert.strictEqual(defmodulePair.closeKeyword.value, 'end');
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.openKeyword.line, 1);
+    });
+  });
+
   generateCommonTests(config);
 });
