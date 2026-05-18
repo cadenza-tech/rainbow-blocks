@@ -2751,5 +2751,25 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-19: dangling operator before a newline keeps ELSE/WHEN intermediate', () => {
+    test('should register ELSE as IF intermediate when the condition ends with a dangling operator before a newline', () => {
+      // Bug: isInExpressionContext skipped the newline and reached the `>` that
+      // ended the previous line, treating ELSE as the operator's right operand
+      // and dropping it. A relational/arithmetic operator left dangling at the
+      // end of a line is an incomplete expression; ELSE on the next line is a
+      // real control-flow intermediate, not the operator's operand.
+      const source = 'IF X >\nELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+    test('should register WHEN as EVALUATE intermediate when a branch ends with a dangling operator before a newline', () => {
+      const source = 'EVALUATE X\n  WHEN A =\n  WHEN OTHER\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN', 'WHEN']);
+    });
+  });
+
   generateCommonTests(config);
 });
