@@ -1973,6 +1973,20 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
+
+    test('should exclude keywords pushed past column 72 by tab expansion in the sequence area', () => {
+      // Bug: tokenize() and computeValidPositions() compared the raw UTF-16
+      // column against 72, while tryMatchExcludedRegion / isFixedFormatCommentLine
+      // use tab-expanded visual columns. A 6-char sequence area followed by 9
+      // tabs places the keyword at visual column 72 (6 -> 8 -> 16 -> ... -> 72),
+      // inside the identification area (visual cols 72-79). With raw columns the
+      // keyword sat at column 15 and was wrongly tokenised, producing a pair.
+      const sequenceArea = '000001';
+      const tabs = '\t'.repeat(9);
+      const source = `${sequenceArea}${tabs}IF X\n${sequenceArea}${tabs}END-IF`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Regression: EXEC pseudo-text content is opaque', () => {
