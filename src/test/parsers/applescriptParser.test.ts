@@ -2397,8 +2397,11 @@ end try`;
     });
   });
 
-  suite('Regression: nested chevron/guillemet syntax', () => {
-    test('should handle nested chevrons without exposing inner keywords', () => {
+  suite('Regression: stray inner \u00AB in chevron/guillemet syntax', () => {
+    test('should close chevron at first \u00BB and not let a stray inner \u00AB extend it', () => {
+      // `\u00ABa \u00ABb\u00BB` closes at the first \u00BB, so the inner \u00AB does not extend the region.
+      // The trailing `end tell` here is mid-line (after `\u00ABa \u00ABb\u00BB `), hence not a
+      // block close, and the real `end tell` on line 2 still pairs with the outer tell.
       const pairs = parser.parse('tell application "X"\n  set x to \u00ABa \u00ABb\u00BB end tell \u00BB\nend tell');
       assertSingleBlock(pairs, 'tell', 'end tell');
       assert.strictEqual(pairs[0].closeKeyword.line, 2);
@@ -3145,6 +3148,26 @@ end try`;
       const source = 'tell (window 1) to activate';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
+    });
+  });
+
+  suite('Regression: chevron «...» does not nest', () => {
+    test('should close chevron at the first » so trailing code is parsed normally', () => {
+      // AppleScript raw Apple-event syntax «...» never nests; a stray inner «
+      // must not extend the excluded region. The first » closes it, leaving the
+      // tell..end tell block on the following lines fully detectable.
+      const source = 'set x to «a «b»\ntell application "y"\nactivate\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.line, 1);
+    });
+
+    test('should treat «...» as ending at the first » in excluded regions', () => {
+      const source = 'set x to «a «b» c';
+      const regions = parser.getExcludedRegions(source);
+      const chevronRegion = regions.find((r) => source[r.start] === '«');
+      assert.ok(chevronRegion);
+      assert.strictEqual(source.slice(chevronRegion.start, chevronRegion.end), '«a «b»');
     });
   });
 
