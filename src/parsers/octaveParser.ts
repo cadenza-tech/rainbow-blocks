@@ -306,11 +306,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // and Octave `\` line continuations) and checks whether the line begins with a
   // non-keyword identifier.
   private isOctaveCommandSyntaxArgument(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
-    // Require at least one space/tab between the previous token and the keyword.
-    if (position <= 0 || (source[position - 1] !== ' ' && source[position - 1] !== '\t')) return false;
+    // Require at least one horizontal whitespace (space / tab / VT / FF / Unicode
+    // space) between the previous token and the keyword. VT (`\v`) and FF (`\f`)
+    // are valid token separators in Octave, so `disp\vdo` is the command-syntax
+    // call `disp('do')` just like `disp do` and `disp\tdo`.
+    if (position <= 0 || !isHorizontalWhitespace(source[position - 1])) return false;
     let i = position - 1;
     while (i >= 0) {
-      if (source[i] === ' ' || source[i] === '\t') {
+      if (isHorizontalWhitespace(source[i])) {
         i--;
         continue;
       }
@@ -337,7 +340,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
       // A recognised block keyword breaks the command-syntax chain.
       if (this.getAllBlockKeywords().has(ident.toLowerCase())) return false;
       let j = idStart - 1;
-      while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\u{FEFF}')) j--;
+      while (j >= 0 && (isHorizontalWhitespace(source[j]) || source[j] === '\u{FEFF}')) j--;
       if (j < 0) return true;
       const ch = source[j];
       if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') {
