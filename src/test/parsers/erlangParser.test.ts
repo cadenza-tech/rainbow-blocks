@@ -2441,6 +2441,31 @@ bar() -> fun() -> ok end.`;
       assertSingleBlock(pairs, 'begin', 'end');
     });
 
+    test('should filter bare reserved words inside -define list literal', () => {
+      // -define(NUMS, [begin, case, end]) lists bare reserved words; none is a real block.
+      // Only the real begin/end block after the macro must be paired.
+      const source = '-define(NUMS, [begin, case, end]).\nbegin\n  ok\nend';
+      const tokens = parser.getTokens(source);
+      const bodyTokens = tokens.filter((t) => t.startOffset < source.indexOf(').'));
+      assert.strictEqual(bodyTokens.length, 0, 'bare reserved words inside -define list body should be filtered');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, source.indexOf('begin\n  ok'));
+    });
+
+    test('should not pair bare reserved word inside -define list literal with later end', () => {
+      const source = '-define(NUMS, [begin, case, end]).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.strictEqual(casePair, undefined, 'bare case inside -define list body should not pair with later end');
+    });
+
+    test('should detect fun/end inside list literal in -define body as real block', () => {
+      // A real fun(...)/end block inside a -define list body must still be recognized.
+      const pairs = parser.parse('-define(L, [fun() -> ok end]).');
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
     test('should detect fun/end inside grouping parens in -define body', () => {
       const pairs = parser.parse('-define(MACRO, (fun(X) -> X end)).');
       assertSingleBlock(pairs, 'fun', 'end');
