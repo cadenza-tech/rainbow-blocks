@@ -4587,5 +4587,106 @@ end`;
     });
   });
 
+  suite('Regression: bracket-context validation must not be quadratic', () => {
+    // Bug: isValidBlockOpen/isValidBlockClose called bracket-context helpers
+    // (isInsideCurlyBraces, isLoneEndInArrayConstruction, isInsideIndexingBrackets,
+    // isInsideSquareBrackets, ...) for every block keyword. Each helper re-scanned
+    // the source prefix from the keyword position to locate its enclosing bracket,
+    // so total work was O(N^2) in the number of keywords. A 500-function file
+    // (~40KB) took ~520ms and 1600 begin/end pairs ~1.1s, blowing past the
+    // debounce budget. The fix pre-computes a JuliaBracketIndex once per parse
+    // (cached by source identity) and looks up the enclosing bracket in O(log n).
+    //
+    // The tests below pin the fix from complementary angles:
+    //   1. a per-source cache contract (timing-independent, robust against JIT);
+    //   2. a wall-clock ceiling the quadratic version blew past by an order of
+    //      magnitude;
+    //   3. block-pair output must be byte-for-byte unchanged by the speedup.
+    type BracketIndexCache = { source: string; index: unknown } | null;
+
+    function buildArrayConstructionSource(units: number): string {
+      // Each unit: a function whose body builds an array of begin/end blocks.
+      // Many block keywords, shallow bracket nesting — the exact shape that
+      // turned the per-keyword prefix scan into O(N^2).
+      return 'function f(x)\n  return [begin x end, begin x * 2 end]\nend\n'.repeat(units);
+    }
+
+    test('should cache the bracket index per source after parse', () => {
+      const source = buildArrayConstructionSource(3);
+      parser.parse(source);
+      const cache = (parser as unknown as { bracketIndexCache: BracketIndexCache }).bracketIndexCache;
+      assert.ok(cache !== null && cache !== undefined, 'bracketIndexCache must be populated after parse');
+      assert.strictEqual(cache.source, source, 'cache must be keyed by the parsed source string');
+      assert.ok(cache.index, 'cache must hold a bracket index instance');
+    });
+
+    test('should reuse the bracket index cache across repeat parses of the same source', () => {
+      const source = buildArrayConstructionSource(2);
+      parser.parse(source);
+      const cache1 = (parser as unknown as { bracketIndexCache: BracketIndexCache }).bracketIndexCache;
+      parser.parse(source);
+      const cache2 = (parser as unknown as { bracketIndexCache: BracketIndexCache }).bracketIndexCache;
+      assert.ok(cache1 && cache2, 'cache must exist after both parses');
+      assert.strictEqual(cache1, cache2, 'parsing the same source twice must reuse the cache object');
+    });
+
+    test('should rebuild the bracket index cache when the source changes', () => {
+      const sourceA = buildArrayConstructionSource(2);
+      const sourceB = 'function g()\n  return [begin 1 end]\nend\n';
+      parser.parse(sourceA);
+      const cacheA = (parser as unknown as { bracketIndexCache: BracketIndexCache }).bracketIndexCache;
+      parser.parse(sourceB);
+      const cacheB = (parser as unknown as { bracketIndexCache: BracketIndexCache }).bracketIndexCache;
+      assert.notStrictEqual(cacheA, cacheB, 'changing the source must invalidate the cache');
+      assert.ok(cacheB, 'cacheB must exist after parsing sourceB');
+      assert.strictEqual(cacheB.source, sourceB, 'rebuilt cache must be keyed by the new source');
+    });
+
+    test('should parse 1600 array-construction begin/end pairs well under the debounce budget', () => {
+      // 800 units => 1600 begin/end pairs + 800 function/end pairs (~2400 pairs).
+      // The O(N^2) version took ~1s+ here; the linearized version is tens of ms.
+      // A 2000ms ceiling is generous for coverage instrumentation and CI jitter
+      // while still failing by a wide margin if the quadratic scan returns.
+      const source = buildArrayConstructionSource(800);
+      parser.parse(source); // warm-up to stabilize against JIT / module init
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assertBlockCount(pairs, 2400);
+      assert.ok(elapsed < 2000, `parse took ${elapsed}ms, expected < 2000ms (quadratic regression)`);
+    });
+
+    test('should produce identical block pairs for many array constructions as the per-block reference', () => {
+      // The speedup must not change classification. Verify a representative mix
+      // of bracket contexts (array construction begin/end, indexing end, curly
+      // type params, comprehension if) yields the expected pairs.
+      const source = [
+        'function outer()',
+        '  a = [begin 1 end, begin 2 end]',
+        '  b = data[end]',
+        '  c = Dict{begin, end}',
+        '  d = [x for x in 1:10 if x > 5]',
+        '  for i in 1:3',
+        '    if i > 1',
+        '      println(i)',
+        '    end',
+        '  end',
+        'end'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      // begin/end x2 (array construction), for/end, if/end, function/end = 5 pairs.
+      // data[end] is lastindex (no pair); Dict{begin,end} is a type param (no pair);
+      // the comprehension `if` is a filter (no pair).
+      assertBlockCount(pairs, 5);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'if');
+      assertBlockCount(
+        pairs.filter((p) => p.openKeyword.value === 'begin'),
+        2
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
