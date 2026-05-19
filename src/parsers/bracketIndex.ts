@@ -1,6 +1,11 @@
-// Julia bracket index: pre-computes (), [], {} pairing in a single O(n) pass so
-// per-keyword context checks can locate the enclosing bracket in O(log n) instead
-// of rescanning the source prefix on every keyword (which made parsing O(n^2)).
+// Bracket index: pre-computes bracket pairing in a single O(n) pass so per-keyword
+// context checks can locate the enclosing bracket in O(log n) instead of rescanning
+// the source prefix on every keyword (which made parsing O(n^2)).
+//
+// `trackedOpeners` selects which bracket kinds participate. The default tracks all
+// three ((), [], {}); callers that only care about one kind (e.g. VHDL `()` depth,
+// Verilog `{}` depth) pass a single-element set, making the index behave identically
+// to a single-kind backward scan.
 
 import type { ExcludedRegion } from '../types';
 import { isInExcludedRegion } from './parserUtils';
@@ -17,11 +22,14 @@ export interface BracketSpan {
 
 const CLOSE_TO_OPEN: Readonly<Record<string, string>> = { ')': '(', ']': '[', '}': '{' };
 
+// Default tracked openers: all three bracket kinds.
+const ALL_OPENERS: ReadonlySet<string> = new Set(['(', '[', '{']);
+
 // A bracket-structure-changing position (an opener or closer outside excluded
 // regions), paired with the innermost enclosing bracket span that is in effect
 // immediately AFTER this character is consumed.
 interface BracketEvent {
-  // Offset of the `(`/`[`/`{`/`)`/`]`/`}` character.
+  // Offset of the bracket character.
   offset: number;
   // The innermost bracket span enclosing positions just past `offset`, or null.
   enclosingAfter: BracketSpan | null;
@@ -31,21 +39,24 @@ interface BracketEvent {
 // reused by every bracket-context helper. The previous design re-scanned the
 // source prefix from each keyword position, yielding O(n^2) work for files with
 // many block keywords; this index makes the enclosing-bracket lookup O(log n).
-export class JuliaBracketIndex {
+export class BracketIndex {
   // Bracket events (openers and closers) sorted by offset ascending. Each event
   // carries the enclosing span in effect just after that character, so the
   // enclosing bracket at any position is found by one binary search.
   private readonly events: BracketEvent[];
 
-  constructor(source: string, excludedRegions: ExcludedRegion[]) {
-    this.events = JuliaBracketIndex.computeEvents(source, excludedRegions);
+  // `trackedOpeners` defaults to all three bracket kinds. Pass a narrower set to
+  // index only one kind; a single-kind index matches a single-kind backward scan.
+  constructor(source: string, excludedRegions: ExcludedRegion[], trackedOpeners: ReadonlySet<string> = ALL_OPENERS) {
+    this.events = BracketIndex.computeEvents(source, excludedRegions, trackedOpeners);
   }
 
   // Single pass over the source: a stack pairs every opener with its closer and
   // records, for each bracket character, the enclosing span in effect afterward.
   // Brackets inside excluded regions (strings, comments, char literals, symbols)
   // are skipped entirely so they never affect block-keyword classification.
-  private static computeEvents(source: string, excludedRegions: ExcludedRegion[]): BracketEvent[] {
+  // Bracket kinds outside `trackedOpeners` are ignored entirely.
+  private static computeEvents(source: string, excludedRegions: ExcludedRegion[], trackedOpeners: ReadonlySet<string>): BracketEvent[] {
     const events: BracketEvent[] = [];
     // Stack of currently-open brackets. Each entry is a mutable span whose
     // `close` is filled in when the matching closer is found.
@@ -57,6 +68,9 @@ export class JuliaBracketIndex {
       }
       const ch = source[i];
       if (ch === '(' || ch === '[' || ch === '{') {
+        if (!trackedOpeners.has(ch)) {
+          continue;
+        }
         const span: BracketSpan = { open: i, close: -1, type: ch };
         stack.push(span);
         // After consuming this opener, the new innermost enclosing span is the
@@ -66,6 +80,9 @@ export class JuliaBracketIndex {
       }
       if (ch === ')' || ch === ']' || ch === '}') {
         const expectedOpen = CLOSE_TO_OPEN[ch];
+        if (!trackedOpeners.has(expectedOpen)) {
+          continue;
+        }
         // Find the nearest opener of the matching type so `( [ )` does not pair
         // `(` with `)` across the `[`. Mismatched closers with no matching
         // opener are tolerated and dropped (best-effort parsing).

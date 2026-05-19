@@ -1,7 +1,7 @@
 // Julia bracket-context helpers: classify keywords by surrounding (), [], {} context
 
 import type { ExcludedRegion } from '../types';
-import type { JuliaBracketIndex } from './juliaBracketIndex';
+import type { BracketIndex } from './bracketIndex';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
 import {
   hasAnyBlockOpenerBetween,
@@ -128,7 +128,7 @@ function hasMatchingEndBeforeBracketClose(
 // Checks if position is inside curly braces (type parameters like Dict{begin, end}).
 // The innermost enclosing bracket fully determines the answer: `position` is inside
 // curly braces exactly when its innermost enclosing bracket is `{`.
-export function isInsideCurlyBraces(position: number, bracketIndex: JuliaBracketIndex): boolean {
+export function isInsideCurlyBraces(position: number, bracketIndex: BracketIndex): boolean {
   return bracketIndex.enclosing(position)?.type === '{';
 }
 
@@ -167,7 +167,7 @@ export function isLoneEndInArrayConstruction(
 // Walks the chain of enclosing brackets outward: returns true as soon as an
 // enclosing `[` is an indexing bracket. Array-construction `[` and `(`/`{` are
 // transparent — scanning continues to their own enclosing bracket.
-export function isInsideAnyIndexingBracket(source: string, position: number, bracketIndex: JuliaBracketIndex): boolean {
+export function isInsideAnyIndexingBracket(source: string, position: number, bracketIndex: BracketIndex): boolean {
   let enclosing = bracketIndex.enclosing(position);
   while (enclosing !== null) {
     if (enclosing.type === '[' && isIndexingBracket(source, enclosing.open)) {

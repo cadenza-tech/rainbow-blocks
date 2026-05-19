@@ -4595,7 +4595,7 @@ end`;
     // the source prefix from the keyword position to locate its enclosing bracket,
     // so total work was O(N^2) in the number of keywords. A 500-function file
     // (~40KB) took ~520ms and 1600 begin/end pairs ~1.1s, blowing past the
-    // debounce budget. The fix pre-computes a JuliaBracketIndex once per parse
+    // debounce budget. The fix pre-computes a BracketIndex once per parse
     // (cached by source identity) and looks up the enclosing bracket in O(log n).
     //
     // The tests below pin the fix from complementary angles:

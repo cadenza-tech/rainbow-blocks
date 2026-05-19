@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { BracketIndex } from './bracketIndex';
 import {
   isComprehensionFilterInBrackets,
   isGeneratorFilterIf,
@@ -13,7 +14,6 @@ import {
   isInsideSquareBrackets,
   isLoneEndInArrayConstruction
 } from './juliaBracketHelpers';
-import { JuliaBracketIndex } from './juliaBracketIndex';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
 import { isSymbolStart, isTransposeOperator, skipJuliaInterpolation } from './juliaHelpers';
 import { isFollowedByBinaryOperator, isPrecededByBinaryOperator, isPrecededBySubtypeOperator } from './juliaLastindexHelpers';
@@ -23,7 +23,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // check of a tokenize pass and reused for every subsequent keyword in the same
   // source, so the enclosing-bracket lookup stays O(log n) instead of rescanning
   // the prefix per keyword (which made parsing O(N^2)).
-  private bracketIndexCache: { source: string; index: JuliaBracketIndex } | null = null;
+  private bracketIndexCache: { source: string; index: BracketIndex } | null = null;
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'if',
@@ -50,11 +50,11 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Returns the bracket index for `source`, building it once and caching it by
   // source identity. Every bracket-context check in a tokenize pass shares the
   // same index, keeping enclosing-bracket lookups O(log n).
-  private getBracketIndex(source: string, excludedRegions: ExcludedRegion[]): JuliaBracketIndex {
+  private getBracketIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
     if (this.bracketIndexCache !== null && this.bracketIndexCache.source === source) {
       return this.bracketIndexCache.index;
     }
-    const index = new JuliaBracketIndex(source, excludedRegions);
+    const index = new BracketIndex(source, excludedRegions);
     this.bracketIndexCache = { source, index };
     return index;
   }
