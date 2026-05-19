@@ -12,21 +12,74 @@ export interface VhdlValidationCallbacks {
 // Keywords that can be followed by 'loop'
 const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
 
+// Window sizes (in lines) for the backward prefix scans of isValidForOpen and
+// isValidLoopOpen. Both functions only ever inspect a bounded number of lines
+// before the keyword (isValidForOpen: current line + an `attempt < 10` loop that
+// steps back at most 10 lines; isValidLoopOpen: `Math.min(lines.length, 15)`).
+// Slicing only this window instead of the whole prefix turns the per-keyword
+// O(N) prefix scan into O(window), so total parsing stays linear.
+//
+// The windows are deliberately larger than the strict bound (22 > 1 + 10, and
+// 20 > 15) so the loop ALWAYS terminates before reaching the window start: a
+// `prevNl <= 0` / `lastNewline > 0` check therefore detects the real source
+// start only, never the window edge. When the source is smaller than the
+// window, windowStart is 0 and local offsets equal absolute offsets, so the
+// behavior is byte-for-byte identical to scanning the full prefix.
+const FOR_OPEN_WINDOW_LINES = 22;
+const LOOP_OPEN_WINDOW_LINES = 20;
+
+// Returns the offset of the line start that is `lineCount` newlines before
+// `position` (i.e. the start of the window that includes `position`'s line and
+// the `lineCount` lines above it). Returns 0 when fewer than `lineCount`
+// newlines precede `position`. The returned offset is always a line start:
+// just after a `\n`, a lone `\r`, or 0. `\r\n` is counted as a single newline
+// so the offset never lands between the `\r` and the `\n`. All three line
+// ending styles (LF, CRLF, CR) are handled uniformly.
+function findWindowStart(source: string, position: number, lineCount: number): number {
+  let newlinesSeen = 0;
+  for (let i = position - 1; i >= 0; i--) {
+    const ch = source[i];
+    if (ch === '\n') {
+      newlinesSeen++;
+      if (newlinesSeen >= lineCount) {
+        return i + 1;
+      }
+      continue;
+    }
+    if (ch === '\r') {
+      // Skip the `\r` of a `\r\n` pair: the following `\n` already counted it.
+      if (i + 1 < source.length && source[i + 1] === '\n') {
+        continue;
+      }
+      newlinesSeen++;
+      if (newlinesSeen >= lineCount) {
+        return i + 1;
+      }
+    }
+  }
+  return 0;
+}
+
 // Validates 'for' keyword: rejects 'wait for' timing statements, 'use entity/configuration ... for' binding clauses,
 // and configuration specifications ('for <id/all/others> : <id> use entity/configuration ... ;')
 export function isValidForOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
-  const textBefore = source.slice(0, position).toLowerCase();
+  // Slice only the bounded window the scan can reach instead of the whole prefix.
+  // `textBefore` offsets are window-relative; add `windowStart` to convert any of
+  // them to an absolute source offset. When windowStart is 0 (small source) the
+  // two coincide and behavior matches the original full-prefix scan exactly.
+  const windowStart = findWindowStart(source, position, FOR_OPEN_WINDOW_LINES);
+  const textBefore = source.slice(windowStart, position).toLowerCase();
   const lastNewline = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
   const lineStart = lastNewline + 1;
   const rawLineBefore = textBefore.slice(lineStart);
   const lineBefore = rawLineBefore.trimStart();
   const trimOffset = rawLineBefore.length - lineBefore.length;
   // Strip trailing comments (-- ...) before checking for wait
-  const lineBeforeNoComment = stripTrailingComment(lineBefore, lineStart + trimOffset, excludedRegions, callbacks);
+  const lineBeforeNoComment = stripTrailingComment(lineBefore, windowStart + lineStart + trimOffset, excludedRegions, callbacks);
   // Reject 'for' in 'use entity ... for ...' or 'use configuration ... for ...' binding clauses
   const useEntityMatch = lineBeforeNoComment.match(/\buse[ \t]+(entity|configuration)\b/);
   if (useEntityMatch && useEntityMatch.index !== undefined) {
-    const useAbsOffset = lineStart + trimOffset + useEntityMatch.index;
+    const useAbsOffset = windowStart + lineStart + trimOffset + useEntityMatch.index;
     if (!callbacks.isInExcludedRegion(useAbsOffset, excludedRegions)) {
       let hasSemicolon = false;
       for (let ci = useAbsOffset + useEntityMatch[0].length; ci < position; ci++) {
@@ -40,10 +93,14 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       }
     }
   }
-  if (isWaitBeforeFor(source, lineBeforeNoComment, lineStart, rawLineBefore, excludedRegions, callbacks)) {
+  if (isWaitBeforeFor(source, lineBeforeNoComment, windowStart + lineStart, rawLineBefore, excludedRegions, callbacks)) {
     return false;
   }
-  // Check previous lines for 'wait' or 'use entity/configuration' (multi-line, skip blank lines)
+  // Check previous lines for 'wait' or 'use entity/configuration' (multi-line, skip blank lines).
+  // `lastNewline > 0` (and the `prevNl <= 0` checks below) detect the source start;
+  // with windowStart > 0 the window always has multiple lines, so a window-relative
+  // lastNewline is either -1 or >= 1 there — never 0 — and the loop (`attempt < 10`)
+  // terminates well before reaching the window edge, keeping these checks faithful.
   if (lastNewline > 0) {
     let scanEnd = lastNewline;
     // Skip the \r in \r\n pairs
@@ -64,7 +121,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
         continue;
       }
       const prevTrimOffset = rawPrevLine.length - prevLine.length;
-      const prevLineNoComment = stripTrailingComment(prevLine, prevNl + 1 + prevTrimOffset, excludedRegions, callbacks);
+      const prevLineNoComment = stripTrailingComment(prevLine, windowStart + prevNl + 1 + prevTrimOffset, excludedRegions, callbacks);
       // Skip comment-only lines (line content is entirely inside a comment)
       if (/^[ \t]*$/.test(prevLineNoComment)) {
         if (prevNl <= 0) break;
@@ -76,7 +133,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       }
       const prevUseMatch = prevLineNoComment.match(/\buse[ \t]+(entity|configuration)\b/);
       if (prevUseMatch && prevUseMatch.index !== undefined) {
-        const prevUseAbsOffset = prevNl + 1 + prevTrimOffset + prevUseMatch.index;
+        const prevUseAbsOffset = windowStart + prevNl + 1 + prevTrimOffset + prevUseMatch.index;
         if (!callbacks.isInExcludedRegion(prevUseAbsOffset, excludedRegions)) {
           let prevHasSemicolon = false;
           for (let ci = prevUseAbsOffset + prevUseMatch[0].length; ci < position; ci++) {
@@ -90,7 +147,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
           }
         }
       }
-      if (isWaitBeforeFor(source, prevLineNoComment, prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
+      if (isWaitBeforeFor(source, prevLineNoComment, windowStart + prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
         return false;
       }
       // Continue scanning upward through wait-clause continuation lines (`on signal_list`,
@@ -115,7 +172,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       // Track parenthesis depth: continue scanning upward through multi-line port/generic map content
       // Accumulate depth across lines (not reset per line)
       {
-        const lineAbsStart = prevNl + 1;
+        const lineAbsStart = windowStart + prevNl + 1;
         for (let ci = lineAbsStart + rawPrevLine.length - 1; ci >= lineAbsStart; ci--) {
           if (callbacks.isInExcludedRegion(ci, excludedRegions)) continue;
           if (source[ci] === ')') mapParenDepth++;
@@ -506,8 +563,14 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
     return false;
   }
 
-  // Look backwards across multiple lines to find if a prefix keyword precedes this
-  const textBefore = source.slice(0, position).toLowerCase();
+  // Look backwards across multiple lines to find if a prefix keyword precedes this.
+  // Only the bounded window the scan can reach is sliced (the loop visits at most
+  // `Math.min(lines.length, 15)` lines from the end). LOOP_OPEN_WINDOW_LINES (20)
+  // exceeds that 15-line bound, so the visited lines are always the same as a
+  // full-prefix scan. When the source has fewer lines than the window, windowStart
+  // is 0 and the slice equals the full prefix, so behavior is unchanged.
+  const windowStart = findWindowStart(source, position, LOOP_OPEN_WINDOW_LINES);
+  const textBefore = source.slice(windowStart, position).toLowerCase();
   // Split on \r\n, \r, or \n to handle all line ending types
   const lines = textBefore.split(/\r\n|\r|\n/);
   const maxLines = Math.min(lines.length, 15);
@@ -515,8 +578,10 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
   // Track loop positions that have been paired with a preceding for/while
   const pairedLoopPositions = new Set<number>();
 
-  // Calculate absolute offsets for each line
-  let lineStartOffset = textBefore.length;
+  // Calculate absolute offsets for each line. Seeded with the absolute `position`
+  // (not `textBefore.length`, which is window-relative) so every offset derived
+  // from `lineStartOffset` below is a true source offset.
+  let lineStartOffset = position;
   for (let idx = 0; idx < maxLines; idx++) {
     const lineIdx = lines.length - 1 - idx;
     const lineText = lines[lineIdx];
