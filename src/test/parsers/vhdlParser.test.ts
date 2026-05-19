@@ -1,5 +1,8 @@
 import * as assert from 'node:assert';
+import { BracketIndex } from '../../parsers/bracketIndex';
+import { isInExcludedRegion as utilIsInExcludedRegion } from '../../parsers/parserUtils';
 import { VhdlBlockParser } from '../../parsers/vhdlParser';
+import type { ExcludedRegion } from '../../types';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
 import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
@@ -3351,6 +3354,163 @@ end package;`;
       const source = 'process\nbegin\n  wait on a, b, c while running;\nend;';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'process', 'end');
+    });
+  });
+
+  // Bug: isInsideParens scanned the source prefix backward from every block keyword
+  // to locate the enclosing '(' (and then forward to verify a matching ')'), so total
+  // work was O(N^2) in the number of keywords. The fix pre-computes a single-kind '('
+  // BracketIndex once per parse and resolves the enclosing paren in O(log n).
+  //
+  // `legacyIsInsideParens` below is a verbatim copy of the pre-fix backward-scan
+  // implementation. `newIsInsideParens` mirrors the production isInsideParens logic
+  // exactly (single-kind '(' BracketIndex + `span.close > pos`) without importing
+  // it, so this suite still compiles when the source fix is stashed for fail-before
+  // verification. The block-pair equivalence test exercises the real production
+  // isInsideParens end-to-end through parse(); the timing test pins linearization.
+  suite('Regression 2026-05-20: VHDL isInsideParens bracket index equivalence', () => {
+    // Verbatim pre-fix isInsideParens (backward '(' scan + forward matching-')'
+    // verification). Kept here so equivalence is checked against the real old code.
+    function legacyHasMatchingCloseParen(source: string, openPos: number, position: number, regions: ExcludedRegion[]): boolean {
+      let depth = 1;
+      for (let j = openPos + 1; j < source.length; j++) {
+        if (utilIsInExcludedRegion(j, regions)) continue;
+        const ch = source[j];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          depth--;
+          if (depth === 0) return j > position;
+        }
+      }
+      return false;
+    }
+    function legacyIsInsideParens(source: string, position: number, regions: ExcludedRegion[]): boolean {
+      let depth = 0;
+      for (let i = position - 1; i >= 0; i--) {
+        if (utilIsInExcludedRegion(i, regions)) continue;
+        const ch = source[i];
+        if (ch === ')') {
+          depth++;
+        } else if (ch === '(') {
+          if (depth === 0) {
+            return legacyHasMatchingCloseParen(source, i, position, regions);
+          }
+          depth--;
+        }
+      }
+      return false;
+    }
+
+    // Mirrors the production isInsideParens: build the same single-kind '('
+    // BracketIndex VhdlBlockParser.getParenIndex builds, then apply the
+    // `span.close > pos` predicate (span.close === -1 means an unclosed '(',
+    // which must NOT count as inside-parens — exactly the legacy behavior).
+    function newIsInsideParens(source: string, position: number, regions: ExcludedRegion[]): boolean {
+      const span = new BracketIndex(source, regions, new Set(['('])).enclosing(position);
+      return span !== null && span.close > position;
+    }
+
+    // Asserts the new and legacy predicates agree at EVERY offset of `source`.
+    function assertParenEquivalence(source: string): void {
+      const regions = parser.getExcludedRegions(source);
+      for (let pos = 0; pos <= source.length; pos++) {
+        const legacy = legacyIsInsideParens(source, pos, regions);
+        const next = newIsInsideParens(source, pos, regions);
+        assert.strictEqual(next, legacy, `isInsideParens mismatch at offset ${pos} of ${JSON.stringify(source)}: new=${next}, legacy=${legacy}`);
+      }
+    }
+
+    const wellFormedCorpus = [
+      'process\nbegin\n  x <= f(a, b);\nend;',
+      'entity e is\n  port (clk : in bit; rst : in bit);\nend;',
+      'signal s : bit := func(g(h(1)), 2);',
+      'inst : comp port map (a => x, b => y);',
+      'architecture a of e is\nbegin\n  y <= (others => 0);\nend;'
+    ];
+    for (const source of wellFormedCorpus) {
+      test(`should match legacy isInsideParens on well-formed source ${JSON.stringify(source.slice(0, 28))}`, () => {
+        assertParenEquivalence(source);
+      });
+    }
+
+    const malformedCorpus = [
+      // Unclosed '(' — enclosing paren never closes (span.close === -1).
+      'x <= f(a, b;\nif c then\nend if;',
+      'process\nbegin\n  wait until (clk = 1\nend;',
+      // Crossing / mismatched brackets around parens.
+      'x <= f(a [ b) c];\nif d then\nend if;',
+      'y <= g(h) ) (k;',
+      // Parens entirely inside excluded regions (comment / string).
+      '-- comment ( if then\nif c then\nend if;',
+      'x <= "literal ( ) string";\nif c then\nend if;',
+      "s <= '(';\nprocess\nbegin\nend;",
+      // A ')' that closes exactly at a keyword boundary, and stray closers.
+      'x <= f()if c then\nend if;',
+      ')) if c then\nend if;',
+      '(((deep nesting if then',
+      // Block comment splitting a paren group (VHDL-2008).
+      'x <= f(/* note ) */ a);\nif c then\nend if;'
+    ];
+    for (const source of malformedCorpus) {
+      test(`should match legacy isInsideParens on malformed source ${JSON.stringify(source.slice(0, 28))}`, () => {
+        assertParenEquivalence(source);
+      });
+    }
+
+    test('should produce identical block pairs as a per-keyword reference for paren-heavy source', () => {
+      // The speedup must not change classification: keywords inside parens stay
+      // unpaired, keywords outside form their normal blocks.
+      const source = [
+        'architecture a of e is',
+        '  function f(x : integer) return integer is',
+        '  begin',
+        '    return x;',
+        '  end;',
+        'begin',
+        '  p : process',
+        '  begin',
+        '    y <= f(g(if_unused) + h(end_unused));',
+        '    if cond then',
+        '      z <= 1;',
+        '    end if;',
+        '  end process;',
+        'end;'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      // architecture, function, process, if = 4 pairs. The `if`/`end` text inside
+      // the f(...) call argument names are identifiers, not keywords, so they add
+      // no pairs; genuine keywords inside parens would be filtered by isInsideParens.
+      assertBlockCount(pairs, 4);
+      findBlock(pairs, 'architecture');
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'process');
+      findBlock(pairs, 'if');
+    });
+
+    test('should parse 30000 paren-context block keywords without quadratic slowdown', () => {
+      // Each line is a bare `process` opener followed by an unclosed `(`. isInsideParens
+      // runs for every `process`: the pre-fix scan walked back to the preceding `(`,
+      // then forward to the source end hunting a matching `)` that never exists, so
+      // total work was O(N^2) (tens of seconds at this size — the legacy run measured
+      // ~78s at a comparable size). The BracketIndex lookup is O(log n) per keyword.
+      //
+      // All `process` openers are unclosed, so zero pairs form. That deliberately
+      // neutralizes the unrelated O(pairs^2) term in the base recalculateNestLevels,
+      // isolating the isInsideParens cost — the same isolation tactic the Julia
+      // bracket-index regression suite uses (mirrors its `'for\n'.repeat(N)` shape).
+      const warmUp = 'process (\n'.repeat(2000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = 'process (\n'.repeat(30000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // unclosed openers form zero pairs
+      // Linearized parsing finishes in tens of ms; a 4000ms ceiling keeps ample
+      // headroom for coverage instrumentation and CI jitter while still failing by
+      // an order of magnitude if the O(N^2) backward/forward paren scan returns.
+      assert.ok(elapsed < 4000, `30000-process parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) isInsideParens regression)`);
     });
   });
 
