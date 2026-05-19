@@ -22,14 +22,27 @@ export function findLastOpenerByType(stack: OpenBlock[], targetValue: string, ca
   return -1;
 }
 
+// Cache of lowercased close/middle keyword sets keyed by LanguageKeywords object
+// identity. LanguageKeywords is readonly and fixed per parser instance, so the
+// cached sets never go stale; the WeakMap lets them be collected with the parser
+const lowerKeywordSetCache = new WeakMap<LanguageKeywords, { close: Set<string>; middle: Set<string> }>();
+
 // Determine token type with case-insensitive keyword matching
 // Used by Ada, Fortran, VHDL for case-insensitive languages
 export function getTokenTypeCaseInsensitive(keyword: string, keywords: LanguageKeywords): TokenType {
+  let sets = lowerKeywordSetCache.get(keywords);
+  if (sets === undefined) {
+    sets = {
+      close: new Set(keywords.blockClose.map((k) => k.toLowerCase())),
+      middle: new Set(keywords.blockMiddle.map((k) => k.toLowerCase()))
+    };
+    lowerKeywordSetCache.set(keywords, sets);
+  }
   const lowerKeyword = keyword.toLowerCase();
-  if (keywords.blockClose.some((k) => k.toLowerCase() === lowerKeyword)) {
+  if (sets.close.has(lowerKeyword)) {
     return 'block_close';
   }
-  if (keywords.blockMiddle.some((k) => k.toLowerCase() === lowerKeyword)) {
+  if (sets.middle.has(lowerKeyword)) {
     return 'block_middle';
   }
   return 'block_open';

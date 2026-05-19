@@ -48,6 +48,10 @@ function countLessThan(sorted: number[], value: number): number {
 export abstract class BaseBlockParser {
   protected abstract readonly keywords: LanguageKeywords;
 
+  // Close/middle keyword sets, memoized lazily on the first getTokenType call.
+  // keywords is readonly and fixed per parser instance, so these never go stale
+  private tokenTypeSets: { close: Set<string>; middle: Set<string> } | null = null;
+
   // Parses source code and returns matched block pairs
   parse(source: string): BlockPair[] {
     const excludedRegions = this.findExcludedRegions(source);
@@ -334,12 +338,21 @@ export abstract class BaseBlockParser {
     return null;
   }
 
-  // Returns the token type for a keyword
+  // Returns the token type for a keyword. The close/middle keyword sets are
+  // memoized on first use so classification is O(1) instead of O(K) per keyword
   protected getTokenType(keyword: string): TokenType {
-    if (this.keywords.blockClose.includes(keyword)) {
+    let sets = this.tokenTypeSets;
+    if (sets === null) {
+      sets = {
+        close: new Set(this.keywords.blockClose),
+        middle: new Set(this.keywords.blockMiddle)
+      };
+      this.tokenTypeSets = sets;
+    }
+    if (sets.close.has(keyword)) {
       return 'block_close';
     }
-    if (this.keywords.blockMiddle.includes(keyword)) {
+    if (sets.middle.has(keyword)) {
       return 'block_middle';
     }
     return 'block_open';
