@@ -226,7 +226,9 @@ export class VerilogBlockParser extends BaseBlockParser {
   // Returns the brace-only index for `source`, building it once and caching it
   // by source identity. Tracks only `{` so the index matches a single-kind `{}`
   // backward scan exactly. Every `{}` context check in a tokenize pass shares
-  // the same index, keeping enclosing-brace lookups O(log n).
+  // the same index, keeping enclosing-brace lookups O(log n). excludedRegions is
+  // not part of the cache key: findExcludedRegions is deterministic, so the same
+  // source always yields the same regions.
   private getBraceIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
     if (this.braceIndexCache !== null && this.braceIndexCache.source === source) {
       return this.braceIndexCache.index;
@@ -238,7 +240,9 @@ export class VerilogBlockParser extends BaseBlockParser {
 
   // Returns the paren-only index for `source`, building it once and caching it
   // by source identity. Tracks only `(` so the index matches a single-kind `()`
-  // forward scan exactly. Used by the `interface` port-list check.
+  // forward scan exactly. Used by the `interface` port-list check. excludedRegions
+  // is not part of the cache key: findExcludedRegions is deterministic, so the
+  // same source always yields the same regions.
   private getParenIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
     if (this.parenIndexCache !== null && this.parenIndexCache.source === source) {
       return this.parenIndexCache.index;

@@ -85,6 +85,8 @@ export class VhdlBlockParser extends BaseBlockParser {
 
   // Returns the paren index for `source`, building it once and caching it by source
   // identity. Every isInsideParens check in a tokenize pass shares the same index.
+  // excludedRegions is not part of the cache key: findExcludedRegions is
+  // deterministic, so the same source always yields the same regions.
   private getParenIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
     if (this.parenIndexCache !== null && this.parenIndexCache.source === source) {
       return this.parenIndexCache.index;

@@ -49,7 +49,9 @@ export class JuliaBlockParser extends BaseBlockParser {
 
   // Returns the bracket index for `source`, building it once and caching it by
   // source identity. Every bracket-context check in a tokenize pass shares the
-  // same index, keeping enclosing-bracket lookups O(log n).
+  // same index, keeping enclosing-bracket lookups O(log n). excludedRegions is
+  // not part of the cache key: findExcludedRegions is deterministic, so the same
+  // source always yields the same regions within a parse.
   private getBracketIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
     if (this.bracketIndexCache !== null && this.bracketIndexCache.source === source) {
       return this.bracketIndexCache.index;
