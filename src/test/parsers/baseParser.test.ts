@@ -1,6 +1,6 @@
 import * as assert from 'node:assert';
 import { BaseBlockParser } from '../../parsers/baseParser';
-import type { ExcludedRegion, LanguageKeywords } from '../../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, Token, TokenType } from '../../types';
 import {
   assertBlockCount,
   assertIntermediates,
@@ -32,6 +32,68 @@ class DefaultExcludedRegionsParser extends BaseBlockParser {
     blockClose: ['end'] as const,
     blockMiddle: [] as const
   };
+}
+
+// Builds a synthetic token; recalculateNestLevels only reads startOffset, plus
+// type for intermediates, so the remaining fields get simple placeholder values
+function mkToken(type: TokenType, value: string, startOffset: number): Token {
+  return { type, value, startOffset, endOffset: startOffset + value.length, line: 0, column: 0 };
+}
+
+// Builds a synthetic block pair from raw open/close offsets and intermediates
+function mkPair(open: number, close: number, intermediates: Token[] = []): BlockPair {
+  return {
+    openKeyword: mkToken('block_open', 'if', open),
+    closeKeyword: mkToken('block_close', 'end', close),
+    intermediates,
+    nestLevel: 0
+  };
+}
+
+// Reference O(P^2) nest-level computation: the doubly-nested loop that the
+// O(P log P) recalculateNestLevels replaced. The fast path must reproduce it exactly
+function legacyNestLevels(pairs: BlockPair[]): number[] {
+  return pairs.map((pair) => {
+    let level = 0;
+    for (const other of pairs) {
+      if (
+        other !== pair &&
+        other.openKeyword.startOffset < pair.openKeyword.startOffset &&
+        other.closeKeyword.startOffset >= pair.closeKeyword.startOffset
+      ) {
+        if (
+          other.closeKeyword.startOffset === pair.closeKeyword.startOffset &&
+          other.intermediates.length > 0 &&
+          pair.openKeyword.startOffset > other.intermediates[other.intermediates.length - 1].startOffset
+        ) {
+          const last = other.intermediates[other.intermediates.length - 1];
+          if (last.type === 'block_middle') {
+            continue;
+          }
+        }
+        level++;
+      }
+    }
+    return level;
+  });
+}
+
+// Parser whose matchBlocks returns a caller-supplied pair list, so parse() runs the
+// real recalculateNestLevels over arbitrary (including adversarial) pair structures
+class FixedPairsParser extends BaseBlockParser {
+  protected readonly keywords: LanguageKeywords = {
+    blockOpen: ['if'] as const,
+    blockClose: ['end'] as const,
+    blockMiddle: ['else'] as const
+  };
+  fixedPairs: BlockPair[] = [];
+  protected findExcludedRegions(_source: string): ExcludedRegion[] {
+    return [];
+  }
+  protected matchBlocks(): BlockPair[] {
+    // Fresh copies each parse so recalculateNestLevels writes into clean objects
+    return this.fixedPairs.map((p) => ({ ...p, nestLevel: 0 }));
+  }
 }
 
 suite('BaseBlockParser Test Suite', () => {
@@ -283,6 +345,110 @@ end`;
       const source = 'if x\nend';
       const pairs = defaultParser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  // recalculateNestLevels was a doubly-nested loop over pairs (O(P^2)); it is now
+  // a Fenwick-based O(P log P) computation. These tests pin the rewrite: the fast
+  // path must reproduce the legacy result exactly (including the block_middle
+  // tie-break and merge-injected block_open intermediates), and a large pair set
+  // must finish well within the debounce budget the quadratic version blew past.
+  suite('Regression: recalculateNestLevels equivalence and scaling', () => {
+    let fixed: FixedPairsParser;
+
+    setup(() => {
+      fixed = new FixedPairsParser();
+    });
+
+    // Runs the real recalculateNestLevels (through parse) and returns the nest levels
+    function realNestLevels(pairs: BlockPair[]): number[] {
+      fixed.fixedPairs = pairs;
+      return fixed.parse('').map((p) => p.nestLevel);
+    }
+
+    function assertEquivalent(pairs: BlockPair[], label: string): void {
+      assert.deepStrictEqual(realNestLevels(pairs), legacyNestLevels(pairs), `nest levels diverge for ${label}`);
+    }
+
+    test('should match the legacy O(P^2) result for concentric nesting', () => {
+      const pairs: BlockPair[] = [];
+      for (let i = 0; i < 30; i++) {
+        pairs.push(mkPair(i, 100 - i));
+      }
+      assertEquivalent(pairs, 'concentric nesting');
+    });
+
+    test('should match the legacy result for crossing intervals', () => {
+      assertEquivalent([mkPair(0, 20), mkPair(10, 30), mkPair(5, 25), mkPair(15, 40)], 'crossing intervals');
+    });
+
+    test('should match the legacy result for many pairs sharing a close offset', () => {
+      const pairs: BlockPair[] = [];
+      for (let i = 0; i < 40; i++) {
+        pairs.push(mkPair(i, 500));
+      }
+      assertEquivalent(pairs, 'shared close offset');
+    });
+
+    test('should match the legacy result for trailing block_middle intermediates', () => {
+      const a = mkPair(0, 100, [mkToken('block_middle', 'else', 50)]);
+      const b = mkPair(60, 100);
+      const c = mkPair(70, 100, [mkToken('block_middle', 'else', 80)]);
+      assertEquivalent([a, b, c], 'trailing block_middle');
+    });
+
+    test('should match the legacy result for trailing block_open intermediates', () => {
+      // Merge-injected shape: the last intermediate is a block_open token
+      const a = mkPair(0, 100, [mkToken('block_open', 'if', 50)]);
+      const b = mkPair(60, 100);
+      assertEquivalent([a, b], 'trailing block_open');
+    });
+
+    test('should match the legacy result for merge-derived multi-stage intermediates', () => {
+      const a = mkPair(0, 200, [mkToken('block_middle', 'else', 30), mkToken('block_open', 'if', 60), mkToken('block_middle', 'else', 90)]);
+      const b = mkPair(100, 200);
+      const c = mkPair(40, 200, [mkToken('block_open', 'always', 45)]);
+      assertEquivalent([a, b, c], 'multi-stage intermediates');
+    });
+
+    test('should match the legacy result across randomized pair sets', () => {
+      let seed = 0x1234abcd;
+      const rand = (n: number): number => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed % n;
+      };
+      for (let trial = 0; trial < 200; trial++) {
+        const count = 1 + rand(25);
+        const pairs: BlockPair[] = [];
+        for (let i = 0; i < count; i++) {
+          const open = rand(200);
+          const close = open + 1 + rand(200);
+          const intermediates: Token[] = [];
+          const interCount = rand(4);
+          for (let k = 0; k < interCount; k++) {
+            const t = rand(2) === 0 ? 'block_middle' : 'block_open';
+            intermediates.push(mkToken(t, 'x', open + 1 + rand(Math.max(1, close - open - 1))));
+          }
+          pairs.push(mkPair(open, close, intermediates));
+        }
+        assertEquivalent(pairs, `random trial ${trial}`);
+      }
+    });
+
+    test('should compute nest levels for 60000 pairs well within the debounce budget', () => {
+      // 60000 concentric pairs: the replaced O(P^2) loop did ~3.6e9 comparisons here
+      const count = 60000;
+      const pairs: BlockPair[] = [];
+      for (let i = 0; i < count; i++) {
+        pairs.push(mkPair(i, 2 * count - i));
+      }
+      fixed.fixedPairs = pairs;
+      fixed.parse(''); // warm up
+      const start = Date.now();
+      const result = fixed.parse('');
+      const elapsed = Date.now() - start;
+      assert.strictEqual(result[count - 1].nestLevel, count - 1, 'innermost pair should be nested count-1 deep');
+      assert.ok(elapsed < 4000, `recalculateNestLevels for ${count} pairs took ${elapsed}ms, expected < 4000ms`);
     });
   });
 });
