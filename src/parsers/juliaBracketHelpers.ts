@@ -55,22 +55,6 @@ function isPrecededByValueExpression(source: string, position: number, excludedR
   return false;
 }
 
-// Checks if there is a matching ']' that closes the current bracket group after 'from'
-function hasMatchingCloseBracket(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
-  let depth = 1;
-  for (let i = from; i < source.length; i++) {
-    if (isInExcludedRegion(i, excludedRegions)) continue;
-    const ch = source[i];
-    if (ch === '[') {
-      depth++;
-    } else if (ch === ']') {
-      depth--;
-      if (depth === 0) return true;
-    }
-  }
-  return false;
-}
-
 // Forward-scan from `from` looking for the `end` that matches the current opener.
 // Returns true if a matching `end` is found before the enclosing indexing `]` closes.
 function hasMatchingEndBeforeBracketClose(
@@ -345,7 +329,10 @@ export function isComprehensionFilterInBrackets(
 }
 
 // Checks if 'if' is a generator filter inside parentheses (for...if pattern)
-// If there's an unmatched block opener in the range, 'if' is inside a block body, not a filter.
+// The nearest enclosing '(' decides; '[' and '{' are transparent (the old scan
+// tracked only paren depth). Walking the bracket-index chain terminates because
+// each step moves to a strictly outer bracket
+// An unmatched block opener in the range means 'if' is inside a block body, not a filter
 export function isGeneratorFilterIf(
   source: string,
   position: number,
@@ -353,23 +340,18 @@ export function isGeneratorFilterIf(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
-  let parenDepth = 0;
-  for (let i = position - 1; i >= 0; i--) {
-    if (isInExcludedRegion(i, excludedRegions)) continue;
-    const char = source[i];
-    if (char === ')') {
-      parenDepth++;
-    } else if (char === '(') {
-      if (parenDepth === 0) {
-        if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, blockOpen, callbacks)) {
-          return false;
-        }
-        return hasForBetween(source, i + 1, position, excludedRegions, callbacks);
-      }
-      parenDepth--;
-    }
+  let enclosing = callbacks.bracketIndex.enclosing(position);
+  while (enclosing !== null && enclosing.type !== '(') {
+    enclosing = callbacks.bracketIndex.enclosing(enclosing.open);
   }
-  return false;
+  if (enclosing === null) {
+    return false;
+  }
+  const open = enclosing.open;
+  if (hasUnmatchedBlockOpenerBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks)) {
+    return false;
+  }
+  return hasForBetween(source, open + 1, position, excludedRegions, callbacks);
 }
 
 // Checks if a position is inside unmatched parentheses (for generator expressions)
@@ -377,6 +359,9 @@ export function isGeneratorFilterIf(
 // (which indicates a block expression like f(if x > 0 x else -x end))
 // Also returns false for named tuple context: (a = for ...) where '=' before 'for'
 // indicates assignment, not a generator expression
+// The innermost enclosing bracket (via the bracket index) decides: '(' analyzes,
+// '[' or none returns false. It is never '{' here: isValidBlockOpen rejects a
+// keyword inside '{}' earlier via isInsideCurlyBraces
 export function isInsideParentheses(
   source: string,
   position: number,
@@ -384,58 +369,43 @@ export function isInsideParentheses(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  for (let i = position - 1; i >= 0; i--) {
-    if (isInExcludedRegion(i, excludedRegions)) {
-      continue;
-    }
-    const char = source[i];
-    if (char === ']') {
-      bracketDepth++;
-    } else if (char === '[') {
-      if (bracketDepth === 0) {
-        // The keyword is directly inside `[...]` (possibly nested in `(...)`).
-        // Bracket-form constructs like `[for ...]` handled separately by isInsideSquareBrackets.
-        return false;
-      }
-      bracketDepth--;
-    } else if (char === ')') {
-      parenDepth++;
-    } else if (char === '(') {
-      if (parenDepth === 0) {
-        if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, blockOpen, callbacks)) {
-          return false;
-        }
-        // Comma at depth 0 may indicate trailing generator: f(x, y for y in iter)
-        // If `for` is preceded by a value expression, treat as generator
-        if (hasCommaAtDepthZero(source, i + 1, position, excludedRegions)) {
-          return isPrecededByValueExpression(source, position, excludedRegions);
-        }
-        // for at start of parentheses is a block, not a generator (generators need expr before for)
-        if (isOnlyWhitespaceBetween(source, i + 1, position, excludedRegions)) {
-          return false;
-        }
-        // Check for named tuple context: (name = for ...)
-        // If there's a '=' (not '==') between '(' and the keyword, it could be either:
-        //   - Assignment with block-form RHS: (name = for ...) — keyword IS block opener.
-        //   - Generator with named binding: (name = value for x in iter) — keyword is generator.
-        // Distinguish by whether the keyword is preceded by a value expression.
-        // For assignment-with-block-form, `for` is immediately after `=` (no value between).
-        if (hasAssignmentBetween(source, i + 1, position, excludedRegions)) {
-          return isPrecededByValueExpression(source, position, excludedRegions);
-        }
-        return true;
-      }
-      parenDepth--;
-    }
+  const enclosing = callbacks.bracketIndex.enclosing(position);
+  // '[' means the keyword is directly inside `[...]` (handled by isInsideSquareBrackets);
+  // no enclosing bracket means it is not parenthesized
+  if (enclosing === null || enclosing.type !== '(') {
+    return false;
   }
-  return false;
+  const open = enclosing.open;
+  if (hasUnmatchedBlockOpenerBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks)) {
+    return false;
+  }
+  // Comma at depth 0 may indicate trailing generator: f(x, y for y in iter)
+  // If `for` is preceded by a value expression, treat as generator
+  if (hasCommaAtDepthZero(source, open + 1, position, excludedRegions)) {
+    return isPrecededByValueExpression(source, position, excludedRegions);
+  }
+  // for at start of parentheses is a block, not a generator (generators need expr before for)
+  if (isOnlyWhitespaceBetween(source, open + 1, position, excludedRegions)) {
+    return false;
+  }
+  // Check for named tuple context: (name = for ...)
+  // If there's a '=' (not '==') between '(' and the keyword, it could be either:
+  //   - Assignment with block-form RHS: (name = for ...) — keyword IS block opener.
+  //   - Generator with named binding: (name = value for x in iter) — keyword is generator.
+  // Distinguish by whether the keyword is preceded by a value expression.
+  // For assignment-with-block-form, `for` is immediately after `=` (no value between).
+  if (hasAssignmentBetween(source, open + 1, position, excludedRegions)) {
+    return isPrecededByValueExpression(source, position, excludedRegions);
+  }
+  return true;
 }
 
 // Checks if position is inside square brackets only (for other block keywords)
 // Julia allows block expressions inside parentheses, so only [] excludes them
 // Keywords inside parentheses within brackets are valid (e.g., a[map(1:3) do x ... end])
+// Walks the enclosing-bracket chain via the bracket index. The old backward scan
+// tracked only '[]'/'()' depth and ignored '{}', so curly braces are transparent
+// here. The walk terminates: each step moves to a strictly outer bracket
 export function isInsideSquareBrackets(
   source: string,
   position: number,
@@ -444,59 +414,49 @@ export function isInsideSquareBrackets(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
-  let bracketDepth = 0;
-  let parenDepth = 0;
-  for (let i = position - 1; i >= 0; i--) {
-    if (isInExcludedRegion(i, excludedRegions)) {
+  let enclosing = callbacks.bracketIndex.enclosing(position);
+  while (enclosing !== null) {
+    if (enclosing.type === '{') {
+      // Curly braces are transparent (type-parameter braces never define indexing context)
+      enclosing = callbacks.bracketIndex.enclosing(enclosing.open);
       continue;
     }
-    const char = source[i];
-    if (char === ']') {
-      bracketDepth++;
-    } else if (char === '[') {
-      if (bracketDepth === 0) {
-        // If inside parentheses within brackets, only `begin` (firstindex) cares about
-        // the outer indexing context. Other block keywords are valid inside parens.
-        if (parenDepth > 0 && keyword !== 'begin') return false;
-        // If there's a block opener between [ and the keyword, the block expression is valid
-        if (hasUnmatchedBlockOpenerBetween(source, i + 1, position, excludedRegions, blockOpen, callbacks)) {
-          return false;
-        }
-        // Only indexing brackets exclude block keywords, not array construction
-        if (!isIndexingBracket(source, i)) {
-          return false;
-        }
-        // `begin` inside indexing brackets is normally the firstindex keyword. But if the
-        // bracket has no matching `]` (e.g., user editing in progress), treat as a real
-        // block opener so the begin/end pair is detected.
-        if (keyword === 'begin') {
-          if (!hasMatchingCloseBracket(source, i + 1, excludedRegions)) {
-            return false;
-          }
-          return true;
-        }
-        // Other block keywords inside indexing brackets may form a block expression
-        // if a matching `end` exists before the bracket closes
-        // (e.g., a[quote x = 1 end] — the `quote/end` block evaluates to a value used as the index)
-        if (hasMatchingEndBeforeBracketClose(source, position + keyword.length, excludedRegions, blockOpen, callbacks)) {
-          return false;
-        }
-        return true;
-      }
-      bracketDepth--;
-    } else if (char === ')') {
-      parenDepth++;
-    } else if (char === '(') {
-      if (parenDepth === 0) {
-        // We've exited a paren going backward. For `begin`, continue scanning so that
-        // `arr[(begin:end)]` is recognized: outer `[` makes begin a firstindex.
-        if (keyword === 'begin') {
-          continue;
-        }
+    if (enclosing.type === '(') {
+      // Inside a parenthesized expression block keywords are valid, so non-`begin`
+      // keywords are not "inside square brackets". `begin` (firstindex) still cares
+      // about an outer indexing bracket (e.g. arr[(begin:end)]), so scan outward
+      if (keyword !== 'begin') {
         return false;
       }
-      parenDepth--;
+      enclosing = callbacks.bracketIndex.enclosing(enclosing.open);
+      continue;
     }
+    // enclosing.type === '[': the keyword is inside square brackets
+    const open = enclosing.open;
+    // If there's a block opener between [ and the keyword, the block expression is valid
+    if (hasUnmatchedBlockOpenerBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks)) {
+      return false;
+    }
+    // Only indexing brackets exclude block keywords, not array construction
+    if (!isIndexingBracket(source, open)) {
+      return false;
+    }
+    // `begin` inside indexing brackets is normally the firstindex keyword. But if the
+    // bracket has no matching `]` (e.g., user editing in progress), treat as a real
+    // block opener so the begin/end pair is detected
+    if (keyword === 'begin') {
+      if (enclosing.close === -1) {
+        return false;
+      }
+      return true;
+    }
+    // Other block keywords inside indexing brackets may form a block expression
+    // if a matching `end` exists before the bracket closes
+    // (e.g., a[quote x = 1 end] — the `quote/end` block evaluates to a value used as the index)
+    if (hasMatchingEndBeforeBracketClose(source, position + keyword.length, excludedRegions, blockOpen, callbacks)) {
+      return false;
+    }
+    return true;
   }
   return false;
 }
