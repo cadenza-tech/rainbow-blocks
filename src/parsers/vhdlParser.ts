@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { BracketIndex } from './bracketIndex';
 import {
   buildCaseInsensitiveKeywordPattern,
   findLastOpenerByType,
@@ -58,6 +59,11 @@ const COMPOUND_END_PATTERN = new RegExp(
 // Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
+// VHDL paren-context checks only care about '()' depth (port maps, generic maps,
+// function calls). A single-kind '(' index behaves identically to a single-kind
+// '()' backward scan, so '[' and '{' are deliberately not tracked.
+const PAREN_OPENERS: ReadonlySet<string> = new Set(['(']);
+
 export class VhdlBlockParser extends BaseBlockParser {
   // Override parse to post-adjust nestLevel for synthetic begin/end bodies inside
   // elsif/else generate chains. The base recalculateNestLevels considers a sibling
@@ -69,6 +75,23 @@ export class VhdlBlockParser extends BaseBlockParser {
     const pairs = super.parse(source);
     this.adjustGenerateBodyNestLevels(pairs);
     return pairs;
+  }
+
+  // Paren index cached per source string. Built lazily on the first paren-context
+  // check of a tokenize pass and reused for every subsequent keyword in the same
+  // source, so the enclosing-paren lookup stays O(log n) instead of rescanning the
+  // source prefix per keyword (which made parsing O(N^2)). Only '(' is tracked.
+  private parenIndexCache: { source: string; index: BracketIndex } | null = null;
+
+  // Returns the paren index for `source`, building it once and caching it by source
+  // identity. Every isInsideParens check in a tokenize pass shares the same index.
+  private getParenIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
+    if (this.parenIndexCache !== null && this.parenIndexCache.source === source) {
+      return this.parenIndexCache.index;
+    }
+    const index = new BracketIndex(source, excludedRegions, PAREN_OPENERS);
+    this.parenIndexCache = { source, index };
+    return index;
   }
 
   // Generate-chain siblings (if/elsif/else generate ... end generate) all close at the
@@ -171,7 +194,7 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
 
     // Reject keywords inside parenthesized expressions (port maps, generic maps, function calls)
-    if (isInsideParens(source, position, excludedRegions, cb)) {
+    if (isInsideParens(position, this.getParenIndex(source, excludedRegions))) {
       return false;
     }
 
@@ -961,17 +984,18 @@ export class VhdlBlockParser extends BaseBlockParser {
     // (e.g., `if func(end record) > 0 then`), and when/else in conditional signal
     // assignments (sig <= val when cond else val)
     const cb = this.validationCallbacks;
+    const parenIndex = this.getParenIndex(source, excludedRegions);
     return result.filter((token) => {
       // Reject block_close keywords inside parenthesized expressions
       if (token.type === 'block_close') {
-        if (isInsideParens(source, token.startOffset, excludedRegions, cb)) {
+        if (isInsideParens(token.startOffset, parenIndex)) {
           return false;
         }
         return true;
       }
       if (token.type !== 'block_middle') return true;
       // Reject block_middle keywords inside parenthesized expressions (port maps, generic maps, function calls)
-      if (isInsideParens(source, token.startOffset, excludedRegions, cb)) {
+      if (isInsideParens(token.startOffset, parenIndex)) {
         return false;
       }
       const kw = token.value.toLowerCase();

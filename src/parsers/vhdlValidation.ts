@@ -1,6 +1,7 @@
 // VHDL block validation helpers for isValidBlockOpen keyword checks
 
 import type { ExcludedRegion } from '../types';
+import type { BracketIndex } from './bracketIndex';
 
 // Callbacks for base parser methods needed by validation functions
 export interface VhdlValidationCallbacks {
@@ -812,47 +813,19 @@ function isCaseBranchArrow(
 }
 
 // Checks if position is inside parenthesized expression (port map, generic map, function call,
-// VHDL-2008 generic subprogram default declarations). Scans backward from position to find
-// unmatched '('; for VHDL-2008 generic/port clauses, `;` is an item separator inside parens
-// (not a statement boundary). To avoid false-positives from broken/in-progress paren state
-// (e.g., `port map (a => b;` followed by a fresh statement), the candidate `(` is verified
-// to have a matching `)` ahead in the source before declaring "inside parens".
-export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
-  let depth = 0;
-  for (let i = position - 1; i >= 0; i--) {
-    if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
-    const ch = source[i];
-    if (ch === ')') {
-      depth++;
-    } else if (ch === '(') {
-      if (depth === 0) {
-        return hasMatchingCloseParen(source, i, position, excludedRegions, callbacks);
-      }
-      depth--;
-    }
-  }
-  return false;
-}
-
-// Returns true when the '(' at openPos has a matching ')' somewhere after `position`.
-function hasMatchingCloseParen(
-  source: string,
-  openPos: number,
-  position: number,
-  excludedRegions: ExcludedRegion[],
-  callbacks: VhdlValidationCallbacks
-): boolean {
-  let depth = 1;
-  for (let j = openPos + 1; j < source.length; j++) {
-    if (callbacks.isInExcludedRegion(j, excludedRegions)) continue;
-    const ch = source[j];
-    if (ch === '(') depth++;
-    else if (ch === ')') {
-      depth--;
-      if (depth === 0) return j > position;
-    }
-  }
-  return false;
+// VHDL-2008 generic subprogram default declarations). Uses a pre-computed BracketIndex
+// (built once per parse, `()` only) to find the innermost enclosing `(` span in O(log n)
+// instead of rescanning the source prefix per keyword. To avoid false-positives from
+// broken/in-progress paren state (e.g., `port map (a => b;` followed by a fresh statement),
+// the enclosing `(` is required to have a matching `)` strictly after `position`.
+//
+// IMPORTANT: `span.close === -1` marks an enclosing `(` that is never closed. Such an
+// unclosed `(` must NOT count as "inside parens" — `-1 > position` is false, which is
+// exactly the behavior of the previous `hasMatchingCloseParen` (it returned false when
+// no matching `)` was found). This `-1` interpretation is load-bearing for parity.
+export function isInsideParens(position: number, parenIndex: BracketIndex): boolean {
+  const span = parenIndex.enclosing(position);
+  return span !== null && span.close > position;
 }
 
 // Strips trailing comment content from a line using excluded regions
