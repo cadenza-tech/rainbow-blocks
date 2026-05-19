@@ -2,6 +2,49 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token, TokenType } from '../types';
 
+// Fenwick tree (binary indexed tree) for prefix-sum queries. 1-indexed: a tree
+// of `size` covers ranks 1..size. recalculateNestLevels uses it to count, in
+// O(log n), how many already-swept pairs have a close offset in a given range
+class FenwickTree {
+  private readonly tree: number[];
+
+  constructor(size: number) {
+    this.tree = new Array<number>(size + 1).fill(0);
+  }
+
+  // Adds `delta` at 1-indexed position `index`
+  add(index: number, delta: number): void {
+    for (let i = index; i < this.tree.length; i += i & -i) {
+      this.tree[i] += delta;
+    }
+  }
+
+  // Returns the sum of values at 1-indexed positions 1..index (0 when index < 1)
+  prefixSum(index: number): number {
+    let sum = 0;
+    for (let i = index; i > 0; i -= i & -i) {
+      sum += this.tree[i];
+    }
+    return sum;
+  }
+}
+
+// Counts how many elements of the ascending-sorted array are strictly less than
+// `value` (lower-bound binary search)
+function countLessThan(sorted: number[], value: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (sorted[mid] < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 export abstract class BaseBlockParser {
   protected abstract readonly keywords: LanguageKeywords;
 
@@ -14,37 +57,121 @@ export abstract class BaseBlockParser {
     return pairs;
   }
 
-  // Recalculate nest levels based on actual matched pairs containment
-  // Fixes incorrect levels caused by unmatched block openers on the stack
+  // Recalculates nest levels from actual matched-pair containment, fixing levels
+  // skewed by unmatched block openers left on the stack. For each pair the nest
+  // level is the count of OTHER pairs that strictly enclose it.
+  //
+  // The naive definition is a doubly-nested loop over pairs (O(P^2)); this gives
+  // the identical result in O(P log P) as `countRaw - disqualified`:
+  //   countRaw     = #{ other : other.open < pair.open && other.close >= pair.close }
+  //   disqualified = #{ other : other.close === pair.close, other has intermediates,
+  //                             other's last intermediate is a block_middle, and that
+  //                             intermediate starts before pair.open }
+  // `disqualified` is the tie-break: a pair opening after another pair's trailing
+  // block_middle section (e.g. VHDL elsif) is a SIBLING, not a child. A trailing
+  // block_open intermediate (e.g. a Verilog `if` merged into an `else`) does NOT
+  // disqualify. Every token of other.intermediates starts after other.open — true
+  // even for the merge-injected tokens in the Verilog/Ada matchBlocks overrides —
+  // so `lastIntermediate.startOffset < pair.open` implies `other.open < pair.open`,
+  // which is why disqualified collapses to a 1-D count and a pair never
+  // disqualifies itself
   private recalculateNestLevels(pairs: BlockPair[]): void {
-    for (const pair of pairs) {
-      let level = 0;
-      for (const other of pairs) {
-        if (
-          other !== pair &&
-          other.openKeyword.startOffset < pair.openKeyword.startOffset &&
-          other.closeKeyword.startOffset >= pair.closeKeyword.startOffset
-        ) {
-          // When sharing the same close offset and pair opens after other's
-          // last intermediate, check the intermediate type to distinguish siblings
-          // from children. block_middle intermediates (e.g., VHDL elsif) are section
-          // boundaries → pair is a sibling. block_open intermediates (e.g., Verilog
-          // if inside else) are sub-block qualifiers → pair is a child.
-          if (
-            other.closeKeyword.startOffset === pair.closeKeyword.startOffset &&
-            other.intermediates.length > 0 &&
-            pair.openKeyword.startOffset > other.intermediates[other.intermediates.length - 1].startOffset
-          ) {
-            const lastIntermediate = other.intermediates[other.intermediates.length - 1];
-            if (lastIntermediate.type === 'block_middle') {
-              continue;
-            }
+    const rawCounts = this.computeRawContainmentCounts(pairs);
+    const disqualifiedCounts = this.computeDisqualifiedCounts(pairs);
+    for (let i = 0; i < pairs.length; i++) {
+      pairs[i].nestLevel = rawCounts[i] - disqualifiedCounts[i];
+    }
+  }
+
+  // For every pair, counts the OTHER pairs with a strictly smaller open offset
+  // and a close offset at or beyond this pair's close offset. A 2-D dominance
+  // count: sweep pairs by ascending open offset and, for each, query a Fenwick
+  // tree keyed by coordinate-compressed close offset. Pairs sharing an open
+  // offset are queried as a run before any of them is inserted, so they never
+  // count one another (the containment test is a strict `<` on open)
+  private computeRawContainmentCounts(pairs: BlockPair[]): number[] {
+    const counts = new Array<number>(pairs.length).fill(0);
+
+    // Coordinate-compress close offsets into 1-based ranks
+    const sortedCloses = [...new Set(pairs.map((p) => p.closeKeyword.startOffset))].sort((a, b) => a - b);
+    const rankByClose = new Map<number, number>();
+    for (let r = 0; r < sortedCloses.length; r++) {
+      rankByClose.set(sortedCloses[r], r + 1);
+    }
+
+    // Pair indices ordered by ascending open offset (the input array is not reordered)
+    const order = [...pairs.keys()].sort((a, b) => pairs[a].openKeyword.startOffset - pairs[b].openKeyword.startOffset);
+
+    const fenwick = new FenwickTree(sortedCloses.length);
+    let insertedCount = 0;
+    let runStart = 0;
+    while (runStart < order.length) {
+      const runOpen = pairs[order[runStart]].openKeyword.startOffset;
+      let runEnd = runStart;
+      while (runEnd < order.length && pairs[order[runEnd]].openKeyword.startOffset === runOpen) {
+        runEnd++;
+      }
+      // Query the whole run against pairs already inserted (strictly smaller open)
+      for (let k = runStart; k < runEnd; k++) {
+        const idx = order[k];
+        // rankByClose has every pair's close offset, so the lookup is always defined
+        const closeRank = rankByClose.get(pairs[idx].closeKeyword.startOffset) as number;
+        // #{ inserted, close >= pair.close } = insertedCount - #{ inserted, close < pair.close }
+        counts[idx] = insertedCount - fenwick.prefixSum(closeRank - 1);
+      }
+      // Then insert the whole run
+      for (let k = runStart; k < runEnd; k++) {
+        const closeRank = rankByClose.get(pairs[order[k]].closeKeyword.startOffset) as number;
+        fenwick.add(closeRank, 1);
+        insertedCount++;
+      }
+      runStart = runEnd;
+    }
+    return counts;
+  }
+
+  // For every pair, counts the tie-break exclusions: OTHER pairs sharing its
+  // close offset whose last intermediate is a block_middle starting before this
+  // pair's open offset. Pairs are grouped by close offset; within each group the
+  // qualifying last-intermediate offsets are sorted once and binary-searched. A
+  // pair never counts itself — its own last intermediate starts after its open
+  private computeDisqualifiedCounts(pairs: BlockPair[]): number[] {
+    const counts = new Array<number>(pairs.length).fill(0);
+
+    // Group pair indices by shared close offset
+    const groupsByClose = new Map<number, number[]>();
+    for (let i = 0; i < pairs.length; i++) {
+      const closeOffset = pairs[i].closeKeyword.startOffset;
+      const group = groupsByClose.get(closeOffset);
+      if (group) {
+        group.push(i);
+      } else {
+        groupsByClose.set(closeOffset, [i]);
+      }
+    }
+
+    for (const group of groupsByClose.values()) {
+      // Last-intermediate start offsets of group members that qualify as tie-break
+      // sources: have intermediates whose last token is a block_middle
+      const qualifyingOffsets: number[] = [];
+      for (const idx of group) {
+        const intermediates = pairs[idx].intermediates;
+        if (intermediates.length > 0) {
+          const last = intermediates[intermediates.length - 1];
+          if (last.type === 'block_middle') {
+            qualifyingOffsets.push(last.startOffset);
           }
-          level++;
         }
       }
-      pair.nestLevel = level;
+      if (qualifyingOffsets.length === 0) {
+        continue;
+      }
+      qualifyingOffsets.sort((a, b) => a - b);
+      for (const idx of group) {
+        counts[idx] = countLessThan(qualifyingOffsets, pairs[idx].openKeyword.startOffset);
+      }
     }
+    return counts;
   }
 
   // Finds regions to exclude from keyword detection (comments, strings, etc)
