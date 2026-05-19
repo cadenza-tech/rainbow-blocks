@@ -1,8 +1,88 @@
 import * as assert from 'node:assert';
+import { isInExcludedRegion } from '../../parsers/parserUtils';
 import { VerilogBlockParser } from '../../parsers/verilogParser';
+import type { ExcludedRegion } from '../../types';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
 import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
+
+// Verbatim copies of the pre-optimization brace/paren scans, kept as the
+// equivalence reference. Before the BracketIndex migration, isInsideBraceExpression
+// and isInsideAssignmentPattern walked the source prefix backward per keyword and
+// isInsideParens scanned the prefix forward from offset 0 per `interface` keyword
+// (both O(N^2)). The regression suites below assert the linearized implementations
+// classify every position identically to these copies on well-formed and
+// malformed input. Do not "fix" these copies — they pin the legacy behavior.
+
+// Legacy: returns true when the `{` at `bracePos` is closed by a matching `}` at
+// or after `position`. Verbatim from verilogParser.ts before the optimization.
+function legacyIsBraceClosedAfter(source: string, bracePos: number, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  let depth = 0;
+  for (let i = bracePos; i < source.length; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) {
+      continue;
+    }
+    const ch = source[i];
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return i >= position;
+      }
+    }
+  }
+  return false;
+}
+
+// Legacy: backward brace-depth scan for `'{...}` assignment patterns.
+// Verbatim from verilogParser.ts before the optimization.
+function legacyIsInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  let braceDepth = 0;
+  for (let i = position - 1; i >= 0; i--) {
+    if (isInExcludedRegion(i, excludedRegions)) {
+      continue;
+    }
+    const ch = source[i];
+    if (ch === '}') {
+      braceDepth++;
+    } else if (ch === '{') {
+      if (braceDepth === 0) {
+        return i > 0 && source[i - 1] === "'" && legacyIsBraceClosedAfter(source, i, position, excludedRegions);
+      }
+      braceDepth--;
+    }
+  }
+  return false;
+}
+
+// Legacy: backward brace-depth scan for any `{...}` brace expression.
+// Verbatim from verilogParser.ts before the optimization.
+function legacyIsInsideBraceExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  let braceDepth = 0;
+  for (let i = position - 1; i >= 0; i--) {
+    if (isInExcludedRegion(i, excludedRegions)) {
+      continue;
+    }
+    const ch = source[i];
+    if (ch === '}') {
+      braceDepth++;
+    } else if (ch === '{') {
+      if (braceDepth === 0) {
+        return legacyIsBraceClosedAfter(source, i, position, excludedRegions);
+      }
+      braceDepth--;
+    }
+  }
+  return false;
+}
+
+// Private-method accessor shape for the parser's brace-context predicates.
+type BraceContextParser = {
+  isInsideBraceExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean;
+  isInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean;
+  getExcludedRegions(source: string): ExcludedRegion[];
+};
 
 suite('VerilogBlockParser Test Suite', () => {
   let parser: VerilogBlockParser;
@@ -3708,6 +3788,122 @@ endmodule`;
       );
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
+  suite('Regression: brace-expression bracket index must not be quadratic', () => {
+    // Bug: isInsideBraceExpression / isInsideAssignmentPattern ran for every
+    // block_open / block_close (and every `default`) keyword. Each call walked the
+    // source prefix backward to offset 0 to locate the enclosing `{`, so total work
+    // was O(N^2) in the number of keywords. A brace-free file with thousands of
+    // module/endmodule pairs blew past the debounce budget. The fix pre-computes a
+    // `{`-only BracketIndex once per parse (cached by source identity) and looks up
+    // the enclosing brace in O(log n).
+    //
+    // The tests below pin the fix from two angles:
+    //   1. position-by-position equivalence with the verbatim legacy backward
+    //      scan, on well-formed and malformed brace nesting;
+    //   2. a wall-clock ceiling the quadratic version blew past by an order of
+    //      magnitude.
+
+    // Asserts the parser's (linearized) brace predicates classify every offset of
+    // `source` identically to the verbatim legacy backward scans.
+    function assertBracePredicateEquivalence(source: string): void {
+      const accessor = parser as unknown as BraceContextParser;
+      const regions = accessor.getExcludedRegions(source);
+      for (let pos = 0; pos <= source.length; pos++) {
+        assert.strictEqual(
+          accessor.isInsideBraceExpression(source, pos, regions),
+          legacyIsInsideBraceExpression(source, pos, regions),
+          `isInsideBraceExpression mismatch at offset ${pos} of ${JSON.stringify(source)}`
+        );
+        assert.strictEqual(
+          accessor.isInsideAssignmentPattern(source, pos, regions),
+          legacyIsInsideAssignmentPattern(source, pos, regions),
+          `isInsideAssignmentPattern mismatch at offset ${pos} of ${JSON.stringify(source)}`
+        );
+      }
+    }
+
+    test('should match the legacy backward scan on well-formed brace expressions', () => {
+      // Concatenation, assignment pattern, nested braces, and brace-free code.
+      const corpus = [
+        'module m;\n  initial begin\n    a = {begin: 1};\n  end\nendmodule',
+        "module m;\n  int x = '{begin: 1, end: 2};\nendmodule",
+        'module m;\n  initial begin\n    a = {outer, {begin}, tail};\n  end\nendmodule',
+        'case (sel)\n  1: a = {default: 1};\n  default: a = 0;\nendcase',
+        'module top;\n  assign y = a & b;\nendmodule'
+      ];
+      for (const source of corpus) {
+        assertBracePredicateEquivalence(source);
+      }
+    });
+
+    test('should match the legacy backward scan on malformed brace nesting', () => {
+      // Unclosed braces, stray closers, crossing brackets, braces inside comments
+      // and strings, and a `}` exactly at the probed position (boundary case).
+      const corpus = [
+        'module top;\n  assign bus = {hi,\nendmodule',
+        'module top;\n  initial begin\n    x = {a, b\n  end\nendmodule',
+        'a } } { begin x end }',
+        '{ a { b } begin x end',
+        "module m; '{ begin x end",
+        '{ ) begin x end }',
+        '{ [ } begin x end ]',
+        'module m;\n  // { begin in a comment }\n  initial begin x end\nendmodule',
+        'module m;\n  string s = "{ begin }";\n  initial begin x end\nendmodule',
+        '{}{}begin',
+        "'{}begin"
+      ];
+      for (const source of corpus) {
+        assertBracePredicateEquivalence(source);
+      }
+    });
+
+    test('should produce identical tokens to the legacy scan for brace-heavy assignment patterns', () => {
+      // End-to-end: the speedup must not change which keywords survive the
+      // brace-context filter. A mix of suppressed (inside braces) and live
+      // (outside braces) keywords.
+      const source = [
+        'module m;',
+        '  initial begin',
+        "    a = '{begin: 1, end: 2};",
+        '    b = {case, endcase};',
+        '    c = {outer, {default}};',
+        '  end',
+        'endmodule'
+      ].join('\n');
+      const tokens = parser.getTokens(source);
+      // Only the real `initial begin` ... `end` survive; every keyword inside a
+      // `{...}` brace is suppressed.
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'initial', 'begin', 'end', 'endmodule']
+      );
+      assertBlockCount(parser.parse(source), 3);
+    });
+
+    test('should parse 30000 brace-free orphan endmodule tokens well under the debounce budget', () => {
+      // isInsideBraceExpression runs for every block_open / block_close token.
+      // Pre-fix, a brace-free file made each call scan the whole source prefix
+      // backward, so 60000 keywords cost O(N^2) (measured ~12s at this size). The
+      // bracket-index lookup makes it O(log n) per keyword. Bare `endmodule`
+      // tokens form zero pairs, so the unrelated O(pairs^2) in
+      // recalculateNestLevels stays neutralized and only the
+      // isInsideBraceExpression cost is measured.
+      const warmUp = 'endmodule\n'.repeat(2000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = 'endmodule\n'.repeat(30000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // unmatched close keywords form zero pairs
+      // Linearized parsing finishes in tens of ms; a 4000ms ceiling keeps ample
+      // headroom for CI load and GC pauses while still failing by an order of
+      // magnitude if the O(N^2) backward brace scan returns.
+      assert.ok(elapsed < 4000, `30000-endmodule parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) brace scan regression)`);
     });
   });
 
