@@ -2,6 +2,7 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
+import { BracketIndex } from './bracketIndex';
 import {
   hasDollarAdjacent,
   matchAttribute,
@@ -204,11 +205,30 @@ const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set(['localparam', 'parame
 const CASE_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez', 'randcase']);
 
 export class VerilogBlockParser extends BaseBlockParser {
+  // Brace index cached per source string. Built lazily on the first `{}`
+  // context check of a tokenize pass and reused for every subsequent keyword in
+  // the same source, so the enclosing-brace lookup stays O(log n) instead of
+  // rescanning the prefix per keyword (which made parsing O(N^2)).
+  private braceIndexCache: { source: string; index: BracketIndex } | null = null;
+
   private get validationCallbacks(): VerilogValidationCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
       findExcludedRegionAt: (pos, regions) => this.findExcludedRegionAt(pos, regions)
     };
+  }
+
+  // Returns the brace-only index for `source`, building it once and caching it
+  // by source identity. Tracks only `{` so the index matches a single-kind `{}`
+  // backward scan exactly. Every `{}` context check in a tokenize pass shares
+  // the same index, keeping enclosing-brace lookups O(log n).
+  private getBraceIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
+    if (this.braceIndexCache !== null && this.braceIndexCache.source === source) {
+      return this.braceIndexCache.index;
+    }
+    const index = new BracketIndex(source, excludedRegions, new Set(['{']));
+    this.braceIndexCache = { source, index };
+    return index;
   }
 
   protected readonly keywords: LanguageKeywords = {
@@ -529,77 +549,38 @@ export class VerilogBlockParser extends BaseBlockParser {
     return j < source.length && source[j] === ';';
   }
 
-  // Returns true when the `{` at `bracePos` is closed by a matching `}` at or after
-  // `position`. An unclosed `{` (an incomplete concatenation/assignment pattern still
-  // being typed) is NOT a real brace expression: treating `position` as "inside" it
-  // would suppress every later block keyword in the file. Per the best-effort parsing
-  // principle, only a properly closed `{...}` brace context should suppress keywords.
-  private isBraceClosedAfter(source: string, bracePos: number, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let depth = 0;
-    for (let i = bracePos; i < source.length; i++) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        continue;
-      }
-      const ch = source[i];
-      if (ch === '{') {
-        depth++;
-      } else if (ch === '}') {
-        depth--;
-        if (depth === 0) {
-          return i >= position;
-        }
-      }
-    }
-    return false;
-  }
-
-  // Detects whether position is inside a SystemVerilog assignment pattern: `'{...}`
-  // Walks back tracking brace depth; returns true when the innermost unmatched `{` is
-  // preceded by `'` AND is closed by a matching `}` at or after `position`.
-  private isInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let braceDepth = 0;
-    for (let i = position - 1; i >= 0; i--) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        continue;
-      }
-      const ch = source[i];
-      if (ch === '}') {
-        braceDepth++;
-      } else if (ch === '{') {
-        if (braceDepth === 0) {
-          // Innermost unmatched `{` — check for preceding `'` and that the brace
-          // is actually closed after `position` (an unclosed brace is incomplete).
-          return i > 0 && source[i - 1] === "'" && this.isBraceClosedAfter(source, i, position, excludedRegions);
-        }
-        braceDepth--;
-      }
-    }
-    return false;
-  }
-
   // Detects whether position is inside any `{...}` brace expression, regardless of
   // whether the brace is preceded by an apostrophe. This includes concatenation
   // operators (`{a, b, c}`), streaming operators, and any expression context where
   // SystemVerilog block keywords cannot legitimately appear as control-flow openers.
-  // Walks back tracking brace depth; returns true at the innermost unmatched `{`
-  // only when that `{` is closed by a matching `}` at or after `position`.
+  //
+  // The enclosing `{` is looked up in O(log n) via the brace index. An unclosed `{`
+  // (an incomplete concatenation/assignment pattern still being typed) reports
+  // `close === -1`: treating `position` as "inside" it would suppress every later
+  // block keyword in the file, so per the best-effort parsing principle only a
+  // properly closed `{...}` brace context suppresses keywords.
+  //
+  // Predicate `span.close >= position` is intentionally inclusive (a brace closing
+  // exactly AT `position` still counts as enclosing it). This non-strict bound
+  // verbatim reproduces the legacy backward scan's `i >= position` test and is
+  // deliberately asymmetric with the `()`-depth `isInsideParens` check, which uses
+  // a strict `>`; do not "normalize" the two.
   private isInsideBraceExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let braceDepth = 0;
-    for (let i = position - 1; i >= 0; i--) {
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        continue;
-      }
-      const ch = source[i];
-      if (ch === '}') {
-        braceDepth++;
-      } else if (ch === '{') {
-        if (braceDepth === 0) {
-          return this.isBraceClosedAfter(source, i, position, excludedRegions);
-        }
-        braceDepth--;
-      }
-    }
-    return false;
+    const span = this.getBraceIndex(source, excludedRegions).enclosing(position);
+    return span !== null && span.close >= position;
+  }
+
+  // Detects whether position is inside a SystemVerilog assignment pattern: `'{...}`.
+  // Same enclosing-brace lookup as isInsideBraceExpression, with the extra
+  // requirement that the enclosing `{` is immediately preceded by an apostrophe.
+  //
+  // `source[span.open - 1]` is referenced unconditionally (guarded only by
+  // `span.open > 0`), matching the legacy scan which read `source[i - 1]` without
+  // an excluded-region check. Adding such a check here would diverge from the
+  // legacy behavior, so it is intentionally omitted.
+  private isInsideAssignmentPattern(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const span = this.getBraceIndex(source, excludedRegions).enclosing(position);
+    return span !== null && span.close >= position && span.open > 0 && source[span.open - 1] === "'";
   }
 
   // Returns true when the keyword at `position` follows a label colon whose label
