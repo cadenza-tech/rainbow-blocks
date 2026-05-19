@@ -1,4 +1,5 @@
 import * as assert from 'node:assert';
+import { performance } from 'node:perf_hooks';
 import { JuliaBlockParser } from '../../parsers/juliaParser';
 import {
   assertBlockCount,
@@ -4685,6 +4686,55 @@ end`;
         pairs.filter((p) => p.openKeyword.value === 'begin'),
         2
       );
+    });
+
+    test('should parse 56000 top-level for openers without quadratic slowdown', () => {
+      // isInsideParentheses runs for every `for`. Pre-fix it scanned the source
+      // prefix backward to offset 0 for any `for` not inside a bracket, making
+      // parsing O(N^2) (tens of seconds at this size). The bracket-index lookup
+      // makes it O(log n) per keyword. N unclosed `for` openers form zero pairs,
+      // so the unrelated O(pairs^2) in recalculateNestLevels stays neutralized.
+      const warmUp = 'for\n'.repeat(2000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = 'for\n'.repeat(56000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // unclosed openers form zero pairs
+      // Linearized parsing finishes well under 100ms; a 4000ms ceiling keeps
+      // ~50x headroom for CI load and GC pauses while still failing by an order
+      // of magnitude if the O(N^2) backward scan returns.
+      assert.ok(elapsed < 4000, `56000-for parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) isInsideParentheses regression)`);
+    });
+
+    test('should parse 76000 top-level if openers without quadratic slowdown', () => {
+      // isGeneratorFilterIf runs for every `if`. Pre-fix it scanned the source
+      // prefix backward to offset 0 for any `if` not inside parentheses, making
+      // parsing O(N^2). The bracket-index lookup makes it O(log n) per keyword.
+      const warmUp = 'if\n'.repeat(2000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = 'if\n'.repeat(76000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // unclosed openers form zero pairs
+      assert.ok(elapsed < 4000, `76000-if parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) isGeneratorFilterIf regression)`);
+    });
+
+    test('should classify keywords consistently in malformed bracket nesting', () => {
+      // The bracket-index migration keeps best-effort classification on malformed
+      // input. Brackets balanced-and-closed before a keyword leave it at top
+      // level, so a stray inner `(` no longer suppresses a real top-level pair
+      assertSingleBlock(parser.parse('[ ) begin x end ]'), 'begin', 'end');
+      assertSingleBlock(parser.parse('( [ ) for i in 1:3 end'), 'for', 'end');
+      assertSingleBlock(parser.parse('a[)) function g() end]'), 'function', 'end');
+      assertNoBlocks(parser.parse('a[)) function g(]'));
+      // `[(]`: the `]` closes the `[` and the `(` is orphaned, so `for` is top-level
+      assertSingleBlock(parser.parse('[(] for i in 1:3 end'), 'for', 'end');
     });
   });
 
