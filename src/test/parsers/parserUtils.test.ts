@@ -1,6 +1,6 @@
 import * as assert from 'node:assert';
-import { mergeCompoundEndTokens } from '../../parsers/parserUtils';
-import type { Token } from '../../types';
+import { getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from '../../parsers/parserUtils';
+import type { LanguageKeywords, Token } from '../../types';
 
 type CompoundInfo = { keyword: string; length: number; endType: string };
 
@@ -111,5 +111,28 @@ suite('parserUtils mergeCompoundEndTokens', () => {
       assert.strictEqual(merged.length, count * 2, 'each compound absorbs its type token');
       assert.ok(elapsed < 4000, `mergeCompoundEndTokens for ${count} compounds took ${elapsed}ms, expected < 4000ms`);
     });
+  });
+});
+
+// getTokenTypeCaseInsensitive memoizes lowercased keyword sets per LanguageKeywords
+// object. These tests pin case-insensitive classification and the close-before-
+// middle priority that the memoized sets must preserve.
+suite('parserUtils getTokenTypeCaseInsensitive', () => {
+  const keywords: LanguageKeywords = {
+    blockOpen: ['if'],
+    blockClose: ['end'],
+    blockMiddle: ['end', 'else']
+  };
+
+  test('should classify keywords case-insensitively', () => {
+    assert.strictEqual(getTokenTypeCaseInsensitive('IF', keywords), 'block_open');
+    assert.strictEqual(getTokenTypeCaseInsensitive('Else', keywords), 'block_middle');
+    assert.strictEqual(getTokenTypeCaseInsensitive('END', keywords), 'block_close');
+  });
+
+  test('should classify a keyword in both blockClose and blockMiddle as block_close', () => {
+    // 'end' is in both lists; close must win, and the memoized set must keep that
+    assert.strictEqual(getTokenTypeCaseInsensitive('end', keywords), 'block_close');
+    assert.strictEqual(getTokenTypeCaseInsensitive('END', keywords), 'block_close');
   });
 });

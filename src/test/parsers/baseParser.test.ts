@@ -96,6 +96,19 @@ class FixedPairsParser extends BaseBlockParser {
   }
 }
 
+// Parser whose blockClose and blockMiddle both list 'end', to pin getTokenType's
+// close-before-middle classification priority
+class OverlapKeywordParser extends BaseBlockParser {
+  protected readonly keywords: LanguageKeywords = {
+    blockOpen: ['if'] as const,
+    blockClose: ['end'] as const,
+    blockMiddle: ['end', 'else'] as const
+  };
+  protected findExcludedRegions(_source: string): ExcludedRegion[] {
+    return [];
+  }
+}
+
 suite('BaseBlockParser Test Suite', () => {
   let parser: TestBlockParser;
 
@@ -449,6 +462,31 @@ end`;
       const elapsed = Date.now() - start;
       assert.strictEqual(result[count - 1].nestLevel, count - 1, 'innermost pair should be nested count-1 deep');
       assert.ok(elapsed < 4000, `recalculateNestLevels for ${count} pairs took ${elapsed}ms, expected < 4000ms`);
+    });
+  });
+
+  // getTokenType memoizes the close/middle keyword sets on first use. These tests
+  // pin the classification priority (close before middle before open) that the
+  // memoized sets must preserve, including a keyword listed in both sets.
+  suite('Regression: getTokenType keyword classification priority', () => {
+    test('should classify a keyword in both blockClose and blockMiddle as block_close', () => {
+      const overlap = new OverlapKeywordParser();
+      assertTokens(overlap.getTokens('end'), [{ value: 'end', type: 'block_close' }]);
+    });
+
+    test('should classify keywords consistently across repeated tokenize passes', () => {
+      const overlap = new OverlapKeywordParser();
+      // The lazily memoized sets must not change results between passes
+      assertTokens(overlap.getTokens('if else end'), [
+        { value: 'if', type: 'block_open' },
+        { value: 'else', type: 'block_middle' },
+        { value: 'end', type: 'block_close' }
+      ]);
+      assertTokens(overlap.getTokens('end else if'), [
+        { value: 'end', type: 'block_close' },
+        { value: 'else', type: 'block_middle' },
+        { value: 'if', type: 'block_open' }
+      ]);
     });
   });
 });
