@@ -77,6 +77,33 @@ function legacyIsInsideBraceExpression(source: string, position: number, exclude
   return false;
 }
 
+// Legacy: forward `()` -depth scan for `interface` port-list detection.
+// Verbatim from verilogValidation.ts before the optimization.
+function legacyIsInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  let depth = 0;
+  for (let i = 0; i < position; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    if (source[i] === '(') depth++;
+    else if (source[i] === ')') {
+      if (depth > 0) depth--;
+    }
+  }
+  if (depth === 0) return false;
+  let forwardDepth = depth;
+  for (let i = position; i < source.length; i++) {
+    if (isInExcludedRegion(i, excludedRegions)) continue;
+    if (source[i] === '(') {
+      forwardDepth++;
+    } else if (source[i] === ')') {
+      forwardDepth--;
+      if (forwardDepth < depth) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Private-method accessor shape for the parser's brace-context predicates.
 type BraceContextParser = {
   isInsideBraceExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean;
@@ -3904,6 +3931,122 @@ endmodule`;
       // headroom for CI load and GC pauses while still failing by an order of
       // magnitude if the O(N^2) backward brace scan returns.
       assert.ok(elapsed < 4000, `30000-endmodule parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) brace scan regression)`);
+    });
+  });
+
+  suite('Regression: interface isInsideParens bracket index must not be quadratic', () => {
+    // Bug: isInsideParens ran for every `interface` keyword and scanned the source
+    // prefix from offset 0 to compute the paren depth at the keyword, so total work
+    // was O(N^2) in the number of `interface` keywords. The fix pre-computes a
+    // `(`-only BracketIndex once per parse (cached by source identity) and looks up
+    // the enclosing paren in O(log n).
+    //
+    // The tests below pin the fix from two angles:
+    //   1. equivalence with the verbatim legacy forward scan, observed end-to-end
+    //      through the real parser, on well-formed and malformed paren nesting;
+    //   2. a wall-clock ceiling the quadratic version blew past by an order of
+    //      magnitude.
+
+    // Drives the real (linearized) parser and asserts each `interface` keyword is
+    // suppressed exactly when the verbatim legacy forward scan reports it inside a
+    // port-list paren. Each corpus `interface` is in a context where the paren
+    // check is the only thing that can suppress it (no `.`/backtick/`::`/`$`, no
+    // data-type or modifier prefix, not followed by `class`, no `{...}` braces),
+    // so `interface` produces a token iff isInsideParens returned false.
+    function assertParenSuppressionMatchesLegacy(source: string): void {
+      const accessor = parser as unknown as { getExcludedRegions(source: string): ExcludedRegion[] };
+      const regions = accessor.getExcludedRegions(source);
+      const interfaceTokenOffsets = new Set(
+        parser
+          .getTokens(source)
+          .filter((t) => t.value === 'interface')
+          .map((t) => t.startOffset)
+      );
+      const keyword = 'interface';
+      const isWord = (ch: string | undefined): boolean => ch !== undefined && /[a-zA-Z0-9_$]/.test(ch);
+      for (let pos = source.indexOf(keyword); pos !== -1; pos = source.indexOf(keyword, pos + 1)) {
+        // Probe only standalone `interface` keyword occurrences. A substring of a
+        // longer identifier (e.g. the `interface` inside `endinterface`, or
+        // `interfaces`) is not a keyword the tokenizer ever emits, so it is not
+        // part of the equivalence domain.
+        if (isWord(source[pos - 1]) || isWord(source[pos + keyword.length])) {
+          continue;
+        }
+        // Skip occurrences inside excluded regions (comments/strings): they never
+        // produce a token and never reach isInsideParens, so they are not part of
+        // the equivalence domain.
+        if (isInExcludedRegion(pos, regions)) {
+          continue;
+        }
+        const suppressed = !interfaceTokenOffsets.has(pos);
+        assert.strictEqual(
+          suppressed,
+          legacyIsInsideParens(source, pos, regions),
+          `interface suppression at offset ${pos} must match the legacy forward scan for ${JSON.stringify(source)}`
+        );
+      }
+    }
+
+    test('should match the legacy forward scan on well-formed paren nesting', () => {
+      const corpus = [
+        'module test(interface bus);\nendmodule',
+        'module test(\n  input clk,\n  interface bus,\n  output valid\n);\nendmodule',
+        'interface my_if;\n  logic valid;\nendinterface',
+        'module test((interface a), interface b);\nendmodule',
+        'module m;\n  // interface in a comment\n  logic x;\nendmodule'
+      ];
+      for (const source of corpus) {
+        assertParenSuppressionMatchesLegacy(source);
+      }
+    });
+
+    test('should match the legacy forward scan on malformed paren nesting', () => {
+      // Unclosed parens, stray closers, parens inside comments/strings.
+      const corpus = [
+        'foo(\ninterface my_if;\n  logic x;\nendinterface',
+        'module test) interface bus(;\nendmodule',
+        'module test( ) interface free;\nendinterface',
+        'module m;\n  // ( comment\n  interface free;\nendinterface',
+        'module m;\n  string s = "(";\n  interface free;\nendinterface',
+        '((interface deep'
+      ];
+      for (const source of corpus) {
+        assertParenSuppressionMatchesLegacy(source);
+      }
+    });
+
+    test('should produce the expected tokens for interface in and out of port lists', () => {
+      // End-to-end: `interface` inside a closed port list stays suppressed; a
+      // standalone `interface` block still opens.
+      const source = 'module test(interface bus);\nendmodule\ninterface free_if;\n  logic v;\nendinterface';
+      const tokens = parser.getTokens(source).map((t) => t.value);
+      // The port-list `interface` is suppressed; the standalone one survives.
+      assert.deepStrictEqual(tokens, ['module', 'endmodule', 'interface', 'endinterface']);
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'interface' && p.closeKeyword?.value === 'endinterface'));
+    });
+
+    test('should parse 20000 orphan interface openers well under the debounce budget', () => {
+      // isInsideParens runs for every `interface` keyword regardless of pairing.
+      // Pre-fix it scanned the source prefix from offset 0 per keyword, making
+      // parsing O(N^2) (measured ~16s at this size). The bracket-index lookup
+      // makes it O(log n) per keyword. Bare `interface` openers form zero pairs,
+      // so the unrelated O(pairs^2) in recalculateNestLevels stays neutralized and
+      // only the isInsideParens cost is measured.
+      const warmUp = 'interface\n'.repeat(2000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = 'interface\n'.repeat(20000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // unclosed openers form zero pairs
+      // Linearized parsing finishes in tens of ms; a 4000ms ceiling keeps ample
+      // headroom for CI load and GC pauses while still failing by an order of
+      // magnitude if the O(N^2) prefix scan returns.
+      assert.ok(elapsed < 4000, `20000-interface parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) isInsideParens regression)`);
     });
   });
 
