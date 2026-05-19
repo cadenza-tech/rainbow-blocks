@@ -1,6 +1,7 @@
 // Verilog block validation helpers for isValidBlockOpen/isValidBlockClose checks
 
 import type { ExcludedRegion, LanguageKeywords } from '../types';
+import type { BracketIndex } from './bracketIndex';
 import { trySkipLabel } from './verilogHelpers';
 
 // Callbacks for base parser methods needed by validation functions
@@ -510,33 +511,24 @@ export function isOnDpiLine(source: string, position: number, excludedRegions: E
 // (e.g., a port list `(...)`). An unclosed `(` before `position` is incomplete
 // syntax (the user is still typing) and must NOT suppress later keywords: it
 // would otherwise treat every following construct as part of a port list. Only
-// when the innermost enclosing `(` is actually closed by a matching `)` at or
-// after `position` is `position` considered to be inside parentheses.
-export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: VerilogValidationCallbacks): boolean {
-  let depth = 0;
-  for (let i = 0; i < position; i++) {
-    if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
-    if (source[i] === '(') depth++;
-    else if (source[i] === ')') {
-      if (depth > 0) depth--;
-    }
-  }
-  if (depth === 0) return false;
-  // Confirm the innermost enclosing `(` is closed at or after `position`:
-  // scan forward until the depth drops below its value at `position`.
-  let forwardDepth = depth;
-  for (let i = position; i < source.length; i++) {
-    if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
-    if (source[i] === '(') {
-      forwardDepth++;
-    } else if (source[i] === ')') {
-      forwardDepth--;
-      if (forwardDepth < depth) {
-        return true;
-      }
-    }
-  }
-  return false;
+// when the innermost enclosing `(` is actually closed by a matching `)` after
+// `position` is `position` considered to be inside parentheses.
+//
+// `parenIndex` must be a `(`-only BracketIndex. The enclosing `(` is found in
+// O(log n); an unclosed `(` reports `close === -1`, which the strict `> position`
+// predicate rejects (`-1 > position` is false) — load-bearing: that `-1` is how a
+// still-being-typed unclosed paren is excluded.
+//
+// The predicate is strict (`>`) by design. The enclosing-span lookup never
+// returns a span whose close is the keyword's own offset, because the sole
+// caller passes `position` = the start offset of the `interface` keyword and a
+// `)` cannot share that offset; so `> position` and `>= position` are identical
+// here, and the strict form mirrors the intent ("closed strictly after the
+// keyword"). The legacy forward scan started at `position` and would also count
+// a `)` exactly at `position`, but that case is unreachable from this caller.
+export function isInsideParens(position: number, parenIndex: BracketIndex): boolean {
+  const span = parenIndex.enclosing(position);
+  return span !== null && span.close > position;
 }
 
 // case-statement openers. Used to decide whether a label colon belongs to a

@@ -211,6 +211,11 @@ export class VerilogBlockParser extends BaseBlockParser {
   // rescanning the prefix per keyword (which made parsing O(N^2)).
   private braceIndexCache: { source: string; index: BracketIndex } | null = null;
 
+  // Paren index cached per source string. Separate from the brace index because
+  // it tracks only `(` openers; the `interface` port-list check needs `()` depth
+  // independent of `{}` depth.
+  private parenIndexCache: { source: string; index: BracketIndex } | null = null;
+
   private get validationCallbacks(): VerilogValidationCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
@@ -228,6 +233,18 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
     const index = new BracketIndex(source, excludedRegions, new Set(['{']));
     this.braceIndexCache = { source, index };
+    return index;
+  }
+
+  // Returns the paren-only index for `source`, building it once and caching it
+  // by source identity. Tracks only `(` so the index matches a single-kind `()`
+  // forward scan exactly. Used by the `interface` port-list check.
+  private getParenIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
+    if (this.parenIndexCache !== null && this.parenIndexCache.source === source) {
+      return this.parenIndexCache.index;
+    }
+    const index = new BracketIndex(source, excludedRegions, new Set(['(']));
+    this.parenIndexCache = { source, index };
     return index;
   }
 
@@ -705,7 +722,7 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject interface used as port type inside parenthesized port list
-    if (keyword === 'interface' && isInsideParens(source, position, excludedRegions, this.validationCallbacks)) {
+    if (keyword === 'interface' && isInsideParens(position, this.getParenIndex(source, excludedRegions))) {
       return false;
     }
 
