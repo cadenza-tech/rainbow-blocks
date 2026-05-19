@@ -3514,5 +3514,99 @@ end package;`;
     });
   });
 
+  // Bug: isValidForOpen and isValidLoopOpen each sliced the entire source prefix
+  // (`source.slice(0, position)`) on every `for` / `loop` keyword, even though the
+  // scan only inspects a bounded number of preceding lines. That made parsing
+  // O(N^2). The fix slices only a bounded line window before the keyword. The tests
+  // below verify the window slicing preserves absolute offsets (pairing results are
+  // unchanged, especially with parens / comments / strings on the lines just above)
+  // and pins the linearization with a timing ceiling.
+  suite('Regression 2026-05-20: VHDL loop and for validation window slicing', () => {
+    test('should still reject for in a multi-line wait statement above the loop', () => {
+      // The window must reach the `wait` line above so the `for` is recognized as
+      // part of `wait ... for <time>` (a timing statement, not a loop prefix).
+      const source = 'process\nbegin\n  wait\n    on sig\n    for 10 ns;\n  null;\nend process;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'process', 'end process');
+    });
+
+    test('should keep a genuine for-loop after adversarial paren/comment/string lines', () => {
+      // Lines just above the for-loop carry parens, a comment, and a string — the
+      // window slice must keep absolute offsets correct so the loop still pairs.
+      const source = [
+        'process',
+        'begin',
+        '  x <= f(a, b);  -- a call with ( parens )',
+        '  msg <= "text with ( unbalanced paren";',
+        '  for i in 0 to 7 loop',
+        '    y(i) <= x(i);',
+        '  end loop;',
+        'end process;'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'process');
+      findBlock(pairs, 'for');
+    });
+
+    test('should reject for binding clause split across many lines above', () => {
+      // `use entity ... for` binding: the `for` is not a block opener. The window
+      // must span the lines back to `use entity` for the rejection to fire.
+      const source = ['configuration cfg of e is', '  use entity', '    work.comp(rtl)', '    for all : comp', 'end configuration;'].join('\n');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'configuration', 'end configuration');
+    });
+
+    test('should pair nested for-loops separated by many blank lines', () => {
+      // Blank lines between the outer for and the inner loop exercise the
+      // window-relative line walk; absolute offsets must stay correct.
+      const source = [
+        'process',
+        'begin',
+        '  for i in 0 to 3 loop',
+        '',
+        '',
+        '',
+        '    for j in 0 to 3 loop',
+        '      a <= b;',
+        '    end loop;',
+        '  end loop;',
+        'end process;'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'process');
+      assertBlockCount(
+        pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'for'),
+        2
+      );
+    });
+
+    test('should parse 16000 for/loop openers without quadratic slowdown', () => {
+      // Alternating `for` / `loop` openers. isValidLoopOpen runs for every `loop`
+      // (and recursively calls isValidForOpen for the preceding `for`); isValidForOpen
+      // runs for every `for`. Pre-fix, each call sliced the whole source prefix
+      // (`source.slice(0, position)`), making parsing O(N^2) — the legacy run measured
+      // ~78s at this size. The bounded line window keeps each scan O(window).
+      //
+      // No `end` keywords, so zero pairs form; that neutralizes the unrelated
+      // O(pairs^2) term in the base recalculateNestLevels and isolates the
+      // prefix-scan cost (same isolation tactic as the Julia bracket-index suite).
+      const warmUp = 'for\nloop\n'.repeat(1000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = 'for\nloop\n'.repeat(16000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // openers without any `end` form zero pairs
+      // Linearized parsing finishes in a few hundred ms; a 4000ms ceiling keeps
+      // headroom for coverage instrumentation and CI jitter while still failing by
+      // an order of magnitude if the O(N^2) full-prefix slice returns.
+      assert.ok(elapsed < 4000, `16000 for/loop parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) prefix-scan regression)`);
+    });
+  });
+
   generateCommonTests(config);
 });
