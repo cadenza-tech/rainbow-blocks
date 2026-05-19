@@ -212,6 +212,22 @@ export function findLineStart(source: string, pos: number): number {
   return 0;
 }
 
+// Returns the largest element of the ascending-sorted array strictly less than
+// `value`, or -1 when no element is smaller
+function largestLessThan(sorted: number[], value: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (sorted[mid] < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo > 0 ? sorted[lo - 1] : -1;
+}
+
 // Merge compound end keywords (e.g., "end if", "end loop") into single tokens
 // Used by Ada, VHDL, and Fortran for compound close keyword handling
 export function mergeCompoundEndTokens(
@@ -220,6 +236,13 @@ export function mergeCompoundEndTokens(
 ): { tokens: Token[]; processedPositions: Set<number> } {
   const result: Token[] = [];
   const processedPositions = new Set<number>();
+
+  // Compound spans [endPos, endPos + length) never overlap: each starts at a
+  // distinct `end` token and stops within the trailing type keyword, so any
+  // token is covered by at most one compound. Sort the compound start offsets
+  // once and binary-search the single candidate per token, instead of scanning
+  // every compound position for every token (which made this O(T*M))
+  const sortedCompoundStarts = [...compoundEndPositions.keys()].sort((a, b) => a - b);
 
   for (const token of tokens) {
     // Check if this token is the start of a compound end
@@ -236,12 +259,15 @@ export function mergeCompoundEndTokens(
       continue;
     }
 
-    // Check if this token should be skipped (it's the type part of compound end)
+    // Check if this token is the type part of a compound end (e.g. the `if` in
+    // `end if`). Only the nearest compound starting strictly before the token
+    // can cover it, since compound spans never overlap
     let shouldSkip = false;
-    for (const [endPos, comp] of compoundEndPositions) {
-      if (token.startOffset > endPos && token.startOffset < endPos + comp.length && token.value.toLowerCase() === comp.endType) {
+    const candidateStart = largestLessThan(sortedCompoundStarts, token.startOffset);
+    if (candidateStart !== -1) {
+      const comp = compoundEndPositions.get(candidateStart);
+      if (comp !== undefined && token.startOffset < candidateStart + comp.length && token.value.toLowerCase() === comp.endType) {
         shouldSkip = true;
-        break;
       }
     }
 
