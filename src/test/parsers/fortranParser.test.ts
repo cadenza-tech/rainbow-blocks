@@ -5375,6 +5375,50 @@ end if`;
     });
   });
 
+  suite('Regression: labeled DO across continuation line is not a block opener', () => {
+    // Fortran 77 labeled DO loops (`do <label> i = 1, n`) close at a labeled
+    // `continue` (or other) statement, not `end do`. The parser conservatively
+    // rejects labeled-DO as a block opener so it does not steal an unrelated
+    // `end do`. When the label is on a continuation line (`do &\n  100 i = 1, n`),
+    // the label must still be recognized so the labeled DO is rejected.
+    test('should reject labeled DO when the label is on a continuation line', () => {
+      const source = `program test
+  do &
+    100 i = 1, 10
+  do j = 1, 5
+    print *, j
+  end do
+  end do
+  100 continue
+end program`;
+      const pairs = parser.parse(source);
+      // Expected: only program -> end program and the inner do j=1,5 -> end do.
+      // The labeled DO on the continuation line must not produce an opener that
+      // steals the outer `end do` and orphans the real labeled-DO terminator.
+      assertBlockCount(pairs, 2);
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(doBlock.openKeyword.line, 3, 'do pair must open at the inner `do j = 1, 5`, not the labeled DO with continuation');
+    });
+
+    test('should reject labeled DO when the label is on a continuation line across blank/comment lines', () => {
+      const source = `program test
+  do &
+    ! comment
+    &
+    200 i = 1, 10
+  do j = 1, 5
+    print *, j
+  end do
+  end do
+  200 continue
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(doBlock.openKeyword.line, 5, 'do pair must open at the inner `do j = 1, 5`, not the labeled DO across blank/comment lines');
+    });
+  });
+
   suite('Regression: procedure-introducer name split across continuation line', () => {
     // When a procedure-introducer (program/module/subroutine/function/...) is
     // split from its name by `&\n`, the name is still an identifier even when it
