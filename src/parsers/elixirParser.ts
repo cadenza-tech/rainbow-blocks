@@ -375,6 +375,13 @@ export class ElixirBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Reject middle keywords that are function names being defined after a definition
+      // keyword (def/defp/defmacro/...). e.g. `def rescue do ... end` defines a function named
+      // `rescue`; the rescue token is an identifier, not a try-block branch. Symmetric with
+      // the block_open path handled by isFunctionNameAfterDefinitionKeyword via isValidBlockOpen.
+      if (token.type === 'block_middle' && this.isFunctionNameAfterDefinitionKeyword(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       // Reject middle keywords preceded by '..' range operator (e.g., 1..else)
       if (token.type === 'block_middle' && token.startOffset >= 2 && source[token.startOffset - 1] === '.' && source[token.startOffset - 2] === '.') {
         return false;
