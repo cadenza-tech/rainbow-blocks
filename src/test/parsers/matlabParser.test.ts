@@ -2312,6 +2312,109 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-21: statement keyword followed by prefix-capable operator is not block_open', () => {
+    // `try`/`spmd`/`classdef` take no expression in their header — `try` starts a block
+    // immediately, `spmd` allows a parenthesised worker-count, and `classdef` takes a name.
+    // None of them can legitimately be followed by a prefix-capable operator (`+ - ~ !`),
+    // so such forms (`try + 1`) are invalid MATLAB and must not register as block openers.
+    // If they did, the keyword would consume a real `end` belonging to an outer block.
+    // `if`/`while`/`switch` take an expression that legitimately can start with a unary
+    // `+ - ~ !` (e.g. `if ~isempty(x)`), so they remain unaffected.
+    test('should not treat try followed by + as block_open', () => {
+      // `try + 1` is invalid MATLAB: `try` does not take an expression after it.
+      // Lines: 0 = function foo(), 1 = try + 1, 2 = y = 2;, 3 = end.
+      const source = 'function foo()\n  try + 1\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should pair with the outer end');
+    });
+
+    test('should not treat try followed by - as block_open', () => {
+      const source = 'function foo()\n  try - 1\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat try followed by ~ as block_open', () => {
+      const source = 'function foo()\n  try ~x\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat try followed by ! as block_open', () => {
+      const source = 'function foo()\n  try !cmd\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat spmd followed by + as block_open', () => {
+      const source = 'function foo()\n  spmd + 1\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat spmd followed by ~ as block_open', () => {
+      const source = 'function foo()\n  spmd ~x\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat classdef followed by + as block_open', () => {
+      const source = 'function foo()\n  classdef + 1\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat classdef followed by - as block_open', () => {
+      const source = 'function foo()\n  classdef - 1\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat real try as block opener', () => {
+      // Sanity check: real try block (no operator following) must remain a block opener.
+      const source = 'function foo()\n  try\n    y = 1;\n  catch err\n    y = 2;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assert.strictEqual(tryBlock.openKeyword.line, 1);
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should still treat real spmd block as block opener', () => {
+      // Sanity check: real spmd block must remain a block opener.
+      const source = 'function foo()\n  spmd\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const spmdBlock = findBlock(pairs, 'spmd');
+      assert.strictEqual(spmdBlock.openKeyword.line, 1);
+    });
+
+    test('should still treat real classdef as block opener', () => {
+      // Sanity check: real classdef block must remain a block opener.
+      const source = 'classdef MyClass\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+
+    test('should still treat if followed by ~ (unary NOT) as block opener', () => {
+      // Sanity check: `if ~isempty(x)` is a legitimate expression-bearing block opener.
+      const source = 'function foo()\n  if ~isempty(x)\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.openKeyword.line, 1);
+    });
+
+    test('should still treat while followed by ~ (unary NOT) as block opener', () => {
+      const source = 'function foo()\n  while ~done\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const whileBlock = findBlock(pairs, 'while');
+      assert.strictEqual(whileBlock.openKeyword.line, 1);
+    });
+  });
+
   suite('Regression 2026-05-16: end followed by compound assignment is not block_close', () => {
     test('should not treat end followed by += as block close', () => {
       // `end += 1;` compound-assigns the reserved word `end` as a variable — invalid
