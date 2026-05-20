@@ -365,14 +365,22 @@ export class LuaBlockParser extends BaseBlockParser {
           break;
 
         case 'block_middle': {
-          // then/else/elseif are if-block section boundaries; a `repeat` block
-          // cannot own them. If a repeat is open on top of the stack, route the
-          // middle keyword to the topmost non-repeat opener instead, mirroring
-          // how `end` skips `repeat` to close the block below it.
+          // then/else/elseif are if-block section boundaries and only belong
+          // to an `if` opener. They cannot be owned by while/for/function/
+          // do/repeat. (`elseif` itself is classified as block_middle, never
+          // block_open, so the stack only ever holds `if` as a valid host.)
+          // We route the middle keyword to the topmost non-repeat opener
+          // (mirroring how `end` skips `repeat` to close the block below it)
+          // and only attach it when that opener is `if`; otherwise the
+          // keyword is invalid Lua and is dropped silently. Dropping (rather
+          // than force-pairing) realises the "ベストエフォート・パーシング"
+          // principle: an invalid middle keyword leaves the surrounding
+          // block uncoloured rather than mislabelling an unrelated block's
+          // intermediates.
           const middleIndex = findLastNonRepeatIndex(stack);
-          if (middleIndex >= 0) {
-            stack[middleIndex].intermediates.push(token);
-          }
+          if (middleIndex < 0) break;
+          if (stack[middleIndex].token.value !== 'if') break;
+          stack[middleIndex].intermediates.push(token);
           break;
         }
 
