@@ -600,8 +600,16 @@ export class PascalBlockParser extends BaseBlockParser {
   }
 
   // Forward-validates a candidate generic opening '<' at openPos: scans forward balancing
-  // nested '< >' (skipping '>=' / '<=' / '>>' / '<<' operators and excluded regions) and
-  // returns true only when the matching '>' is found at or after enclosePos.
+  // nested '< >' and returns true only when the matching '>' is found at or after
+  // enclosePos. Skips '>=' / '<=' comparison operators and excluded regions.
+  //
+  // Importantly, '>>' is NOT skipped as a shift operator here: inside generic context the
+  // two characters are independent generic-close brackets (the Java/C++/C# `Map<List<X>>`
+  // convention), and skipping them as a unit prevents the outer '<' from finding its
+  // matching '>'. The next iteration naturally processes the second '>' as another
+  // generic close. Likewise '<<' is not skipped on the open side. Bare comparison '<' in
+  // a prior statement still rejects safely because its forward scan finds no matching '>'
+  // at or after the keyword being validated.
   private hasMatchingGenericClose(source: string, openPos: number, enclosePos: number, excludedRegions: ExcludedRegion[]): boolean {
     let depth = 1;
     let i = openPos + 1;
@@ -615,15 +623,15 @@ export class PascalBlockParser extends BaseBlockParser {
       }
       const ch = source[i];
       if (ch === '<') {
-        // Skip '<=' (comparison) and '<<' (shift)
-        if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '<')) {
+        // Skip '<=' comparison; treat '<<' as two independent generic opens.
+        if (i + 1 < source.length && source[i + 1] === '=') {
           i += 2;
           continue;
         }
         depth++;
       } else if (ch === '>') {
-        // Skip '>=' (comparison) and '>>' (shift)
-        if (i + 1 < source.length && (source[i + 1] === '=' || source[i + 1] === '>')) {
+        // Skip '>=' comparison; treat '>>' as two independent generic closes.
+        if (i + 1 < source.length && source[i + 1] === '=') {
           i += 2;
           continue;
         }
