@@ -585,7 +585,8 @@ export class VhdlBlockParser extends BaseBlockParser {
   private findCommentSeparatedCompoundEnds(
     source: string,
     excludedRegions: ExcludedRegion[],
-    alreadyMatched: Set<number>
+    alreadyMatched: Set<number>,
+    rejectedCompoundTypePositions: Set<number>
   ): Map<number, { keyword: string; length: number; endType: string }> {
     const result = new Map<number, { keyword: string; length: number; endType: string }>();
     const endPattern = /\bend\b/gi;
@@ -632,6 +633,7 @@ export class VhdlBlockParser extends BaseBlockParser {
       // followed by `body`, and `postponed` by `process`, within the same valid gap.
       let endType = firstWord;
       let typeEnd = i;
+      let trailingTypeStart = typeStart;
       if (firstWord === 'package' || firstWord === 'protected' || firstWord === 'postponed') {
         let j = i;
         while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
@@ -641,13 +643,29 @@ export class VhdlBlockParser extends BaseBlockParser {
         if ((firstWord !== 'postponed' && secondWord === 'body') || (firstWord === 'postponed' && secondWord === 'process')) {
           endType = firstWord === 'postponed' ? 'process' : firstWord;
           typeEnd = j;
+          // For `postponed process`, the trailing reserved word that would be tokenized as
+          // a stray block_open is `process` (the second word). For `package body` /
+          // `protected body`, the trailing word `body` is not a keyword so this only
+          // matters for `postponed process`.
+          if (firstWord === 'postponed') {
+            trailingTypeStart = secondStart;
+          }
         } else if (firstWord === 'postponed') {
           // `postponed` alone is not a compound end type.
           continue;
         }
       }
       if (!COMPOUND_END_TYPES.includes(endType)) continue;
-      if (!this.isValidBlockClose(source.slice(endStart, typeEnd), source, endStart, excludedRegions)) continue;
+      if (!this.isValidBlockClose(source.slice(endStart, typeEnd), source, endStart, excludedRegions)) {
+        // Mirror the same-line regex path: when a comment-separated compound end is rejected
+        // (typically because `end` is dot-preceded like `inst.end /* c */ process`), record
+        // the offset of the trailing reserved type word so the keyword loop in tokenize()
+        // skips it instead of tokenizing it as a fresh block_open. Without this, the stray
+        // opener absorbs the surrounding block's `end <type>` via LIFO matching and breaks
+        // pairing of the enclosing block.
+        rejectedCompoundTypePositions.add(trailingTypeStart);
+        continue;
+      }
       result.set(endStart, {
         keyword: source.slice(endStart, typeEnd),
         length: typeEnd - endStart,
@@ -744,7 +762,15 @@ export class VhdlBlockParser extends BaseBlockParser {
     // Supplement with compound ends whose `end` and type keyword are separated by
     // block comments (e.g. `end /* c */ process`). COMPOUND_END_PATTERN only allows
     // spaces/tabs between the two words, so these forms are detected here separately.
-    const commentSeparated = this.findCommentSeparatedCompoundEnds(source, excludedRegions, new Set(compoundEndPositions.keys()));
+    // Pass `rejectedCompoundTypePositions` so that rejections inside this scan (e.g.
+    // `inst.end /* c */ process`) also contribute their trailing type word to the
+    // skip set, mirroring the same-line regex path above.
+    const commentSeparated = this.findCommentSeparatedCompoundEnds(
+      source,
+      excludedRegions,
+      new Set(compoundEndPositions.keys()),
+      rejectedCompoundTypePositions
+    );
     for (const [pos, info] of commentSeparated) {
       compoundEndPositions.set(pos, info);
     }
