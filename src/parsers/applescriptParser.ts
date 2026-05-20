@@ -1002,6 +1002,20 @@ export class ApplescriptBlockParser extends BaseBlockParser {
             // the full opener string. Handler-name fallbacks (e.g. `on transaction()`)
             // store only the last word as the handler name, so use the last word for
             // handler-name comparison.
+            //
+            // Exception: `using terms from` ends in the generic preposition `from`.
+            // Falling back to `from` would pair `on from()` (a legitimate handler
+            // declaration named `from`) with `end using terms from`, producing a
+            // semantically wrong cross-pair. Per the cost-minimization principle
+            // (CLAUDE.md), suppressing fallback here yields zero orphans for the
+            // most common authoring intent (`on from()` matched by `end from` or
+            // bare `end`) and only forgoes a speculative handler-name pairing for
+            // the unlikely `on using terms from()` form.
+            //
+            // `with timeout` / `with transaction` keep the fallback because their
+            // last word (`timeout` / `transaction`) is a plausible handler name and
+            // existing regression tests pin that behavior.
+            const allowHandlerFallback = expectedOpener !== 'using terms from';
             const handlerNameTarget = expectedOpener.includes(' ') ? (expectedOpener.split(' ').pop() as string) : expectedOpener;
             // Walk the stack from the most recently pushed opener back to the bottom
             // and pair with the first opener that matches either by direct keyword
@@ -1015,7 +1029,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
                 matchIndex = i;
                 break;
               }
-              if ((value === 'on' || value === 'to') && this.handlerName(block) === handlerNameTarget) {
+              if (allowHandlerFallback && (value === 'on' || value === 'to') && this.handlerName(block) === handlerNameTarget) {
                 matchIndex = i;
                 break;
               }
