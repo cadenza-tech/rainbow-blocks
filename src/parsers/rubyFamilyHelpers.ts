@@ -37,7 +37,17 @@ function getMatchingDelimiter(open: string): string | null {
 
 // Determines whether / at pos is a regex start (true) or division operator (false)
 // lastExcludedRegion: the most recently found excluded region (for context-aware scanning)
-export function isRegexStart(source: string, pos: number, regexPrecedingKeywords: ReadonlySet<string>, lastExcludedRegion?: ExcludedRegion): boolean {
+// methodLikeKeywords: optional set of identifier-like keywords (e.g., `p`, `puts`, `raise`)
+// that are method names rather than true control keywords. For these, `/` is treated as
+// regex only when the method-call spacing rule applies (space before, no space after);
+// otherwise it stays division (`puts / 2` is division, `puts /re/` is a regex argument).
+export function isRegexStart(
+  source: string,
+  pos: number,
+  regexPrecedingKeywords: ReadonlySet<string>,
+  lastExcludedRegion?: ExcludedRegion,
+  methodLikeKeywords?: ReadonlySet<string>
+): boolean {
   if (pos === 0) return true;
 
   // Look back for context, skipping whitespace
@@ -109,7 +119,10 @@ export function isRegexStart(source: string, pos: number, regexPrecedingKeywords
       wordStart--;
     }
     const word = source.substring(wordStart, i + 1);
-    if (regexPrecedingKeywords.has(word)) {
+    // True control keywords always force regex interpretation (e.g. `if /re/`).
+    // Method-like identifiers (p, puts, raise, ...) skip this branch and fall through
+    // to the spacing rule so that `p / 2` stays division.
+    if (regexPrecedingKeywords.has(word) && !methodLikeKeywords?.has(word)) {
       return true;
     }
     // Method-call regex argument: `method /regex/`. When an identifier is

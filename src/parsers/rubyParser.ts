@@ -30,7 +30,12 @@ const REGEX_FLAGS_PATTERN = /[imxonesu]/;
 // Valid specifiers for percent literals
 const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrsx]/;
 
-// Keywords after which / starts a regex, not division
+// Keywords after which / starts a regex, not division.
+// Includes true control keywords (`if`, `unless`, ...) plus method-like keywords
+// (`puts`, `p`, `raise`, ...) that often take a regex literal as the first argument.
+// The method-like subset is also listed in METHOD_LIKE_REGEX_KEYWORDS so that
+// `isRegexStart` only treats them as regex starters under the method-call spacing rule
+// (`puts /re/` is regex, `puts / 2` is division).
 const REGEX_PRECEDING_KEYWORDS = new Set([
   'if',
   'unless',
@@ -60,6 +65,11 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
   'rescue',
   'ensure'
 ]);
+
+// Method-like identifiers that double as keywords here but are really method names.
+// For these, `/` after whitespace is division by default; only `ident /regex/` (no
+// space after `/`) is treated as a regex argument.
+const METHOD_LIKE_REGEX_KEYWORDS = new Set(['p', 'pp', 'puts', 'print', 'warn', 'fail', 'abort', 'raise']);
 
 // Open keywords whose blocks can take a `then` clause separator.
 // `then` is only a section boundary for if/unless/while/until/case. In
@@ -820,7 +830,7 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Checks if slash is regex start (not division)
   private isRegexStart(source: string, pos: number): boolean {
-    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS, this._lastExcludedRegion ?? undefined);
+    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS, this._lastExcludedRegion ?? undefined, METHOD_LIKE_REGEX_KEYWORDS);
   }
 
   // Checks if position is inside the last excluded region
