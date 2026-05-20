@@ -4050,5 +4050,43 @@ endmodule`;
     });
   });
 
+  suite('Regression: findPragmaProtectEnd ignores `pragma protect end inside strings and comments', () => {
+    test('should not terminate protect region at `pragma protect end inside double-quoted string', () => {
+      // Bug: findPragmaProtectEnd scans forward for `pragma\b` literally and does not
+      // skip strings or comments. A string or comment containing the text
+      // `` `pragma protect end `` early-terminates the protected region, leaving the
+      // remainder of the file un-excluded.
+      const source = 'module m;\n`pragma protect begin\n"xyz `pragma protect end zzzz"\n`pragma protect end\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const protectStart = source.indexOf('`pragma protect begin');
+      const protectRegion = regions.find((r) => r.start === protectStart);
+      assert.ok(protectRegion, 'protect region should be excluded');
+      // The exclusion must extend to the real `pragma protect end on the last line,
+      // not to the fake one inside the string.
+      const realEnd = source.lastIndexOf('`pragma protect end');
+      assert.ok(protectRegion.end > realEnd, `protect region end ${protectRegion.end} must extend past the real \`pragma protect end at ${realEnd}`);
+    });
+
+    test('should not terminate protect region at `pragma protect end inside block comment', () => {
+      const source = 'module m;\n`pragma protect begin\n/* `pragma protect end */\n`pragma protect end\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const protectStart = source.indexOf('`pragma protect begin');
+      const protectRegion = regions.find((r) => r.start === protectStart);
+      assert.ok(protectRegion, 'protect region should be excluded');
+      const realEnd = source.lastIndexOf('`pragma protect end');
+      assert.ok(protectRegion.end > realEnd, `protect region end ${protectRegion.end} must extend past the real \`pragma protect end at ${realEnd}`);
+    });
+
+    test('should not terminate protect region at `pragma protect end inside line comment', () => {
+      const source = 'module m;\n`pragma protect begin\n// `pragma protect end\n`pragma protect end\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const protectStart = source.indexOf('`pragma protect begin');
+      const protectRegion = regions.find((r) => r.start === protectStart);
+      assert.ok(protectRegion, 'protect region should be excluded');
+      const realEnd = source.lastIndexOf('`pragma protect end');
+      assert.ok(protectRegion.end > realEnd, `protect region end ${protectRegion.end} must extend past the real \`pragma protect end at ${realEnd}`);
+    });
+  });
+
   generateCommonTests(config);
 });
