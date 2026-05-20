@@ -156,6 +156,9 @@ export function isValidProcedureOpen(
 }
 
 // Checks if a position is inside parentheses by scanning backward for unmatched '('
+// Also treats `[` / `]` (Fortran 2003+ array constructors and coarray image selectors)
+// the same as `(` / `)` so a keyword inside `[expr, ...]` or `x[expr]` is recognized as
+// being inside a bracket-grouped expression.
 // Skips characters inside string literals (single/double quoted with doubled-quote escaping)
 // and comments (! to end of line)
 // Follows & continuation lines backward to handle multi-line expressions
@@ -238,8 +241,8 @@ export function isInsideParentheses(source: string, position: number): boolean {
           }
           continue;
         }
-        if (source[s] === '(') rescanDepth++;
-        else if (source[s] === ')') rescanDepth--;
+        if (source[s] === '(' || source[s] === '[') rescanDepth++;
+        else if (source[s] === ')' || source[s] === ']') rescanDepth--;
       }
       // Check if code portion has more ( than can be matched by pending )
       if (rescanDepth > depthBeforeLine) return true;
@@ -268,8 +271,8 @@ export function isInsideParentheses(source: string, position: number): boolean {
       }
       continue;
     }
-    if (char === ')') depth++;
-    else if (char === '(') {
+    if (char === ')' || char === ']') depth++;
+    else if (char === '(' || char === '[') {
       if (depth === 0) return true;
       depth--;
     }
