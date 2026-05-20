@@ -4,6 +4,7 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import {
   collapseContinuationLines,
+  findInlineCommentIndex,
   findLineEnd,
   isAfterDoubleColon,
   isBlockWhereOrForall,
@@ -343,14 +344,16 @@ export class FortranBlockParser extends BaseBlockParser {
   // keyword like `block`, `do`, `where`, `type`, `forall`, `interface`, `enum`,
   // `associate`, `critical`. Without this filter, e.g. `subroutine block(arg)` would
   // produce a spurious `block` opener that steals a later bare `end`.
+  // Also handles continuation lines: `program &\n  block` is a program named `block`,
+  // not a block-construct nested inside `program`. The current physical line before
+  // `position` is extended backward across `&` continuation (skipping comment-only
+  // and blank lines) so the introducer can be matched even when split.
   private isFortranOpenConstructName(source: string, position: number, keyword: string): boolean {
-    const lineStart = findLineStart(source, position);
-    const before = source.slice(lineStart, position);
     const lowerKeyword = keyword.toLowerCase();
     // 'module function/subroutine/procedure' inside a (sub)module body opens a block.
     // Treat the keyword as a real block opener, not as a construct name following 'module '.
     const isModuleSubprogramKeyword = lowerKeyword === 'function' || lowerKeyword === 'subroutine' || lowerKeyword === 'procedure';
-    // Match a procedure-introducer at the tail of `before` (allow trailing whitespace).
+    // Match a procedure-introducer at the tail of the combined text (allow trailing whitespace).
     // Covers: program, module, submodule (with optional parent in parens), subroutine,
     // function, 'module procedure'. When the keyword being tested is itself a
     // module-subprogram keyword (function/subroutine/procedure), require the explicit
@@ -362,7 +365,70 @@ export class FortranBlockParser extends BaseBlockParser {
       `(?:^|[^a-zA-Z0-9_])(?:program|${moduleAlt}|submodule[ \\t]*\\([^)]*\\)|subroutine|function|recursive[ \\t]+(?:subroutine|function)|pure[ \\t]+(?:subroutine|function)|elemental[ \\t]+(?:subroutine|function)|interface|type)[ \\t]+$`,
       'i'
     );
+    const before = this.getLogicalLineBefore(source, position);
     return pattern.test(before);
+  }
+
+  // Builds the logical line text from the start of the (possibly multi-line)
+  // statement up to `position`. Walks backward across `&` continuation lines,
+  // skipping comment-only and blank lines, stripping inline comments and the
+  // trailing `&`. Returns a single string joined with a space so the introducer
+  // regex matches uniformly across continuations.
+  private getLogicalLineBefore(source: string, position: number): string {
+    const lineStart = findLineStart(source, position);
+    let combined = source.slice(lineStart, position);
+    // Only walk back when the current line so far is empty or just `&`(+ws):
+    // the typical shape of a continuation line carrying the name token.
+    if (combined !== '' && !/^[ \t]*&?[ \t]*$/.test(combined)) {
+      return combined;
+    }
+    let prevLineEnd = lineStart - 1;
+    if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+      prevLineEnd--;
+    }
+    while (prevLineEnd >= 0) {
+      const prevLineStart = findLineStart(source, prevLineEnd);
+      let prevLine = source.slice(prevLineStart, prevLineEnd);
+      if (prevLine.endsWith('\r')) {
+        prevLine = prevLine.slice(0, -1);
+      }
+      // Strip inline comment
+      const commentIdx = findInlineCommentIndex(prevLine);
+      if (commentIdx >= 0) {
+        prevLine = prevLine.slice(0, commentIdx);
+      }
+      const trimmed = prevLine.trimEnd();
+      // Skip blank/comment-only lines: continue walking back
+      if (trimmed.length === 0) {
+        prevLineEnd = prevLineStart - 1;
+        if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+          prevLineEnd--;
+        }
+        continue;
+      }
+      // The prior content line must end with `&` to be a continuation
+      if (!trimmed.endsWith('&')) {
+        return combined;
+      }
+      // Strip the trailing `&` and prepend (joined with a space so the regex matches)
+      const contentBeforeAmp = trimmed.slice(0, -1).trimEnd();
+      combined = `${contentBeforeAmp} ${combined.replace(/^[ \t]*&?[ \t]*/, '')}`;
+      // Recheck whether we need to keep walking back: only if `contentBeforeAmp`
+      // is itself a continuation (i.e., its own prior line ends with `&`). For the
+      // procedure-introducer case the introducer keyword should already be present
+      // in `contentBeforeAmp`, so a single hop is normally enough. Continue
+      // walking back when the accumulated text still has no non-continuation
+      // content at the head.
+      prevLineEnd = prevLineStart - 1;
+      if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+        prevLineEnd--;
+      }
+      // Stop walking once we have non-empty content at the head of `combined`
+      if (contentBeforeAmp.trim() !== '') {
+        break;
+      }
+    }
+    return combined;
   }
 
   // Validates 'type': rejects select type guards, type specifiers, continuation patterns
