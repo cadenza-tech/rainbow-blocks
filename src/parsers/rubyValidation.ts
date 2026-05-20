@@ -34,7 +34,10 @@ export function isEndlessMethodDef(source: string, start: number, excludedRegion
   };
   skipWs();
   // Optional receiver: self., Class., obj.
-  const receiverMatch = source.slice(i).match(/^(?:self\.|[A-Z][A-Za-z0-9_]*\.)/);
+  // Ruby class names start with an uppercase/titlecase letter or an "other letter"
+  // codepoint (e.g. CJK ideographs like 日本語), followed by identifier-continuation
+  // characters. Match this Unicode-aware variant in addition to `self.`.
+  const receiverMatch = source.slice(i).match(/^(?:self\.|[\p{Lu}\p{Lt}\p{Lo}][\p{L}\p{M}\p{N}\p{Pc}]*\.)/u);
   if (receiverMatch) {
     i += receiverMatch[0].length;
   }
