@@ -95,10 +95,13 @@ export function isFollowedByCompoundAssignment(source: string, afterPos: number)
 //   * A strictly-binary operator (`* / ^ \ < > & |` or `:`) and the comparison
 //     operators (`== ~= != <= >=`) — these can never start an expression, so the
 //     keyword is the left operand (`while * 2`). Rejected for every keyword.
-//   * For `for`/`parfor` only, also the prefix-capable operators `+ - ~ !` — a
-//     for-header must be `for var = ...`, so it can never start with any operator
-//     (`for + 1`). `if`/`while`/`switch` take an expression that legitimately can
-//     start with a unary `+ - ~ !` (e.g. `if ~isempty(x)`), so those are NOT rejected.
+//   * For `for`/`parfor`/`try`/`spmd`/`classdef` only, also the prefix-capable
+//     operators `+ - ~ !` — a `for` header must be `for var = ...`, and `try`/`spmd`/
+//     `classdef` either take no expression (`try`), an optional parenthesised worker
+//     count (`spmd`), or an identifier name (`classdef`). None of them can legitimately
+//     begin with any operator, so `try + 1` / `spmd ~x` / `classdef + 1` are invalid.
+//     `if`/`while`/`switch` take an expression that legitimately can start with a unary
+//     `+ - ~ !` (e.g. `if ~isempty(x)`), so those are NOT rejected.
 // A single `=` (plain assignment, e.g. `for = 5`) is intentionally NOT handled here —
 // isFollowedBySimpleAssignment covers that variable-name case.
 export function isFollowedByBinaryOperator(source: string, afterPos: number, keyword: string): boolean {
@@ -137,8 +140,14 @@ export function isFollowedByBinaryOperator(source: string, afterPos: number, key
     return true;
   }
   // for/parfor headers must be `for var = ...` and can never start with any operator,
-  // including the prefix-capable `+ - ~ !`.
-  if ((keyword === 'for' || keyword === 'parfor') && (ch === '+' || ch === '-' || ch === '~' || ch === '!')) {
+  // including the prefix-capable `+ - ~ !`. try/spmd/classdef likewise take no
+  // expression in their header (try: nothing, spmd: optional `(n)`, classdef: a name),
+  // so they cannot begin with any operator either. if/while/switch DO take an
+  // expression that can legitimately start with `+ - ~ !`, so they are NOT rejected.
+  if (
+    (keyword === 'for' || keyword === 'parfor' || keyword === 'try' || keyword === 'spmd' || keyword === 'classdef') &&
+    (ch === '+' || ch === '-' || ch === '~' || ch === '!')
+  ) {
     return true;
   }
   return false;
