@@ -4287,6 +4287,31 @@ end`;
       assertSingleBlock(pairs, 'for', 'end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
     });
+
+    test('should not pair if with end on LHS of range expression (end..N)', () => {
+      // `end` is a reserved word and cannot be the LHS of a range either; the inner
+      // `end` in `(end..1)` must not be tokenized as block_close. The outer `if`
+      // block must pair with the trailing `end` on the last line, not the in-range one.
+      const source = 'if cond\n  a = (end..1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end on LHS of exclusive range expression (end...N)', () => {
+      const source = 'if cond\n  a = (end...1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end on LHS of range with whitespace (end ..N)', () => {
+      // Whitespace between `end` and `..` is permitted in Crystal range syntax.
+      const source = 'if cond\n  a = (end ..1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: end in ternary value position should not be tokenized as block_close', () => {
