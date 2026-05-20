@@ -2168,5 +2168,28 @@ end`;
     });
   });
 
+  suite('Regression: do followed by two dots is field access, not a block open', () => {
+    test('should not treat do..x as a do/until opener', () => {
+      // `do..x` is invalid Octave syntax (the `..` token does not exist), but
+      // treating `do` as a block opener leaves it orphan on the stack and
+      // destroys outer block pairing. Reject `do` whenever it is followed by
+      // `.` that does not begin a `...` continuation.
+      const source = 'function f\n  do..x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do..x should not open a block');
+    });
+
+    test('should still reject do.x (single-dot field access) as a block open', () => {
+      // Regression guard: the existing `do.x` rejection must keep working.
+      const source = 'function f\n  do.x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do.x should not open a block');
+    });
+  });
+
   generateCommonTests(config);
 });
