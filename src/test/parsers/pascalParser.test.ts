@@ -3236,6 +3236,26 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-21: try-except-else-else duplicate else must be rejected', () => {
+    test('should reject the second else after try-except-else (only one else intermediate)', () => {
+      // Delphi's try-except-else permits at most one `else` clause. A second `else`
+      // is malformed: previously both were added to the intermediates list, polluting
+      // the structure. Only the first `else` should be recorded.
+      const source = `try
+  Foo;
+except
+  Bar;
+else
+  Baz;
+else
+  Qux;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['except', 'else']);
+    });
+  });
+
   suite('Regression 2026-05-21: nested generic close `>>` must not be treated as shift operator', () => {
     test('should treat record inside nested generic with `>>` close as constraint, not block opener', () => {
       // `function Bar<T: TList<record>>: T;` closes two generic levels with `>>`.
