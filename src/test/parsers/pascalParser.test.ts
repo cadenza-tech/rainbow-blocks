@@ -3236,5 +3236,35 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-21: nested generic close `>>` must not be treated as shift operator', () => {
+    test('should treat record inside nested generic with `>>` close as constraint, not block opener', () => {
+      // `function Bar<T: TList<record>>: T;` closes two generic levels with `>>`.
+      // The forward scan in hasMatchingGenericClose previously skipped `>>` as a
+      // shift operator, so the outer `<` never found its matching `>`. As a result
+      // the `record` constraint was misclassified as a block opener and consumed
+      // the trailing `end`, leaving the enclosing `class` as an orphan.
+      const source = `TFoo = class
+  function Bar<T: TList<record>>: T;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      const recordToken = parser.getTokens(source).find((t) => t.value === 'record');
+      assert.strictEqual(recordToken, undefined, 'record inside generic constraint must not be tokenized as block opener');
+    });
+
+    test('should treat record inside doubly nested generic with `>>>>` close as constraint', () => {
+      // Four-level nested generic with four consecutive `>` closing all levels.
+      // The forward scan must handle any even number of `>` correctly, not just
+      // when odd `>` count happens to leave a leftover for the depth check.
+      const source = `TFoo = class
+  function Bar<T: TA<TB<TC<record>>>>: T;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      const recordToken = parser.getTokens(source).find((t) => t.value === 'record');
+      assert.strictEqual(recordToken, undefined, 'record inside deeply nested generic must not be tokenized as block opener');
+    });
+  });
+
   generateCommonTests(config);
 });
