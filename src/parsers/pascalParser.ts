@@ -1040,6 +1040,14 @@ export class PascalBlockParser extends BaseBlockParser {
         }
       }
 
+      // Filter 'of' used as a case label, e.g. `case X of\n  of: foo;`. A label-position
+      // 'of' is preceded by 'of'/';'/',' and followed by ':' (and not ':=' assign). The
+      // legitimate 'of' immediately following `case X` is not followed by ':' so it
+      // is unaffected by this check.
+      if (type === 'block_middle' && keyword === 'of' && this.isUsedAsCaseLabel(keyword, source, startOffset, excludedRegions)) {
+        continue;
+      }
+
       const { line, column } = this.getLineAndColumn(startOffset, newlinePositions);
 
       tokens.push({
