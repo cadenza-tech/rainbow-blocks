@@ -2875,5 +2875,49 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: multi-line fun in spec context', () => {
+    test('should not treat fun on its own line inside -spec as block opener', () => {
+      // The `fun` token is on a line by itself with the `(...)` following after blank lines.
+      // Existing regex permitted only a single line break, so this `fun` slipped through and
+      // became an orphan block_open that stole the trailing `end`.
+      const source = `-spec foo() ->
+
+  fun
+
+  (() -> ok).
+begin
+  ok.
+end.
+end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat fun followed by blank line and paren inside -type as block', () => {
+      const source = `-type handler() ::
+  fun
+
+  ((atom()) -> ok).
+begin
+  ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat fun across multiple blank lines inside -callback as block', () => {
+      const source = `-callback init(Args) ->
+  {ok, fun
+
+
+    (() -> ok)}.
+begin
+  ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
