@@ -4532,5 +4532,64 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-21: middle keyword used as function name after definition keyword', () => {
+    // A block middle keyword (rescue/else/catch/after) immediately following a definition
+    // keyword (def/defp/defmacro/...) is a function name (identifier), not a try-block branch.
+    // e.g. `def rescue do ... end` defines a function named `rescue`; the `rescue` token must
+    // not be tokenized as a block_middle and attached as an intermediate to the def..end pair.
+    // Symmetric with the block_open case handled by isFunctionNameAfterDefinitionKeyword.
+    test('should treat rescue as a function name in def rescue do/end', () => {
+      const source = 'def rescue do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should treat else as a function name in def else do/end', () => {
+      const source = 'def else do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should treat catch as a function name in def catch do/end', () => {
+      const source = 'def catch do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should treat after as a function name in def after do/end', () => {
+      const source = 'def after do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should treat rescue as a function name in defp rescue(x) do/end', () => {
+      const source = 'defp rescue(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defp', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should treat rescue as a function name in defmacro rescue(x) do/end', () => {
+      const source = 'defmacro rescue(x) do\n  x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmacro', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should still attach rescue as intermediate in a real try..rescue..end block', () => {
+      const source = 'try do\n  :ok\nrescue\n  e -> e\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+    test('should treat rescue as a function name inside defmodule', () => {
+      const source = 'defmodule MyMod do\n  def rescue do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defmodulePair = findBlock(pairs, 'defmodule');
+      assertIntermediates(defmodulePair, []);
+      const defPair = findBlock(pairs, 'def');
+      assertIntermediates(defPair, []);
+    });
+  });
+
   generateCommonTests(config);
 });
