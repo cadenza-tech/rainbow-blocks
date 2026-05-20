@@ -112,6 +112,14 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // fun in -spec/-type/-callback/-opaque declarations is always a type expression,
+    // never a real anonymous-function opener. Evaluated independently of the parens-follow
+    // pattern so multi-line spec contexts (with blank lines or comments between `fun` and
+    // its `(...)` arguments) are still rejected.
+    if (this.isInSpecContext(source, position, excludedRegions)) {
+      return false;
+    }
+
     // fun() in type annotation context (after ::)
     // Handles: handler :: fun((atom()) -> ok) in -record declarations
     if (/^[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?\(/.test(afterFun)) {
@@ -249,13 +257,6 @@ export class ErlangBlockParser extends BaseBlockParser {
           if (ch === '=' || ch === ';' || ch === '.') break;
           k--;
         }
-      }
-    }
-
-    // fun() in type context (inside parentheses of -spec/-type)
-    if (/^[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?\(/.test(afterFun)) {
-      if (this.isInSpecContext(source, position, excludedRegions)) {
-        return false;
       }
     }
 
