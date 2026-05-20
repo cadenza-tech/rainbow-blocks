@@ -5375,6 +5375,67 @@ end if`;
     });
   });
 
+  suite('Regression: procedure-introducer name split across continuation line', () => {
+    // When a procedure-introducer (program/module/subroutine/function/...) is
+    // split from its name by `&\n`, the name is still an identifier even when it
+    // spells a Fortran keyword like `block`, `do`, `where`, etc. Without this
+    // check, the name token would be phantom-tokenized as block_open and steal
+    // a later bare `end`, orphaning the real introducer opener.
+    test('should not treat program-name on continuation line as block open', () => {
+      const source = `program &
+  block
+  print *, 1
+end`;
+      const pairs = parser.parse(source);
+      // The real opener is `program` and pairs with bare `end`.
+      // The `block` identifier on the continuation line must not become a phantom block_open.
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+
+    test('should not treat subroutine-name on continuation line as block open', () => {
+      const source = `subroutine &
+  block(x)
+  print *, x
+end subroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+      // The `block` identifier must not be phantom-tokenized as block_open
+      const tokens = parser.getTokens(source);
+      const blockTokens = tokens.filter((t) => t.value.toLowerCase() === 'block');
+      assert.strictEqual(blockTokens.length, 0, 'no phantom `block` token should be emitted for the procedure name');
+    });
+
+    test('should not treat function-name on continuation line as block open', () => {
+      const source = `function &
+  do_thing(x)
+  do_thing = x
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+
+    test('should not treat module-name on continuation line as block open', () => {
+      const source = `module &
+  interface_mod
+  integer :: x
+end module`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'end module');
+    });
+
+    test('should not treat program-name on continuation line as block open across blank/comment lines', () => {
+      // Fortran allows blank and comment-only lines between continuation lines.
+      const source = `program &
+  ! comment between lines
+  &
+  block
+  print *, 1
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end');
+    });
+  });
+
   suite('Regression: keyword inside array constructor brackets is not a block close', () => {
     // Fortran 2003+ array constructor syntax `[expr, ...]` (also coarray image
     // selector `x[image]`) groups expressions inside square brackets. A keyword
