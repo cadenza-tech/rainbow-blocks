@@ -477,6 +477,17 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (this.isInsideModuleAttributeArgs(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Reject block_close/block_middle inside -spec/-type/-callback/-opaque declarations.
+      // These keywords are reserved-word usage in type expressions, not real block delimiters.
+      // block_open is already filtered by isValidBlockOpen() (which calls isInSpecContext).
+      // Without this filter, a spec-internal `end` could be paired with an outer `begin`, and
+      // spec-internal `of`/`after`/`else` could be registered as intermediates of the enclosing
+      // block.
+      if (token.type === 'block_close' || token.type === 'block_middle') {
+        if (this.isInSpecContext(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+      }
       // Reject 'catch' expression prefix (preceded by =, (, [, {, ,, !, operator)
       if (token.value === 'catch' && token.type === 'block_middle') {
         if (this.isCatchExpressionPrefix(source, token.startOffset, excludedRegions)) {
