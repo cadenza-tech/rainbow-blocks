@@ -207,13 +207,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (j < source.length && (source[j] === '(' || source[j] === '[' || source[j] === '{')) {
         return false;
       }
-      // Reject `do .x` (struct field assignment such as `do.x = 1`): the `.`
-      // begins a field access, so `do` is a variable name, not a block opener.
-      // Treating it as an opener leaves a spurious `do` on the stack and breaks
-      // the enclosing block pairing. Exclude `.` that begins `..` so a `...`
-      // continuation that was not consumed above (e.g. at EOF without a trailing
-      // newline) is not mistaken for field access.
-      if (j < source.length && source[j] === '.' && source[j + 1] !== '.') {
+      // Reject `do .x` (struct field assignment such as `do.x = 1`) and
+      // `do..x` (still field access — `..` is not a valid Octave token, so the
+      // parse is `do` then `.` then `.x`): the `.` begins a field access, so
+      // `do` is a variable name, not a block opener. Treating it as an opener
+      // leaves a spurious `do` on the stack and breaks the enclosing block
+      // pairing. Exclude only `...` (three dots), which represents a line
+      // continuation that was not consumed above (e.g. at EOF without a
+      // trailing newline) and must not be mistaken for field access.
+      if (j < source.length && source[j] === '.' && !(source[j + 1] === '.' && source[j + 2] === '.')) {
         return false;
       }
       // Reject `do:` and `do :` — Octave has no label statements and `:` is the
