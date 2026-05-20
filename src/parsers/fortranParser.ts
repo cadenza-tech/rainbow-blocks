@@ -260,9 +260,13 @@ export class FortranBlockParser extends BaseBlockParser {
     // close at a labeled 'continue' statement, not 'end do'. Matching them would
     // require tracking labels, so we conservatively drop the block to avoid
     // stealing an unrelated 'end'.
+    // Also handle continuation: `do &\n  100 i = 1, 10` — collapse continuation
+    // lines before testing for the label pattern so the labeled DO is still
+    // rejected when the label is on a different physical line.
     if (lowerKeyword === 'do') {
       const afterDo = source.slice(position + keyword.length);
-      if (/^[ \t]+\d+\b/.test(afterDo)) {
+      const collapsedAfterDo = collapseContinuationLines(afterDo);
+      if (/^[ \t]+\d+\b/.test(collapsedAfterDo)) {
         return false;
       }
     }
