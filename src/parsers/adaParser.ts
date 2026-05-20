@@ -990,10 +990,14 @@ export class AdaBlockParser extends BaseBlockParser {
   //     source                           -> select alternative boundary
   private isSelectAlternativeOrAtLineStart(source: string, orStart: number, excludedRegions: ExcludedRegion[]): boolean {
     // The `or` must be the first non-whitespace token on its physical line.
+    // Ada LRM 2.2 line terminators (LF, CR, NEL U+0085, LS U+2028, PS U+2029)
+    // break the scan; any other Ada whitespace (ASCII space/tab and the Zs
+    // category, including NBSP U+00A0) is treated as indentation and skipped.
     for (let p = orStart - 1; p >= 0; p--) {
       const ch = source[p];
-      if (ch === '\n' || ch === '\r') break;
-      if (ch === ' ' || ch === '\t') continue;
+      const code = ch.charCodeAt(0);
+      if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) break;
+      if (isAdaWhitespace(ch)) continue;
       return false;
     }
     const reservedBlockKeywords = new Set([...this.keywords.blockOpen, ...this.keywords.blockClose].map((k) => k.toLowerCase()));
