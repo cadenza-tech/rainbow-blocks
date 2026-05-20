@@ -2150,5 +2150,23 @@ end`;
     });
   });
 
+  suite('Regression: rejected arguments block must not consume the enclosing end', () => {
+    test('should preserve outer if/end pair when arguments block has only one end', () => {
+      // `arguments` outside function/methods/classdef is rejected, but the
+      // (single) `end` that follows must close the enclosing `if`, not be
+      // swallowed by phantom-skip tracking. Otherwise the `if` is left orphan
+      // and outer block pairing is destroyed.
+      const source = 'if true\n  arguments\n    x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should preserve outer for/end pair when arguments block has only one end', () => {
+      const source = 'for i = 1:3\n  arguments\n    x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
