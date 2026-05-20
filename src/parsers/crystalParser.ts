@@ -528,6 +528,13 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.value === 'end' && this.isPrecededByRangeOperator(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Symmetric case: filter out `end` placed before a range operator (.. or ...).
+      // `end` is a reserved word and cannot be the LHS of a range expression either,
+      // so this is invalid syntax; treating it as block_close mis-pairs surrounding
+      // blocks (e.g., `if cond\n  a = (end..1)\nend` would pair the inner `end` with `if`).
+      if (token.value === 'end' && this.isFollowedByRangeOperator(source, token.endOffset, excludedRegions)) {
+        return false;
+      }
       // Filter out `end` placed in the value position of a ternary expression
       // (`cond ? a : end`). `end` is a reserved word and cannot be a value, so this
       // is invalid syntax; treating it as block_close mis-pairs surrounding blocks.
@@ -563,6 +570,31 @@ export class CrystalBlockParser extends BaseBlockParser {
       return false;
     }
     return true;
+  }
+
+  // Checks if the keyword that ends at endOffset is immediately followed by a range
+  // operator (.. or ...). Whitespace is permitted between the keyword and the operator.
+  // Skips characters inside excluded regions. Symmetric to isPrecededByRangeOperator
+  // and used to filter `end` on the LHS of a range (`end..N`).
+  private isFollowedByRangeOperator(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = endOffset;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i++;
+        continue;
+      }
+      break;
+    }
+    // Need at least two consecutive dots to form .. (or ...)
+    return i + 1 < source.length && source[i] === '.' && source[i + 1] === '.';
   }
 
   // Checks if `end` at position sits in the value position of a ternary expression
