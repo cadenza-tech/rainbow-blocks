@@ -617,9 +617,6 @@ export class OctaveBlockParser extends MatlabBlockParser {
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
-    // Track stack depths at which an `arguments` opener was rejected so the matching
-    // `end` (at the same depth) is skipped instead of closing an outer block.
-    const pendingSkipDepths: number[] = [];
     // Snapshot phantom section positions and process them in order. Each phantom
     // represents a section keyword that was rejected at tokenize but where the user
     // probably wrote a stray `end` to close it. We skip one `end` per phantom — but
@@ -644,7 +641,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
               return v === 'function' || v === 'methods' || v === 'classdef';
             });
             if (!hasFunctionOrClass) {
-              pendingSkipDepths.push(stack.length);
+              // Drop the token: an `arguments` block outside of any function/methods/
+              // classdef context is almost certainly a function call (`arguments(obj)`)
+              // rather than a real block. Recording a phantom-end skip here would
+              // consume a legitimate `end` from an enclosing block (e.g. an `if`
+              // wrapping a single `end`), destroying outer block pairing. Mirrors
+              // MatlabBlockParser.matchBlocks lines 525-532.
               break;
             }
           }
@@ -691,11 +693,6 @@ export class OctaveBlockParser extends MatlabBlockParser {
           break;
 
         case 'block_close': {
-          // Skip this `end` if it corresponds to a rejected `arguments` opener at this depth.
-          if (pendingSkipDepths.length > 0 && pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length) {
-            pendingSkipDepths.pop();
-            break;
-          }
           // Phantom section keyword skip (mirror of MatlabBlockParser.matchBlocks logic):
           // when `properties = 5` (or `properties + 1`) was rejected at tokenize, the user
           // likely wrote a stray `end`. If there's a phantom position between the most recent
