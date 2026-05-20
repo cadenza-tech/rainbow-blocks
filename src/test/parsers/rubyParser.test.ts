@@ -4175,5 +4175,55 @@ end`;
     });
   });
 
+  suite('Regression: method-like keywords with spaced division should not start regex', () => {
+    test('should treat p / N as division and not absorb subsequent blocks', () => {
+      const source = 'p / 2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat puts / N as division and not absorb subsequent blocks', () => {
+      const source = 'puts / 2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat print / N as division and not absorb subsequent blocks', () => {
+      const source = 'print / 2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat warn / N as division and not absorb subsequent blocks', () => {
+      const source = 'warn / 2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat raise / N as division and not absorb subsequent blocks', () => {
+      const source = 'raise / 2\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still treat p /regex/ (no space before slash) as regex argument', () => {
+      const source = 'p /foo/\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still treat puts /regex/ (no space before slash) as regex argument', () => {
+      const source = 'puts /foo/\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still treat if / as regex start (control keyword)', () => {
+      const source = 'if /foo/ =~ x\n  bar\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
