@@ -1554,5 +1554,74 @@ end`;
     });
   });
 
+  suite('Regression: then/else/elseif must only attach to if/elseif openers', () => {
+    // Bug: `then`/`else`/`elseif` are if-block section boundaries and only
+    // belong to `if` or `elseif` openers. The previous implementation routed
+    // every middle keyword to the topmost non-repeat opener regardless of its
+    // block kind, so invalid constructs like `while x then end`, `function f()
+    // else end`, `for i = 1,2 do else end`, and `do then end` wrongly attached
+    // the middle keyword to the enclosing while/function/for/do block. The
+    // fix drops the middle keyword when the chosen opener is not an if or
+    // elseif, matching the language spec (then/else/elseif have no meaning
+    // outside an if-chain).
+    test('should drop then when the enclosing opener is while', () => {
+      const source = 'while x then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should drop else when the enclosing opener is function', () => {
+      const source = 'function f()\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should drop else when the enclosing opener is for', () => {
+      const source = 'for i = 1, 2 do\nelse\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should drop then when the enclosing opener is a standalone do block', () => {
+      const source = 'do then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should drop elseif when the enclosing opener is while', () => {
+      const source = 'while x do\nelseif y then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      // The elseif's own `then` is also a middle keyword with no enclosing
+      // if/elseif on the stack, so it too must be dropped.
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach then to an elseif opener', () => {
+      // elseif owns the following `then` for the elseif arm body
+      const source = 'if a then\nelseif b then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then', 'elseif', 'then']);
+    });
+
+    test('should attach else to an inner if even when an invalid outer while is open', () => {
+      // Outer while (cannot own else) wraps an inner if-else-end. The else
+      // must land on the inner if, and the while's intermediates must remain
+      // empty.
+      const source = 'while x do\nif a then\nelse\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifBlock = findBlock(pairs, 'if');
+      assertIntermediates(ifBlock, ['then', 'else']);
+      const whileBlock = findBlock(pairs, 'while');
+      assertIntermediates(whileBlock, []);
+    });
+  });
+
   generateCommonTests(config);
 });
