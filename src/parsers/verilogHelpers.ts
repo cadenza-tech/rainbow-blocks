@@ -331,23 +331,104 @@ function isPragmaProtectBegin(source: string, argStart: number, argEnd: number):
 // Searches for `pragma protect end (with optional whitespace) starting from `from`.
 // Returns the position immediately after the matching directive line (i.e., the position
 // of the line terminator), or -1 if not found.
+//
+// The scan must skip occurrences of the literal text `` `pragma protect end `` that appear
+// inside strings (`"..."`), block comments (`/* ... */`), line comments (`//`), and
+// escaped identifiers (`\name`). Per IEEE 1800-2017 §28.10 the encoded payload between
+// `protect begin` and `protect end` is opaque (typically base64), but tooling-generated
+// payloads may still happen to contain the literal text; treating such occurrences as
+// real directives would early-terminate the protected region and falsely expose
+// downstream block keywords.
 function findPragmaProtectEnd(source: string, from: number): number {
-  const pattern = /`pragma\b/g;
-  pattern.lastIndex = from;
-  let match: RegExpExecArray | null = pattern.exec(source);
-  while (match !== null) {
-    const lineStart = match.index + match[0].length;
-    let lineEnd = lineStart;
-    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-      lineEnd++;
+  let i = from;
+  while (i < source.length) {
+    const ch = source[i];
+    // Skip double-quoted string literals
+    if (ch === '"') {
+      i = skipStringLiteral(source, i);
+      continue;
     }
-    if (isPragmaProtectEnd(source, lineStart, lineEnd)) {
-      return lineEnd;
+    // Skip block comment /* ... */
+    if (ch === '/' && i + 1 < source.length && source[i + 1] === '*') {
+      i = skipBlockComment(source, i);
+      continue;
     }
-    pattern.lastIndex = lineEnd;
-    match = pattern.exec(source);
+    // Skip line comment // ...
+    if (ch === '/' && i + 1 < source.length && source[i + 1] === '/') {
+      i = skipLineComment(source, i);
+      continue;
+    }
+    // Skip escaped identifier \name (terminated by whitespace)
+    if (ch === '\\' && i + 1 < source.length && !/\s/.test(source[i + 1])) {
+      i++;
+      while (i < source.length && !/\s/.test(source[i])) i++;
+      continue;
+    }
+    // Look for a `pragma directive
+    if (ch === '`' && source.slice(i, i + 7) === '`pragma' && (i + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 7]))) {
+      const lineStart = i + 7;
+      let lineEnd = lineStart;
+      while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+        lineEnd++;
+      }
+      if (isPragmaProtectEnd(source, lineStart, lineEnd)) {
+        return lineEnd;
+      }
+      i = lineEnd;
+      continue;
+    }
+    i++;
   }
   return -1;
+}
+
+// Skips a `"..."` string literal starting at `pos` (which must point to the opening `"`).
+// Returns the position immediately after the closing `"`, or at the terminating newline /
+// end of source for unterminated strings. Mirrors matchVerilogString's defensive behavior
+// (line-continuation via `\<LF>`, bare-newline terminates).
+function skipStringLiteral(source: string, pos: number): number {
+  let i = pos + 1;
+  while (i < source.length) {
+    if (source[i] === '\\' && i + 1 < source.length) {
+      const nextChar = source[i + 1];
+      if (nextChar === '\n') {
+        i += 2;
+        continue;
+      }
+      if (nextChar === '\r') {
+        const skip = i + 2 < source.length && source[i + 2] === '\n' ? 3 : 2;
+        i += skip;
+        continue;
+      }
+      i += 2;
+      continue;
+    }
+    if (source[i] === '"') return i + 1;
+    if (source[i] === '\n' || source[i] === '\r') return i;
+    i++;
+  }
+  return source.length;
+}
+
+// Skips a `/* ... */` block comment starting at `pos`. Returns the position immediately
+// after the closing `*/`, or end of source for unterminated comments.
+function skipBlockComment(source: string, pos: number): number {
+  let i = pos + 2;
+  while (i < source.length) {
+    if (source[i] === '*' && i + 1 < source.length && source[i + 1] === '/') {
+      return i + 2;
+    }
+    i++;
+  }
+  return source.length;
+}
+
+// Skips a `// ...` line comment starting at `pos`. Returns the position of the
+// terminating newline (or end of source). The newline itself is not consumed.
+function skipLineComment(source: string, pos: number): number {
+  let i = pos + 2;
+  while (i < source.length && source[i] !== '\n' && source[i] !== '\r') i++;
+  return i;
 }
 
 // Returns true when the `pragma directive arguments are `protect end` (or
