@@ -2012,6 +2012,31 @@ end if;`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should suppress protected when access and protected are separated by NBSP', () => {
+      // U+00A0 (NBSP) between `access` and `protected` is intra-line whitespace
+      // per Ada LRM 2.1; the access-prefix detection must accept it like ASCII
+      // space so the `protected` reserved word is not mis-classified as a
+      // block opener. The trailing `protected type Controller is ... end
+      // Controller;` would otherwise (without an access-prefix early-out)
+      // produce a spurious `protected` / `end Controller` pair. NBSP is built
+      // via String.fromCharCode(0xA0) so it is explicit in code review and
+      // cannot be silently normalized by an editor.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `type Handler is access${nbsp}protected type Controller is\n  entry Process;\nend Controller;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should suppress protected when access all and protected are separated by NBSP', () => {
+      // Same as above, but exercising the optional `all` group:
+      // `access<NBSP>all<NBSP>protected` must still match the access-prefix
+      // pattern.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `type Handler is access${nbsp}all${nbsp}protected type Controller is\n  entry Process;\nend Controller;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Regression: isValidLoopOpen position-based pairing', () => {
