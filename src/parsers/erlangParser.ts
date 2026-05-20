@@ -304,26 +304,74 @@ export class ErlangBlockParser extends BaseBlockParser {
     return candidate;
   }
 
-  // Returns the position of the first declaration-ending period in [start, source.length),
-  // or source.length if none found. Skips excluded regions, range operators (..), and floats.
+  // Returns the position where the -spec/-type/-callback/-opaque declaration ends.
+  // Preferred terminator is a top-level period `.` (skipping range operators `..` and
+  // float decimal points). To prevent an unterminated declaration from absorbing the
+  // rest of the file, the scan also stops at best-effort boundary signals: a line that
+  // begins with another attribute (`\n-name`) at column 0, or a function head
+  // (`\n[a-z_][a-zA-Z0-9_]*\s*\(`) at column 0. Whichever signal appears first wins.
+  // A bare blank line is NOT a boundary: a legitimate -spec may span multiple lines
+  // with blank lines between its type-expression parts.
+  // Range operators (`..`), float decimal points, and signals inside excluded regions
+  // are ignored.
   private findDeclarationEndingPeriod(source: string, start: number, excludedRegions: ExcludedRegion[]): number {
     for (let j = start; j < source.length; j++) {
-      if (source[j] !== '.' || this.isInExcludedRegion(j, excludedRegions)) {
-        continue;
+      // Period: declaration terminator
+      if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
+        if (j + 1 < source.length && source[j + 1] === '.') {
+          j++;
+          continue;
+        }
+        if (j > 0 && source[j - 1] === '.') {
+          continue;
+        }
+        if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
+          continue;
+        }
+        return j;
       }
-      if (j + 1 < source.length && source[j + 1] === '.') {
-        j++;
-        continue;
+      // Boundary detection: a line break at the top level (not inside a string/comment)
+      // followed by a column-0 attribute or function head terminates the declaration when
+      // no period has been seen yet.
+      if (this.isLineBreak(source, j) && !this.isInExcludedRegion(j, excludedRegions)) {
+        const next = this.skipLineBreak(source, j);
+        // Next attribute line: '-' followed by identifier at column 0.
+        if (next < source.length && source[next] === '-') {
+          const id = next + 1;
+          if (id < source.length && /[a-zA-Z_]/.test(source[id])) {
+            return j;
+          }
+        }
+        // Next function head: identifier followed by '(' at column 0.
+        if (next < source.length && /[a-z_]/.test(source[next])) {
+          let m = next + 1;
+          while (m < source.length && /[a-zA-Z0-9_]/.test(source[m])) {
+            m++;
+          }
+          while (m < source.length && (source[m] === ' ' || source[m] === '\t')) {
+            m++;
+          }
+          if (m < source.length && source[m] === '(') {
+            return j;
+          }
+        }
       }
-      if (j > 0 && source[j - 1] === '.') {
-        continue;
-      }
-      if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
-        continue;
-      }
-      return j;
     }
     return source.length;
+  }
+
+  // Returns true if `source[pos]` starts a line break (LF, CR, or CRLF).
+  private isLineBreak(source: string, pos: number): boolean {
+    return source[pos] === '\n' || source[pos] === '\r';
+  }
+
+  // Returns the position immediately after the line break starting at `pos`.
+  // CRLF counts as a single line break (2 chars), CR-only or LF-only as 1 char.
+  private skipLineBreak(source: string, pos: number): number {
+    if (source[pos] === '\r' && pos + 1 < source.length && source[pos + 1] === '\n') {
+      return pos + 2;
+    }
+    return pos + 1;
   }
 
   // Pre-scans source for module attribute spans -name(...) at line start. Each span
