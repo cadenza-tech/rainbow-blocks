@@ -2093,6 +2093,28 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-21: select alternative or with Unicode whitespace indentation', () => {
+    test('should keep or as a select intermediate when indented by NBSP after a non-semicolon-terminated body', () => {
+      // The first alternative body has no trailing `;` (`accept X`) and the
+      // following `or` line is indented with NBSP (U+00A0). The physical-line
+      // start check must treat NBSP as whitespace so `or` is recognized as a
+      // select alternative delimiter rather than a stray operator.
+      const source = 'select\n  accept X\n or\n    accept B;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+
+    test('should keep or as a select intermediate when indented by U+2028 line separator', () => {
+      // U+2028 is a line separator; combined with a leading regular space it
+      // exercises the Unicode-aware whitespace skip on the same physical line.
+      const source = 'select\n  accept X\n  or\n    accept B;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+  });
+
   suite('Branch coverage: findExcludedRegionAt null fallback and isOrElseShortCircuit comment', () => {
     // Lines 514-522: backward scan from 'then' crossing excluded regions (comments)
     // The loop at lines 515-521 calls isInExcludedRegion then findExcludedRegionAt.
