@@ -4088,5 +4088,41 @@ endmodule`;
     });
   });
 
+  suite('Regression: isPrecededByDataTypeKeyword treats escaped identifiers as a word boundary', () => {
+    test('should not skip an escaped identifier when scanning for a preceding data-type keyword', () => {
+      // Bug: isPrecededByDataTypeKeyword skips ANY excluded region (including escaped
+      // identifiers and strings) and then reads the preceding word. For the source
+      // `int \my_var endmodule`, it skips past `\my_var` and finds `int`, causing
+      // the trailing `endmodule` to be suppressed as if it were a declared identifier.
+      // The fix limits backward skipping to block comments (`/* ... */`) only.
+      const source = 'module outer;\n  int \\my_var endmodule\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      // Both `endmodule` keywords must be tokenized: the one after `\my_var` and the
+      // outer one on the last line.
+      assert.strictEqual(endmoduleTokens.length, 2, 'both endmodule keywords must survive when an escaped identifier intervenes');
+    });
+
+    test('should not skip a string literal when scanning for a preceding data-type keyword', () => {
+      // Same bug class: a string before the reserved-word identifier should also
+      // break the preceding-word adjacency, not be transparently skipped.
+      const source = 'module outer;\n  int "label" endmodule\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 2, 'both endmodule keywords must survive when a string intervenes');
+    });
+
+    test('should still skip block comment between data-type keyword and reserved-word identifier', () => {
+      // Confirms the fix preserves the legitimate skip behavior for block comments,
+      // which IS a regression-tested feature (see "data type with packed dimension or
+      // block comment before reserved-word identifier"). `reg /* width */ endmodule;`
+      // remains a declaration, so the trailing `endmodule` is suppressed.
+      const source = 'module m;\n  reg /* width */ endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1, 'block comment between data-type and identifier still suppresses the identifier');
+    });
+  });
+
   generateCommonTests(config);
 });
