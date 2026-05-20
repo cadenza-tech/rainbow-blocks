@@ -517,12 +517,22 @@ export class VerilogBlockParser extends BaseBlockParser {
       }
       // Skip block comment `/* ... */` backward: when current position is in an
       // excluded region whose end equals i+1, jump to just before its start.
+      // Only block comments are skipped — other excluded regions (escaped
+      // identifiers `\name`, strings, line comments) are real tokens that break
+      // the `<data-type-keyword> <identifier>` adjacency. Treating them as
+      // trivia would let constructs like `int \my_var endmodule` falsely
+      // suppress the trailing `endmodule` (see isFollowedByLabelColon for the
+      // mirrored constraint on the forward direction).
       if (excludedRegions !== undefined && this.isInExcludedRegion(i, excludedRegions)) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
-        if (region) {
+        if (region && source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*') {
           i = region.start - 1;
           continue;
         }
+        // Non-block-comment excluded region: terminate the backward scan. The
+        // intervening string / escaped identifier / line comment breaks
+        // adjacency with any prior data-type keyword.
+        return false;
       }
       break;
     }
