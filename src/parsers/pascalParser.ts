@@ -1111,10 +1111,13 @@ export class PascalBlockParser extends BaseBlockParser {
             // try block: reject 'else' when the body is in `finally` clause. Only
             // try-except-else is valid in Delphi; try-finally-else is not. The
             // 'else' here is malformed and would otherwise pollute the intermediates.
+            // Also reject duplicate 'else' (try-except-else-else): Delphi permits at
+            // most one else clause per try-except, so a second else is malformed.
             if (topValue === 'try' && middleValue === 'else') {
               const existing = stack[stack.length - 1].intermediates;
               const hasFinally = existing.some((t) => t.value.toLowerCase() === 'finally');
-              if (hasFinally) break;
+              const hasElse = existing.some((t) => t.value.toLowerCase() === 'else');
+              if (hasFinally || hasElse) break;
             }
             stack[stack.length - 1].intermediates.push(token);
           }
