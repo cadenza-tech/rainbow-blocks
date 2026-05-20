@@ -3236,6 +3236,25 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-21: case label using block_middle keyword', () => {
+    test('should not treat of used as case label as case-middle intermediate', () => {
+      // `case X of\n  of: a;` uses the keyword `of` as a case label (FreePascal/Delphi
+      // accept reserved words preceded by `&` as identifiers, and even bare reserved
+      // words can appear as labels in some compilers). The label-position `of` must
+      // not be re-tokenized as a `case` block intermediate.
+      const source = `case X of
+  of: a;
+  1: b;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+      // Only the real `of` after `case X` is an intermediate (offset 7); the
+      // label-position `of` at offset 12 must be filtered out.
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, 7, 'the surviving of intermediate must be the case-X-of keyword');
+    });
+  });
+
   suite('Regression 2026-05-21: try-except-else-else duplicate else must be rejected', () => {
     test('should reject the second else after try-except-else (only one else intermediate)', () => {
       // Delphi's try-except-else permits at most one `else` clause. A second `else`
