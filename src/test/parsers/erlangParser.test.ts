@@ -2919,5 +2919,46 @@ end`;
     });
   });
 
+  suite('Regression: spec context filters block_close and block_middle', () => {
+    test('should not tokenize end inside single-line -spec as block_close', () => {
+      // The `end` inside the spec must not be tokenized: otherwise the outer `begin`
+      // gets matched against the spec's `end`, closing at the wrong line.
+      const source = `begin
+ -spec foo() -> case X of 1 -> 2 end.
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const realEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, realEndOffset);
+    });
+
+    test('should not tokenize of/after/else inside multi-line -spec', () => {
+      // intermediates inside a -spec must not be reported as block intermediates of the
+      // enclosing begin block.
+      const source = `begin
+ -spec foo() ->
+   case X of
+     1 -> after_value;
+     _ -> 2
+   end.
+ ok
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The close must point at the trailing outer end, not the spec's inner end.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+      assert.strictEqual(pairs[0].intermediates.length, 0);
+    });
+
+    test('should not tokenize end inside -type as block_close', () => {
+      const source = `begin
+ -type t() :: case Y of 1 -> err end.
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
