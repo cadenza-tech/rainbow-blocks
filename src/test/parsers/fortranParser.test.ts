@@ -5375,6 +5375,56 @@ end if`;
     });
   });
 
+  suite('Regression: keyword inside array constructor brackets is not a block close', () => {
+    // Fortran 2003+ array constructor syntax `[expr, ...]` (also coarray image
+    // selector `x[image]`) groups expressions inside square brackets. A keyword
+    // like `end` appearing inside `[...]` is always an identifier, never a block
+    // close. Without bracket-tracking in isInsideParentheses, the `end` inside
+    // `[end, 1, 2]` is phantom-tokenized as block_close, stealing the real
+    // `end program` and orphaning the program opener.
+    test('should not treat `end` inside array constructor as block close', () => {
+      const source = `program test
+  integer :: end
+  end = 5
+  x = [end, 1, 2]
+end program`;
+      const pairs = parser.parse(source);
+      // Exactly one pair: `program` paired with the real `end program` on the
+      // last line. The `end` inside `[end, 1, 2]` is an identifier reference
+      // and must not be tokenized as block_close.
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat `end` inside coarray image selector as block close', () => {
+      // Coarray image selector `x[image]` uses square brackets. A bare `end`
+      // inside `[...]` here is an identifier (e.g., the index variable).
+      const source = `program test
+  integer :: end
+  x[end] = 5
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat `do` identifier inside array constructor as block open', () => {
+      // A phantom `do` inside `[do, 1, 2]` would steal a later `end do` and
+      // orphan the real outer `do` opener. Bracket tracking in
+      // isInsideParentheses must suppress this block_open token.
+      const source = `program test
+  do j = 1, 5
+    x = [do, 1, 2]
+    print *, j
+  end do
+end program`;
+      const pairs = parser.parse(source);
+      // Two pairs: outer program -> end program, and inner do -> end do at
+      // the real do j=1,5 line (not the phantom do inside the array constructor).
+      assertBlockCount(pairs, 2);
+      const doBlock = findBlock(pairs, 'do');
+      assert.strictEqual(doBlock.openKeyword.line, 1, 'do pair must open at the real `do j = 1, 5`, not the phantom inside [do, 1, 2]');
+    });
+  });
+
   suite('Regression: keyword split across continuation line', () => {
     // When a keyword is split across a free-form continuation (e.g. `end do`
     // written as `en&` / `d do`), the trailing physical line `d do` carries the
