@@ -260,6 +260,14 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
       return false;
     }
+    // `end` directly followed by a binary operator (e.g., `end!=2`, `end<2`, `end+1`)
+    // outside of indexing brackets is invalid syntax (`end` is not a value). It should
+    // not be classified as block_close so the surrounding real `end` can pair with its
+    // opener correctly. Inside indexing brackets this is `lastindex` and is already
+    // handled by the earlier `isInsideAnyIndexingBracket` check above.
+    if (this.isFollowedByBinaryOperator(source, position)) {
+      return false;
+    }
     return true;
   }
 

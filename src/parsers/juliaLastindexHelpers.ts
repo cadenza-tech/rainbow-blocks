@@ -131,6 +131,16 @@ export function isPrecededByBinaryOperator(source: string, position: number, exc
     if (ch === '&' || ch === '|') {
       return true;
     }
+    // Unary `!` (logical NOT) before `end` is invalid syntax (`end` is not a value).
+    // Distinguish from the trailing `!` of an identifier (`foo!end` was already filtered
+    // by the tokenize step) and from the `!` of `!=` (which would have `=` immediately
+    // after, but we scanned backward from `end` so the `=` would be at position+1, not
+    // i+1). At this point `i` points at the `!` immediately preceding `end`, so
+    // `source[i + 1]` is the first char of `end`. A `!` here is therefore a standalone
+    // unary operator, never part of `!=`.
+    if (ch === '!') {
+      return true;
+    }
     return false;
   }
   return false;
