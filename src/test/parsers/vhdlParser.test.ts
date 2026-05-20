@@ -3273,6 +3273,53 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-21: comment-separated rejected compound end trailing keyword should be skipped', () => {
+    test('should skip trailing process of rejected comment-separated compound end (x.end /* c */ process)', () => {
+      // x.end /* c */ process; is a dot-preceded compound end and should be rejected.
+      // Trailing `process` must NOT be tokenized as a fresh block_open, otherwise the
+      // surrounding `end process` would pair with the stray opener and orphan the real
+      // outer process block.
+      const source =
+        'architecture a of e is\nbegin\n  p1: process\n  begin\n    x.end /* c */ process;\n    if cond then\n      null;\n    end if;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      // Architecture should pair with `end architecture`
+      const archPair = findBlock(pairs, 'architecture');
+      assert.strictEqual(archPair.closeKeyword.value.toLowerCase(), 'end architecture', 'architecture should pair with end architecture');
+      // Outer process opener at line 2 (0-indexed) should pair with `end process` at line 8
+      const processPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.strictEqual(processPairs.length, 1, 'should have exactly one process pair (not two)');
+      assert.strictEqual(processPairs[0].openKeyword.line, 2, 'paired process opener should be the outer one (L3)');
+      assert.strictEqual(processPairs[0].closeKeyword.value.toLowerCase(), 'end process', 'process should pair with end process');
+      // The if/end if must remain intact too.
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword.value.toLowerCase(), 'end if', 'inner if should pair with end if');
+    });
+
+    test('should skip trailing loop of rejected comment-separated compound end (inst.end /* c */ loop)', () => {
+      const source = 'process is\nbegin\n  loop\n    x := inst.end /* c */ loop;\n  end loop;\nend process;';
+      const pairs = parser.parse(source);
+      // Only ONE loop pair should exist; the stray trailing `loop` at L3 must not become a fresh opener.
+      const loopPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.strictEqual(loopPairs.length, 1, 'should have exactly one loop pair (not two)');
+      assert.strictEqual(loopPairs[0].openKeyword.line, 2, 'paired loop opener should be the outer one (L3)');
+      assert.strictEqual(loopPairs[0].closeKeyword.value.toLowerCase(), 'end loop', 'outer loop should pair with end loop');
+      const processPair = findBlock(pairs, 'process');
+      assert.strictEqual(processPair.closeKeyword.value.toLowerCase(), 'end process', 'process should pair with end process');
+    });
+
+    test('should skip trailing if of rejected comment-separated compound end (inst.end /* c */ if)', () => {
+      const source = 'process is\nbegin\n  if cond then\n    signal x : integer := inst.end /* c */ if;\n  end if;\nend process;';
+      const pairs = parser.parse(source);
+      // Only ONE if pair should exist; the stray trailing `if` at L3 must not become a fresh opener.
+      const ifPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.strictEqual(ifPairs.length, 1, 'should have exactly one if pair (not two)');
+      assert.strictEqual(ifPairs[0].openKeyword.line, 2, 'paired if opener should be the outer one (L3)');
+      assert.strictEqual(ifPairs[0].closeKeyword.value.toLowerCase(), 'end if', 'outer if should pair with end if');
+      const processPair = findBlock(pairs, 'process');
+      assert.strictEqual(processPair.closeKeyword.value.toLowerCase(), 'end process', 'process should pair with end process');
+    });
+  });
+
   suite('Regression 2026-05-15: elsif-generate begin/end body siblings have flat nestLevel', () => {
     test('should give same nestLevel to begin/end bodies in if-elsif generate chain', () => {
       const source =
