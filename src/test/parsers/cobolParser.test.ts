@@ -2401,6 +2401,50 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
+
+    // Bug: findBlockVerbAfterCopybook (cobolPseudoText.ts) only checked
+    // blockOpen keywords, so non-block verbs (MOVE/SET/STOP RUN/OPEN/CLOSE/
+    // CONTINUE/...) failed to terminate a period-less COPY. The body of the
+    // following IF/END-IF was wrongly absorbed into the COPY context, the
+    // END-IF token was filtered out as "inside COPY", and the IF/END-IF
+    // pair was lost. Each non-block verb listed in
+    // COPY_TERMINATING_NONBLOCK_VERBS must end the period-less COPY just
+    // like a block-opening verb.
+    test('should end a period-less COPY at MOVE so the following IF/END-IF pair is detected', () => {
+      const source = 'IF A\nCOPY X\nMOVE Q TO W\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should end a period-less COPY at SET so the following IF/END-IF pair is detected', () => {
+      const source = 'IF A\nCOPY X\nSET FLAG TO TRUE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should end a period-less COPY at STOP so the following IF/END-IF pair is detected', () => {
+      const source = 'IF A\nCOPY X\nSTOP RUN\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should end a period-less COPY at OPEN so the following IF/END-IF pair is detected', () => {
+      const source = 'IF A\nCOPY X\nOPEN INPUT FILE-A\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should end a period-less COPY at CLOSE so the following IF/END-IF pair is detected', () => {
+      const source = 'IF A\nCOPY X\nCLOSE FILE-A\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should end a period-less COPY at CONTINUE so the following IF/END-IF pair is detected', () => {
+      const source = 'IF A\nCOPY X\nCONTINUE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
   });
 
   suite('Coverage: COPY detection skips strings and comments preceding the COPY keyword', () => {
