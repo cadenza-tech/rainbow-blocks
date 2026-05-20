@@ -4155,5 +4155,25 @@ end`;
     });
   });
 
+  suite('Regression: endless method definition with Unicode receiver', () => {
+    test('should not treat endless def with Unicode class receiver as a block opener', () => {
+      const source = 'class X\n  def 日本語.foo = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat endless def with Unicode class receiver and Unicode method name', () => {
+      const source = 'class X\n  def 日本語.名前 = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat endless def with Unicode class receiver and parens', () => {
+      const source = 'class X\n  def 日本語.foo() = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
