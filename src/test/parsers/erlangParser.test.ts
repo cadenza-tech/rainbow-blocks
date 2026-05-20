@@ -2960,5 +2960,41 @@ end`;
     });
   });
 
+  suite('Regression: unterminated -spec without trailing period', () => {
+    test('should not extend spec context past blank line when period is missing', () => {
+      // -spec without a closing period must not absorb the trailing case/end into the
+      // spec context. Best-effort: stop at the first blank line.
+      const source = `-spec foo() -> integer()
+
+foo() ->
+  case X of
+    1 -> ok
+  end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not extend spec context past next -attribute line', () => {
+      const source = `-spec foo() -> integer()
+-export([foo/0]).
+foo() ->
+  case X of
+    1 -> ok
+  end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not extend spec context past next function head', () => {
+      const source = `-spec foo() -> integer()
+foo() ->
+  case X of
+    1 -> ok
+  end.`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
