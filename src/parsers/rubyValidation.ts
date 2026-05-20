@@ -40,14 +40,19 @@ export function isEndlessMethodDef(source: string, start: number, excludedRegion
   }
   skipWs();
   // Method name: identifier with optional ? or !, or operator
-  const identMatch = source.slice(i).match(/^(?:[a-zA-Z_][a-zA-Z0-9_]*[?!=]?|\[\]=?|<=>|===|==|=~|!=|!~|<=|>=|<<|>>|\*\*|[+\-*/%&|^<>~!])/);
+  // Ruby permits non-ASCII characters in method names; the leading char must be a
+  // letter (including non-ASCII letters) or underscore, with subsequent identifier-
+  // continuation chars (letters, marks, numbers, connectors).
+  const identMatch = source
+    .slice(i)
+    .match(/^(?:[\p{L}_][\p{L}\p{M}\p{N}\p{Pc}]*[?!=]?|\[\]=?|<=>|===|==|=~|!=|!~|<=|>=|<<|>>|\*\*|[+\-*/%&|^<>~!])/u);
   if (!identMatch) return false;
   i += identMatch[0].length;
   // The `[?!=]?` suffix above greedily consumes a trailing `=`. That `=` is part of
   // a setter method name (`def name=(value)`) only when a parameter list `(` follows.
   // Otherwise (`def a=1`) the `=` is the endless-method separator written without a
   // space, so rewind one char to let the `=` check below recognize it.
-  if (identMatch[0].endsWith('=') && /^[a-zA-Z_]/.test(identMatch[0])) {
+  if (identMatch[0].endsWith('=') && /^[\p{L}_]/u.test(identMatch[0])) {
     let peek = i;
     while (peek < source.length) {
       const ch = source[peek];
