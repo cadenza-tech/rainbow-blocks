@@ -5,6 +5,19 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.51] - 2026-05-21
+
+### Fixed
+
+- Ada / Fortran / VHDL: Match compound `end` keywords (`end if`, `end loop`) with a binary search instead of an O(tokens × compounds) per-token scan
+- All languages: Recalculate block nest levels in O(P log P) instead of O(P²) so deeply nested files colorize without quadratic slowdown
+- All languages: Memoize block-keyword type classification so tokenization no longer scans the keyword list for every token
+- Julia: Look up enclosing parentheses through a precomputed bracket index so generator and named-tuple validation runs in linear time instead of O(n²)
+- Verilog: Look up enclosing braces through a precomputed bracket index so assignment-pattern detection runs in linear time instead of O(n²)
+- Verilog: Look up enclosing parentheses through a precomputed bracket index for the `interface` port-list check instead of scanning from the source start
+- VHDL: Look up enclosing parentheses through a precomputed bracket index so block validation runs in linear time instead of O(n²)
+- VHDL: Scan only a bounded line window when validating `loop` and `for ... generate` openers instead of the whole source prefix
+
 ## [1.1.50] - 2026-05-19
 
 ### Fixed
@@ -1982,6 +1995,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.51]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.50...v1.1.51
 [1.1.50]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.49...v1.1.50
 [1.1.49]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.48...v1.1.49
 [1.1.48]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.47...v1.1.48
