@@ -4131,5 +4131,29 @@ end`;
     });
   });
 
+  suite('Regression: endless method definition with Unicode identifier', () => {
+    test('should not treat endless def with Unicode method name as a block opener', () => {
+      const source = 'class X\n  def αβγ = 1\n  def bar\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 2);
+      const classPair = pairs.find((p) => p.openKeyword.value === 'class');
+      const defPair = pairs.find((p) => p.openKeyword.value === 'def');
+      assert.ok(classPair, 'class/end pair expected');
+      assert.ok(defPair, 'def bar/end pair expected');
+    });
+
+    test('should not treat endless def with Unicode method name and parens as a block opener', () => {
+      const source = 'class X\n  def αβγ() = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat endless def with Cyrillic method name as a block opener', () => {
+      const source = 'class X\n  def привет = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
