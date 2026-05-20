@@ -3238,5 +3238,41 @@ end try`;
     });
   });
 
+  suite('Regression 2026-05-21: handler-name fallback should not apply to using terms from (last word is generic preposition)', () => {
+    test('should not pair on from() handler with end using terms from', () => {
+      // `using terms from` ends in the generic preposition `from`. Falling back to
+      // the last word would make `on from()` (a legitimate handler declaration named
+      // `from`) match `end using terms from`, generating a geometrically wrong pair.
+      // Both keywords should remain orphans.
+      const source = 'on from()\n  beep\nend using terms from';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair to from() handler with end using terms from', () => {
+      const source = 'to from()\n  beep\nend using terms from';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair on transaction() with end transaction (with timeout/transaction fallback retained)', () => {
+      // Pin the existing fallback for `with timeout` / `with transaction`. Their last
+      // word (`timeout` / `transaction`) is a plausible handler name, so fallback is
+      // useful. Only `using terms from` is excluded from fallback.
+      const source = 'on transaction()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end transaction');
+    });
+
+    test('should still pair using terms from with end using terms from when correctly opened', () => {
+      // The fallback exclusion must not break the canonical pairing.
+      const source = 'using terms from application "Mail"\n  beep\nend using terms from';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+    });
+  });
+
   generateCommonTests(config);
 });
