@@ -108,8 +108,15 @@ export function findBlockVerbAfterCopybook(
       match = WORD_PATTERN.exec(source);
       continue;
     }
-    // A block-opening verb after the copybook name ends the COPY statement.
-    if (blockOpen.some((kw) => kw === upper.toLowerCase())) {
+    // A statement verb (block-opening or not) after the copybook name ends the
+    // COPY statement. Mirrors findBlockVerbAfterCopy in cobolHelpers.ts and the
+    // getPseudoTextStarts scan further below, which both already accept either
+    // COPY_TERMINATING_VERBS (block-opening) or COPY_TERMINATING_NONBLOCK_VERBS
+    // (MOVE, SET, STOP, OPEN, CLOSE, CONTINUE, ...) as the boundary. Without
+    // including the non-block set here, isInCopyStatement extended a
+    // period-less COPY past a following MOVE/SET/etc. line, hiding the body
+    // (and END-keywords) of the following block from tokenisation.
+    if (blockOpen.some((kw) => kw === upper.toLowerCase()) || COPY_TERMINATING_NONBLOCK_VERBS.has(upper)) {
       return wordPos;
     }
     wordIndex++;
