@@ -4588,6 +4588,75 @@ end`;
     });
   });
 
+  suite('Regression: end followed by binary operator outside indexing brackets is not block_close', () => {
+    // Bug: outside indexing brackets, `end` followed by a binary operator (e.g., `end!=2`,
+    // `end<2`, `end+1`) is invalid syntax (the bare keyword `end` is not a value), but the
+    // parser used to classify it as block_close. That swallowed the trailing real `end` of
+    // the surrounding block, leaving the outer opener orphaned. Treat such `end` as not
+    // block_close so the surrounding block can pair with its real closer. The mirror case
+    // (unary `!end`) is also covered: `!end` is invalid syntax and the `end` here should
+    // not be block_close.
+    test('should not treat end!=N as block_close inside non-indexing block body', () => {
+      const source = 'if a\n  end!=2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // line is 0-indexed; the trailing real `end` is on the third line (index 2)
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end<N as block_close inside non-indexing block body', () => {
+      const source = 'if a\n  end<2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end+N as block_close inside non-indexing block body', () => {
+      const source = 'if a\n  end+1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end==N as block_close inside non-indexing block body', () => {
+      const source = 'if a\n  end==2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end>N as block_close inside non-indexing block body', () => {
+      const source = 'if a\n  end>2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end*N as block_close inside non-indexing block body', () => {
+      const source = 'if a\n  end*2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword?.line, 2);
+    });
+
+    test('should not treat !end as block_close (unary NOT before end)', () => {
+      // `!end` is invalid syntax (the bare keyword `end` is not a value). Treat the `end`
+      // here as not block_close so the surrounding function can pair with its real `end`.
+      const source = 'function f()\n  x = !end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should still treat end inside indexing brackets followed by binary operator as lastindex', () => {
+      // Sanity check: the new outside-brackets rule must not regress the existing
+      // inside-brackets behavior. `arr[end-1]` is lastindex, not block_close.
+      const source = 'function f(arr)\n  return arr[end-1]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: bracket-context validation must not be quadratic', () => {
     // Bug: isValidBlockOpen/isValidBlockClose called bracket-context helpers
     // (isInsideCurlyBraces, isLoneEndInArrayConstruction, isInsideIndexingBrackets,
