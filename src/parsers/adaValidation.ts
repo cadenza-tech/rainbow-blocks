@@ -1,7 +1,45 @@
 // Ada block validation helpers for isValidBlockOpen keyword checks
 
 import type { ExcludedRegion } from '../types';
-import { isAdaWordAt, scanForwardToIs, skipAdaWhitespaceAndComments } from './adaHelpers';
+import { isAdaWhitespace, isAdaWordAt, scanForwardToIs, skipAdaWhitespaceAndComments } from './adaHelpers';
+
+// Intra-line whitespace per Ada LRM 2.1: any Ada whitespace except a line
+// terminator (LF, CR, NEL U+0085, LS U+2028, PS U+2029). The access-prefix
+// detection for `protected` needs this distinction so that `access<NBSP>protected`
+// (same line) suppresses the block while `access\nprotected` (different lines)
+// does not.
+function isAdaIntraLineWhitespace(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) return false;
+  return isAdaWhitespace(ch);
+}
+
+// Scans backward from `end` (exclusive) skipping intra-line whitespace and
+// returns the position immediately after the last non-whitespace char, or -1
+// if the scan reached a line terminator (cross-line gap) or start of source.
+function skipIntraLineWhitespaceBackward(source: string, end: number): number {
+  let p = end - 1;
+  while (p >= 0) {
+    const ch = source[p];
+    const code = ch.charCodeAt(0);
+    if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) return -1;
+    if (!isAdaIntraLineWhitespace(ch)) return p + 1;
+    p--;
+  }
+  return 0;
+}
+
+// Returns true if the slice of `source` ending at `end` (exclusive) ends with
+// the word `target` preceded by either start-of-source or a non-word char
+// (treating only ASCII identifier chars as word chars). The match is
+// case-insensitive.
+function endsWithWord(source: string, end: number, target: string): boolean {
+  if (end < target.length) return false;
+  const start = end - target.length;
+  if (source.slice(start, end).toLowerCase() !== target) return false;
+  if (start === 0) return true;
+  return !/[a-zA-Z0-9_]/.test(source[start - 1]);
+}
 
 // Callbacks for base parser methods needed by validation functions
 export interface AdaValidationCallbacks {
@@ -164,12 +202,29 @@ export function isValidProtectedOpen(
   excludedRegions: ExcludedRegion[],
   callbacks: AdaValidationCallbacks
 ): boolean {
-  const textBefore = source.slice(0, position);
-  const accessMatch = textBefore.match(/\b(access)([ \t]+(all|constant))?[ \t]*$/i);
-  if (accessMatch) {
-    const accessPos = position - accessMatch[0].length + accessMatch[0].indexOf(accessMatch[1]);
-    if (!callbacks.isInExcludedRegion(accessPos, excludedRegions)) {
-      return false;
+  // Look for an `access` prefix on the same physical line: skip intra-line
+  // whitespace (Ada LRM 2.1: any Ada whitespace except a line terminator;
+  // covers NBSP, NEL, LS, PS, and the Zs category in addition to space/tab),
+  // optionally consume `all` or `constant`, then look for `access`. A
+  // line-terminator break aborts the scan so cross-line cases like
+  // `access\nprotected` still fall through to the forward-`is` check.
+  const afterPrefixWord = skipIntraLineWhitespaceBackward(source, position);
+  if (afterPrefixWord >= 0) {
+    let accessEnd = afterPrefixWord;
+    for (const optWord of ['all', 'constant']) {
+      if (endsWithWord(source, accessEnd, optWord)) {
+        const before = skipIntraLineWhitespaceBackward(source, accessEnd - optWord.length);
+        if (before >= 0) {
+          accessEnd = before;
+          break;
+        }
+      }
+    }
+    if (endsWithWord(source, accessEnd, 'access')) {
+      const accessPos = accessEnd - 'access'.length;
+      if (!callbacks.isInExcludedRegion(accessPos, excludedRegions)) {
+        return false;
+      }
     }
   }
   // Scan forward: if ';' comes before 'is', it's a forward declaration
