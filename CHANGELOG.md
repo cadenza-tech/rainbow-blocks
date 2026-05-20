@@ -5,6 +5,37 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.52] - 2026-05-21
+
+### Fixed
+
+- Ada: Recognize NBSP and other Unicode whitespace at physical line start so `or` is kept as a `select` alternative intermediate
+- Ada: Accept Unicode whitespace between `access` and `protected` so `access<NBSP>protected` does not open a phantom `protected` block
+- AppleScript: Suppress the handler-name fallback for `using terms from` so `on from()` is not mispaired with `end using terms from`
+- COBOL: End a period-less `COPY` at a following non-block verb (`MOVE`, `SET`, `STOP`, `OPEN`, `CLOSE`, `CONTINUE`) so the next block close is not absorbed into the COPY range
+- Crystal: Skip an `end` on the left side of a range operator (`end..N`, `end...N`) so it is not treated as a block close
+- Elixir: Treat a middle keyword used as a function name after a definition keyword (`def rescue do`, `def catch(x) do`, `def after(x) do`) as an identifier, not a block intermediate
+- Erlang: Reject `fun` inside a `-spec` type context across multiple newlines so a blank-lined type expression is not opened as a block
+- Erlang: Skip `end`/`of`/`after`/`else` tokens inside a `-spec`/`-type`/`-callback`/`-opaque` context so they do not mispair with surrounding blocks
+- Erlang: Bound an unterminated `-spec`/`-type` declaration at the next attribute or function head instead of treating the rest of the file as type context
+- Fortran: Skip `end` inside array constructors `[...]` and coarray image selectors so it is not treated as a phantom block close
+- Fortran: Recognize a procedure name on a `&` continuation line (`program &` `block`) so the trailing name no longer becomes a phantom block opener
+- Fortran: Skip labeled DO loops across continuation lines (`do &` `100 i = 1, 10`) so they are not treated as block openers
+- Julia: Skip an `end` adjacent to a binary or unary operator outside indexing brackets (`!end`, `end!=N`, `end<N`) so it is not treated as a block close
+- Lua: Drop `then`/`else`/`elseif` when the enclosing opener is not `if`/`elseif` so invalid syntax does not pollute intermediates
+- MATLAB: Reject `try`/`spmd`/`classdef` followed by a prefix-capable operator (`+ - ~ !`) so they are not opened as blocks
+- Octave: Drop a rejected `arguments` block instead of phantom-skipping the enclosing block's `end`, so an outer `if`/`end` pair survives
+- Octave: Treat `do..` (two dots) as a field-access prefix instead of a `do` block opener
+- Pascal: Treat consecutive `>` characters as nested generic closes instead of a shift operator so `record` inside `<T<U<record>>>` is not opened as a block
+- Pascal: Reject a duplicate `else` after `try-except-else` so the second `else` is not added to intermediates
+- Pascal: Skip `of` used as a case-label position (`of:`) so it is not added to intermediates
+- Ruby: Recognize endless method definitions with Unicode method names (`def αβγ = 1`) so they are not treated as block openers
+- Ruby: Recognize endless method definitions with Unicode class receivers (`def 日本語.foo = 1`) so they are not treated as block openers
+- Ruby: Treat spaced division after method-like keywords (`p / 2`, `puts / 2`) as division instead of a multiline regex that swallows the rest of the file
+- Verilog: Skip strings and comments when scanning for the matching `` `pragma protect end `` so a literal occurrence inside protected data does not end the region early
+- Verilog: Treat escaped identifiers and strings as word boundaries when scanning for a preceding data-type keyword so `int \my_var endmodule` keeps its `endmodule` token
+- VHDL: Skip the trailing type word of a comment-separated compound `end` rejected by validation (`inst.end /* c */ process`) so it does not become a stray block opener
+
 ## [1.1.51] - 2026-05-21
 
 ### Fixed
@@ -1995,6 +2026,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.52]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.51...v1.1.52
 [1.1.51]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.50...v1.1.51
 [1.1.50]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.49...v1.1.50
 [1.1.49]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.48...v1.1.49
