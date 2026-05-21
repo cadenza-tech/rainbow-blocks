@@ -610,6 +610,8 @@ export class BashBlockParser extends BaseBlockParser {
       if (!this.isAtCommandPosition(source, token.startOffset, excludedRegions)) return false;
       if (this.isCasePattern(source, token.startOffset, token.value, excludedRegions)) return false;
       if (this.isFollowedByEquals(source, token.startOffset, token.value)) return false;
+      // `then() { ... }` etc.: reserved word used as a function name, not a block intermediate
+      if (this.isFollowedByFunctionParens(source, token.startOffset, token.value)) return false;
       return true;
     });
 
