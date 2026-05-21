@@ -19,6 +19,13 @@ import {
 // (e.g., 1..fn -> 1 end and 1..quote do :a end remain valid block expressions).
 const DEFINITION_KEYWORDS = new Set(['def', 'defp', 'defmodule', 'defmacro', 'defmacrop', 'defguard', 'defguardp', 'defprotocol', 'defimpl']);
 
+// Leading characters of binary/expression operators. When a middle keyword (else/rescue/
+// catch/after) is immediately followed (after whitespace) by one of these, it is an operand
+// in an expression (e.g. `after <> y`, `else != x`), not a try/if/receive branch. `=` is
+// handled separately (assignment vs `==`/`=>`/`=~`); `.` is handled separately (field access
+// vs `..` range).
+const EXPRESSION_OPERATOR_LEAD_CHARS = new Set(['+', '-', '*', '/', '<', '>', '|', '^', '&', '~']);
+
 export class ElixirBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
@@ -372,8 +379,69 @@ export class ElixirBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Reject middle keywords used in an expression rather than as a branch: a function
+      // call (`else(x)`), field access (`else.bar`), or operand of a binary operator
+      // (`after <> y`). These are identifiers inside the body, not try/if/receive branches.
+      // A genuine same-line branch is a clause `<keyword> <pattern> -> <body>`, so it is kept
+      // whenever a clause-level `->` follows (this also preserves parenthesised patterns like
+      // `else (err) ->`, binary patterns `else <<b>> ->`, and negative literals `else -1 ->`).
+      // `..` (range) is excluded from the field-access check; the preceding-`..` rule handles
+      // `1..else`.
+      if (token.type === 'block_middle' && token.endOffset < source.length) {
+        let p = token.endOffset;
+        while (p < source.length && (source[p] === ' ' || source[p] === '\t')) p++;
+        if (p < source.length) {
+          const after = source[p];
+          const isFunctionCall = after === '(';
+          const isFieldAccess = after === '.' && (p + 1 >= source.length || source[p + 1] !== '.');
+          const isOperatorOperand = EXPRESSION_OPERATOR_LEAD_CHARS.has(after);
+          if ((isFunctionCall || isFieldAccess || isOperatorOperand) && !this.isFollowedByClauseArrow(source, p, excludedRegions)) {
+            return false;
+          }
+        }
+      }
       return true;
     });
+  }
+
+  // Checks whether a clause-level `->` follows position `fromPos` before the current clause
+  // head ends, i.e. whether a middle keyword here heads a real `<pattern> -> <body>` branch
+  // (e.g. `else (err) ->`, `else <<b>> ->`) rather than being used in an expression
+  // (e.g. `else(x)`, `else.bar`, `after <> y`). Scans forward tracking ()/[]/{} depth and
+  // skipping excluded regions, returning true on a depth-0 `->` and false on a depth-0
+  // newline / `;` / end of source first.
+  private isFollowedByClauseArrow(source: string, fromPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = fromPos;
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    while (i < source.length) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '(') parenDepth++;
+      else if (ch === ')') {
+        if (parenDepth > 0) parenDepth--;
+      } else if (ch === '[') bracketDepth++;
+      else if (ch === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+      } else if (ch === '{') braceDepth++;
+      else if (ch === '}') {
+        if (braceDepth > 0) braceDepth--;
+      } else if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        if (ch === '-' && source[i + 1] === '>') {
+          return true;
+        }
+        if (ch === '\n' || ch === '\r' || ch === ';') {
+          return false;
+        }
+      }
+      i++;
+    }
+    return false;
   }
 
   // Validates block close keywords, rejecting keyword arguments (e.g., end:) and ?/! suffixes (e.g., end?, end!)
