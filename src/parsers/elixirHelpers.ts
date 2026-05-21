@@ -359,56 +359,211 @@ export function matchTripleQuotedString(source: string, pos: number, delimiter: 
   return { start: pos, end: source.length };
 }
 
-// Skips a triple-quoted string (heredoc) inside interpolation, handling escapes and nested interpolation
-export function skipNestedTripleQuotedString(source: string, pos: number, delimiter: string, skipInterpolation: SkipInterpolationFn): number {
-  let i = pos + 3;
-  let isHeredoc = false;
-  while (i < source.length) {
-    if (source[i] === '\n' || source[i] === '\r') {
-      isHeredoc = true;
+// Handlers for the parser-instance-dependent operations the interpolation scanner needs.
+// Extracted as a callback interface so the iterative scanner can live here (free of `this`)
+// while still reaching ElixirBlockParser's character-literal and identifier-context logic.
+export interface InterpolationScanHandlers {
+  // Returns the position after a character literal at pos, or pos if not a character literal
+  skipCharLiteral: (source: string, pos: number) => number;
+  // Returns true if the '~' at pos is preceded by an identifier (so it is not a sigil)
+  isPrecededByIdentifier: (source: string, pos: number) => boolean;
+}
+
+// One open scan context on the explicit stack used by skipInterpolationIterative.
+// Each variant carries exactly the state its scanner needs to resume after a nested
+// context (string/sigil/interpolation) it descended into has been fully consumed.
+type ScanContext =
+  | { kind: 'interp'; depth: number }
+  | { kind: 'string'; quote: string }
+  | { kind: 'triple'; delimiter: string; isHeredoc: boolean }
+  | { kind: 'sigil'; openDelimiter: string; closeDelimiter: string; isPaired: boolean; isLowercase: boolean; depth: number }
+  | { kind: 'sigilTriple'; tripleDelim: string; isLowercase: boolean; isHeredoc: boolean };
+
+// Iteratively scans #{} interpolation content starting just after the opening "#{"
+// (pos points at the first char inside the braces) and returns the position after the
+// matching "}". Strings, charlists, triple-quoted heredocs, and sigils nested inside the
+// interpolation are scanned on an explicit context stack instead of by mutual recursion,
+// so arbitrarily deep nesting (e.g. "#{\"#{\"...\"}\"}") cannot exhaust the JS call stack.
+// Behaviour is identical to the former skipInterpolation/skipNested* mutual recursion.
+export function skipInterpolationIterative(source: string, pos: number, handlers: InterpolationScanHandlers): number {
+  const stack: ScanContext[] = [{ kind: 'interp', depth: 1 }];
+  let i = pos;
+
+  while (stack.length > 0 && i < source.length) {
+    const ctx = stack[stack.length - 1];
+
+    switch (ctx.kind) {
+      case 'interp': {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        // Character literal: ?x (Elixir character literal)
+        if (source[i] === '?' && i + 1 < source.length && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
+          const charLitEnd = handlers.skipCharLiteral(source, i);
+          if (charLitEnd > i) {
+            i = charLitEnd;
+            continue;
+          }
+        }
+        if (source[i] === '{') {
+          ctx.depth++;
+        } else if (source[i] === '}') {
+          ctx.depth--;
+          if (ctx.depth === 0) {
+            // Consume the closing brace and finish this interpolation context
+            i++;
+            stack.pop();
+            continue;
+          }
+        } else if (source[i] === '"' && source.slice(i, i + 3) === '"""') {
+          stack.push({ kind: 'triple', delimiter: '"""', isHeredoc: false });
+          i += 3;
+          continue;
+        } else if (source[i] === "'" && source.slice(i, i + 3) === "'''") {
+          stack.push({ kind: 'triple', delimiter: "'''", isHeredoc: false });
+          i += 3;
+          continue;
+        } else if (source[i] === '"' || source[i] === "'") {
+          stack.push({ kind: 'string', quote: source[i] });
+          i += 1;
+          continue;
+        } else if (source[i] === '#') {
+          // # starts a comment in interpolation code, skip to end of line
+          while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+            i++;
+          }
+          continue;
+        } else if (
+          source[i] === '~' &&
+          i + 1 < source.length &&
+          /[a-zA-Z]/.test(source[i + 1]) &&
+          (i === 0 || !handlers.isPrecededByIdentifier(source, i))
+        ) {
+          // Skip sigil inside interpolation (e.g. ~s(}))
+          const pushed = pushSigilContext(source, i, stack);
+          if (pushed > i) {
+            i = pushed;
+            continue;
+          }
+        }
+        i++;
+        continue;
+      }
+
+      case 'string': {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          stack.push({ kind: 'interp', depth: 1 });
+          i += 2;
+          continue;
+        }
+        if (source[i] === ctx.quote) {
+          i += 1;
+          stack.pop();
+          continue;
+        }
+        i++;
+        continue;
+      }
+
+      case 'triple': {
+        if (source[i] === '\n' || source[i] === '\r') {
+          ctx.isHeredoc = true;
+        }
+        if (source[i] === '\\' && i + 1 < source.length) {
+          i += 2;
+          continue;
+        }
+        if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          stack.push({ kind: 'interp', depth: 1 });
+          i += 2;
+          continue;
+        }
+        if (
+          source.slice(i, i + 3) === ctx.delimiter &&
+          (!ctx.isHeredoc || (isAtLineStartAllowingWhitespace(source, i) && isLineEndAfterTerminator(source, i + 3)))
+        ) {
+          i += 3;
+          stack.pop();
+          continue;
+        }
+        i++;
+        continue;
+      }
+
+      case 'sigilTriple': {
+        if (source[i] === '\n' || source[i] === '\r') {
+          ctx.isHeredoc = true;
+        }
+        if (source[i] === '\\' && i + 1 < source.length) {
+          if (ctx.isLowercase || source[i + 1] === ctx.tripleDelim[0] || source[i + 1] === '\\') {
+            i += 2;
+            continue;
+          }
+        }
+        if (ctx.isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          stack.push({ kind: 'interp', depth: 1 });
+          i += 2;
+          continue;
+        }
+        if (source.slice(i, i + 3) === ctx.tripleDelim && (!ctx.isHeredoc || isAtLineStartAllowingWhitespace(source, i))) {
+          // Tentatively skip optional modifiers (stop before reserved words like end/do/def)
+          const afterModifiers = skipSigilModifiers(source, i + 3);
+          // Heredoc terminator requires non-identifier-continuation char (or EOF) after
+          // modifiers; otherwise the """ is not a real terminator (sigil body continues).
+          if (!ctx.isHeredoc || isLineEndAfterSigilTerminator(source, afterModifiers)) {
+            i = afterModifiers;
+            stack.pop();
+            continue;
+          }
+        }
+        i++;
+        continue;
+      }
+
+      case 'sigil': {
+        if (source[i] === '\\' && i + 1 < source.length) {
+          if (ctx.isLowercase || source[i + 1] === ctx.closeDelimiter || source[i + 1] === '\\') {
+            i += 2;
+            continue;
+          }
+        }
+        // Handle #{} interpolation inside lowercase sigils
+        if (ctx.isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
+          stack.push({ kind: 'interp', depth: 1 });
+          i += 2;
+          continue;
+        }
+        if (ctx.isPaired && source[i] === ctx.openDelimiter) {
+          ctx.depth++;
+        } else if (source[i] === ctx.closeDelimiter) {
+          ctx.depth--;
+          if (ctx.depth === 0) {
+            // Skip optional modifiers (stop before reserved words like end/do/def)
+            i = skipSigilModifiers(source, i + 1);
+            stack.pop();
+            continue;
+          }
+        }
+        i++;
+        continue;
+      }
     }
-    if (source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
-    }
-    if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
-      i = skipInterpolation(source, i + 2);
-      continue;
-    }
-    if (
-      source.slice(i, i + 3) === delimiter &&
-      (!isHeredoc || (isAtLineStartAllowingWhitespace(source, i) && isLineEndAfterTerminator(source, i + 3)))
-    ) {
-      return i + 3;
-    }
-    i++;
   }
+
   return i;
 }
 
-// Skips a nested string inside interpolation
-export function skipNestedString(source: string, pos: number, skipInterpolation: SkipInterpolationFn): number {
-  const quote = source[pos];
-  let i = pos + 1;
-  while (i < source.length) {
-    if (source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
-    }
-    if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
-      i = skipInterpolation(source, i + 2);
-      continue;
-    }
-    if (source[i] === quote) {
-      return i + 1;
-    }
-    i++;
-  }
-  return i;
-}
-
-// Skips a sigil inside interpolation, returning position after it
-export function skipNestedSigil(source: string, pos: number, skipInterpolation: SkipInterpolationFn): number {
+// Inspects a sigil starting at the '~' at pos and, if it is a valid sigil, pushes the
+// matching scan context (sigil or sigilTriple) onto the stack and returns the position at
+// which body scanning should resume (just past the opening delimiter). Returns pos
+// unchanged when the construct is not a valid sigil (caller then advances by one char).
+// This mirrors the pre-scan portion of the former skipNestedSigil.
+function pushSigilContext(source: string, pos: number, stack: ScanContext[]): number {
   // pos points to '~', pos+1 is the sigil letter
   const sigilChar = source[pos + 1];
   const isLowercase = /[a-z]/.test(sigilChar);
@@ -441,65 +596,12 @@ export function skipNestedSigil(source: string, pos: number, skipInterpolation: 
     source[delimiterPos + 1] === openDelimiter &&
     source[delimiterPos + 2] === openDelimiter
   ) {
-    const tripleDelim = openDelimiter.repeat(3);
-    let j = delimiterPos + 3;
-    let isHeredoc = false;
-    while (j < source.length) {
-      if (source[j] === '\n' || source[j] === '\r') {
-        isHeredoc = true;
-      }
-      if (source[j] === '\\' && j + 1 < source.length) {
-        if (isLowercase || source[j + 1] === tripleDelim[0] || source[j + 1] === '\\') {
-          j += 2;
-          continue;
-        }
-      }
-      if (isLowercase && source[j] === '#' && j + 1 < source.length && source[j + 1] === '{') {
-        j = skipInterpolation(source, j + 2);
-        continue;
-      }
-      if (source.slice(j, j + 3) === tripleDelim && (!isHeredoc || isAtLineStartAllowingWhitespace(source, j))) {
-        // Tentatively skip optional modifiers (stop before reserved words like end/do/def)
-        const afterModifiers = skipSigilModifiers(source, j + 3);
-        // Heredoc terminator requires non-identifier-continuation char (or EOF) after
-        // modifiers; otherwise the """ is not a real terminator (sigil body continues).
-        if (!isHeredoc || isLineEndAfterSigilTerminator(source, afterModifiers)) {
-          return afterModifiers;
-        }
-      }
-      j++;
-    }
-    return j;
+    stack.push({ kind: 'sigilTriple', tripleDelim: openDelimiter.repeat(3), isLowercase, isHeredoc: false });
+    return delimiterPos + 3;
   }
 
-  let i = delimiterPos + 1;
-  let depth = 1;
-  const isPaired = openDelimiter !== closeDelimiter;
-
-  while (i < source.length && depth > 0) {
-    if (source[i] === '\\' && i + 1 < source.length) {
-      if (isLowercase || source[i + 1] === closeDelimiter || source[i + 1] === '\\') {
-        i += 2;
-        continue;
-      }
-    }
-    // Handle #{} interpolation inside lowercase sigils
-    if (isLowercase && source[i] === '#' && i + 1 < source.length && source[i + 1] === '{') {
-      i = skipInterpolation(source, i + 2);
-      continue;
-    }
-    if (isPaired && source[i] === openDelimiter) {
-      depth++;
-    } else if (source[i] === closeDelimiter) {
-      depth--;
-    }
-    i++;
-  }
-
-  // Skip optional modifiers (stop before reserved words like end/do/def)
-  i = skipSigilModifiers(source, i);
-
-  return i;
+  stack.push({ kind: 'sigil', openDelimiter, closeDelimiter, isPaired: openDelimiter !== closeDelimiter, isLowercase, depth: 1 });
+  return delimiterPos + 1;
 }
 
 // Matches sigil (~r/.../, ~s(...), ~w[...], etc)

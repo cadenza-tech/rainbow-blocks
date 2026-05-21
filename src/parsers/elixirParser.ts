@@ -3,6 +3,7 @@
 import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import {
+  type InterpolationScanHandlers,
   isAtomStart,
   matchAtomLiteral,
   matchElixirCharlist,
@@ -10,9 +11,7 @@ import {
   matchOperatorAtom,
   matchSigil,
   matchTripleQuotedString,
-  skipNestedSigil,
-  skipNestedString,
-  skipNestedTripleQuotedString
+  skipInterpolationIterative
 } from './elixirHelpers';
 
 // Definition keywords that should not be treated as block opens after '..' range operator.
@@ -110,65 +109,21 @@ export class ElixirBlockParser extends BaseBlockParser {
     return null;
   }
 
-  // Skips #{} interpolation block, tracking brace depth
+  // Handlers giving the iterative interpolation scanner access to this parser's
+  // character-literal and identifier-context logic without a `this` dependency.
+  private get interpolationScanHandlers(): InterpolationScanHandlers {
+    return {
+      skipCharLiteral: (source, pos) => this.skipCharLiteral(source, pos),
+      isPrecededByIdentifier: (source, pos) => this.isPrecededByIdentifier(source, pos)
+    };
+  }
+
+  // Skips a #{} interpolation block (pos points just after the opening "#{"), returning
+  // the position after the matching "}". Delegates to an iterative scanner that tracks
+  // nested strings/sigils/interpolations on an explicit stack, so deeply nested
+  // interpolation cannot overflow the JS call stack.
   private skipInterpolation(source: string, pos: number): number {
-    let depth = 1;
-    let i = pos;
-    const skipInterpolationBound = this.skipInterpolation.bind(this);
-    while (i < source.length && depth > 0) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      // Character literal: ?x (Elixir character literal)
-      if (source[i] === '?' && i + 1 < source.length && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
-        const charLitEnd = this.skipCharLiteral(source, i);
-        if (charLitEnd > i) {
-          i = charLitEnd;
-          continue;
-        }
-      }
-      if (source[i] === '{') {
-        depth++;
-      } else if (source[i] === '}') {
-        depth--;
-      } else if (source[i] === '"' && source.slice(i, i + 3) === '"""') {
-        // Triple-quoted string (heredoc) inside interpolation
-        i = skipNestedTripleQuotedString(source, i, '"""', skipInterpolationBound);
-        continue;
-      } else if (source[i] === "'" && source.slice(i, i + 3) === "'''") {
-        // Triple single-quoted charlist heredoc inside interpolation
-        i = skipNestedTripleQuotedString(source, i, "'''", skipInterpolationBound);
-        continue;
-      } else if (source[i] === '"') {
-        i = skipNestedString(source, i, skipInterpolationBound);
-        continue;
-      } else if (source[i] === "'") {
-        i = skipNestedString(source, i, skipInterpolationBound);
-        continue;
-      } else if (source[i] === '#') {
-        // # starts a comment in interpolation code, skip to end of line
-        // Nested #{} inside strings is handled by skipNestedString above
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-          i++;
-        }
-        continue;
-      } else if (
-        source[i] === '~' &&
-        i + 1 < source.length &&
-        /[a-zA-Z]/.test(source[i + 1]) &&
-        (i === 0 || !this.isPrecededByIdentifier(source, i))
-      ) {
-        // Skip sigil inside interpolation (e.g. ~s(}))
-        const sigilEnd = skipNestedSigil(source, i, skipInterpolationBound);
-        if (sigilEnd > i) {
-          i = sigilEnd;
-          continue;
-        }
-      }
-      i++;
-    }
-    return i;
+    return skipInterpolationIterative(source, pos, this.interpolationScanHandlers);
   }
 
   // Matches Elixir character literal: ?x, ?\escape, ?\xNN, ?\uNNNN, ?\u{NNNN}
