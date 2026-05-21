@@ -24,6 +24,13 @@ export class JuliaBlockParser extends BaseBlockParser {
   // source, so the enclosing-bracket lookup stays O(log n) instead of rescanning
   // the prefix per keyword (which made parsing O(N^2)).
   private bracketIndexCache: { source: string; index: BracketIndex } | null = null;
+  // Start offsets of block_close `end` tokens that are followed by a binary operator on
+  // the same line (e.g. `end + 1`, `end^2`). These are "tentative" closers: matchBlocks
+  // only uses them to close an opener that would otherwise be left unmatched, so a value-
+  // returning block (`begin...end + 1`) pairs while an invalid bare `end+1` does not steal
+  // the surrounding block's real `end`. Rebuilt every tokenize pass; never read across
+  // parses (single-threaded), so no source-identity key is needed.
+  private tentativeCloseOffsets = new Set<number>();
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'if',
@@ -72,7 +79,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Filters out keywords preceded by dot or adjacent to Unicode identifier characters
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
-    return tokens.filter((token) => {
+    const filtered = tokens.filter((token) => {
       // Skip keywords preceded by dot (struct field access like obj.end, range.begin)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '.') {
         return false;
@@ -117,6 +124,20 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
       return true;
     });
+
+    // Record block_close `end` tokens followed by a binary operator (e.g. `end + 1`).
+    // These stay block_close candidates but are only used by matchBlocks to rescue an
+    // otherwise-unmatched opener (see tentativeCloseOffsets). Indexing-bracket `end`s
+    // (lastindex) are already filtered out by isValidBlockClose, so any block_close `end`
+    // reaching here that is followed by an operator is an outside-brackets block terminator.
+    this.tentativeCloseOffsets = new Set<number>();
+    for (const token of filtered) {
+      if (token.type === 'block_close' && this.isFollowedByBinaryOperator(source, token.startOffset)) {
+        this.tentativeCloseOffsets.add(token.startOffset);
+      }
+    }
+
+    return filtered;
   }
 
   // Pairs blocks with context-aware intermediate handling: catch/finally only attach to
@@ -127,6 +148,13 @@ export class JuliaBlockParser extends BaseBlockParser {
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
+    // Pass 1: standard LIFO matching, but DEFER `end` tokens that are followed by a binary
+    // operator (tentativeCloseOffsets). A deferred close is a value-returning block
+    // terminator (`begin...end + 1`) only when its opener survives pass 1 unmatched; if a
+    // later real `end` already closes that opener, the deferred close was an invalid bare
+    // `end+1` and stays orphaned. Deferring (rather than closing eagerly) is what keeps
+    // `if a\n end!=2\nend` pairing the `if` with its real trailing `end`.
+    const deferredCloses: Token[] = [];
 
     for (const token of tokens) {
       switch (token.type) {
@@ -145,6 +173,10 @@ export class JuliaBlockParser extends BaseBlockParser {
           break;
 
         case 'block_close': {
+          if (this.tentativeCloseOffsets.has(token.startOffset)) {
+            deferredCloses.push(token);
+            break;
+          }
           const openBlock = stack.pop();
           if (openBlock) {
             pairs.push({
@@ -159,7 +191,41 @@ export class JuliaBlockParser extends BaseBlockParser {
       }
     }
 
+    // Pass 2: rescue openers still unmatched after pass 1 using the deferred operator-
+    // followed closes. Merge the surviving openers and the deferred closes in source order
+    // and run a second standard LIFO match. Merging by position guarantees a deferred close
+    // only pairs with an opener that starts before it, so independent blocks
+    // (`begin...end + 1\n begin...end + 2`) and nested ones pair correctly, while a deferred
+    // close with no preceding unmatched opener (the invalid bare `end+1`) stays orphaned.
+    if (deferredCloses.length > 0 && stack.length > 0) {
+      this.matchDeferredCloses(pairs, stack, deferredCloses);
+    }
+
     return pairs;
+  }
+
+  // Second-pass LIFO match between openers left unmatched by pass 1 (`remainingOpeners`,
+  // already in source order) and deferred operator-followed closes (`deferredCloses`,
+  // already in source order). Walks both sequences merged by start offset, pushing openers
+  // and popping the stack top for each close, appending matched pairs to `pairs`.
+  private matchDeferredCloses(pairs: BlockPair[], remainingOpeners: OpenBlock[], deferredCloses: Token[]): void {
+    const passStack: OpenBlock[] = [];
+    let openerIndex = 0;
+    for (const closeToken of deferredCloses) {
+      while (openerIndex < remainingOpeners.length && remainingOpeners[openerIndex].token.startOffset < closeToken.startOffset) {
+        passStack.push(remainingOpeners[openerIndex]);
+        openerIndex++;
+      }
+      const openBlock = passStack.pop();
+      if (openBlock) {
+        pairs.push({
+          openKeyword: openBlock.token,
+          closeKeyword: closeToken,
+          intermediates: openBlock.intermediates,
+          nestLevel: passStack.length
+        });
+      }
+    }
   }
 
   // Returns true if the intermediate keyword is valid for the given opener.
@@ -260,14 +326,12 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
       return false;
     }
-    // `end` directly followed by a binary operator (e.g., `end!=2`, `end<2`, `end+1`)
-    // outside of indexing brackets is invalid syntax (`end` is not a value). It should
-    // not be classified as block_close so the surrounding real `end` can pair with its
-    // opener correctly. Inside indexing brackets this is `lastindex` and is already
-    // handled by the earlier `isInsideAnyIndexingBracket` check above.
-    if (this.isFollowedByBinaryOperator(source, position)) {
-      return false;
-    }
+    // Note: `end` followed by a binary operator outside indexing brackets is NOT rejected
+    // here. A block-terminating `end` whose block returns a value (e.g. `begin...end + 1`,
+    // `if c a else b end - 1`, `let...end * 2`) is a legitimate operand and must stay a
+    // block_close candidate so it can pair with its opener. The invalid bare-`end` form
+    // (`if a\n end!=2\nend`) is distinguished in matchBlocks: such an operator-followed
+    // `end` is only used to close an opener that would otherwise be left unmatched.
     return true;
   }
 
