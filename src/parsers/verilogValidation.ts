@@ -852,72 +852,80 @@ export function skipParenGroup(source: string, pos: number, excludedRegions: Exc
 }
 
 // Skips a #delay expression: #number, #(expr), #identifier
+// Iterates over arithmetic operator chains (`a + b * c`) instead of recursing per
+// operator. A long delay like `#1+1+1+...` previously recursed once per operator
+// and overflowed the call stack (JS does not tail-call optimize); the loop keeps
+// stack usage constant for any expression length while producing the same result.
 export function skipDelayExpression(source: string, pos: number, excludedRegions: ExcludedRegion[], callbacks: VerilogValidationCallbacks): number {
   let i = pos;
-  while (i < source.length && /\s/.test(source[i])) i++;
-  if (i < source.length && source[i] === '(') {
-    return skipParenGroup(source, i, excludedRegions, callbacks);
-  }
-  if (i < source.length && /[0-9]/.test(source[i])) {
-    while (i < source.length && /[0-9_.]/.test(source[i])) i++;
-    // Handle base-specifier format: [size]'[s/S][base]digits (e.g., 32'd0, 8'hFF, 4'sb1010)
-    if (i < source.length && source[i] === "'") {
-      i = skipBaseSpecifierSuffix(source, i);
-    }
-    // Handle exponent notation (e.g., 1.5e-3, 2.0E+6)
-    if (i < source.length && (source[i] === 'e' || source[i] === 'E')) {
-      i++;
-      if (i < source.length && (source[i] === '+' || source[i] === '-')) {
-        i++;
-      }
-      while (i < source.length && /[0-9_]/.test(source[i])) i++;
-    }
-    // Skip time unit (e.g., ns, ps)
-    while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
-    // Skip arithmetic operators (allowing leading whitespace) and continue parsing
-    let op = i;
-    while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
-    if (op < source.length && /[+\-*/%]/.test(source[op])) {
-      return skipDelayExpression(source, op + 1, excludedRegions, callbacks);
-    }
-    return i;
-  }
-  // Handle unsized base-specifier literals: '[s/S][base]digits (e.g., 'd5, 'hFF)
-  // and bare tick fill literals: '0, '1, 'x, 'X, 'z, 'Z
-  if (i < source.length && source[i] === "'") {
-    const next = i + 1 < source.length ? source[i + 1] : '';
-    if (/[sS]/.test(next) || /[bBoOdDhH]/.test(next)) {
-      i = skipBaseSpecifierSuffix(source, i);
-      return i;
-    }
-    if (/[01xXzZ]/.test(next)) {
-      return i + 2;
-    }
-  }
-  if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
-    while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
-    let op = i;
-    while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
-    if (op < source.length && /[+\-*/%]/.test(source[op])) {
-      return skipDelayExpression(source, op + 1, excludedRegions, callbacks);
-    }
-    return i;
-  }
-  // Backtick-prefixed macro identifier: `MACRO_NAME or `(expr)
-  if (i < source.length && source[i] === '`') {
-    i++;
+  while (true) {
+    while (i < source.length && /\s/.test(source[i])) i++;
     if (i < source.length && source[i] === '(') {
       return skipParenGroup(source, i, excludedRegions, callbacks);
     }
-    while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
-    let op = i;
-    while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
-    if (op < source.length && /[+\-*/%]/.test(source[op])) {
-      return skipDelayExpression(source, op + 1, excludedRegions, callbacks);
+    if (i < source.length && /[0-9]/.test(source[i])) {
+      while (i < source.length && /[0-9_.]/.test(source[i])) i++;
+      // Handle base-specifier format: [size]'[s/S][base]digits (e.g., 32'd0, 8'hFF, 4'sb1010)
+      if (i < source.length && source[i] === "'") {
+        i = skipBaseSpecifierSuffix(source, i);
+      }
+      // Handle exponent notation (e.g., 1.5e-3, 2.0E+6)
+      if (i < source.length && (source[i] === 'e' || source[i] === 'E')) {
+        i++;
+        if (i < source.length && (source[i] === '+' || source[i] === '-')) {
+          i++;
+        }
+        while (i < source.length && /[0-9_]/.test(source[i])) i++;
+      }
+      // Skip time unit (e.g., ns, ps)
+      while (i < source.length && /[a-zA-Z]/.test(source[i])) i++;
+      // Skip arithmetic operators (allowing leading whitespace) and continue parsing
+      let op = i;
+      while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
+      if (op < source.length && /[+\-*/%]/.test(source[op])) {
+        i = op + 1;
+        continue;
+      }
+      return i;
+    }
+    // Handle unsized base-specifier literals: '[s/S][base]digits (e.g., 'd5, 'hFF)
+    // and bare tick fill literals: '0, '1, 'x, 'X, 'z, 'Z
+    if (i < source.length && source[i] === "'") {
+      const next = i + 1 < source.length ? source[i + 1] : '';
+      if (/[sS]/.test(next) || /[bBoOdDhH]/.test(next)) {
+        return skipBaseSpecifierSuffix(source, i);
+      }
+      if (/[01xXzZ]/.test(next)) {
+        return i + 2;
+      }
+    }
+    if (i < source.length && /[a-zA-Z_]/.test(source[i])) {
+      while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+      let op = i;
+      while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
+      if (op < source.length && /[+\-*/%]/.test(source[op])) {
+        i = op + 1;
+        continue;
+      }
+      return i;
+    }
+    // Backtick-prefixed macro identifier: `MACRO_NAME or `(expr)
+    if (i < source.length && source[i] === '`') {
+      i++;
+      if (i < source.length && source[i] === '(') {
+        return skipParenGroup(source, i, excludedRegions, callbacks);
+      }
+      while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+      let op = i;
+      while (op < source.length && (source[op] === ' ' || source[op] === '\t')) op++;
+      if (op < source.length && /[+\-*/%]/.test(source[op])) {
+        i = op + 1;
+        continue;
+      }
+      return i;
     }
     return i;
   }
-  return i;
 }
 
 // Skips the tick and base-specifier portion of a Verilog number literal
