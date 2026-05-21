@@ -3953,6 +3953,22 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'end');
     });
+    test('should detect a long chain of block keywords without quadratic blowup or stack overflow', () => {
+      // `if for for ... do :ok end` chained N+1 block keywords on one line. The former
+      // self-recursive chain detection in isKeywordUsedAsValue was re-walked for every
+      // block_open token from hasDoKeyword/isDoColonOneLiner, exploding to O(N^3) time
+      // (>100s at N=800) and overflowing the stack at larger N. With iterative,
+      // memoized chain detection this parses in well under the budget. The budget sits
+      // far below the broken version's runtime while leaving generous slack for slow CI.
+      const n = 800;
+      const source = `if ${'for '.repeat(n)}do :ok end`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.ok(elapsed < 15000, `parse should not be super-quadratic but took ${elapsed}ms`);
+      // The chained keywords are all used as values, so no spurious extra pairs appear.
+      assert.ok(pairs.length <= 1, `expected at most one block pair, got ${pairs.length}`);
+    });
   });
 
   suite('Regression 2026-05-09: middle keyword as map key should not be intermediate', () => {
