@@ -4006,6 +4006,66 @@ end`;
     });
   });
 
+  suite('Regression: reserved middle keywords used in expressions are not intermediates', () => {
+    // A reserved middle keyword (else/rescue/catch/after) used as a function call, field
+    // access, or expression operand inside a block body is an identifier, not a branch of
+    // the enclosing try/if/receive. It must not be attached as an intermediate.
+    test('should not register else as intermediate when used as a function call (else(x))', () => {
+      const source = 'def foo do\n  else(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should not register after as intermediate when used as a function call (after(5000))', () => {
+      const source = 'def foo do\n  after(5000)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should not register catch as intermediate when used as a function call (catch(err))', () => {
+      const source = 'def foo do\n  catch(err)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should not register rescue as intermediate when used as a function call (rescue(x))', () => {
+      const source = 'def foo do\n  rescue(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should not register else as intermediate when used as field access (else.bar)', () => {
+      const source = 'def foo do\n  x = else.bar\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should not register after as intermediate when used with an operator (after <> y)', () => {
+      const source = 'def foo do\n  x = after <> y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should still register else as intermediate in a real if/else block', () => {
+      const source = 'if x do\n  :a\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+    test('should still register rescue/catch/after intermediates in a real try block', () => {
+      const source = 'try do\n  :a\nrescue\n  e -> e\ncatch\n  x -> x\nafter\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue', 'catch', 'after']);
+    });
+    test('should still register after intermediate in a real receive/after block', () => {
+      const source = 'receive do\n  x -> x\nafter\n  1000 -> :timeout\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], ['after']);
+    });
+  });
+
   suite('Regression 2026-05-09: operator atoms should be recognized as excluded regions', () => {
     // Operator atoms in Elixir use punctuation rather than letters: :+, :-, :*, :/, :<,
     // :>, :=, :!, :?, :~, :^, :&, :|, plus multi-char :==, :!=, :<=, :>=, :=~, :->,
