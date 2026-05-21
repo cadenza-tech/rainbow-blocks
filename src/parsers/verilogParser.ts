@@ -24,6 +24,7 @@ import {
   isOnDpiLine,
   isPrecededByAssertionVerb,
   isPrecededByAssignmentOperator,
+  isPrecededByBinaryOperator,
   isPrecededByLabelColon,
   isPrecededByModifierKeyword,
   isValidForkOpen,
@@ -658,14 +659,19 @@ export class VerilogBlockParser extends BaseBlockParser {
     }
 
     // Reject case-statement keywords misused as identifiers on the right-hand side
-    // of an assignment (e.g., `x = case;`, `y <= casex;`, `b = randcase;`,
-    // `x = case(y);`). A case keyword can only appear at statement position and
-    // never as an expression operand, so a preceding assignment operator means it
-    // is being used as an identifier — regardless of whether an opening paren
-    // follows. (A following `(` does not rescue the `case (expr)` statement form
-    // here because a case statement cannot legally appear after an assignment
-    // operator in the first place.)
-    if (CASE_KEYWORDS.has(keyword) && isPrecededByAssignmentOperator(source, position, excludedRegions, this.validationCallbacks)) {
+    // of an operator. A case keyword can only appear at statement position and
+    // never as an expression operand, so a preceding operator means it is being
+    // used as an identifier — regardless of whether an opening paren follows.
+    // - Assignment operators: `x = case;`, `y <= casex;`, `b = randcase;`, `x = case(y);`
+    // - Comparison/arithmetic/bitwise/logical operators: `if (x == casez)`,
+    //   `if (a + casex)`, `b & casez`. (A following `(` does not rescue the
+    //   `case (expr)` statement form here because a case statement cannot legally
+    //   appear after an operator in the first place.)
+    if (
+      CASE_KEYWORDS.has(keyword) &&
+      (isPrecededByAssignmentOperator(source, position, excludedRegions, this.validationCallbacks) ||
+        isPrecededByBinaryOperator(source, position, excludedRegions, this.validationCallbacks))
+    ) {
       return false;
     }
 

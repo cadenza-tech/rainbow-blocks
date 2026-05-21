@@ -609,6 +609,35 @@ export function isPrecededByAssignmentOperator(
   return true;
 }
 
+// Trailing characters of a binary/comparison/arithmetic/bitwise/logical operator
+// that can sit on the operator's right-hand side. A case-statement keyword can
+// only appear at statement position, never as an expression operand, so when one
+// of these characters immediately precedes a case keyword (skipping whitespace and
+// comments) the keyword is being misused as an identifier inside an expression
+// (e.g., `x == casez`, `a + casex`, `b & casez`).
+// `:` and `,` are excluded: a `:` may be a case_item label colon (`0: casez`) and
+// a `,` a list separator; both are handled by other suppression paths.
+const OPERATOR_TAIL_CHARS = new Set(['=', '<', '>', '!', '+', '-', '*', '/', '%', '&', '|', '^', '~', '?']);
+
+// Returns true when the keyword at `position` is immediately preceded (skipping
+// whitespace and comments) by a character that terminates a binary operator
+// (comparison, arithmetic, bitwise, or logical). Used to reject case-statement
+// keywords (`case`/`casex`/`casez`/`randcase`) misused as expression operands,
+// e.g. `if (x == casez)`. This generalizes the assignment-operator suppression:
+// a case keyword never appears as an operand, so any preceding operator means it
+// is being used as an identifier.
+export function isPrecededByBinaryOperator(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const opPos = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
+  if (opPos < 0) return false;
+  if (callbacks.isInExcludedRegion(opPos, excludedRegions)) return false;
+  return OPERATOR_TAIL_CHARS.has(source[opPos]);
+}
+
 // Control keywords that take a parenthesized header `(condition)` immediately
 // followed by their single-statement body. When a `default` keyword sits right
 // after such a header's closing `)`, it is inside that single statement body,
