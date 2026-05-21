@@ -71,14 +71,41 @@ export interface CobolHelperCallbacks {
   findLastPeriodOutsideStringsBefore?: (endExclusive: number) => number;
   // Returns true if the position is inside a COPY statement. Cached.
   isInCopyStatementCached?: (posBeforeKeyword: number) => boolean;
+  // Per-parse memo for walkBackThroughPseudoChain, keyed by the right-end offset
+  // of a closing `==`. Without it, a long run of consecutive `=` (e.g. a divider
+  // banner) makes every `==` re-walk all preceding `==` pairs, giving O(n^2) per
+  // pass and O(n^3) overall. Populated by the parser before each parse.
+  pseudoChainWalkCache?: Map<number, number>;
+  // Returns the offset of the first character of the line containing `pos`
+  // (just after the previous \n/\r, or 0). Backed by the parser's precomputed
+  // newline table for O(log n) lookup. Without it, skipBackwardWhitespaceAndComments
+  // walks back to the line start one char at a time, which is O(n) per call and
+  // O(n^2) across a long single-line `=` run.
+  findLineStart?: (pos: number) => number;
+  // Returns the offset of the first `*>` inline-comment marker in [lineStart, endInclusive],
+  // or -1 if none. Backed by a precomputed sorted table for O(log n) lookup so the
+  // comment scan inside skipBackwardWhitespaceAndComments does not re-scan the whole
+  // line on every call.
+  firstInlineCommentFrom?: (lineStart: number, endInclusive: number) => number;
 }
 
-// Checks if the given position is on a fixed-format comment line or >> compiler directive line
-function isOnExcludedLine(source: string, pos: number, callbacks: CobolHelperCallbacks): boolean {
+// Resolves the start offset of the line containing `pos`. Uses the parser's
+// precomputed newline table (O(log n)) when available, falling back to a
+// backward character scan otherwise.
+function lineStartOf(source: string, pos: number, callbacks: CobolHelperCallbacks): number {
+  if (callbacks.findLineStart) {
+    return callbacks.findLineStart(pos);
+  }
   let lineStart = pos;
   while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
     lineStart--;
   }
+  return lineStart;
+}
+
+// Checks if the given position is on a fixed-format comment line or >> compiler directive line
+function isOnExcludedLine(source: string, pos: number, callbacks: CobolHelperCallbacks): boolean {
+  const lineStart = lineStartOf(source, pos, callbacks);
   // Check fixed-format column 7 comment line
   if (callbacks.isFixedFormatCommentLine(source, lineStart)) return true;
   // Check >> compiler directive line (skip leading whitespace)
@@ -100,20 +127,25 @@ export function skipBackwardWhitespaceAndComments(source: string, startPos: numb
     }
     if (j < 0) return -1;
 
-    let lineStart = j;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-      lineStart--;
-    }
+    const lineStart = lineStartOf(source, j, callbacks);
 
     if (isOnExcludedLine(source, j, callbacks)) {
       j = lineStart - 1;
       continue;
     }
 
-    const line = source.slice(lineStart, j + 1);
-    const commentIdx = line.indexOf('*>');
-    if (commentIdx !== -1) {
-      j = lineStart + commentIdx - 1;
+    // Jump before the first inline `*>` comment on this line at or before j, if any.
+    // The precomputed table answers this in O(log n); the slice/indexOf fallback is
+    // O(line length) but only runs when the parser did not supply the table.
+    let commentPos: number;
+    if (callbacks.firstInlineCommentFrom) {
+      commentPos = callbacks.firstInlineCommentFrom(lineStart, j);
+    } else {
+      const idx = source.slice(lineStart, j + 1).indexOf('*>');
+      commentPos = idx === -1 ? -1 : lineStart + idx;
+    }
+    if (commentPos !== -1) {
+      j = commentPos - 1;
       continue;
     }
 
@@ -280,17 +312,39 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
   return { start: pos, end: pos + startWord.length };
 }
 
-// Scans backward from position i to check if the preceding word matches target keyword
-// Skips whitespace, pseudo-text (==...==), BY keywords, inline *> comments,
-// fixed-format comment lines, and >> directive lines.
-export function isPrecededByKeyword(source: string, i: number, target: string, callbacks: CobolHelperCallbacks): boolean {
-  let j = skipBackwardWhitespaceAndComments(source, i, callbacks);
-  if (j < 0) {
-    return false;
-  }
+// Walks backward over a chain of pseudo-text blocks and BY keywords starting at
+// position `i` (after whitespace/comments have already been skipped). Returns the
+// position of the character just before the word that terminates the chain — the
+// same `j` that the inline loops in isPrecededByKeyword / findPrecedingKeywordPosition
+// used to compute before extracting the preceding word. Returns -1 if the scan
+// runs off the start of the source.
+//
+// The walk is memoized per parse (callbacks.pseudoChainWalkCache, keyed by the
+// closing-`==` right-end at the start of each iteration). The result of the walk
+// depends only on (source, i), and every iteration starts at another closing-`==`
+// right-end whose own walk yields the identical terminating position, so caching
+// each visited right-end collapses the otherwise O(n^2) re-walk on long `=` runs
+// to O(n) amortized. The memo is exact: it stores the same value the un-memoized
+// loop would reach, just discovered earlier.
+function walkBackThroughPseudoChain(source: string, i: number, callbacks: CobolHelperCallbacks): number {
+  const cache = callbacks.pseudoChainWalkCache;
+  // Right-ends visited in this walk; all of them terminate at the same position,
+  // so we backfill the cache for each once the terminating position is known.
+  const visited: number[] = [];
+  let j = i;
   // Skip multiple consecutive pseudo-text blocks and BY keywords
   // (e.g., ==a== BY ==b== ==c== BY ==d== <- need to traverse all to reach REPLACING)
   while (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
+    if (cache) {
+      const memoized = cache.get(j);
+      if (memoized !== undefined) {
+        for (const v of visited) {
+          cache.set(v, memoized);
+        }
+        return memoized;
+      }
+      visited.push(j);
+    }
     j -= 2;
     // Skip pseudo-text content to find opening ==
     while (j >= 1) {
@@ -302,7 +356,12 @@ export function isPrecededByKeyword(source: string, i: number, target: string, c
     }
     j = skipBackwardWhitespaceAndComments(source, j, callbacks);
     if (j < 0) {
-      return false;
+      if (cache) {
+        for (const v of visited) {
+          cache.set(v, -1);
+        }
+      }
+      return -1;
     }
     // If we landed on another closing ==, let the loop handle it directly
     if (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
@@ -320,8 +379,33 @@ export function isPrecededByKeyword(source: string, i: number, target: string, c
     }
     j = skipBackwardWhitespaceAndComments(source, byStart, callbacks);
     if (j < 0) {
-      return false;
+      if (cache) {
+        for (const v of visited) {
+          cache.set(v, -1);
+        }
+      }
+      return -1;
     }
+  }
+  if (cache) {
+    for (const v of visited) {
+      cache.set(v, j);
+    }
+  }
+  return j;
+}
+
+// Scans backward from position i to check if the preceding word matches target keyword
+// Skips whitespace, pseudo-text (==...==), BY keywords, inline *> comments,
+// fixed-format comment lines, and >> directive lines.
+export function isPrecededByKeyword(source: string, i: number, target: string, callbacks: CobolHelperCallbacks): boolean {
+  let j = skipBackwardWhitespaceAndComments(source, i, callbacks);
+  if (j < 0) {
+    return false;
+  }
+  j = walkBackThroughPseudoChain(source, j, callbacks);
+  if (j < 0) {
+    return false;
   }
   // Extract the preceding word
   const wordEnd = j + 1;
@@ -343,39 +427,9 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
   if (j < 0) {
     return -1;
   }
-  // Skip multiple consecutive pseudo-text blocks and BY keywords
-  while (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
-    j -= 2;
-    // Skip pseudo-text content to find opening ==
-    while (j >= 1) {
-      if (source[j] === '=' && source[j - 1] === '=') {
-        j -= 2;
-        break;
-      }
-      j--;
-    }
-    j = skipBackwardWhitespaceAndComments(source, j, callbacks);
-    if (j < 0) {
-      return -1;
-    }
-    // If we landed on another closing ==, let the loop handle it directly
-    if (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
-      continue;
-    }
-    // Check if the preceding word is BY; if so, skip it and continue the loop
-    const byEnd = j + 1;
-    let byStart = j;
-    while (byStart >= 0 && /[a-zA-Z]/.test(source[byStart])) {
-      byStart--;
-    }
-    const byWord = source.slice(byStart + 1, byEnd).toUpperCase();
-    if (byWord !== 'BY') {
-      break;
-    }
-    j = skipBackwardWhitespaceAndComments(source, byStart, callbacks);
-    if (j < 0) {
-      return -1;
-    }
+  j = walkBackThroughPseudoChain(source, j, callbacks);
+  if (j < 0) {
+    return -1;
   }
   // Extract the preceding word
   const wordEnd = j + 1;

@@ -87,7 +87,10 @@ export class CobolBlockParser extends BaseBlockParser {
   private get helperCallbacks(): CobolHelperCallbacks {
     return {
       isFixedFormatCommentLine: (source, lineStart) => this.isFixedFormatCommentLine(source, lineStart),
-      isInCopyStatementCached: (posBeforeKeyword) => this.isInCopyStatementCached(posBeforeKeyword)
+      isInCopyStatementCached: (posBeforeKeyword) => this.isInCopyStatementCached(posBeforeKeyword),
+      pseudoChainWalkCache: this.cachedPseudoChainWalk,
+      findLineStart: (pos) => this.findLineStart(pos),
+      firstInlineCommentFrom: (lineStart, endInclusive) => this.firstInlineCommentFrom(lineStart, endInclusive)
     };
   }
 
@@ -110,6 +113,17 @@ export class CobolBlockParser extends BaseBlockParser {
   // per-`==` backward walk that previously gave O(n^2) behaviour for large
   // multi-pair COPY REPLACING blocks.
   private cachedPseudoTextStarts: Set<number> | null = null;
+  // Per-parse memo for the backward `==`-chain walk in cobolHelpers. Keyed by the
+  // right-end offset of a closing `==`. A long run of consecutive `=` (a divider
+  // banner like `====...`) falls through to the per-position pseudo-text check,
+  // whose backward walk would otherwise re-scan all preceding `==` pairs — O(n^2)
+  // per pass, O(n^3) overall. Memoizing the walk per parse makes it O(n).
+  private cachedPseudoChainWalk = new Map<number, number>();
+  // Newline offsets and `*>` inline-comment offsets, precomputed once per parse so
+  // cobolHelpers' backward scans can locate line starts and inline comments in
+  // O(log n) instead of re-walking the line on every `==`.
+  private cachedNewlines: number[] | null = null;
+  private cachedInlineComments: number[] | null = null;
 
   // Override findExcludedRegions to reset per-parse caches before scanning.
   // Without this, repeated parser.parse() calls on different sources would
@@ -120,6 +134,9 @@ export class CobolBlockParser extends BaseBlockParser {
       this.cachedPeriods = null;
       this.cachedCopyStatement.clear();
       this.cachedPseudoTextStarts = null;
+      this.cachedPseudoChainWalk.clear();
+      this.cachedNewlines = null;
+      this.cachedInlineComments = null;
     }
     return super.findExcludedRegions(source);
   }
@@ -152,6 +169,73 @@ export class CobolBlockParser extends BaseBlockParser {
   // Single-pass scan to collect all period positions outside strings/comments/comment-lines
   private buildPeriodPositions(source: string): number[] {
     return buildPeriodPositions(source);
+  }
+
+  // Returns the start offset of the line containing `pos` (just after the prior
+  // \n/\r, or 0). Uses a per-parse newline table for O(log n) lookup.
+  private findLineStart(pos: number): number {
+    if (this.cachedSource === null) return 0;
+    if (this.cachedNewlines === null) {
+      this.cachedNewlines = this.buildNewlinePositions(this.cachedSource);
+    }
+    const newlines = this.cachedNewlines;
+    // Binary search for the largest newline offset < pos; the line starts after it.
+    let lo = 0;
+    let hi = newlines.length - 1;
+    let lastNewline = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (newlines[mid] < pos) {
+        lastNewline = newlines[mid];
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lastNewline + 1;
+  }
+
+  // Returns the offset of the first `*>` inline-comment marker fully contained in
+  // [lineStart, endInclusive] (i.e., both the `*` and `>` are within range), or -1
+  // if none. Mirrors the plain-substring semantics of the previous
+  // `source.slice(lineStart, endInclusive + 1).indexOf('*>')` scan (which requires
+  // both characters to fall inside the slice) using a per-parse sorted table of
+  // every `*>` occurrence for O(log n) lookup.
+  private firstInlineCommentFrom(lineStart: number, endInclusive: number): number {
+    if (this.cachedSource === null) return -1;
+    if (this.cachedInlineComments === null) {
+      this.cachedInlineComments = this.buildInlineCommentPositions(this.cachedSource);
+    }
+    const markers = this.cachedInlineComments;
+    // Binary search for the smallest marker offset >= lineStart.
+    let lo = 0;
+    let hi = markers.length - 1;
+    let candidate = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (markers[mid] >= lineStart) {
+        candidate = markers[mid];
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    // The marker spans [candidate, candidate + 1]; require its `>` to be at or
+    // before endInclusive so it matches the original slice that excluded a
+    // trailing lone `*`.
+    if (candidate === -1 || candidate + 1 > endInclusive) return -1;
+    return candidate;
+  }
+
+  // Single-pass scan collecting the offset of every `*>` two-character sequence.
+  private buildInlineCommentPositions(source: string): number[] {
+    const positions: number[] = [];
+    for (let i = 0; i + 1 < source.length; i++) {
+      if (source[i] === '*' && source[i + 1] === '>') {
+        positions.push(i);
+      }
+    }
+    return positions;
   }
 
   // Builds (lazily, once per parse) the set of `==` offsets that begin a pseudo-text region
