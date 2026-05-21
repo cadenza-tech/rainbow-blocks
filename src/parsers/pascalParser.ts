@@ -158,13 +158,15 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         // Expression/declaration prefixes that disqualify `asm` as a block opener.
         // `[asm]` / `arr[0] asm` (array index), `<asm>` / `a > asm` (generic param or
-        // comparison), arithmetic ops are all identifier/expression contexts. The set
-        // must stay in sync with the backward check in addAsmExcludedRegions.
+        // comparison), `(x) asm` (condition/expression context after a closing paren),
+        // arithmetic ops are all identifier/expression contexts. The set must stay in
+        // sync with the backward check in addAsmExcludedRegions.
         if (
           prev === '.' ||
           prev === ':' ||
           prev === ',' ||
           prev === '(' ||
+          prev === ')' ||
           prev === '=' ||
           prev === '[' ||
           prev === ']' ||
@@ -829,14 +831,17 @@ export class PascalBlockParser extends BaseBlockParser {
           const prev = source[bp];
           if (prev !== ';') {
             // @asm = address-of, &asm = identifier-escape, <asm> = generic param,
-            // [asm] = array indexing, +/-/*/asm = arithmetic, $asm = hex-literal prefix,
+            // [asm] = array indexing, (x) asm = condition/expression context after a
+            // closing paren, +/-/*/asm = arithmetic, $asm = hex-literal prefix,
             // #asm = char-constant prefix. None of these can introduce an asm block;
-            // treat them as non-statement context.
+            // treat them as non-statement context. The set must stay in sync with the
+            // backward check in isValidBlockOpen.
             if (
               prev === '.' ||
               prev === ':' ||
               prev === ',' ||
               prev === '(' ||
+              prev === ')' ||
               prev === '=' ||
               prev === '@' ||
               prev === '&' ||
