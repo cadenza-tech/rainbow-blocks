@@ -1,6 +1,6 @@
 import * as assert from 'node:assert';
 import { CobolBlockParser } from '../../parsers/cobolParser';
-import { assertBlockCount, assertIntermediates, assertNoBlocks, assertSingleBlock } from '../helpers/parserTestHelpers';
+import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
 import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
 
@@ -245,6 +245,60 @@ END-EVALUATE`;
 END-IF`;
       const pairs = parser.parse(source);
       assertBlockCount(pairs, 3);
+    });
+
+    // Regression: crossing (non-well-nested) blocks must not produce two
+    // overlapping pairs. Per CLAUDE.md best-effort parsing (anchor-set
+    // principle), a close that would cross an inner unclosed opener does not
+    // force a pair; the crossed-over opener is left orphan (no color) rather
+    // than colored as an overlapping region. Pre-fix COBOL emitted BOTH
+    // IF->END-IF and PERFORM->END-PERFORM here (matching Ada/Bash behaviour,
+    // which yield a single pair for the same crossing input).
+    suite('Crossing blocks', () => {
+      test('should not pair END-IF across an inner unclosed PERFORM', () => {
+        // IF opens, PERFORM opens, then END-IF (would cross PERFORM), then
+        // END-PERFORM. END-IF cannot cross PERFORM (which is still closed by the
+        // later END-PERFORM), so only PERFORM/END-PERFORM pairs.
+        const source = 'IF A\n  PERFORM\n  END-IF\nEND-PERFORM';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+      });
+
+      test('should not pair END-PERFORM across an inner unclosed IF', () => {
+        const source = 'PERFORM\n  IF A\n  END-PERFORM\nEND-IF';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'IF', 'END-IF');
+      });
+
+      test('should keep both pairs for well-nested IF inside PERFORM', () => {
+        const source = 'PERFORM\n  IF A\n  END-IF\nEND-PERFORM';
+        const pairs = parser.parse(source);
+        assertBlockCount(pairs, 2);
+        assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
+        assertNestLevel(pairs, 'IF', 1);
+        assert.strictEqual(findBlock(pairs, 'PERFORM').closeKeyword?.value, 'END-PERFORM');
+        assertNestLevel(pairs, 'PERFORM', 0);
+      });
+
+      test('should keep both pairs for well-nested PERFORM inside IF', () => {
+        const source = 'IF A\n  PERFORM\n  END-PERFORM\nEND-IF';
+        const pairs = parser.parse(source);
+        assertBlockCount(pairs, 2);
+        assert.strictEqual(findBlock(pairs, 'PERFORM').closeKeyword?.value, 'END-PERFORM');
+        assertNestLevel(pairs, 'PERFORM', 1);
+        assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
+        assertNestLevel(pairs, 'IF', 0);
+      });
+
+      test('should pair IF->END-IF when the crossed-over PERFORM is never closed', () => {
+        // IF opens, PERFORM opens (never closed), END-IF. The PERFORM has no
+        // matching END-PERFORM, so END-IF does not actually cross a pair and
+        // should still pair with IF (PERFORM stays orphan). This keeps orphan
+        // count minimal (CLAUDE.md cost-minimization).
+        const source = 'IF A\n  PERFORM\nEND-IF';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'IF', 'END-IF');
+      });
     });
   });
 
