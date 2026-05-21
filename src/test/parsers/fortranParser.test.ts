@@ -5585,6 +5585,28 @@ do`;
     });
   });
 
+  suite('Empty parenthesized if condition', () => {
+    test('should not treat if () then as a block opener', () => {
+      const pairs = parser.parse('if () then\n  x = 1\nend if');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat if ( ) then with whitespace-only condition as a block opener', () => {
+      const pairs = parser.parse('if (  ) then\n  x = 1\nend if');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair a non-empty if condition', () => {
+      const pairs = parser.parse('if (x > 0) then\n  x = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still pair if with nested parentheses as a non-empty condition', () => {
+      const pairs = parser.parse('if (()) then\n  x = 1\nend if');
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
