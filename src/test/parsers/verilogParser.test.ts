@@ -2672,6 +2672,40 @@ endmodule`;
     });
   });
 
+  suite('Regression: very long delay expression operator chain should not overflow the stack', () => {
+    // Bug: skipDelayExpression recursed once per arithmetic operator (`+ - * / %`)
+    // in a delay expression. A delay like `#1+1+1+...` with thousands of operators
+    // grew the call stack proportionally to the operator count, throwing
+    // `RangeError: Maximum call stack size exceeded` (observed at ~8000 operators).
+    // The scan must iterate so any-length expression is handled without recursion.
+    test('should pair always with end for a numeric delay with 10000 plus operators', () => {
+      const chain = new Array(10000).fill('1').join('+');
+      const source = `always #${chain} begin\n  x = 1;\nend`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should pair always with end for an identifier delay with 10000 plus operators', () => {
+      const chain = new Array(10000).fill('a').join('+');
+      const source = `always #${chain} begin\n  x = 1;\nend`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'begin');
+    });
+
+    test('should pair always with end for a backtick-macro delay with 10000 plus operators', () => {
+      const chain = new Array(10000).fill('`M').join('+');
+      const source = `always #${chain} begin\n  x = 1;\nend`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'begin');
+    });
+  });
+
   suite('Regression: trySkipLabel bare backslash', () => {
     test('should not treat bare backslash followed by colon as label', () => {
       const pairs = parser.parse('always @(posedge clk) \\ : begin\n  q <= d;\nend');
