@@ -5,6 +5,32 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.53] - 2026-05-22
+
+### Fixed
+
+- AppleScript: Treat U+2212 (minus sign) as a binary operator so a keyword after it (`1 − tell`) is not opened as a block
+- AppleScript: Treat a stray right double quotation mark (`U+201D`) as an expression terminator so a following keyword is not opened as a block
+- Bash: Skip block middle keywords (`then`, `else`, `elif`, `do`) used as function names so they are not added to intermediates
+- Bash: Reject a command group close `}` after a stray `]` without a separator so `{ echo foo]}` does not produce a phantom `{`/`}` pair
+- COBOL: Resolve pseudo-text `==` context in a single pass so a long run of consecutive `==` (banner lines) no longer hangs with superlinear scanning
+- COBOL: Skip crossing block pairs (`IF` interleaved with `PERFORM`) so overlapping pairs are not generated
+- Crystal: Bound an unterminated `<<-"FOO` heredoc opener to its own line so it no longer swallows following blocks up to a distant quote
+- Elixir: Scan nested string interpolation iteratively so deeply nested interpolation no longer overflows the stack
+- Elixir: Detect chained block keywords iteratively so a long keyword chain no longer overflows the stack or degrades quadratically
+- Elixir: Skip reserved middle keywords used in expressions (`else(x)`, `after(5000)`, `else.bar`) so they are not added to intermediates
+- Fortran: Bound opener validation to the opener's logical line so files with many blocks validate in linear time instead of `O(N²)`
+- Fortran: Reject an empty parenthesized condition `if ()` so it is not opened as a block
+- Julia: Pair a block-expression `end` followed by a binary operator (`begin ... end + 1`) instead of dropping the block
+- MATLAB: Treat a logical compound assignment after `end` (`end &= 1`, `end |= 1`) as a variable use instead of a block close
+- Octave: Skip Unicode horizontal whitespace before an assignment so `do<NBSP>= 1` is treated as a variable assignment, not a block opener
+- Pascal: Stop the generic-constraint scan at a statement boundary so a `<` in a preceding statement no longer suppresses a following `record` block
+- Pascal: Reject an `asm` block opener after a closing parenthesis (`if (x) asm`) so it is not opened as a block
+- Ruby: Filter an `end` in a multi-line ternary value position so it is not mispaired with a preceding `def`
+- Ruby: Restrict `when`/`else`/`elsif` attachment to matching block types so they are not added to the intermediates of `do`/`while`/`for` blocks
+- Verilog: Scan delay expressions iteratively so a long operator chain (`#1+1+...`) no longer overflows the stack
+- Verilog: Suppress `case`/`casez`/`casex` keywords after a comparison operator (`x == casez`) so they are not opened as a block
+
 ## [1.1.52] - 2026-05-21
 
 ### Fixed
@@ -2026,6 +2052,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.53]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.52...v1.1.53
 [1.1.52]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.51...v1.1.52
 [1.1.51]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.50...v1.1.51
 [1.1.50]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.49...v1.1.50
