@@ -857,6 +857,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // minus sign that Script Editor produces when auto-converting ASCII `-`).
     if ('&+\\-*/=<>^'.includes(ch)) return true;
     if (ch === '≤' || ch === '≥' || ch === '≠' || ch === '÷' || ch === '×' || ch === '−') return true;
+    // Stray right double quotation mark `”` (U+201D) without its opening `“`: a balanced
+    // `“…”` is consumed as an excluded string region before this scan runs, so reaching a
+    // lone `”` here means it terminated a (malformed) string literal. Treat it as an
+    // expression terminator so a following tell/if/repeat is the right operand, not a block
+    // opener. This only fires on stray `”`, leaving valid smart-quoted strings untouched.
+    if (ch === '”') return true;
     // String/literal value terminator: any alphanumeric/underscore that is not part of a
     // known control keyword. We conservatively accept if preceding char is any word character
     // and look back for the preceding token (simple heuristic: if it's a control keyword,
