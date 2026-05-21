@@ -2191,5 +2191,58 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-22: Unicode horizontal whitespace before assignment is not a block open', () => {
+    test('should not treat do followed by NBSP then = as block open', () => {
+      // U+00A0 NO-BREAK SPACE is horizontal whitespace in Octave, so `do<NBSP>= 1;`
+      // is an assignment to a variable named `do` — exactly like the ASCII `do = 1;`
+      // case. `do` must NOT open a do/until block; both `do` and `until` stay orphan.
+      const source = 'do = 1;\nuntil y';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do followed by NBSP and = should not open a do/until block');
+      assert.strictEqual(pairs.length, 0, 'do and until are both orphans');
+    });
+
+    test('should not treat do followed by full-width space then = as block open', () => {
+      // U+3000 IDEOGRAPHIC SPACE (full-width space) is also horizontal whitespace.
+      const source = 'do　= 1;\nuntil y';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do followed by full-width space and = should not open a do/until block');
+      assert.strictEqual(pairs.length, 0, 'do and until are both orphans');
+    });
+
+    test('should not treat if followed by NBSP then = as block open', () => {
+      // `if<NBSP>= 5;` is an assignment to a variable named `if`; the `if` on line 0
+      // must not be tokenized as a block open at all. A LIFO pairing would still
+      // match the trailing `end` with the real `if` on line 1 and hide the bug, so
+      // assert at the token level: only the real `if` (line 1) may be a block_open.
+      const source = 'if = 5;\nif true\nend';
+      const tokens = parser.getTokens(source);
+      const ifOpenTokens = tokens.filter((t) => t.value === 'if' && t.type === 'block_open');
+      assert.strictEqual(ifOpenTokens.length, 1, 'only the real if (line 1) should be a block_open token');
+      assert.strictEqual(ifOpenTokens[0].line, 1, 'the block_open if must be the real one on line 1');
+      assertSingleBlock(parser.parse(source), 'if', 'end');
+    });
+
+    test('should not treat if followed by full-width space then = as block open', () => {
+      // U+3000 separator: `if<U+3000>= 5;` assigns to a variable named `if`, so the
+      // following `end` is an orphan close and the `if` is not a block opener.
+      const source = 'if　= 5;\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat do followed by NBSP then compound assignment as block open', () => {
+      // U+00A0 before a compound assignment (`+=`) must also be skipped: `do<NBSP>+= 1;`
+      // is a compound assignment to a variable named `do`, not a do/until opener.
+      const source = 'do += 1;\nuntil y';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do followed by NBSP and += should not open a do/until block');
+      assert.strictEqual(pairs.length, 0, 'do and until are both orphans');
+    });
+  });
+
   generateCommonTests(config);
 });
