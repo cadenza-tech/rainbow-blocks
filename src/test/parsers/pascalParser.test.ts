@@ -2690,6 +2690,20 @@ end.`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'class', 'end');
     });
+
+    test('should treat record as block opener when a preceding statement has a bare < and the record body has a bare >', () => {
+      // A prior statement `x := a < b;` leaves a bare comparison '<'. The record body
+      // `const K = 1 > 0;` has a bare comparison '>'. The generic-constraint scan must
+      // not mistake the prior '<' and the body '>' for a generic angle bracket enclosing
+      // the 'record', which would suppress the record/end block. The ';' after `a < b`
+      // is a statement boundary separating the comparison '<' from the type declaration.
+      const source = `x := a < b;
+type TR = record
+  const K = 1 > 0;
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
   });
 
   suite('Regression 2026-05-09: := assignment and additional comparison context keywords', () => {
