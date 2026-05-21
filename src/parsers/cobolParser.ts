@@ -718,6 +718,23 @@ export class CobolBlockParser extends BaseBlockParser {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
 
+    // Count, per opener type, how many of its close keywords appear in the whole
+    // token stream. As we walk forward we decrement each close's own contribution
+    // first, so the map reflects only closes that come *after* the current token.
+    // This drives the crossing check below: a close must not pair with a deeper
+    // opener when an opener sitting above it still has a matching close pending,
+    // because consuming the deeper opener first would force that pending close to
+    // cross the pair we are about to build.
+    const remainingCloseCounts = new Map<string, number>();
+    for (const token of tokens) {
+      if (token.type === 'block_close') {
+        const opener = CLOSE_TO_OPEN[token.value.toLowerCase()];
+        if (opener) {
+          remainingCloseCounts.set(opener, (remainingCloseCounts.get(opener) ?? 0) + 1);
+        }
+      }
+    }
+
     for (const token of tokens) {
       switch (token.type) {
         case 'block_open':
@@ -752,7 +769,30 @@ export class CobolBlockParser extends BaseBlockParser {
           const validOpener = CLOSE_TO_OPEN[closeValue];
 
           if (validOpener) {
-            const matchIndex = findLastOpenerByType(stack, validOpener, true);
+            // This close was counted above; remove its own contribution so the
+            // map reflects only closes after it (used by the crossing check).
+            remainingCloseCounts.set(validOpener, (remainingCloseCounts.get(validOpener) ?? 0) - 1);
+
+            let matchIndex = findLastOpenerByType(stack, validOpener, true);
+
+            // Reject the match when pairing with this opener would cross an inner
+            // unclosed block: if an opener sitting above matchIndex still has a
+            // matching close pending later in the token stream, consuming the
+            // deeper matchIndex now would force that pending close to cross this
+            // pair. Per CLAUDE.md best-effort parsing (anchor-set principle),
+            // leave the crossed-over opener orphan (no color) rather than emit two
+            // overlapping pairs. An above opener with no remaining close (e.g. a
+            // truly unclosed PERFORM) does NOT block the match, keeping orphan
+            // count minimal (cost-minimization).
+            if (matchIndex >= 0 && matchIndex < stack.length - 1) {
+              for (let s = matchIndex + 1; s < stack.length; s++) {
+                const aboveOpener = stack[s].token.value.toLowerCase();
+                if ((remainingCloseCounts.get(aboveOpener) ?? 0) > 0) {
+                  matchIndex = -1;
+                  break;
+                }
+              }
+            }
 
             if (matchIndex >= 0) {
               const openBlock = stack.splice(matchIndex, 1)[0];
