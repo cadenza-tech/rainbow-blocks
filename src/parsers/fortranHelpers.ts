@@ -254,6 +254,146 @@ export function findLineEnd(source: string, position: number): number {
   return source.length;
 }
 
+// Finds the end offset (exclusive) of the logical line starting at `position`.
+// A Fortran logical line is a sequence of physical lines joined by `&` continuation.
+// Walks forward across `&` continuation lines (skipping comment-only, blank, and
+// continuation-only lines, like collapseContinuationLines) and returns the end of
+// the last physical line that carries the statement. The returned offset is suitable
+// as the upper bound of a `source.slice(position, end)` so the slice spans exactly the
+// opener's logical line and no further. Bounding the slice keeps per-opener validation
+// O(logical-line length) instead of O(remaining source), avoiding O(N^2) over the file.
+export function findLogicalLineEnd(source: string, position: number): number {
+  let lineEnd = findLineEnd(source, position);
+  while (lineEnd < source.length) {
+    // Determine whether this physical line ends with a continuation `&`
+    // (outside strings/comments). If not, the logical line ends here.
+    const lineStart = findLineStart(source, lineEnd);
+    if (!lineEndsWithContinuation(source, lineStart, lineEnd)) {
+      return lineEnd;
+    }
+    // Advance past the line break to the next physical line.
+    let next = lineEnd;
+    if (source[next] === '\r' && next + 1 < source.length && source[next + 1] === '\n') {
+      next += 2;
+    } else {
+      next++;
+    }
+    // Skip comment-only lines, blank lines, and continuation-only (`&`) lines so the
+    // returned end covers the final content-bearing physical line of the statement.
+    next = skipNonContentContinuationLines(source, next);
+    if (next >= source.length) {
+      return source.length;
+    }
+    lineEnd = findLineEnd(source, next);
+  }
+  return lineEnd;
+}
+
+// Returns true if the physical line [lineStart, lineEnd) ends with a continuation `&`
+// that is the last significant token (only whitespace and an optional inline `!`
+// comment may follow it). String literals are skipped so an `&` inside a string is
+// not treated as a continuation marker.
+function lineEndsWithContinuation(source: string, lineStart: number, lineEnd: number): boolean {
+  let lastAmp = -1;
+  let i = lineStart;
+  while (i < lineEnd) {
+    const ch = source[i];
+    if (ch === "'" || ch === '"') {
+      i++;
+      while (i < lineEnd) {
+        if (source[i] === ch) {
+          if (i + 1 < lineEnd && source[i + 1] === ch) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (ch === '!') {
+      break;
+    }
+    if (ch === '&') {
+      lastAmp = i;
+    }
+    i++;
+  }
+  if (lastAmp < 0) {
+    return false;
+  }
+  for (let k = lastAmp + 1; k < lineEnd; k++) {
+    if (source[k] === '!') {
+      break;
+    }
+    if (source[k] !== ' ' && source[k] !== '\t') {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Starting at offset `start` (beginning of a physical line), skips over comment-only
+// lines, blank lines, and continuation-only (`&` with optional comment) lines and
+// returns the offset of the first content-bearing line (or source.length).
+function skipNonContentContinuationLines(source: string, start: number): number {
+  let i = start;
+  while (i < source.length) {
+    let contentStart = i;
+    while (contentStart < source.length && (source[contentStart] === ' ' || source[contentStart] === '\t')) {
+      contentStart++;
+    }
+    // Blank line
+    if (contentStart >= source.length || source[contentStart] === '\n' || source[contentStart] === '\r') {
+      if (contentStart >= source.length) {
+        return source.length;
+      }
+      if (source[contentStart] === '\r' && contentStart + 1 < source.length && source[contentStart + 1] === '\n') {
+        i = contentStart + 2;
+      } else {
+        i = contentStart + 1;
+      }
+      continue;
+    }
+    // Comment-only line
+    if (source[contentStart] === '!') {
+      const commentEnd = findLineEnd(source, contentStart);
+      if (commentEnd >= source.length) {
+        return source.length;
+      }
+      if (source[commentEnd] === '\r' && commentEnd + 1 < source.length && source[commentEnd + 1] === '\n') {
+        i = commentEnd + 2;
+      } else {
+        i = commentEnd + 1;
+      }
+      continue;
+    }
+    // Continuation-only line: a leading `&` followed only by whitespace / comment / EOL
+    if (source[contentStart] === '&') {
+      let afterAmp = contentStart + 1;
+      while (afterAmp < source.length && (source[afterAmp] === ' ' || source[afterAmp] === '\t')) {
+        afterAmp++;
+      }
+      if (afterAmp >= source.length || source[afterAmp] === '\n' || source[afterAmp] === '\r' || source[afterAmp] === '!') {
+        const lineEnd = findLineEnd(source, afterAmp);
+        if (lineEnd >= source.length) {
+          return source.length;
+        }
+        if (source[lineEnd] === '\r' && lineEnd + 1 < source.length && source[lineEnd + 1] === '\n') {
+          i = lineEnd + 2;
+        } else {
+          i = lineEnd + 1;
+        }
+        continue;
+      }
+    }
+    break;
+  }
+  return i;
+}
+
 // Finds the index of the first inline comment (!) outside string literals
 export function findInlineCommentIndex(line: string): number {
   let inString = false;

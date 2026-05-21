@@ -6,6 +6,7 @@ import {
   collapseContinuationLines,
   findInlineCommentIndex,
   findLineEnd,
+  findLogicalLineEnd,
   isAfterDoubleColon,
   isBlockWhereOrForall,
   isOnKeywordSplittingContinuationLine,
@@ -155,7 +156,8 @@ export class FortranBlockParser extends BaseBlockParser {
       }
       // Require parenthesized team-value: `change team (...)`. Reject bare `change team`.
       // Also reject empty parens `change team ()` since the team-value requires an expression.
-      let afterTeam = source.slice(position + keyword.length);
+      const afterTeamStart = position + keyword.length;
+      let afterTeam = source.slice(afterTeamStart, findLogicalLineEnd(source, afterTeamStart));
       afterTeam = collapseContinuationLines(afterTeam);
       if (!/^[ \t]*\(/.test(afterTeam)) {
         return false;
@@ -169,7 +171,8 @@ export class FortranBlockParser extends BaseBlockParser {
     // 'select type' and 'select rank' must additionally be followed by '(...)'.
     // Handles line continuation with &, including comment-only lines between.
     if (lowerKeyword === 'select') {
-      let afterSelect = source.slice(position + keyword.length);
+      const afterSelectStart = position + keyword.length;
+      let afterSelect = source.slice(afterSelectStart, findLogicalLineEnd(source, afterSelectStart));
       afterSelect = collapseContinuationLines(afterSelect);
       const selectMatch = afterSelect.match(/^[ \t]+(type|case|rank)\b/i);
       if (!selectMatch) {
@@ -191,7 +194,8 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // 'module procedure/function/subroutine' inside submodule is not a new module block
     if (lowerKeyword === 'module') {
-      let afterModule = source.slice(position + keyword.length);
+      const afterModuleStart = position + keyword.length;
+      let afterModule = source.slice(afterModuleStart, findLogicalLineEnd(source, afterModuleStart));
       afterModule = collapseContinuationLines(afterModule);
       if (/^[ \t]+(procedure|function|subroutine)\b/i.test(afterModule)) {
         return false;
@@ -201,7 +205,8 @@ export class FortranBlockParser extends BaseBlockParser {
     // 'enum' must be followed by `, bind(c)` clause (Fortran 2003+).
     // Plain `enum NAME` without the bind(c) attribute is not a valid enum block.
     if (lowerKeyword === 'enum') {
-      let afterEnum = source.slice(position + keyword.length);
+      const afterEnumStart = position + keyword.length;
+      let afterEnum = source.slice(afterEnumStart, findLogicalLineEnd(source, afterEnumStart));
       afterEnum = collapseContinuationLines(afterEnum);
       if (!/^[ \t]*,[ \t]*bind[ \t]*\(/i.test(afterEnum)) {
         return false;
@@ -212,7 +217,8 @@ export class FortranBlockParser extends BaseBlockParser {
     // Plain `submodule name` without parens is invalid. Also reject empty parens
     // `submodule () name` since the parent clause requires at least one identifier.
     if (lowerKeyword === 'submodule') {
-      let afterSub = source.slice(position + keyword.length);
+      const afterSubStart = position + keyword.length;
+      let afterSub = source.slice(afterSubStart, findLogicalLineEnd(source, afterSubStart));
       afterSub = collapseContinuationLines(afterSub);
       if (!/^[ \t]*\(/.test(afterSub)) {
         return false;
@@ -264,7 +270,8 @@ export class FortranBlockParser extends BaseBlockParser {
     // lines before testing for the label pattern so the labeled DO is still
     // rejected when the label is on a different physical line.
     if (lowerKeyword === 'do') {
-      const afterDo = source.slice(position + keyword.length);
+      const afterDoStart = position + keyword.length;
+      const afterDo = source.slice(afterDoStart, findLogicalLineEnd(source, afterDoStart));
       const collapsedAfterDo = collapseContinuationLines(afterDo);
       if (/^[ \t]+\d+\b/.test(collapsedAfterDo)) {
         return false;
@@ -273,7 +280,8 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // Skip keywords used as variable names in assignments (e.g., 'do = 5', 'subroutine = 1')
     // Also handles array-element assignments (e.g., 'do(1) = 5', 'block(i, j) = val')
-    const afterKw = source.slice(position + keyword.length);
+    const afterKwStart = position + keyword.length;
+    const afterKw = source.slice(afterKwStart, findLogicalLineEnd(source, afterKwStart));
     const collapsed = collapseContinuationLines(afterKw);
     if (/^[ \t]*=[^=]/.test(collapsed) || /^[ \t]*=[ \t]*$/.test(collapsed)) {
       return false;
@@ -448,7 +456,8 @@ export class FortranBlockParser extends BaseBlockParser {
     }
     // 'type is(...)' or 'type is (...)' is a guard in select type, not a block
     // Also handles continuation: type &\n  is (integer)
-    let afterKeyword = source.slice(position + keyword.length);
+    const afterKeywordStart = position + keyword.length;
+    let afterKeyword = source.slice(afterKeywordStart, findLogicalLineEnd(source, afterKeywordStart));
     afterKeyword = collapseContinuationLines(afterKeyword);
     if (/^[ \t]+is[ \t]*\(/i.test(afterKeyword)) {
       return false;
