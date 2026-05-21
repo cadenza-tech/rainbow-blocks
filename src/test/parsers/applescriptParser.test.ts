@@ -2614,6 +2614,35 @@ end try`;
     });
   });
 
+  suite('Regression: stray right double quotation mark U+201D as expression terminator', () => {
+    test('should pair head tell with end tell and reject mid-line tell after stray U+201D', () => {
+      // A lone `”` (U+201D) without its opening `“` is not consumed as a string
+      // region, so the backward scan reaches it. It must be treated as an expression
+      // terminator so the mid-line `tell` is the right operand, not a new block opener.
+      // The head `tell` then correctly pairs with `end tell` (orphan count 0).
+      const source = 'tell app\n  set x to end” tell\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'head tell at offset 0 should be paired');
+    });
+
+    test('should pair head if with end if and reject mid-line if after stray U+201D', () => {
+      const source = 'if x then\n  set y to end” if then\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'head if at offset 0 should be paired');
+    });
+
+    test('should still consume properly closed smart string and pair head tell', () => {
+      // A balanced `“…”` is consumed as an excluded region first, so this fix does
+      // not affect valid smart-quoted strings: the head tell still pairs normally.
+      const source = 'tell app\n  set x to “end” tell\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'head tell at offset 0 should be paired');
+    });
+  });
+
   suite('Regression: stray `end <type>` should not close on/to handler with mismatched name', () => {
     test('should not pair on run with stray end if', () => {
       const source = 'on run\n  beep\nend if';
