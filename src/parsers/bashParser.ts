@@ -710,7 +710,7 @@ export class BashBlockParser extends BaseBlockParser {
         if (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
           continue;
         }
-        if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && source[j] !== ')' && source[j] !== ']') {
+        if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && source[j] !== ')') {
           // Check if preceded by block close keywords (fi, done, esac)
           const blockCloseKeywords = ['fi', 'done', 'esac', '}'];
           let isAfterBlockClose = false;
@@ -724,7 +724,11 @@ export class BashBlockParser extends BaseBlockParser {
               }
             }
           }
-          if (!isAfterBlockClose) {
+          // Allow `}` after a closing `]]` ONLY when a separator (space/tab) sits between them,
+          // e.g. `{ [[ $x -gt 0 ]] }`. A stray bracket without a separator (`foo]}`, `]]}`,
+          // `foo[0]}`) is not a command group close and must keep `{` orphan.
+          const isAfterDoubleBracketWithSep = source[j] === ']' && source[j - 1] === ']' && i - 1 > j;
+          if (!isAfterBlockClose && !isAfterDoubleBracketWithSep) {
             continue;
           }
         }
