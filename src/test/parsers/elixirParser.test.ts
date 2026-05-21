@@ -1343,6 +1343,21 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
     });
 
+    test('should not stack overflow on very deeply nested string interpolation', () => {
+      // x="#{"#{"..."}"}" with 6000 levels of nested #{"..."} interpolation.
+      // The string/interpolation scanners must iterate (not mutually recurse) so deep
+      // nesting cannot exhaust the JS call stack. Best-effort: return excluded regions
+      // without crashing (RangeError: Maximum call stack size exceeded).
+      const depth = 6000;
+      const source = `x="${'#{"'.repeat(depth)}${'"}'.repeat(depth)}"`;
+      const regions = parser.getExcludedRegions(source);
+      // The whole literal collapses into a single outer string region spanning the source.
+      assertBlockCount(parser.parse(source), 0);
+      assert.ok(regions.length >= 1);
+      assert.strictEqual(regions[0].start, 2);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+
     test('should handle #{} in triple-quoted heredoc', () => {
       const source = `def foo do
   x = """
