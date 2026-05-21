@@ -4657,6 +4657,59 @@ end`;
     });
   });
 
+  suite('Regression: block-expression end followed by a binary operator pairs with its opener', () => {
+    // Bug: `begin...end`, `if...else...end`, `let...end` are compound expressions that
+    // return a value, so they can legitimately be an operand of a binary operator on the
+    // same line (e.g. `y = begin a; b end + 1`). The parser used to drop ANY `end`
+    // followed by a binary operator from block_close (a rule meant for the invalid bare
+    // `end+1` syntax), which orphaned the block opener whenever the closing `end` had a
+    // trailing operator on the same line. The fix keeps such an `end` as a block_close
+    // candidate and only treats it as orphan in matchBlocks when no opener remains for it
+    // to close. The invalid bare-`end` cases (`if a\n end!=2\nend`) still resolve to the
+    // surrounding block's real `end` because the operator-followed `end` is only used as a
+    // last resort to rescue an otherwise-unmatched opener.
+    test('should pair begin/end when end is followed by + on the same line', () => {
+      const source = 'y = begin\n a\nend + 1\nfunction foo()\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginBlock = findBlock(pairs, 'begin');
+      assert.strictEqual(beginBlock.closeKeyword?.line, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword?.line, 4);
+    });
+
+    test('should pair begin/end when end is followed by ^ with no space', () => {
+      const source = 'begin\n a\nend^2';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair begin/end when end is followed by < with a space', () => {
+      const source = 'begin\n a\nend < 5';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair let/end when end is followed by * on the same line', () => {
+      const source = 'let x = 1\n x\nend * 2';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+
+    test('should pair single-line if/else/end when end is followed by -', () => {
+      const source = 'if c a else b end - 1';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(findBlock(pairs, 'if'), ['else']);
+    });
+
+    test('should pair function/end when end is followed by a binary operator', () => {
+      const source = 'function foo()\n x\nend + 1';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: bracket-context validation must not be quadratic', () => {
     // Bug: isValidBlockOpen/isValidBlockClose called bracket-context helpers
     // (isInsideCurlyBraces, isLoneEndInArrayConstruction, isInsideIndexingBrackets,
