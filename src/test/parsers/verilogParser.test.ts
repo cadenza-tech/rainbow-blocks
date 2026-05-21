@@ -3558,6 +3558,49 @@ endmodule`;
     });
   });
 
+  suite('Regression: case keyword used as identifier after a comparison operator', () => {
+    test('should not tokenize `casez` as block_open on the right-hand side of `==`', () => {
+      // Bug: `if (x == casez)` misuses the reserved word `casez` as an identifier.
+      // The case-keyword suppression only covered assignment operators, so `casez`
+      // after `==` was tokenized as block_open and stole the trailing `endcase`,
+      // leaving the real `case` opener orphaned. A case keyword can only appear at
+      // statement position, never as an expression operand, so a preceding binary
+      // operator (comparison included) means it is misused as an identifier.
+      const source = 'case (sel)\n0: if (x == casez) a = 1;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'casez'), '`casez` after `==` must not be tokenized as block_open');
+      assertSingleBlock(parser.parse(source), 'case', 'endcase');
+    });
+
+    test('should not tokenize `case` as block_open on the right-hand side of `!=`', () => {
+      const source = 'if (x != case) a = 1;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'case'), '`case` after `!=` must not be tokenized as block_open');
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should not tokenize `casex` as block_open on the right-hand side of `>=`', () => {
+      const source = 'if (x >= casex) a = 1;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'casex'), '`casex` after `>=` must not be tokenized as block_open');
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should not tokenize `casez` as block_open on the right-hand side of arithmetic `+`', () => {
+      const source = 'if (x + casez) a = 1;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'casez'), '`casez` after `+` must not be tokenized as block_open');
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should still parse a normal case statement preceded by a comparison elsewhere', () => {
+      // Sanity: a comparison operator on a prior line must not suppress a real
+      // case statement that legitimately starts at statement position.
+      const pairs = parser.parse('if (a == b) x = 1;\ncase (sel)\n  1: y = 1;\nendcase');
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+  });
+
   suite('Regression: line comments between control keyword and label colon', () => {
     test('should skip line comments when checking label-colon adjacency', () => {
       // Bug: `isFollowedByLabelColon` only skipped block comments, so a line
