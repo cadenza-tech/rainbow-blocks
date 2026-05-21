@@ -7,6 +7,7 @@ import {
   findInlineCommentIndex,
   findLineEnd,
   findLogicalLineEnd,
+  hasEmptyParenthesizedCondition,
   isAfterDoubleColon,
   isBlockWhereOrForall,
   isOnKeywordSplittingContinuationLine,
@@ -530,6 +531,12 @@ export class FortranBlockParser extends BaseBlockParser {
 
   // Validates 'if': checks for 'then' keyword handling & continuation lines
   private isValidIfOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Reject an empty parenthesized condition `if () then`. A block-if requires a
+    // non-empty condition expression, consistent with the empty-paren rejection already
+    // applied to select case/where/forall/submodule.
+    if (hasEmptyParenthesizedCondition(source, position + keyword.length)) {
+      return false;
+    }
     let i = position + keyword.length;
     let parenDepth = 0;
     // Track whether a `(` has ever been seen at top-level after `if`. A valid block-if

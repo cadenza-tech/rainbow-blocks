@@ -394,6 +394,77 @@ function skipNonContentContinuationLines(source: string, start: number): number 
   return i;
 }
 
+// Returns true if the first parenthesized group after `start` (skipping leading
+// whitespace and `&` continuation) is empty -- it contains only whitespace, inline
+// comments, and `&` continuation tokens. Used to reject empty conditions like
+// `if () then`, mirroring the empty-paren rejection already applied to
+// where/forall/select/submodule. Returns false when there is no opening paren, the
+// group is unterminated, or it carries any real content (including a string literal).
+export function hasEmptyParenthesizedCondition(source: string, start: number): boolean {
+  let i = start;
+  // Skip leading whitespace, line breaks, `&` continuation tokens, and comment-only
+  // continuation lines up to the opening parenthesis.
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t' || ch === '&' || ch === '\n' || ch === '\r') {
+      i++;
+      continue;
+    }
+    if (ch === '!') {
+      i = findLineEnd(source, i);
+      continue;
+    }
+    break;
+  }
+  if (i >= source.length || source[i] !== '(') {
+    return false;
+  }
+  const contentStart = i + 1;
+  let depth = 1;
+  i++;
+  while (i < source.length && depth > 0) {
+    const ch = source[i];
+    // A string literal is real content; skip past it so its inner characters are not
+    // mistaken for the closing paren and the group is treated as non-empty.
+    if (ch === "'" || ch === '"') {
+      i++;
+      while (i < source.length && source[i] !== ch) {
+        i++;
+      }
+      if (i < source.length) {
+        i++;
+      }
+      continue;
+    }
+    if (ch === '!') {
+      i = findLineEnd(source, i);
+      continue;
+    }
+    if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+    }
+    i++;
+  }
+  // Unterminated parenthesis: leave it to the main validation path, do not reject here.
+  if (depth > 0) {
+    return false;
+  }
+  // i now points one past the matching `)`; the inner span is [contentStart, i - 1).
+  // Strip inline comments and `&` continuation tokens, then check for any real content.
+  const innerContent = source
+    .slice(contentStart, i - 1)
+    .split(/(?:\r\n|\r|\n)/)
+    .map((line) => {
+      const commentIdx = line.indexOf('!');
+      const codeOnly = commentIdx >= 0 ? line.slice(0, commentIdx) : line;
+      return codeOnly.replace(/&/g, '');
+    })
+    .join('');
+  return innerContent.trim().length === 0;
+}
+
 // Finds the index of the first inline comment (!) outside string literals
 export function findInlineCommentIndex(line: string): number {
   let inString = false;
