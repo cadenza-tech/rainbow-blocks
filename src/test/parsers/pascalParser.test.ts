@@ -3319,5 +3319,82 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-22: asm opener after closing parenthesis', () => {
+    test('should not treat asm after closing parenthesis as block opener', () => {
+      // `)` is an expression/condition context (like `>` and `]`), so `asm`
+      // following it must not start a block. This source is invalid (missing
+      // `then`), so the correct behavior is to produce no blocks.
+      const source = `if (x) asm
+  nop
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not let asm after closing parenthesis consume a surrounding end', () => {
+      // Without rejecting `)`, the spurious asm/end pair consumes the inner `end`,
+      // forcing `begin` to pair with the outer `end` (corrupting the BlockPair set).
+      // With the fix, `asm` is not tokenized: `begin` pairs with its own inner `end`
+      // and the extra trailing `end` is left orphaned (uncolored).
+      const source = `begin
+  if (x) asm
+    nop
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword.line, 3, 'begin must pair with the inner end, not the outer end');
+      const asmToken = parser.getTokens(source).find((t) => t.value === 'asm');
+      assert.strictEqual(asmToken, undefined, 'asm after closing parenthesis must not be tokenized as block opener');
+    });
+
+    test('should not exclude asm block region after closing parenthesis', () => {
+      // The backward check in addAsmExcludedRegions must also reject `)` so the
+      // asm body is not turned into an excluded region.
+      const source = `if (x) asm
+  nop
+end`;
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 0, 'no asm excluded region should be created after closing parenthesis');
+    });
+
+    test('should still treat asm as block opener after begin', () => {
+      const source = `begin asm
+  nop
+end
+end.`;
+      const pairs = parser.parse(source);
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'),
+        'asm after begin must remain a valid block opener'
+      );
+    });
+
+    test('should still treat asm as block opener after semicolon', () => {
+      const source = `begin
+  x := 1; asm
+    nop
+  end
+end.`;
+      const pairs = parser.parse(source);
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'),
+        'asm after semicolon must remain a valid block opener'
+      );
+    });
+
+    test('should still treat asm as block opener after procedure header parameter list', () => {
+      const source = `procedure Foo(x: Integer); asm
+  nop
+end;`;
+      const pairs = parser.parse(source);
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value === 'asm' && p.closeKeyword.value === 'end'),
+        'asm after a procedure header (semicolon following the parameter list) must remain a valid block opener'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
