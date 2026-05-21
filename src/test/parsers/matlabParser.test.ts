@@ -2447,6 +2447,23 @@ end`;
       assert.strictEqual(pairs[0].closeKeyword.line, 2);
     });
 
+    test('should not treat end followed by logical-and compound assignment &= as block close', () => {
+      // `end &= 1;` compound-assigns the reserved word `end` as a variable (≡ `end = end & 1`),
+      // mirroring the `+=`/`-=` cases above. The line-1 `end` is a variable use, not a block
+      // close, so the `if` must pair with the outer `end` on line 2.
+      const source = 'if true\n  end &= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'if should pair with the last end');
+    });
+
+    test('should not treat end followed by logical-or compound assignment |= as block close', () => {
+      const source = 'if true\n  end |= 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
     test('should still treat a real end as block close when followed by == comparison', () => {
       // `end == 1` is a comparison, not a compound assignment. The `end` here is a
       // genuine block close of the for loop; only the `==` follows it. The for/end
