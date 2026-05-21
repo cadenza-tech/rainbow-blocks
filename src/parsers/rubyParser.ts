@@ -412,12 +412,15 @@ export class RubyBlockParser extends BaseBlockParser {
   }
 
   // Checks if `end` at position sits in the value position of a ternary expression
-  // (`cond ? value : end`). Such an `end` is immediately preceded by a standalone
-  // ternary colon: a `:` surrounded by whitespace, not part of `::` (scope resolution)
-  // and not a `label:`/symbol colon, with a matching ternary `?` earlier on the same
-  // line. Whitespace and excluded regions are skipped while scanning.
+  // (`cond ? value : end`, including the multi-line form where the colon and `end`
+  // are on separate lines). Such an `end` is preceded by a standalone ternary colon:
+  // a `:` surrounded by whitespace, not part of `::` (scope resolution) and not a
+  // `label:`/symbol colon, with a matching ternary `?` earlier on the colon's line.
+  // Whitespace, newlines, and excluded regions are skipped while scanning back to the
+  // colon (the value can wrap onto the next line). Excluded regions are skipped.
   private isEndInTernaryValuePosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Scan back from `end`, skipping whitespace and excluded regions, to the colon
+    // Scan back from `end`, skipping whitespace, newlines, and excluded regions, to the
+    // colon. Newlines are skipped because the value can sit on a line after the colon.
     let i = position - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -428,7 +431,7 @@ export class RubyBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t') {
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
         i--;
         continue;
       }
