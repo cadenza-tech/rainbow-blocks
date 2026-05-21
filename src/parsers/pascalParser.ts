@@ -562,7 +562,19 @@ export class PascalBlockParser extends BaseBlockParser {
   // Forward-validation distinguishes a real generic clause from a bare comparison '<' in
   // a prior statement: a comparison like `const C = 1 < 2;` has no matching '>' after the
   // position, so the candidate is rejected and the keyword is treated as a block opener.
+  //
+  // The '<' (prior comparison) / '>' (record body comparison) pair in
+  //   `x := a < b; type TR = record const K = 1 > 0; end;`
+  // is lexically indistinguishable from `<...; ...: record>` by the angle-bracket scan
+  // alone (the prior '<' and the body '>' enclose the 'record'). To reject it, first
+  // require that 'record' is the final element of a constraint: in a generic clause the
+  // keyword is immediately followed (past whitespace/comments) by a constraint terminator
+  // '>' (clause end), ';' (next type parameter), or ',' (next constraint). A block-opener
+  // 'record' is instead followed by a field declaration, 'case', 'end', etc.
   private isInsideGenericConstraint(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (!this.isFollowedByGenericConstraintTerminator(source, position + 'record'.length, excludedRegions)) {
+      return false;
+    }
     let depth = 0;
     let i = position - 1;
     while (i >= 0) {
@@ -644,6 +656,35 @@ export class PascalBlockParser extends BaseBlockParser {
       i++;
     }
     return false;
+  }
+
+  // Returns true when the first non-whitespace, non-comment character at or after `from`
+  // is a generic-constraint terminator: '>' (end of the generic clause), ';' (next type
+  // parameter), or ',' (next constraint on the same parameter). Used to confirm that a
+  // 'record' keyword sits at the tail of a generic constraint (`<T: record>`,
+  // `<T: record; U>`, `<T: record, U>`) rather than opening a record block (whose first
+  // following token is a field declaration, 'case', 'end', etc.).
+  private isFollowedByGenericConstraintTerminator(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = from;
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (j >= source.length) {
+      return false;
+    }
+    const ch = source[j];
+    return ch === '>' || ch === ';' || ch === ',';
   }
 
   // Returns true when the position is preceded by `.` field-access dot, distinguishing
