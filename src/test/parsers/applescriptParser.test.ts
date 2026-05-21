@@ -2597,6 +2597,23 @@ end try`;
     });
   });
 
+  suite('Regression: Unicode minus sign U+2212 as binary operator', () => {
+    test('should not treat tell as block opener after U+2212 minus sign', () => {
+      // `−` (U+2212) is the genuine subtraction operator Script Editor produces when
+      // it auto-converts ASCII `-`. `tell` is its right operand, not a block opener,
+      // matching how U+00D7/U+00F7/U+2260/U+2264/U+2265 already suppress it.
+      const source = 'on run\n  set x to 1 − tell\nend tell\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat if as block opener after U+2212 minus sign', () => {
+      const source = 'on run\n  set x to 1 − if then\nend if\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   suite('Regression: stray `end <type>` should not close on/to handler with mismatched name', () => {
     test('should not pair on run with stray end if', () => {
       const source = 'on run\n  beep\nend if';
