@@ -5974,6 +5974,26 @@ fi`;
       const selectPairs = pairs.filter((p) => p.openKeyword.value === 'select');
       assert.strictEqual(selectPairs.length, 0, 'select() function name should not be a block opener');
     });
+
+    test('should not add then used as a function name to if intermediates', () => {
+      // The second `then` is a function name (then() { ... }), not the if-block intermediate.
+      // Only the `then` on the first line belongs to the if block.
+      const source = 'if a; then\nthen(){ :;}\nfi';
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword?.value, 'fi');
+      assertIntermediates(ifBlock, ['then']);
+    });
+
+    test('should not add else used as a function name to if intermediates', () => {
+      // The `else` is a function name (else() { ... }), not the if-block intermediate.
+      // Only the `then` on the first line belongs to the if block.
+      const source = 'if a; then\nelse(){ :;}\nfi';
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.closeKeyword?.value, 'fi');
+      assertIntermediates(ifBlock, ['then']);
+    });
   });
 
   suite('Regression: time prefix combined with command starters (! time, then time, do time, etc.)', () => {
