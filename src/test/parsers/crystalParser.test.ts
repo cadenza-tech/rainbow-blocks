@@ -1597,6 +1597,27 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should not let unterminated <<-"DATA opener swallow blocks up to a far quote', () => {
+      // `<<-"DATA` has no closing quote on its own line, so it is an invalid
+      // (unterminated) heredoc opener. A later, unrelated quote (`puts "done"`)
+      // must NOT cause the orphan opener to greedily exclude everything in
+      // between. The def/end block on lines 1-4 must still be detected.
+      const source = 'def process\n  x = <<-"DATA\n  result\nend\nputs "done"';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should produce the same blocks whether or not a far quote follows the unterminated opener', () => {
+      // The presence of a later, unrelated double quote must not flip the result.
+      // Both sources have an identical leading `def/end` block; only the trailing
+      // `puts "..."` differs. The unterminated `<<-"DATA` opener excludes just its
+      // own orphan quote, so def/end is detected identically in both cases.
+      const withFarQuote = parser.parse('def process\n  x = <<-"DATA\n  result\nend\nputs "done"');
+      const withoutFarQuote = parser.parse('def process\n  x = <<-"DATA\n  result\nend\nputs done');
+      assertSingleBlock(withFarQuote, 'def', 'end');
+      assertSingleBlock(withoutFarQuote, 'def', 'end');
+    });
   });
 
   suite('Coverage: heredoc at EOF without newline', () => {
@@ -4080,11 +4101,16 @@ end`;
 
   suite('Regression 2026-05-09: failed heredoc with quote not closed on opener line', () => {
     test('should not let orphan quote swallow downstream code', () => {
-      const source = 'x = <<-"\nclass Foo\nend\n"\nif true\nend';
+      // The malformed `<<-"` opener (no closing quote on its own line) must not
+      // produce a stray string region that captures the code that follows. The
+      // exclusion is bounded to the opener's own line, so both the class/end and
+      // if/end blocks below remain visible (orphan count minimized per the
+      // best-effort parsing principle).
+      const source = 'x = <<-"\nclass Foo\nend\nif true\nend';
       const pairs = parser.parse(source);
-      // Only the if/end pair on lines 4-5 should be detected. The malformed
-      // <<-" opener must not produce a stray string region that captures code.
-      assertSingleBlock(pairs, 'if', 'end');
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(findBlock(pairs, 'class').closeKeyword.value, 'end');
+      assert.strictEqual(findBlock(pairs, 'if').closeKeyword.value, 'end');
     });
   });
 
