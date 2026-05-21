@@ -543,10 +543,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
   protected isFollowedByAssignment(source: string, afterPos: number): boolean {
     let i = afterPos;
     while (i < source.length) {
-      // Skip horizontal whitespace: space, tab, vertical tab (\v), and form feed (\f).
-      // \v and \f are included so `do\f= 1;` / `do\v+= 1;` are detected as assignments
-      // to a variable named `do`, matching isHorizontalWhitespace's definition.
-      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\v' || source[i] === '\f') {
+      // Skip horizontal whitespace using the same Unicode-aware set as the rest of the
+      // parser (isHorizontalWhitespace covers ASCII space/tab/VT/FF plus Unicode spaces
+      // such as NBSP / U+2000-200A / Ideographic Space). This keeps assignment detection
+      // symmetric with the `do (args)` function-call check: `do<NBSP>= 1;` / `if<U+3000>= 5;`
+      // are assignments to a variable named `do` / `if`, exactly like `do = 1;` / `do\f= 1;`.
+      if (isHorizontalWhitespace(source[i])) {
         i++;
         continue;
       }
