@@ -61,11 +61,13 @@ export function isFollowedBySimpleAssignment(source: string, afterPos: number): 
 }
 
 // Checks if a keyword (whose end is `afterPos`) is followed (after whitespace) by a
-// compound assignment operator: `+= -= *= /= ^= \=` and the `.`-prefixed element-wise
-// forms `.^= .*= ./= .\=`. Such a form (`end += 1` ≡ `end = end + 1`) uses the keyword
-// as an assignment target, so the keyword is a variable, not a block close. Comparison
-// operators (`==`, `~=`, `<=`, `>=`, `!=`) are intentionally NOT matched: they are not
-// compound assignments, and a real block close may be followed by a stray comparison.
+// compound assignment operator: `+= -= *= /= ^= \= &= |=` and the `.`-prefixed
+// element-wise forms `.^= .*= ./= .\=`. Such a form (`end += 1` ≡ `end = end + 1`,
+// `end &= 1` ≡ `end = end & 1`) uses the keyword as an assignment target, so the keyword
+// is a variable, not a block close. The operator set is kept symmetric with the block-open
+// side (isFollowedByBinaryOperator) which already rejects `&= |=`. Comparison operators
+// (`==`, `~=`, `<=`, `>=`, `!=`) are intentionally NOT matched: they are not compound
+// assignments, and a real block close may be followed by a stray comparison.
 export function isFollowedByCompoundAssignment(source: string, afterPos: number): boolean {
   let i = afterPos;
   while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
@@ -76,8 +78,11 @@ export function isFollowedByCompoundAssignment(source: string, afterPos: number)
   }
   const ch = source[i];
   const next = i + 1 < source.length ? source[i + 1] : '';
-  // Plain compound assignment: arithmetic/division operator directly followed by `=`.
-  if (next === '=' && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '^' || ch === '\\')) {
+  // Plain compound assignment: arithmetic/division/logical operator directly followed by
+  // `=` (`+= -= *= /= ^= \= &= |=`). The `&`/`|` forms are logical compound assignments
+  // (`end &= 1` ≡ `end = end & 1`) and must reject `end` as a block close, symmetric with
+  // the block-open side (isFollowedByBinaryOperator).
+  if (next === '=' && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '^' || ch === '\\' || ch === '&' || ch === '|')) {
     return true;
   }
   // Element-wise compound assignment: `.` then an operator then `=` (`.^=`, `.*=` ...).
