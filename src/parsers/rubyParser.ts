@@ -77,6 +77,20 @@ const METHOD_LIKE_REGEX_KEYWORDS = new Set(['p', 'pp', 'puts', 'print', 'warn', 
 // syntactic element, so it must not be collected as an intermediate.
 const THEN_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 'while', 'until', 'case']);
 
+// Open keywords whose blocks can take a `when` branch. `when` belongs to `case`
+// only. A bare `when` inside a do/loop/def/... body is not a syntactic element,
+// so it must not be collected as an intermediate.
+const WHEN_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['case']);
+
+// Open keywords whose blocks can take an `else` clause. `else` belongs to
+// if/unless (conditional), case (after when), and begin (after rescue, runs when
+// no exception). while/until/for loops and def/class/module do not take `else`.
+const ELSE_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 'case', 'begin']);
+
+// Open keywords whose blocks can take an `elsif` clause. `elsif` belongs to
+// if/unless only.
+const ELSIF_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless']);
+
 // Ruby interpolation check: %q, %w, %i, %s do not interpolate
 function isRubyInterpolatingPercent(_specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -149,6 +163,20 @@ export class RubyBlockParser extends BaseBlockParser {
             // 'then' inside a def/class/module/begin/for/do body is not a syntactic
             // element, so it must not be attached as an intermediate.
             if (token.value === 'then' && !THEN_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
+              break;
+            }
+            // 'when' belongs to `case` only; 'else'/'elsif' belong to conditional and
+            // related blocks. A bare 'when'/'else'/'elsif' inside a do/loop/def/...
+            // body is not a syntactic element of that block, so it must not be attached
+            // as an intermediate. ('rescue'/'ensure' are intentionally not restricted
+            // here -- they are valid in begin/def/etc.)
+            if (token.value === 'when' && !WHEN_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
+              break;
+            }
+            if (token.value === 'else' && !ELSE_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
+              break;
+            }
+            if (token.value === 'elsif' && !ELSIF_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
               break;
             }
             stack[stack.length - 1].intermediates.push(token);
