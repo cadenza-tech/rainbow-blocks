@@ -606,6 +606,27 @@ fi`;
       const pairs = parser.parse('{ [[ $x -gt 0 ]] }');
       assertSingleBlock(pairs, '{', '}');
     });
+
+    test('should not detect } after stray ] without separator', () => {
+      // `{ echo foo]}` lacks a separator (`;`/newline/space) before `}`, so `}` is not a
+      // command group close. The `{` stays orphan and no pair is generated (uncolored).
+      const pairs = parser.parse('{ echo foo]}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect } after ]] without separator', () => {
+      // `{ [[ x ]]}` closes the conditional but has no separator before `}`, so `}` is not
+      // a command group close. No pair is generated.
+      const pairs = parser.parse('{ [[ x ]]}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect } after array subscript ] without separator', () => {
+      // `{ echo foo[0]}` ends with an array-subscript-like `]` and no separator, so `}` is
+      // not a command group close. No pair is generated.
+      const pairs = parser.parse('{ echo foo[0]}');
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Special Bash constructs', () => {
