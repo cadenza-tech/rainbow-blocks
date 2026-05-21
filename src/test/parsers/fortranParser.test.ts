@@ -5585,5 +5585,31 @@ do`;
     });
   });
 
+  suite('Performance: opener validation does not blow up to O(N^2)', () => {
+    // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
+    function makeDoBlocks(blockCount: number): string {
+      const lines: string[] = [];
+      for (let i = 0; i < blockCount; i++) {
+        lines.push('do i=1,10');
+        lines.push('end do');
+      }
+      return lines.join('\n');
+    }
+
+    test('should parse 20000 independent do/end-do blocks without quadratic blowup', function () {
+      // Before the fix, isValidBlockOpen sliced the source to EOF and ran
+      // collapseContinuationLines over the whole suffix for every opener, making parsing
+      // O(N^2) in the file size. On these 40000 lines the pre-fix parser took ~48s; the
+      // bounded-slice fix (findLogicalLineEnd) brings it to ~2s. The 10s mocha timeout
+      // reliably fails the O(N^2) version (which times out) while passing the fixed
+      // version with a wide margin, staying robust against per-machine and GC timing
+      // jitter that a tight ratio threshold cannot.
+      this.timeout(10000);
+      const source = makeDoBlocks(20000);
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 20000);
+    });
+  });
+
   generateCommonTests(config);
 });
