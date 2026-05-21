@@ -853,9 +853,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     if (ch === '(' || ch === '[' || ch === '{' || ch === ',' || ch === ':') return true;
     // AppleScript binary operators: keyword used as right operand
     // (e.g., `set x to 1 & tell`, `set x to 1 + tell`, `if x = tell ...`, `set x to 2 ^ tell`)
-    // Includes ASCII operator chars and Unicode comparison operators (≤ ≥ ≠ ÷ ×).
+    // Includes ASCII operator chars and Unicode operators (≤ ≥ ≠ ÷ × and the U+2212
+    // minus sign that Script Editor produces when auto-converting ASCII `-`).
     if ('&+\\-*/=<>^'.includes(ch)) return true;
-    if (ch === '≤' || ch === '≥' || ch === '≠' || ch === '÷' || ch === '×') return true;
+    if (ch === '≤' || ch === '≥' || ch === '≠' || ch === '÷' || ch === '×' || ch === '−') return true;
     // String/literal value terminator: any alphanumeric/underscore that is not part of a
     // known control keyword. We conservatively accept if preceding char is any word character
     // and look back for the preceding token (simple heuristic: if it's a control keyword,
