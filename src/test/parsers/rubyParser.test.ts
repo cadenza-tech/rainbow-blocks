@@ -4091,6 +4091,71 @@ end`;
     });
   });
 
+  suite('Regression: when/else/elsif are not intermediates of blocks that cannot take them', () => {
+    test('should not collect when as intermediate of a do block', () => {
+      const source = '[1].each do\n  when 1\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'do');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect else as intermediate of a while block', () => {
+      const source = 'while c\n  x\nelse\n  y\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'while');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect else as intermediate of an until block', () => {
+      const source = 'until c\n  x\nelse\n  y\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'until');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect else as intermediate of a for block', () => {
+      const source = 'for i in 1..3\n  x\nelse\n  y\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'for');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect when as intermediate of a def block', () => {
+      const source = 'def m\n  when 1\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'def');
+      assertIntermediates(pair, []);
+    });
+
+    test('should not collect elsif as intermediate of a do block', () => {
+      const source = '[1].each do\n  elsif x\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'do');
+      assertIntermediates(pair, []);
+    });
+
+    test('should still collect when and else as intermediates of a case block', () => {
+      const source = 'case x\nwhen 1\n  1\nelse\n  2\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'case');
+      assertIntermediates(pair, ['when', 'else']);
+    });
+
+    test('should still collect elsif and else as intermediates of an if block', () => {
+      const source = 'if x\n  1\nelsif y\n  2\nelse\n  3\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'if');
+      assertIntermediates(pair, ['elsif', 'else']);
+    });
+
+    test('should still collect else as intermediate of a begin block', () => {
+      const source = 'begin\n  x\nrescue\n  y\nelse\n  z\nend';
+      const pairs = parser.parse(source);
+      const pair = findBlock(pairs, 'begin');
+      assertIntermediates(pair, ['rescue', 'else']);
+    });
+  });
+
   suite('Regression: def detection adjacent to Unicode identifiers', () => {
     test('should treat fooαdef as identifier and keep following do as block opener', () => {
       const source = 'fooαdef do\nend';
