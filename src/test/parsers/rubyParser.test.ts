@@ -3965,6 +3965,21 @@ end`;
       assert.strictEqual(ternaryEnd, undefined, 'end at offset 16 (ternary value) must not be tokenized');
     });
 
+    test('should not treat end after ternary colon followed by newline as a block close', () => {
+      const source = 'def m\n  x ? a :\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The def must pair with the real end (offset 22), not the multi-line ternary end (offset 18)
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, 22);
+    });
+
+    test('should not produce an end token for end in multi-line ternary value position', () => {
+      const source = 'def m\n  x ? a :\n  end\nend';
+      const tokens = parser.getTokens(source);
+      const ternaryEnd = tokens.find((t) => t.value === 'end' && t.startOffset === 18);
+      assert.strictEqual(ternaryEnd, undefined, 'end at offset 18 (multi-line ternary value) must not be tokenized');
+    });
+
     test('should still treat end followed by scope resolution as a block close', () => {
       const source = 'def m\n  1\nend::CONST';
       const pairs = parser.parse(source);
