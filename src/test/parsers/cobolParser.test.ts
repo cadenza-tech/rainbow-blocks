@@ -967,6 +967,25 @@ END-PERFORM`;
         // Use a generous ceiling to avoid flakiness on slow CI nodes.
         assert.ok(elapsed < 1000, `300-pair COPY REPLACING took ${elapsed}ms (expected < 1000ms)`);
       });
+
+      // Regression: a long run of consecutive `=` (e.g., a divider banner) used
+      // to run in super-linear time (~O(n^3): every `==` fell through to the
+      // per-position pseudo-text check, whose backward `==`-chain walk re-scanned
+      // all preceding `==` pairs). Pre-fix this measured 50ms / 264ms / 1828ms /
+      // 14343ms for n=400 / 800 / 1600 / 3200 (ratio ~8x per doubling). Now the
+      // backward walk is memoized per parse, so a multi-thousand-character banner
+      // completes in roughly linear time and IF/END-IF still pairs as one block.
+      test('should parse a large consecutive-equals banner in linear time', () => {
+        const banner = '='.repeat(8000);
+        const source = `${banner}\nIF X\nEND-IF`;
+        const t0 = Date.now();
+        const pairs = parser.parse(source);
+        const elapsed = Date.now() - t0;
+        assertSingleBlock(pairs, 'IF', 'END-IF');
+        // Pre-fix an 8000-char banner would take many seconds (O(n^3)).
+        // Post-fix it is a few milliseconds. Use a generous ceiling for slow CI.
+        assert.ok(elapsed < 1000, `8000-char banner took ${elapsed}ms (expected < 1000ms)`);
+      });
     });
   });
 
