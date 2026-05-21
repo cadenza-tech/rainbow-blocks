@@ -50,6 +50,15 @@ export class ElixirBlockParser extends BaseBlockParser {
     blockMiddle: ['else', 'rescue', 'catch', 'after']
   };
 
+  // Per-source memoization for isKeywordUsedAsValue. The result at a given position is a
+  // pure function of `source` and the position (the keyword ending there is fixed), so it
+  // can be cached for the duration of a single parse. The cache is keyed by source identity
+  // and rebuilt whenever a different source is seen, so it never leaks across parse() calls.
+  // Without this, chained block keywords on one line ("if for for ... do") make
+  // hasDoKeyword/isDoColonOneLiner re-walk the chain O(N) times each, exploding to O(N^3).
+  private valueMemoSource: string | null = null;
+  private valueMemo = new Map<number, boolean>();
+
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
     const skipInterpolationBound = this.skipInterpolation.bind(this);
@@ -819,67 +828,106 @@ export class ElixirBlockParser extends BaseBlockParser {
   // keywords are syntactically required to start their own block; a following "def foo do/end"
   // belongs to that inner def, not to a chained expression.
   private isKeywordUsedAsValue(source: string, afterPos: number, currentKeyword?: string): boolean {
-    let j = afterPos;
-    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
-      j++;
+    // Reset the memo when a new source is parsed (cache is valid only within one parse).
+    if (this.valueMemoSource !== source) {
+      this.valueMemoSource = source;
+      this.valueMemo = new Map<number, boolean>();
     }
-    if (j >= source.length) return false;
-    const c = source[j];
-    if (c === ',') {
-      return true;
-    }
-    // Followed by a closing bracket: the keyword is the last element of a
-    // parenthesized condition / list / tuple (e.g., "if(cond) do", "if [case] do",
-    // "if {cond} do"). cond/case is a value, do belongs to the outer block keyword.
-    if (c === ')' || c === ']' || c === '}') {
-      return true;
-    }
-    // Check if directly followed by "do" with word boundary
-    if (source.slice(j, j + 2) === 'do') {
-      const afterDo = source[j + 2];
-      if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
-        return true;
+
+    // Walk the "<kw> <kw> ... do" chain iteratively. Each loop iteration evaluates the
+    // value checks at `pos` for keyword `keyword`; when the next word is itself a block
+    // keyword used in the chain, we advance `pos`/`keyword` to that word instead of
+    // recursing. Iterating (rather than the former self-recursion) avoids stack overflow
+    // when a statement chains many block keywords (e.g. "if for for ... do :ok end").
+    //
+    // Every position visited in a single walk shares the same final result (each
+    // non-terminal link merely delegates to the next), so the result is memoized for all
+    // of them. Combined with reuse across calls this keeps total chain work near-linear
+    // and removes the former O(N^3) blowup. The key folds in whether the keyword is a
+    // definition keyword, since that gates the chain/do-no-body branches.
+    let pos = afterPos;
+    let keyword = currentKeyword;
+    const visitedKeys: number[] = [];
+
+    const finish = (result: boolean): boolean => {
+      for (const key of visitedKeys) {
+        this.valueMemo.set(key, result);
       }
-    }
-    // Followed by inline comment or newline: skip comments and newlines, then check for `do`
-    if (c === '\n' || c === '\r' || c === '#') {
-      let k = j;
-      while (k < source.length) {
-        const ch = source[k];
-        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-          k++;
-          continue;
-        }
-        if (ch === '#') {
-          while (k < source.length && source[k] !== '\n' && source[k] !== '\r') k++;
-          continue;
-        }
-        break;
+      return result;
+    };
+
+    while (true) {
+      const isDefinitionKw = keyword !== undefined && DEFINITION_KEYWORDS.has(keyword);
+      const memoKey = pos * 2 + (isDefinitionKw ? 1 : 0);
+      const cached = this.valueMemo.get(memoKey);
+      if (cached !== undefined) {
+        return finish(cached);
       }
-      if (source.slice(k, k + 2) === 'do') {
-        const afterDo = source[k + 2];
+      visitedKeys.push(memoKey);
+
+      let j = pos;
+      while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+        j++;
+      }
+      if (j >= source.length) return finish(false);
+      const c = source[j];
+      if (c === ',') {
+        return finish(true);
+      }
+      // Followed by a closing bracket: the keyword is the last element of a
+      // parenthesized condition / list / tuple (e.g., "if(cond) do", "if [case] do",
+      // "if {cond} do"). cond/case is a value, do belongs to the outer block keyword.
+      if (c === ')' || c === ']' || c === '}') {
+        return finish(true);
+      }
+      // Check if directly followed by "do" with word boundary
+      if (source.slice(j, j + 2) === 'do') {
+        const afterDo = source[j + 2];
         if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
-          return true;
+          return finish(true);
         }
       }
-    }
-    // Followed by binary operator (part of an expression)
-    if ('+-*/<>=!^&|'.includes(c)) {
-      return true;
-    }
-    // Followed by `.` (method/field access) — but not `..` range terminator at end of expr
-    if (c === '.' && j + 1 < source.length && source[j + 1] !== '.') {
-      return true;
-    }
-    // Note: `(` (function call) is intentionally NOT treated as value here, since
-    // isBlockKeywordFunctionCall in callers handles function-call form separately.
-    // Followed by word-based operator (and/or/not/in/when) or another identifier+do pattern
-    if (/[a-z_]/.test(c)) {
+      // Followed by inline comment or newline: skip comments and newlines, then check for `do`
+      if (c === '\n' || c === '\r' || c === '#') {
+        let k = j;
+        while (k < source.length) {
+          const ch = source[k];
+          if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+            k++;
+            continue;
+          }
+          if (ch === '#') {
+            while (k < source.length && source[k] !== '\n' && source[k] !== '\r') k++;
+            continue;
+          }
+          break;
+        }
+        if (source.slice(k, k + 2) === 'do') {
+          const afterDo = source[k + 2];
+          if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+            return finish(true);
+          }
+        }
+      }
+      // Followed by binary operator (part of an expression)
+      if ('+-*/<>=!^&|'.includes(c)) {
+        return finish(true);
+      }
+      // Followed by `.` (method/field access) — but not `..` range terminator at end of expr
+      if (c === '.' && j + 1 < source.length && source[j + 1] !== '.') {
+        return finish(true);
+      }
+      // Note: `(` (function call) is intentionally NOT treated as value here, since
+      // isBlockKeywordFunctionCall in callers handles function-call form separately.
+      // Followed by word-based operator (and/or/not/in/when) or another identifier+do pattern
+      if (!/[a-z_]/.test(c)) {
+        return finish(false);
+      }
       let wordEnd = j;
       while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) wordEnd++;
       const word = source.slice(j, wordEnd);
       if (['and', 'or', 'not', 'in', 'when'].includes(word)) {
-        return true;
+        return finish(true);
       }
       // "<this_kw> <ident> do" - this_kw is a value when the do has no body
       // (i.e., 'do' is followed immediately by 'end'). This distinguishes
@@ -888,7 +936,6 @@ export class ElixirBlockParser extends BaseBlockParser {
       // Skip this heuristic when this_kw is a definition keyword: definition keywords
       // (def/defp/defmacro/defguard/defmodule etc.) always start their own block, so a
       // following "def foo do\nend" must not be treated as a chained value expression.
-      const isDefinitionKw = currentKeyword !== undefined && DEFINITION_KEYWORDS.has(currentKeyword);
       if (!isDefinitionKw) {
         let k = wordEnd;
         while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
@@ -900,7 +947,7 @@ export class ElixirBlockParser extends BaseBlockParser {
             if (source.slice(m, m + 3) === 'end') {
               const afterEnd = source[m + 3];
               if (afterEnd === undefined || !/[a-zA-Z0-9_?!]/.test(afterEnd)) {
-                return true;
+                return finish(true);
               }
             }
           }
@@ -908,13 +955,14 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
       // Chained pattern: "<this_kw> <next_word> <rest> do" where <next_word> is a block
       // keyword used as a value (e.g., "if for case do :ok end" or "if case x do :ok end").
-      // Recursively check if the next identifier is used as a value, treating it as a chain.
+      // Advance the chain to <next_word> and re-evaluate (the former tail-recursive call).
       // Suppress the chain when this_kw is a definition keyword for the same reason as above.
-      if (!isDefinitionKw && this.isBlockKeywordAt(source, j) && this.isKeywordUsedAsValue(source, wordEnd, source.slice(j, wordEnd))) {
-        return true;
+      if (isDefinitionKw || !this.isBlockKeywordAt(source, j)) {
+        return finish(false);
       }
+      pos = wordEnd;
+      keyword = word;
     }
-    return false;
   }
 
   // Checks if this is a do: one-liner
