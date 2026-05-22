@@ -2837,6 +2837,49 @@ end`;
     });
   });
 
+  suite('Regression: qualified-name constant-equality case label', () => {
+    test('should not treat object as block opener inside qualified case label after =', () => {
+      const source = `case X of
+  A.B = object: Foo;
+end`;
+      const pairs = parser.parse(source);
+      // The `A.B = object:` is a (invalid) constant-equality case label with a qualified
+      // left-hand side. `object` is not a type-definition opener here. Without this fix the
+      // backward scan over the `=` left-hand identifier stops at the `.` of `A.B`, fails to
+      // reach the `of` case-label boundary, and `object` is wrongly treated as a block opener,
+      // stealing the trailing `end` from `case`.
+      assertSingleBlock(pairs, 'case', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 31);
+    });
+
+    test('should not treat class as block opener inside qualified case label after =', () => {
+      const source = `case X of
+  A.B = class: Foo;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat object as block opener inside multi-level qualified case label after =', () => {
+      const source = `case X of
+  Foo.Bar.Baz = object: Run;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should still treat object as block opener after simple constant-equality type definition', () => {
+      // Regression guard: a real type definition `TFoo = object ... end` must still open a
+      // block. The qualified-name backward scan must not over-consume past a statement boundary.
+      const source = `type
+  TFoo = object
+    X: Integer;
+  end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+  });
+
   suite('Regression 2026-05-10: try block intermediate validation', () => {
     test('should reject duplicate finally in try block', () => {
       const source = `try
