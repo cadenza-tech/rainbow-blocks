@@ -56,16 +56,17 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isPrecededByDot(source, position, excludedRegions)) {
       return false;
     }
-    // Reject end used as variable name (end = 5)
-    if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
+    // Reject end used as variable name (`end = 5`) or compound-assignment target
+    // (`end += 1`, `end *= 2`). Skip whitespace AND `...` line continuations so
+    // `end ...\n= 5` is detected as the same assignment form as the same-line `end = 5`,
+    // symmetric with the section-keyword side (isValidBlockOpen).
+    const assignFrom = this.skipWhitespaceAndContinuations(source, position + keyword.length, excludedRegions);
+    if (this.isFollowedBySimpleAssignment(source, assignFrom)) {
       return false;
     }
-    // Reject end used as a compound-assignment target (`end += 1`, `end *= 2`).
-    // Such a form (`end += 1` ≡ `end = end + 1`) uses the reserved word `end` as a
-    // variable; it is not a block close. Comparison operators (`== ~= >= <=`) are NOT
-    // compound assignments and are deliberately left alone (a real block close may be
-    // followed by a stray comparison).
-    if (this.isFollowedByCompoundAssignment(source, position + keyword.length)) {
+    // Comparison operators (`== ~= >= <=`) are NOT compound assignments and are
+    // deliberately left alone (a real block close may be followed by a stray comparison).
+    if (this.isFollowedByCompoundAssignment(source, assignFrom)) {
       return false;
     }
     // Reject end followed by a single `.` (possibly preceded by whitespace) that is NOT
@@ -343,9 +344,12 @@ export class MatlabBlockParser extends BaseBlockParser {
         }
       }
     }
-    // Reject block opener keywords used as variable names (for = 10, if = 5)
+    // Reject block opener keywords used as variable names (for = 10, if = 5). Skip
+    // whitespace AND `...` line continuations so `for ...\n= 10` is detected as the same
+    // assignment form as the same-line `for = 10`.
     if (!MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(keyword)) {
-      if (this.isFollowedBySimpleAssignment(source, position + keyword.length)) {
+      const assignFrom = this.skipWhitespaceAndContinuations(source, position + keyword.length, excludedRegions);
+      if (this.isFollowedBySimpleAssignment(source, assignFrom)) {
         return false;
       }
       // Reject block opener used as standalone identifier on the RHS of an assignment
