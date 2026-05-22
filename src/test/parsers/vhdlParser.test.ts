@@ -1351,6 +1351,51 @@ end process;`;
       assertSingleBlock(pairs, 'process', 'end process');
     });
 
+    test('should not treat single-line config spec for as block opener inside architecture', () => {
+      // A single-line configuration specification (`for all : comp use entity work.impl;`)
+      // in the declarative part does not open a block. The `for` must not be a block opener:
+      // otherwise its lookahead steals the enclosing architecture's `begin` and the real
+      // for-loop's `end loop`, breaking pairing. The enclosing `end` here is `end loop`, not
+      // `end for`, so the config spec is correctly recognized as a single-line statement.
+      const source = `architecture a of t is
+  for all : comp use entity work.impl;
+begin
+  for i in 0 to 3 loop
+    null;
+  end loop;
+end architecture;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword.value, 'end architecture');
+      assertIntermediates(archBlock, ['is', 'begin']);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.closeKeyword.value, 'end loop');
+    });
+
+    test('should not treat single-line config spec for as block opener inside block statement', () => {
+      // Same config-spec issue but inside a block statement, whose closing keyword is
+      // `end block`. The config-spec `for` must not absorb the block's `begin` intermediate.
+      const source = `b: block
+  for all : comp use entity work.impl;
+begin
+  null;
+end block;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'block', 'end block');
+      assertIntermediates(pairs[0], ['begin']);
+    });
+
+    test('should still treat block-form for as block opener when end for follows', () => {
+      // Block-form configuration (`for label : comp use entity work.impl;` ... `end for;`)
+      // is a real block. The next `end` after the use clause IS `end for`, so the `for`
+      // remains a block opener (regression guard for the VH1 fix).
+      const source = `for label : comp use entity work.impl;
+ end for;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end for');
+    });
+
     test('Bug 3: wait on/until with for should not create block', () => {
       const pairs = parser.parse('process begin\n  wait on sig\n  for 10 ns;\nend process;');
       assertSingleBlock(pairs, 'process', 'end process');
