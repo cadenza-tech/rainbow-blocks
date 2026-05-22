@@ -43,6 +43,66 @@ const DATA_NAME_VERBS = new Set([
 // a new statement's control-flow keyword and must not be suppressed.
 const OPERAND_INTRODUCERS = new Set(['TO', 'INTO', 'FROM', 'OF', 'IN', 'USING', 'AT', 'BY', 'GIVING', 'REMAINDER']);
 
+// Alphabetic relational operators. They are the word equivalents of the symbolic
+// =/</> operators (e.g., `IF X EQUAL Y` == `IF X = Y`), so a WHEN/ELSE directly
+// after one of them is the right comparison operand (a data-name position), not a
+// control-flow intermediate. Stored uppercase for case-insensitive matching
+// (COBOL is case-insensitive).
+const RELATIONAL_WORDS = new Set(['EQUAL', 'EQUALS', 'GREATER', 'LESS', 'EXCEEDS']);
+
+// Words that bridge a relational operator and its right operand: GREATER THAN,
+// LESS THAN, EQUAL TO. When the word directly before WHEN/ELSE is one of these,
+// the relational word is one hop further back (e.g., `GREATER THAN ELSE`).
+const RELATIONAL_BRIDGES = new Set(['THAN', 'TO']);
+
+// Reads the identifier-like word (letters/digits/_/-) ending at `endIndex`
+// (inclusive). Returns the uppercased word and the start index of the character
+// preceding it (for continued backward scanning), or null when `endIndex` is not
+// an identifier character. COBOL is case-insensitive, so the word is uppercased.
+function readWordBackward(source: string, endIndex: number): { word: string; before: number } | null {
+  if (endIndex < 0 || !/[a-zA-Z0-9_-]/.test(source[endIndex])) {
+    return null;
+  }
+  let start = endIndex;
+  while (start > 0 && /[a-zA-Z0-9_-]/.test(source[start - 1])) {
+    start--;
+  }
+  return { word: source.slice(start, endIndex + 1).toUpperCase(), before: start - 1 };
+}
+
+// Skips whitespace (but not newlines) backward from `from`, returning the index of
+// the first non-blank character on the same physical line, or -1 when a newline or
+// the buffer start is reached first. Used to walk a same-line relational phrase
+// (`GREATER THAN`) without crossing into the previous line.
+function skipSameLineBlanksBackward(source: string, from: number): number {
+  let i = from;
+  while (i >= 0) {
+    const c = source[i];
+    if (c === '\n' || c === '\r') return -1;
+    if (c !== ' ' && c !== '\t') return i;
+    i--;
+  }
+  return -1;
+}
+
+// Returns true when the word ending at `wordEnd` (inclusive) is an alphabetic
+// relational operator, including the two-word phrases `GREATER THAN`, `LESS THAN`,
+// and `EQUAL TO` (where the bridge word THAN/TO sits between the relational word
+// and the keyword). The relational phrase must lie on the same physical line as
+// the keyword — a relational word dangling at the end of the previous line is an
+// incomplete expression, so the next line's WHEN/ELSE is a real intermediate.
+function isPrecededByRelationalWord(source: string, wordEnd: number): boolean {
+  const directWord = readWordBackward(source, wordEnd);
+  if (!directWord) return false;
+  if (RELATIONAL_WORDS.has(directWord.word)) return true;
+  // Bridge word (THAN/TO): the relational word is one same-line hop further back.
+  if (!RELATIONAL_BRIDGES.has(directWord.word)) return false;
+  const prevEnd = skipSameLineBlanksBackward(source, directWord.before);
+  if (prevEnd < 0) return false;
+  const prevWord = readWordBackward(source, prevEnd);
+  return prevWord !== null && RELATIONAL_WORDS.has(prevWord.word);
+}
+
 // Calculates the visual column of a position, expanding tabs to 8-character stops
 export function getVisualColumn(source: string, lineStart: number, pos: number): number {
   let visualCol = 0;
@@ -276,6 +336,17 @@ export function isInExpressionContext(source: string, position: number, excluded
   // when the operator is on the same physical line as the keyword.
   if (crossedNewline && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '=' || ch === '<' || ch === '>')) {
     return false;
+  }
+  // Alphabetic relational operators (EQUAL/GREATER/LESS/EXCEEDS, and the phrases
+  // GREATER THAN / LESS THAN / EQUAL TO) are the word equivalents of =/</>, so a
+  // following WHEN/ELSE is the right comparison operand. Apply the same same-line
+  // policy as the symbolic operators: a relational word ending the previous line
+  // is an incomplete expression, so do not suppress a next-line WHEN/ELSE.
+  // Only letters/digits start such a word; `-`/`_` are handled by the symbolic
+  // and hyphen branches above/below, never as the start of a relational word.
+  if (/[a-zA-Z0-9]/.test(ch)) {
+    if (crossedNewline) return false;
+    return isPrecededByRelationalWord(source, i);
   }
   // Arithmetic operators: + - * / = < >
   // Separators: , ;
