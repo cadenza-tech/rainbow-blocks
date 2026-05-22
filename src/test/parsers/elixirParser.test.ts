@@ -4046,6 +4046,30 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
       assertIntermediates(pairs[0], []);
     });
+    test('should not register rescue as intermediate when followed by =~ comparison (rescue =~ x)', () => {
+      const source = 'try do\n  :a\nrescue =~ x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should not register else as intermediate when followed by =~ comparison (else =~ x)', () => {
+      const source = 'if v do\n  :a\nelse =~ x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+    test('should still register rescue as intermediate in a real try/rescue clause (rescue e -> e)', () => {
+      const source = 'try do\n  :a\nrescue\n  e -> e\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+    test('should still register rescue as intermediate for a same-line clause (rescue e -> e)', () => {
+      const source = 'try do\n  :a\nrescue e -> e\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
     test('should still register else as intermediate in a real if/else block', () => {
       const source = 'if x do\n  :a\nelse\n  :b\nend';
       const pairs = parser.parse(source);
