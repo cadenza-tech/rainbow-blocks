@@ -402,13 +402,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return false;
   }
 
-  // Returns true when `end` at `position` is the target of an indexing assignment
-  // such as `end(1) = 5;` or `end(idx, j) = expr;`. Detection: directly followed
-  // (after whitespace/line-continuation) by `(`, then a balanced run to the matching
-  // `)`, then `=` (but not `==`, which is comparison). String/comment regions are
-  // skipped via `excludedRegions` while scanning the parens body.
-  private isEndIndexingAssignment(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let j = position + 'end'.length;
+  // Returns true when the close keyword (`end` or `until`) at `position` is the target
+  // of an indexing assignment such as `end(1) = 5;`, `end(1) += 5;`, `end(1).x = 5;`, or
+  // `until(1) = 5`. Detection: directly followed (after whitespace) by `(`, then a balanced
+  // run to the matching `)`, then either an assignment / compound assignment (covered by
+  // isFollowedByAssignment, which excludes `==`) or a `.` field access — `end(1).x = 5`
+  // assigns to a field of the indexed variable. A trailing `...` (line continuation) after
+  // `)` is not field access and is therefore excluded. String/comment regions are skipped
+  // via `excludedRegions` while scanning the parens body.
+  private isIndexingAssignment(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position + keyword.length;
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
     if (j >= source.length || source[j] !== '(') return false;
     // Find the matching `)` ignoring excluded regions and tracking nesting.
@@ -429,12 +432,18 @@ export class OctaveBlockParser extends MatlabBlockParser {
       k++;
     }
     if (depth !== 0) return false;
-    // After the closing `)`, skip whitespace and check for `=` (but not `==`).
+    // After the closing `)`, skip whitespace and inspect the next token.
     let after = k + 1;
     while (after < source.length && (source[after] === ' ' || source[after] === '\t')) after++;
-    if (after >= source.length || source[after] !== '=') return false;
-    if (after + 1 < source.length && source[after + 1] === '=') return false;
-    return true;
+    if (after >= source.length) return false;
+    // Field access (`end(1).x = ...`): a `.` here continues an lvalue, so the keyword is a
+    // variable being indexed and field-assigned, not a block close. `...` (line continuation)
+    // is not field access and must be excluded.
+    if (source[after] === '.' && !(source[after + 1] === '.' && source[after + 2] === '.')) {
+      return true;
+    }
+    // Plain or compound assignment (`=`, `+=`, `*=`, `.^=`, ... but not `==`).
+    return this.isFollowedByAssignment(source, after);
   }
 
   // Reject block close keywords used as variable names (end = 5, endif = 1, etc.)
@@ -442,19 +451,21 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
       return false;
     }
-    // Reject `end(<expr>) = <value>` indexing-assignment form: `end` here is a
-    // variable name being indexed and assigned, not a block close. Without this,
-    // the indexed-end consumes an outer block opener and the trailing real `end`
-    // becomes orphan. Only applies to bare `end` (typed closes like `endif` are
-    // already constrained by isAtStatementLeadingPosition).
-    if (keyword.toLowerCase() === 'end' && this.isEndIndexingAssignment(source, position, excludedRegions)) {
+    // Reject `end(<expr>) = <value>` / `until(<expr>) = <value>` indexing-assignment
+    // forms: the keyword here is a variable name being indexed and assigned (or
+    // field-assigned, `end(1).x = 5`), not a block close. Without this, the indexed
+    // keyword consumes an outer block opener and the trailing real close becomes orphan.
+    // Applies to bare `end` and `until` (the only closes that can syntactically be
+    // followed by `(`); other typed closes are already constrained by
+    // isAtStatementLeadingPosition and the trailing-token check below.
+    const lowerKw = keyword.toLowerCase();
+    if ((lowerKw === 'end' || lowerKw === 'until') && this.isIndexingAssignment(keyword, source, position, excludedRegions)) {
       return false;
     }
     // Reject typed-end keywords (endif/endfor/endwhile/etc.) used as identifiers in
     // expression context (e.g., `if endif == 5`). When the keyword does not appear at
     // the start of a statement, it is being used as a variable/identifier rather than
     // closing a block.
-    const lowerKw = keyword.toLowerCase();
     const isTypedClose = (lowerKw !== 'end' && lowerKw.startsWith('end')) || lowerKw === 'until';
     if (isTypedClose && !this.isAtStatementLeadingPosition(source, position, excludedRegions)) {
       return false;
