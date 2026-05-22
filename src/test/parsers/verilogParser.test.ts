@@ -1523,11 +1523,33 @@ endmodule`;
   });
 
   suite('Regression: isValidForkOpen line boundaries', () => {
-    test('should not let disable on previous line suppress fork', () => {
+    test('should let disable on previous line suppress fork (free-form newline)', () => {
+      // SystemVerilog is free-form: a newline between `disable` and `fork` is
+      // equivalent to a space, so `disable\nfork` is the `disable fork` statement
+      // (IEEE 1800 §9.6) and `fork` must NOT open a block. Only module/endmodule pairs.
       const pairs = parser.parse('module m;\n  disable\n  fork\n    #10 a = 1;\n  join\nendmodule');
-      assertBlockCount(pairs, 2);
-      findBlock(pairs, 'module');
-      findBlock(pairs, 'fork');
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not treat fork after disable on previous line as block open', () => {
+      // `disable\nfork ... join` is the free-form `disable fork` statement; fork
+      // is not a par-block opener, so no fork/join pair is produced.
+      const pairs = parser.parse('disable\nfork\n  x = 1;\njoin');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat fork after wait on previous line as block open', () => {
+      // `wait\nfork ... join` is the free-form `wait fork` statement; neither
+      // `wait` nor `fork` opens a block, so no pairs are produced.
+      const pairs = parser.parse('wait\nfork\n  x = 1;\njoin');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat fork after a normal statement on previous line as block open', () => {
+      // The preceding word across the newline is `;` (not disable/wait), so the
+      // fork/join par-block is a real block.
+      const pairs = parser.parse('a = b;\nfork\n  x = 1;\njoin');
+      assertSingleBlock(pairs, 'fork', 'join');
     });
   });
 
