@@ -91,6 +91,12 @@ const ELSE_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 
 // if/unless only.
 const ELSIF_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless']);
 
+// Open keywords whose blocks can take a bare `rescue`/`ensure` clause. These are
+// valid directly inside begin/def/class/module bodies, and inside `do...end`
+// blocks (Ruby 2.6+). A bare `rescue`/`ensure` in a while/until/for/case body is
+// a syntax error, so it must not be collected as an intermediate.
+const RESCUE_ENSURE_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['begin', 'def', 'class', 'module', 'do']);
+
 // Ruby interpolation check: %q, %w, %i, %s do not interpolate
 function isRubyInterpolatingPercent(_specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -168,8 +174,7 @@ export class RubyBlockParser extends BaseBlockParser {
             // 'when' belongs to `case` only; 'else'/'elsif' belong to conditional and
             // related blocks. A bare 'when'/'else'/'elsif' inside a do/loop/def/...
             // body is not a syntactic element of that block, so it must not be attached
-            // as an intermediate. ('rescue'/'ensure' are intentionally not restricted
-            // here -- they are valid in begin/def/etc.)
+            // as an intermediate.
             if (token.value === 'when' && !WHEN_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
               break;
             }
@@ -177,6 +182,13 @@ export class RubyBlockParser extends BaseBlockParser {
               break;
             }
             if (token.value === 'elsif' && !ELSIF_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
+              break;
+            }
+            // 'rescue'/'ensure' are valid directly in begin/def/class/module bodies and
+            // in do...end blocks (Ruby 2.6+). A bare 'rescue'/'ensure' inside a
+            // while/until/for/case body is a syntax error, so it must not be attached as
+            // an intermediate.
+            if ((token.value === 'rescue' || token.value === 'ensure') && !RESCUE_ENSURE_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
               break;
             }
             stack[stack.length - 1].intermediates.push(token);
