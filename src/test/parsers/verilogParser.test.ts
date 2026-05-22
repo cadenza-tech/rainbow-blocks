@@ -2580,6 +2580,42 @@ endmodule`;
     });
   });
 
+  suite('Regression: dangling-else with single-statement else', () => {
+    test('should not let end close outer if when a single-statement else follows', () => {
+      // The `end` closes the inner `if (inner) begin ... end` only. The outer
+      // `if (outer)` body continues into the single-statement `else y = 2;`, so
+      // the outer `if` must NOT be chain-consumed by this `end`; it stays orphan.
+      const source = 'if (outer)\n  if (inner) begin\n    x = 1;\n  end\nelse\n  y = 2;\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = findBlock(pairs, 'begin');
+      const endOffset = source.indexOf('end');
+      assert.strictEqual(beginPair.closeKeyword.startOffset, endOffset);
+      // The inner if (the second `if`) pairs with the same end.
+      const innerIfOffset = source.indexOf('if', 1);
+      const innerIfPair = pairs.find((p) => p.openKeyword.value === 'if' && p.openKeyword.startOffset === innerIfOffset);
+      assert.ok(innerIfPair, 'inner if should be paired with end');
+      assert.strictEqual(innerIfPair.closeKeyword.startOffset, endOffset);
+      // The outer if (offset 0) is orphan: no pair has it as opener.
+      const outerIfPair = pairs.find((p) => p.openKeyword.value === 'if' && p.openKeyword.startOffset === 0);
+      assert.strictEqual(outerIfPair, undefined, 'outer if must remain orphan');
+    });
+
+    test('should still close both ifs when else has its own begin-end block', () => {
+      // Regression guard: `else begin ... end` (else with begin) must keep the
+      // existing behavior where the outer if spans to the final end.
+      const source = 'if (outer)\n  if (inner) begin\n    x = 1;\n  end\nelse begin\n  y = 2;\nend\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 5);
+      const lastEndOffset = source.lastIndexOf('end');
+      const outerIfPair = pairs.find((p) => p.openKeyword.value === 'if' && p.openKeyword.startOffset === 0);
+      assert.ok(outerIfPair, 'outer if should be paired');
+      assert.strictEqual(outerIfPair.closeKeyword.startOffset, lastEndOffset);
+      const elsePair = pairs.find((p) => p.openKeyword.value === 'else');
+      assert.ok(elsePair, 'else should be paired with its begin-end');
+    });
+  });
+
   suite('Regression: extern, include angle brackets, and virtual interface', () => {
     test('should not detect extern protected function as block', () => {
       const pairs = parser.parse('extern protected function void f();');
