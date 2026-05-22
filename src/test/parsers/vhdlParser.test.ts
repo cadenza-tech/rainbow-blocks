@@ -3393,6 +3393,42 @@ end package;`;
     });
   });
 
+  suite('Single generate body nestLevel', () => {
+    // A single `if/for/while ... generate` is one construct: the control keyword and
+    // generate close at the same `end generate` (siblings, nestLevel equal). The synthetic
+    // begin/end body inside is one level deep, so it must be nestLevel 1, not 2. The base
+    // recalculation counts both the control keyword and the generate as parents of the body.
+    test('should give nestLevel 1 to begin body in single if generate', () => {
+      const source = 'g: if c generate\nbegin\n  null;\nend;\nend generate;';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      assert.strictEqual(beginPair.nestLevel, 1, 'synthetic begin body should be nestLevel 1');
+      assertNestLevel(pairs, 'if', 0);
+      const generatePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'generate');
+      assert.ok(generatePair);
+      assert.strictEqual(generatePair.nestLevel, 1, 'generate sibling of if should be nestLevel 1');
+    });
+
+    test('should give nestLevel 1 to begin body in single for generate', () => {
+      const source = 'g: for i in 0 to 3 generate\nbegin\n  null;\nend;\nend generate;';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      assert.strictEqual(beginPair.nestLevel, 1, 'synthetic begin body should be nestLevel 1');
+      assertNestLevel(pairs, 'for', 0);
+    });
+
+    test('should give nestLevel 1 to begin body in single while generate', () => {
+      const source = 'g: while c generate\nbegin\n  null;\nend;\nend generate;';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      assert.strictEqual(beginPair.nestLevel, 1, 'synthetic begin body should be nestLevel 1');
+      assertNestLevel(pairs, 'while', 0);
+    });
+  });
+
   suite('Regression 2026-05-15: component instantiation across newlines and comments', () => {
     test('should reject component instantiation when label and component separated by newline', () => {
       const source = 'architecture rtl of t is\nbegin\n  inst :\n  component foo port map();\nend;';
