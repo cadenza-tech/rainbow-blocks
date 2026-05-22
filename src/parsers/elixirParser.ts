@@ -457,7 +457,10 @@ export class ElixirBlockParser extends BaseBlockParser {
           const after = source[p];
           const isFunctionCall = after === '(';
           const isFieldAccess = after === '.' && (p + 1 >= source.length || source[p + 1] !== '.');
-          const isOperatorOperand = EXPRESSION_OPERATOR_LEAD_CHARS.has(after);
+          // `=~` (match operator) leads with `=`, which is not in EXPRESSION_OPERATOR_LEAD_CHARS
+          // and is intentionally skipped by the variable-assignment check above; treat it as a
+          // binary operator operand here so `rescue =~ x` / `else =~ x` are not branch keywords
+          const isOperatorOperand = EXPRESSION_OPERATOR_LEAD_CHARS.has(after) || (after === '=' && p + 1 < source.length && source[p + 1] === '~');
           if ((isFunctionCall || isFieldAccess || isOperatorOperand) && !this.isFollowedByClauseArrow(source, p, excludedRegions)) {
             return false;
           }
