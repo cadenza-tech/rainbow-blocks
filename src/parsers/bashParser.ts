@@ -422,15 +422,57 @@ export class BashBlockParser extends BaseBlockParser {
     return j < source.length && source[j] === '{';
   }
 
-  // Checks if keyword is preceded by 'in' (for empty case: case $x in esac)
-  private isPrecededByIn(source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
+  // Checks if keyword is preceded by the case statement's `in` keyword (rescues the
+  // empty case `case WORD in esac`). The `in` immediately before `esac` is only the
+  // case header `in` when scanning further back reaches the `case` keyword with just
+  // the subject word between them; if an argument word `in` is found instead (e.g.
+  // `a) cmd in esac`, where the preceding `in` belongs to a command, not the header),
+  // an arm separator (`)` pattern terminator, `;;`, `;&`, `;;&`) sits before it and
+  // the rescue must not fire.
+  private isPrecededByIn(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let j = position - 1;
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+    while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) j--;
     if (j >= 1 && source[j] === 'n' && source[j - 1] === 'i') {
       const inStart = j - 1;
       if (inStart === 0 || !/[a-zA-Z0-9_]/.test(source[inStart - 1])) {
+        return this.isCaseHeaderIn(source, inStart, excludedRegions);
+      }
+    }
+    return false;
+  }
+
+  // Confirms the `in` keyword at inStart is a case statement header `in` (`case WORD in`)
+  // by scanning backward: skipping excluded regions, the scan must reach a `case`
+  // keyword before crossing an arm boundary. A valid case subject is a single word
+  // whose parentheses live only inside expansions (`$(...)`, `$((...))`, `${...}` —
+  // all excluded regions, skipped here), so any bare `(`/`)` or a `;;`/`;&`/`;;&`
+  // separator before `case` marks an arm boundary and means this `in` is an argument
+  // word, not the header (e.g. `a) cmd in esac`).
+  private isCaseHeaderIn(source: string, inStart: number, excludedRegions: ExcludedRegion[]): boolean {
+    let k = inStart - 1;
+    while (k >= 0) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        k = region ? region.start - 1 : k - 1;
+        continue;
+      }
+      const ch = source[k];
+      // Bare parenthesis or `;;`/`;&`/`;;&` arm separator: arm boundary reached.
+      if (ch === '(' || ch === ')' || ch === ';' || (ch === '&' && k >= 1 && source[k - 1] === ';')) {
+        return false;
+      }
+      // `case` keyword reached (word boundaries on both sides) with only the subject
+      // word in between.
+      if (
+        ch === 'e' &&
+        k >= 3 &&
+        source.slice(k - 3, k + 1) === 'case' &&
+        (k - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 4])) &&
+        (k + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[k + 1]))
+      ) {
         return true;
       }
+      k--;
     }
     return false;
   }
