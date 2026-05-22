@@ -2996,5 +2996,63 @@ foo() ->
     });
   });
 
+  suite('Bug ER1: OTP 27 user-defined sigil prefixes (multi-char / non-standard)', () => {
+    test('should treat ~r/.../ user sigil with slash delimiter as excluded region', () => {
+      // OTP 27 sigil prefix can be any name (not only s/S/b/B). The slash-delimited
+      // body of ~r/.../ must be excluded so its begin/end do not leak as a block.
+      const source = 'X = ~r/begin end/,\nbegin ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat ~json{...} multi-char sigil prefix with brace delimiter as excluded region', () => {
+      const source = 'X = ~json{begin end},\nbegin ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should treat ~r"..." user sigil with quote delimiter as excluded region', () => {
+      // A quote delimiter after a non-standard prefix routes through verbatim-string
+      // handling once the prefix is skipped, so the whole ~r"..." is one region.
+      const source = 'X = ~r"begin end",\nbegin ok end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~r"begin end"');
+    });
+
+    test('should treat ~json/.../ multi-char prefix with slash delimiter as excluded region', () => {
+      const source = '~json/begin end/';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~json/begin end/');
+    });
+
+    test('should keep standard ~b/.../ sigil handling unchanged', () => {
+      const source = 'Y = ~b/begin end/';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~b/begin end/');
+    });
+
+    test('should keep standard ~s"..." sigil handling unchanged', () => {
+      const source = 'Y = ~s"begin end"';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~s"begin end"');
+    });
+
+    test('should not create a region for a prefix-only tilde with no delimiter at EOF', () => {
+      // ~r with no following delimiter is not a complete sigil; no region is created.
+      const regions = parser.getExcludedRegions('~r');
+      assert.strictEqual(regions.length, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
