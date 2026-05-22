@@ -41,6 +41,11 @@ const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   until: 'do'
 };
 
+// Keywords that take a condition/header expression. A bare `do` immediately following one of
+// these on the same logical line (e.g. `if do`) is `do` used in expression position, not a
+// do/until opener.
+const DO_CONDITION_KEYWORDS = new Set(['if', 'elseif', 'while', 'switch', 'case', 'until']);
+
 export class OctaveBlockParser extends MatlabBlockParser {
   // Mirror of MatlabBlockParser.phantomSectionPositions for Octave's overridden matchBlocks.
   // Populated by isValidBlockOpen below in lock-step with the parent's tracking, so that
@@ -165,6 +170,13 @@ export class OctaveBlockParser extends MatlabBlockParser {
       return false;
     }
     if (keyword === 'do') {
+      // Reject `do` used in a condition/header position such as `if do` / `while do`: the
+      // preceding keyword expects an expression, so this `do` is not a do/until opener.
+      // Treating it as one leaves a spurious `do` on the stack that breaks the enclosing
+      // block pairing (the generic `end` cannot close `do`, so if/end would be lost).
+      if (this.isDoInConditionContext(source, position, excludedRegions)) {
+        return false;
+      }
       // Skip horizontal whitespace (ASCII space/tab/VT/FF plus Unicode spaces such
       // as NBSP / U+2000-200A / Ideographic Space) and line continuations (... or \)
       // after `do`, then inspect the first significant character. `do (args)`,
@@ -298,6 +310,36 @@ export class OctaveBlockParser extends MatlabBlockParser {
       nextChar !== ',' &&
       !this.isCommentChar(nextChar)
     );
+  }
+
+  // Returns true when `do` at position immediately follows a condition/header keyword
+  // (if/elseif/while/switch/case/until) on the same logical line, e.g. `if do`. Such a `do`
+  // is used in expression position and is not a do/until opener. Scans backward over
+  // horizontal whitespace and `...`/`\` line continuations to read the preceding word; a
+  // line break or statement separator before any word means `do` starts its own statement
+  // (a real opener) and is not rejected.
+  private isDoInConditionContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (isHorizontalWhitespace(source[i])) {
+        i--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.start - 1;
+        continue;
+      }
+      break;
+    }
+    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) {
+      return false;
+    }
+    const idEnd = i;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) {
+      i--;
+    }
+    return DO_CONDITION_KEYWORDS.has(source.slice(i + 1, idEnd + 1).toLowerCase());
   }
 
   // Returns true when an Octave keyword (`do`) at position is the argument of a
