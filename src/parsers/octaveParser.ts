@@ -465,7 +465,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // `until` is excluded because it requires a condition expression (`until cond`).
     if (isTypedClose && lowerKw !== 'until') {
       let after = position + keyword.length;
-      while (after < source.length && (source[after] === ' ' || source[after] === '\t' || source[after] === '\v' || source[after] === '\f')) after++;
+      while (after < source.length && isHorizontalWhitespace(source[after])) after++;
       if (after < source.length) {
         const ch = source[after];
         if (ch !== '\n' && ch !== '\r' && ch !== ';' && ch !== ',' && ch !== '%' && ch !== '#') {
@@ -484,7 +484,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // continuation — it is just text — so it is ignored.
   private isAtStatementLeadingPosition(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\v' || source[i] === '\f')) i--;
+    while (i >= 0 && isHorizontalWhitespace(source[i])) i--;
     if (i < 0) return true;
     const ch = source[i];
     if (ch === ';' || ch === ',') return true;
@@ -494,7 +494,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
       let nlEnd = i;
       if (ch === '\n' && i > 0 && source[i - 1] === '\r') nlEnd = i - 1;
       let scan = nlEnd - 1;
-      while (scan >= 0 && (source[scan] === ' ' || source[scan] === '\t' || source[scan] === '\v' || source[scan] === '\f')) scan--;
+      while (scan >= 0 && isHorizontalWhitespace(source[scan])) scan--;
       if (scan >= 2 && source[scan] === '.' && source[scan - 1] === '.' && source[scan - 2] === '.') {
         // `...` is recorded as an excluded region whose `start` is the first `.` of the
         // continuation. If we find a region containing `scan - 2` whose start is *before*
