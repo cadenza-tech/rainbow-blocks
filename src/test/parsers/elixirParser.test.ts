@@ -4682,5 +4682,113 @@ end`;
     });
   });
 
+  suite('Regression: middle keyword not accepted by enclosing opener is orphaned', () => {
+    // A block_middle keyword (else/rescue/catch/after) only belongs to an opener that
+    // actually accepts it: if/unless take else; try takes rescue/catch/after/else; receive
+    // takes after; with takes else. fn/quote/case/cond/def-family/defmodule/for accept no
+    // middle keyword. When the enclosing opener does not accept the middle keyword, the
+    // keyword is a stray identifier and must not be attached as an intermediate (best-effort
+    // parsing: leave it unhighlighted rather than mis-attributing it).
+    test('should not attach else as intermediate to an fn block', () => {
+      const source = 'g = fn x ->\n  :a\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate to a defmodule block', () => {
+      const source = 'defmodule M do\n  :a\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmodule', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach rescue as intermediate to a quote block', () => {
+      const source = 'quote do\n  :a\nrescue\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'quote', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate to a case block', () => {
+      const source = 'case x do\n  _ -> :a\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach after as intermediate to a for block', () => {
+      const source = 'for x <- list do\n  x\nafter\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else to defmodule when it follows a closed inner if block', () => {
+      const source = 'defmodule M do\n  if x do\n    :a\n  end\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const modulePair = findBlock(pairs, 'defmodule');
+      assertIntermediates(modulePair, []);
+      const ifPair = findBlock(pairs, 'if');
+      assertIntermediates(ifPair, []);
+    });
+
+    test('should still attach else as intermediate in a real if/else block', () => {
+      const source = 'if x do\n  :a\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should still attach rescue/catch/after intermediates in a real try block', () => {
+      const source = 'try do\n  :a\nrescue\n  e -> e\ncatch\n  x -> x\nafter\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue', 'catch', 'after']);
+    });
+
+    test('should still attach else as intermediate to a try block (try/else)', () => {
+      const source = 'try do\n  :a\nelse\n  v -> v\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should still attach after as intermediate in a real receive/after block', () => {
+      const source = 'receive do\n  x -> x\nafter\n  1000 -> :timeout\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], ['after']);
+    });
+
+    test('should still attach else as intermediate to a with block', () => {
+      const source = 'with {:ok, v} <- f() do\n  v\nelse\n  err -> err\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should attach else to the with opener even when an inner if/end is closed first', () => {
+      const source = 'with {:ok, v} <- f() do\n  if v do\n    :a\n  end\nelse\n  err -> err\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const withPair = findBlock(pairs, 'with');
+      assertIntermediates(withPair, ['else']);
+      const ifPair = findBlock(pairs, 'if');
+      assertIntermediates(ifPair, []);
+    });
+
+    test('should attach rescue to the try opener even when an inner if/end is closed first', () => {
+      const source = 'try do\n  if v do\n    :a\n  end\nrescue\n  e -> e\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const tryPair = findBlock(pairs, 'try');
+      assertIntermediates(tryPair, ['rescue']);
+      const ifPair = findBlock(pairs, 'if');
+      assertIntermediates(ifPair, []);
+    });
+  });
+
   generateCommonTests(config);
 });
