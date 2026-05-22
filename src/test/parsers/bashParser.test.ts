@@ -6221,5 +6221,28 @@ fi`;
     });
   });
 
+  suite('Regression: array literal close paren must not act as a command group separator', () => {
+    test('should orphan { when } follows an array literal close without a separator', () => {
+      // `{ x=(1)}` is a bash syntax error: the `)` closes the array literal `x=(1)`,
+      // so there is no separator before `}` and `{` is not a command group. No pair
+      // is generated and `{` stays orphan (uncolored).
+      const pairs = parser.parse('{ x=(1)}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should orphan { when } follows a += array literal close without a separator', () => {
+      // Same as above for `var+=(...)` append-array assignment.
+      const pairs = parser.parse('{ x+=(1)}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair { } when } follows a subshell close', () => {
+      // Regression guard: `{ (echo)}` is valid bash; the `)` closes a subshell, which
+      // is a real command, so `}` closes the command group.
+      const pairs = parser.parse('{ (echo)}');
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
   generateCommonTests(config);
 });
