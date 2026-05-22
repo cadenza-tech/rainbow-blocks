@@ -883,6 +883,17 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Checks if % at position is a modulo operator (not a percent literal)
   private isModuloOperator(source: string, pos: number): boolean {
+    // A line-leading `%%` whose second `%` is followed by whitespace, a line break, or EOF is a
+    // degenerate/unterminated percent literal (a real `%`-delimited literal like `%%text%` has
+    // non-blank content right after the delimiter). Treat the `%` as a non-literal token so it
+    // does not open an unterminated literal that swallows the rest of the source.
+    const atLineStart = pos === 0 || source[pos - 1] === '\n' || source[pos - 1] === '\r';
+    if (atLineStart && source[pos + 1] === '%') {
+      const afterDelim = source[pos + 2];
+      if (afterDelim === undefined || afterDelim === ' ' || afterDelim === '\t' || afterDelim === '\n' || afterDelim === '\r') {
+        return true;
+      }
+    }
     if (pos === 0) return false;
     // Look back, skipping whitespace
     let i = pos - 1;
