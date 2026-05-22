@@ -88,13 +88,13 @@ export function isValidWaitOpen(source: string, position: number, excludedRegion
 export function isValidForkOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   let j = position - 1;
   while (j >= 0) {
-    if (source[j] === ' ' || source[j] === '\t') {
+    // Treat newlines as whitespace (SystemVerilog free-form: a newline between
+    // `disable`/`wait` and `fork` is equivalent to a space, so `disable\nfork`
+    // is the same statement as `disable fork`). This mirrors the forward scan in
+    // isValidWaitOpen, which already skips newlines after `fork`.
+    if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
       j--;
       continue;
-    }
-    // Stop at line boundaries so we don't cross lines
-    if (source[j] === '\n' || source[j] === '\r') {
-      break;
     }
     // Skip over excluded regions (comments)
     let inExcluded = false;
