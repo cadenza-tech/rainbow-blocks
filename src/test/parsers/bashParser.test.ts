@@ -6180,5 +6180,46 @@ fi`;
     });
   });
 
+  suite('Regression: argument word esac after in must not close case early', () => {
+    test('should pair case with final esac when an arm contains the word esac after in', () => {
+      // `cmd in esac` inside a case arm: `in` and `esac` are command argument words,
+      // not the case statement `in` / a block close. The case must pair with the
+      // final esac (offset 51), not the argument-word esac (offset 22). Valid bash.
+      const source = 'case $x in\n a) cmd in esac\n echo more;;\n b) echo;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('esac'));
+    });
+
+    test('should still pair empty case with newline separator', () => {
+      // Regression guard: `case $x in\nesac` is an empty case; the esac directly
+      // after the case `in` must still close it.
+      const source = 'case $x in\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should still pair empty case on a single line', () => {
+      // Regression guard: `case $x in esac` is an empty case on one line.
+      const source = 'case $x in esac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should still pair empty case nested inside an arm', () => {
+      // Regression guard: the inner `case $y in esac` empty case must pair with its
+      // own esac while the outer case pairs with the final esac.
+      const source = 'case $x in\n  a)\n    case $y in esac\n    ;;\nesac';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const inner = pairs[0];
+      const outer = pairs[1];
+      assert.strictEqual(inner.openKeyword.value, 'case');
+      assert.strictEqual(inner.closeKeyword.value, 'esac');
+      assert.strictEqual(inner.nestLevel, 1);
+      assert.strictEqual(outer.closeKeyword.startOffset, source.lastIndexOf('esac'));
+    });
+  });
+
   generateCommonTests(config);
 });
