@@ -3767,5 +3767,66 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-23: many line-start or operators must not validate in quadratic time', () => {
+    // Builds `if A` followed by N bare `or B` lines, each starting its own
+    // physical line, then `then null; end if;`. A bare `or` whose preceding
+    // token is neither `;` nor `select` triggers isSelectAlternativeOrAtLineStart,
+    // whose backward scan walked to the start of source on every call — the exact
+    // shape that makes the select-alternative check O(n^2).
+    function buildOrChain(n: number): string {
+      const lines = ['if A'];
+      for (let i = 0; i < n; i++) {
+        lines.push('or B');
+      }
+      lines.push('then null; end if;');
+      return lines.join('\n');
+    }
+
+    test('should pair the enclosing if regardless of how many line-start or operators precede then', () => {
+      // Output-equivalence guard: bounding the backward scan must not change the
+      // BlockPair set. The chain is a single `if ... then ... end if` whose only
+      // intermediate is `then`; every bare `or` is a boolean operator dropped
+      // before pairing, so the result is one pair with intermediate `then`.
+      const pairs = parser.parse(buildOrChain(4000));
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should not scale quadratically between 1000 and 4000 line-start or operators', () => {
+      const small = buildOrChain(1000);
+      const big = buildOrChain(4000);
+      // Warm-up to stabilize timings against JIT and module init.
+      parser.parse(small);
+      parser.parse(big);
+      const t1 = Date.now();
+      parser.parse(small);
+      const smallMs = Date.now() - t1;
+      const t2 = Date.now();
+      parser.parse(big);
+      const bigMs = Date.now() - t2;
+      // 4x input: pre-fix isSelectAlternativeOrAtLineStart scanned from each `or`
+      // back to offset 0, giving O(n^2) (~16x time; ~2s at 4000, ~13s at 8000).
+      // The bounded backward scan keeps each call O(1), so the ratio stays
+      // near-linear. A baseline floor avoids tripping on very fast small runs;
+      // 9x cleanly separates the post-fix (~4x) from the pre-fix (~16x) curve.
+      const baseline = Math.max(smallMs, 10);
+      const ratio = bigMs / baseline;
+      assert.ok(
+        ratio < 9,
+        `4000-or parse took ${bigMs}ms vs 1000-or ${smallMs}ms (ratio ${ratio.toFixed(1)}x; expected < 9x, was ~16x with O(n^2) isSelectAlternativeOrAtLineStart)`
+      );
+    });
+
+    test('should still keep a bare or as a select intermediate after a non-terminated body within the scan bound', () => {
+      // The bound must not break genuine select-alternative detection: a bare
+      // `or` whose alternative body is not semicolon-terminated, but whose
+      // boundary lies within the scan bound, is still a select intermediate.
+      const source = 'select\n  X\nor\n  accept B;\nend select;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      assertIntermediates(pairs[0], ['or']);
+    });
+  });
+
   generateCommonTests(config);
 });
