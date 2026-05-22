@@ -4710,6 +4710,87 @@ end`;
     });
   });
 
+  suite('Regression: nested block-expression end followed by a binary operator pairs with its inner opener', () => {
+    // Bug: a value-returning inner block whose `end` is followed by a binary operator
+    // (`begin x end + 1`) nested inside another block had its `end` deferred by the
+    // tentative-close mechanism. In pass 1 the outer block's real `end` then popped the
+    // inner opener off the stack (LIFO), producing a swapped pairing: the inner `begin`
+    // closed with the outer `end`, and the outer opener closed with the inner `end`.
+    // The fix evaluates a deferred close at its natural LIFO position: when there are
+    // more openers on the stack than remaining eager (non-operator-followed) closes, the
+    // deferred close is needed to balance them and is closed eagerly against the stack
+    // top. Bare-invalid `end+op` cases (`if a\n end!=2\nend`) still defer and orphan.
+    test('should pair inner begin/end with its own end inside function (not swap with outer end)', () => {
+      const source = 'function f()\nbegin x end + 1\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerBegin = findBlock(pairs, 'begin');
+      // Inner begin closes with the `end` of `end + 1` on line 1, not the outer end on line 2
+      assert.strictEqual(innerBegin.closeKeyword?.line, 1);
+      assert.strictEqual(innerBegin.nestLevel, 1);
+      const outerFunc = findBlock(pairs, 'function');
+      // Outer function closes with the trailing real `end` on line 2
+      assert.strictEqual(outerFunc.closeKeyword?.line, 2);
+      assert.strictEqual(outerFunc.nestLevel, 0);
+    });
+
+    test('should pair inner begin/end with its own end inside while loop', () => {
+      const source = 'while c\nbegin x end + 1\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerBegin = findBlock(pairs, 'begin');
+      assert.strictEqual(innerBegin.closeKeyword?.line, 1);
+      assert.strictEqual(innerBegin.nestLevel, 1);
+      const outerWhile = findBlock(pairs, 'while');
+      assert.strictEqual(outerWhile.closeKeyword?.line, 2);
+      assert.strictEqual(outerWhile.nestLevel, 0);
+    });
+
+    test('should pair inner begin/end inside if and attach else to the outer if', () => {
+      const source = 'if c\nbegin x end + 1\nelse\ny\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerBegin = findBlock(pairs, 'begin');
+      assert.strictEqual(innerBegin.closeKeyword?.line, 1);
+      assert.strictEqual(innerBegin.nestLevel, 1);
+      const outerIf = findBlock(pairs, 'if');
+      assert.strictEqual(outerIf.closeKeyword?.line, 4);
+      assert.strictEqual(outerIf.nestLevel, 0);
+      // else is part of the if, not the inner begin
+      assertIntermediates(outerIf, ['else']);
+    });
+
+    test('should pair nested begin/begin/end/end when outer end is followed by a binary operator', () => {
+      const source = 'begin begin x end end + 1';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      // Inner begin@6 pairs with the first end@14; outer begin@0 pairs with end@18 (`end + 1`)
+      const innerBegin = pairs.find((p) => p.openKeyword.startOffset === 6);
+      assert.ok(innerBegin, 'inner begin@6 should pair');
+      assert.strictEqual(innerBegin?.closeKeyword?.startOffset, 14);
+      assert.strictEqual(innerBegin?.nestLevel, 1);
+      const outerBegin = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outerBegin, 'outer begin@0 should pair');
+      assert.strictEqual(outerBegin?.closeKeyword?.startOffset, 18);
+      assert.strictEqual(outerBegin?.nestLevel, 0);
+    });
+
+    test('should pair three levels deep when inner end is followed by a binary operator', () => {
+      const source = 'function f()\nwhile c\nbegin x end + 1\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const innerBegin = findBlock(pairs, 'begin');
+      assert.strictEqual(innerBegin.closeKeyword?.line, 2);
+      assert.strictEqual(innerBegin.nestLevel, 2);
+      const middleWhile = findBlock(pairs, 'while');
+      assert.strictEqual(middleWhile.closeKeyword?.line, 3);
+      assert.strictEqual(middleWhile.nestLevel, 1);
+      const outerFunc = findBlock(pairs, 'function');
+      assert.strictEqual(outerFunc.closeKeyword?.line, 4);
+      assert.strictEqual(outerFunc.nestLevel, 0);
+    });
+  });
+
   suite('Regression: bracket-context validation must not be quadratic', () => {
     // Bug: isValidBlockOpen/isValidBlockClose called bracket-context helpers
     // (isInsideCurlyBraces, isLoneEndInArrayConstruction, isInsideIndexingBrackets,
