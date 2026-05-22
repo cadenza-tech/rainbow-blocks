@@ -2274,5 +2274,56 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: indexed end/until with compound or field assignment is not block close', () => {
+    test('should not treat end(1) += 5 as block close (compound assignment)', () => {
+      // `end(1) += 5;` is a compound assignment to a variable named `end` being indexed,
+      // not a block close. The function must pair with the trailing real `end` (0-indexed
+      // line 2), and `end(1)` (line 1) must not consume the function opener.
+      const source = 'function f\nend(1) += 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2, 'function should pair with the trailing end on the 3rd line');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end(1) *= 2 as block close (compound assignment)', () => {
+      const source = 'function f\nend(1) *= 2;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end(1).x = 5 as block close (field assignment)', () => {
+      // `end(1).x = 5;` indexes a variable named `end`, then assigns to its field `x`.
+      // The `.` after `)` marks a field-access assignment target, so this is not a close.
+      const source = 'function f\nend(1).x = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat until(1) = 5 as block close (indexed assignment)', () => {
+      // `until(1) = 5` is an indexed assignment to a variable named `until`, not a do/until
+      // close. Without a real close, `do` stays an orphan and the trailing generic `end`
+      // cannot close it, so no pairs are produced (cost-minimal: zero mispairings).
+      const source = 'do\n a;\nuntil(1)=5\nend';
+      const pairs = parser.parse(source);
+      const untilPair = pairs.find((pr) => pr.closeKeyword.value === 'until');
+      assert.strictEqual(untilPair, undefined, 'until(1)=5 is an indexed assignment, not a do/until close');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat end(1) = 5 as indexing assignment, not block close (regression guard)', () => {
+      // Existing behaviour from the 2026-05-15 fix must be preserved.
+      const source = 'function f\nend(1) = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
