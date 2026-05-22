@@ -514,8 +514,19 @@ export class PascalBlockParser extends BaseBlockParser {
     if (source[bp] === '=' && (bp === 0 || ![':', '>', '<', '+', '-', '*', '/', '='].includes(source[bp - 1]))) {
       // Skip past the '=' and any whitespace/comments
       let ip = this.skipBackwardWhitespace(source, bp - 1, excludedRegions);
-      // Skip past an identifier preceding the '=' (e.g. the `Z` in `Z = object:`)
-      while (ip >= 0 && /[a-zA-Z0-9_]/.test(source[ip])) ip--;
+      // Skip past the left-hand side: a (possibly qualified) identifier such as the `Z` in
+      // `Z = object:` or the `A.B` in `A.B = object:`. Walk back over each identifier segment,
+      // then over a `.` qualifier separator (skipping whitespace/comments around it), and
+      // repeat. A `..` range operator is not a qualifier, so stop if the dot is doubled.
+      while (ip >= 0 && /[a-zA-Z0-9_]/.test(source[ip])) {
+        while (ip >= 0 && /[a-zA-Z0-9_]/.test(source[ip])) ip--;
+        const dotPos = this.skipBackwardWhitespace(source, ip, excludedRegions);
+        if (dotPos < 0 || source[dotPos] !== '.' || (dotPos > 0 && source[dotPos - 1] === '.')) {
+          ip = dotPos;
+          break;
+        }
+        ip = this.skipBackwardWhitespace(source, dotPos - 1, excludedRegions);
+      }
       bp = this.skipBackwardWhitespace(source, ip, excludedRegions);
       if (bp < 0) return false;
     }
