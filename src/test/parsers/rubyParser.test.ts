@@ -3649,6 +3649,16 @@ end`;
       const pairs = parser.parse('x = 5 %% 2\nif true\n  1\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should detect if/end after %% at line start', () => {
+      const pairs = parser.parse('%%\nif true\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should detect if/end after %% at start of source followed by newline', () => {
+      const pairs = parser.parse('%%\ndef foo\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Regression: second regex on same line should be excluded', () => {
