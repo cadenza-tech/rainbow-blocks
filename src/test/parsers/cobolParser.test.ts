@@ -2287,6 +2287,91 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after a real subtraction operator is a data name');
     });
+
+    test('should not register ELSE as intermediate when preceded by EQUAL relational word', () => {
+      // Bug: isInExpressionContext detected only symbolic operators (=/</>) and
+      // treated their alphabetic equivalents (EQUAL/GREATER/LESS) as ordinary
+      // words, so `IF X EQUAL ELSE` wrongly registered ELSE as an intermediate
+      // while `IF X = ELSE` (symbolic) did not. EQUAL is a relational operator;
+      // the following word is the right comparison operand (a data-name position).
+      const source = 'IF X EQUAL ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after EQUAL relational word is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by GREATER relational word', () => {
+      const source = 'IF A GREATER ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after GREATER relational word is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by LESS relational word', () => {
+      const source = 'IF A LESS ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after LESS relational word is data name');
+    });
+    test('should not register WHEN as EVALUATE intermediate when preceded by LESS THAN relational phrase', () => {
+      // THAN bridges the relational word and its right operand: GREATER THAN /
+      // LESS THAN / EQUAL TO. The word after the phrase is still an operand.
+      const source = 'EVALUATE TRUE\n  IF A LESS THAN WHEN\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN after LESS THAN relational phrase is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by GREATER THAN relational phrase', () => {
+      const source = 'IF A GREATER THAN ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after GREATER THAN relational phrase is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by EQUALS relational word', () => {
+      const source = 'IF X EQUALS ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after EQUALS relational word is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by EXCEEDS relational word', () => {
+      const source = 'IF A EXCEEDS ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after EXCEEDS relational word is data name');
+    });
+    test('should not register ELSE as intermediate when preceded by lowercase equal relational word (case-insensitive)', () => {
+      // COBOL is case-insensitive; the alphabetic relational words must match
+      // regardless of case (equal/Equal/EQUAL).
+      const source = 'if x equal else\nend-if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end-if');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else after lowercase equal is data name');
+    });
+    test('should register ELSE as IF intermediate when a relational word ends the previous line (incomplete expression)', () => {
+      // Mirrors the symbolic crossedNewline guard: a relational word left
+      // dangling at the end of the previous line is an incomplete expression
+      // (editing in progress). ELSE on the following line is a real control-flow
+      // intermediate, not the operator's right operand.
+      const source = 'IF A EQUAL\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+    test('should still treat ELSE as data name when symbolic = operator precedes it (existing behavior preserved)', () => {
+      // Guard: the alphabetic relational fix must not regress the symbolic
+      // operator path. `IF X = ELSE` already suppresses ELSE registration.
+      const source = 'IF X = ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE after = symbolic operator is data name');
+    });
+    test('should still register ELSE as intermediate when preceded by an ordinary data name (no relational word)', () => {
+      // Guard: ordinary words must not be mistaken for relational operators.
+      // `IF X\n  ELSE` has only the condition identifier X before ELSE, so ELSE
+      // is a real IF intermediate.
+      const source = 'IF X\n  ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
   });
 
   suite('Regression 2026-05-09: ELSE/WHEN expression context honors excluded regions', () => {
