@@ -5607,6 +5607,36 @@ do`;
     });
   });
 
+  suite('Regression: fixed-form column-6 continuation in if-then header', () => {
+    test('should pair fixed-form if-then split by a column-6 continuation marker', () => {
+      // Fixed-form continuation: column 6 (0-indexed offset 5) of line 2 is a
+      // non-blank marker ('1'), so line 2 continues line 1. The logical line is
+      // `if (x .gt. 0 .and. y .lt. 5) then`, opening a block-if closed by `end if`.
+      const source = '      if (x .gt. 0 .and.\n     1    y .lt. 5) then\n          z = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still pair free-form if-then split by a trailing & continuation', () => {
+      // Free-form continuation (existing behavior) must not regress.
+      const source = '      if (x .gt. 0 .and. &\n          y .lt. 5) then\n          z = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not treat a free-form 5-space-indented statement as a fixed-form continuation', () => {
+      // Free-form: line 2 has columns 1-5 blank and column 6 a letter ('t' of `then`).
+      // A letter in column 6 is a normal indented token, NOT a fixed-form continuation
+      // marker (which is a sequence digit/symbol). Line 1's `if (x .gt. 0)` has no `&`
+      // continuation, so it is a single-line if; the stray `then` on line 2 is not a
+      // block intermediate and no pair is produced. Treating column-6 letters as
+      // continuations would wrongly attach `then` and pair if/end if.
+      const source = '      if (x .gt. 0)\n     then\n          z = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
