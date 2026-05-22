@@ -1681,6 +1681,43 @@ end`;
     });
   });
 
+  suite('Receiver-like context-dependent keywords (KEYWORD.method)', () => {
+    const receiverKeywords = ['select', 'union', 'enum', 'struct', 'lib', 'macro', 'annotation'];
+
+    for (const kw of receiverKeywords) {
+      test(`should not treat ${kw}.method as block opener and keep the enclosing def-end pair`, () => {
+        const source = `def foo
+  ${kw} = "x"
+  y = ${kw}.upcase
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+    }
+
+    test('should still parse a genuine enum block when members follow on the next line', () => {
+      const source = `enum Color
+  Red
+  Green
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+
+    test('should not treat select.method as opener but keep nested blocks intact', () => {
+      const source = `def run
+  x = select.first
+  if ready
+    go
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'if', 1);
+      assertNestLevel(pairs, 'def', 0);
+    });
+  });
+
   suite('Coverage: semicolon in postfix rescue check', () => {
     test('should treat rescue after semicolon as postfix', () => {
       const pairs = parser.parse('x = 1; y rescue nil');
