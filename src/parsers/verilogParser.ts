@@ -217,6 +217,15 @@ export class VerilogBlockParser extends BaseBlockParser {
   // independent of `{}` depth.
   private parenIndexCache: { source: string; index: BracketIndex } | null = null;
 
+  // Source text and excluded regions of the current parse pass, captured in
+  // tokenize (which always runs immediately before matchBlocks in the base
+  // pipeline). matchBlocks needs them to scan the raw source after a closing
+  // `end` for a single-statement `else` that was never tokenized (an `else`
+  // without a following begin/fork is not a valid block opener, so it does not
+  // appear in the token stream). The base matchBlocks signature only receives
+  // tokens, so the source is shared via this field rather than a parameter.
+  private currentParse: { source: string; excludedRegions: ExcludedRegion[] } | null = null;
+
   private get validationCallbacks(): VerilogValidationCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
@@ -325,6 +334,8 @@ export class VerilogBlockParser extends BaseBlockParser {
 
   // Override tokenize to also scan for preprocessor directives
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Capture the current pass's source/regions for matchBlocks (see currentParse).
+    this.currentParse = { source, excludedRegions };
     let tokens = super.tokenize(source, excludedRegions);
 
     // Filter out tokens that are ifdef/ifndef/elsif directive macro name arguments
@@ -1019,17 +1030,7 @@ export class VerilogBlockParser extends BaseBlockParser {
                 // e.g., always -> if -> begin: after closing if, also close always
                 // BUT: if the next token is 'else', don't chain-consume because the
                 // if-else construct is not complete yet
-                let hasElseNext = false;
-                for (let ni = ti + 1; ni < tokens.length; ni++) {
-                  const candidateToken = tokens[ni];
-                  // Skip preprocessor directive tokens
-                  if (candidateToken.value.startsWith('`')) {
-                    continue;
-                  }
-                  // Check if the first non-preprocessor token is 'else'
-                  hasElseNext = candidateToken.type === 'block_open' && candidateToken.value === 'else';
-                  break;
-                }
+                const hasElseNext = this.isElseNext(token, tokens, ti);
                 if (!hasElseNext) {
                   let nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
                   // Skip preprocessor directives at top of stack
@@ -1122,13 +1123,7 @@ export class VerilogBlockParser extends BaseBlockParser {
       });
     }
 
-    let hasElseNext = false;
-    for (let ni = currentTokenIndex + 1; ni < tokens.length; ni++) {
-      const candidateToken = tokens[ni];
-      if (candidateToken.value.startsWith('`')) continue;
-      hasElseNext = candidateToken.type === 'block_open' && candidateToken.value === 'else';
-      break;
-    }
+    const hasElseNext = this.isElseNext(token, tokens, currentTokenIndex);
     if (!hasElseNext) {
       let nextCheckIndex = stack.length > 0 ? stack.length - 1 : -1;
       while (nextCheckIndex >= 0 && stack[nextCheckIndex].token.value.startsWith('`')) {
@@ -1148,6 +1143,38 @@ export class VerilogBlockParser extends BaseBlockParser {
         }
       }
     }
+  }
+
+  // Returns true when an `else` follows the closing `end` at `token`, meaning the
+  // enclosing if/else construct is not yet complete and chained control keywords
+  // must NOT be consumed by this `end`.
+  //
+  // Two detection paths are needed because an `else` may or may not be tokenized:
+  // 1. Token stream: an `else begin ... end` form tokenizes `else` as a block_open,
+  //    possibly after preprocessor directives (`ifdef/`endif) that wrap the gap
+  //    between `end` and `else`. Skipping those directive tokens and checking the
+  //    first real token covers the preprocessor-wrapped cases.
+  // 2. Raw source: a single-statement `else` (e.g., `end\nelse\n  y = 2;`) is NOT a
+  //    valid block opener (no following begin/fork) so it never enters the token
+  //    stream. Path 1 then sees nothing and would let `end` over-consume the outer
+  //    control keyword. Scanning the source immediately after `end` for a bare
+  //    `else` word recovers this case. Path 1 already handled every directive-wrapped
+  //    form, so the source scan does not need to step over preprocessor directives.
+  private isElseNext(token: Token, tokens: Token[], currentTokenIndex: number): boolean {
+    for (let ni = currentTokenIndex + 1; ni < tokens.length; ni++) {
+      const candidateToken = tokens[ni];
+      // Skip preprocessor directive tokens between `end` and a tokenized `else`
+      if (candidateToken.value.startsWith('`')) continue;
+      if (candidateToken.type === 'block_open' && candidateToken.value === 'else') {
+        return true;
+      }
+      break;
+    }
+    // Single-statement else: scan the raw source right after the closing `end`.
+    if (this.currentParse !== null) {
+      return isFollowedByWord(this.currentParse.source, token.endOffset, 'else', this.currentParse.excludedRegions, this.validationCallbacks);
+    }
+    return false;
   }
 
   // Finds the index of the last opener that matches any of the valid openers
