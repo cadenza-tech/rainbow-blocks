@@ -2244,5 +2244,35 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: typed-close trailing/leading position allows Unicode horizontal whitespace', () => {
+    // U+00A0 (NBSP). Built from an escape so the codepoint survives editing tools that
+    // collapse literal NBSP into an ASCII space.
+    const NBSP = String.fromCharCode(0x00a0);
+
+    test('should treat endif as block close when followed by NBSP then semicolon', () => {
+      // U+00A0 (NBSP) between `endif` and `;` is horizontal whitespace, mirroring the
+      // rest of the parser (isHorizontalWhitespace / HORIZONTAL_WHITESPACE_PATTERN).
+      // The typed-close trailing check must skip it so `endif<NBSP>;` still closes the if.
+      const source = `if x\nendif${NBSP};`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should treat endif as block close when preceded by NBSP indentation', () => {
+      // Leading U+00A0 indentation before `endif` must not break the statement-leading
+      // position detection: `<NBSP>endif` is still at the start of its statement.
+      const source = `if x\n${NBSP}endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should still treat endif as block close with ASCII space then semicolon', () => {
+      // Regression guard: the existing ASCII-space form `endif ;` must keep working.
+      const source = 'if x\nendif ;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+  });
+
   generateCommonTests(config);
 });
