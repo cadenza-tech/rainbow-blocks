@@ -3320,5 +3320,84 @@ end try`;
     });
   });
 
+  suite('Bug AS1: multi-line record literal should suppress block_open keywords', () => {
+    // The block_close / block_middle paths already guard against record-key
+    // positions via isAtRecordKeyPosition. The block_open path lacked the same
+    // guard, so a block-open keyword used as a record property name (e.g.
+    // `{\n  tell: 5\n}`) was tokenized as a real opener and stole the close of
+    // the genuine outer block, leaving that outer opener orphaned. These tests
+    // pin the symmetric guard: the outer opener (line 0) must keep its close.
+
+    test('should not detect tell as block_open when used as multi-line record key', () => {
+      const source = 'tell application "Finder"\n  set r to {\n    tell: 5\n  }\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer tell at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect script as block_open when used as multi-line record key', () => {
+      const source = 'script myScript\n  set r to {\n    script: 5\n  }\nend script';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'script', 'end script');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer script at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect try as block_open when used as multi-line record key', () => {
+      const source = 'try\n  set r to {\n    try: 5\n  }\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer try at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect repeat as block_open when used as multi-line record key', () => {
+      const source = 'repeat 3 times\n  set r to {\n    repeat: 5\n  }\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer repeat at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect considering as block_open when used as multi-line record key', () => {
+      const source = 'considering case\n  set r to {\n    considering: 5\n  }\nend considering';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'considering', 'end considering');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer considering at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect ignoring as block_open when used as multi-line record key', () => {
+      const source = 'ignoring case\n  set r to {\n    ignoring: 5\n  }\nend ignoring';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'ignoring', 'end ignoring');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer ignoring at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect with timeout as block_open when used as multi-line record key', () => {
+      const source = 'with timeout of 5 seconds\n  set r to {\n    with timeout: 5\n  }\nend timeout';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with timeout', 'end timeout');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer with timeout at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect with transaction as block_open when used as multi-line record key', () => {
+      const source = 'with transaction\n  set r to {\n    with transaction: 5\n  }\nend transaction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with transaction', 'end transaction');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer with transaction at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect using terms from as block_open when used as multi-line record key', () => {
+      const source = 'using terms from application "Mail"\n  set r to {\n    using terms from: 5\n  }\nend using terms from';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'using terms from', 'end using terms from');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer using terms from at line 0 must be the opener, not the record key');
+    });
+
+    test('should not detect tell as block_open when used as record key after preceding entry', () => {
+      const source = 'tell application "Finder"\n  set r to {\n    a: 1,\n    tell: 5\n  }\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'the genuine outer tell at line 0 must be the opener, not the record key');
+    });
+  });
+
   generateCommonTests(config);
 });
