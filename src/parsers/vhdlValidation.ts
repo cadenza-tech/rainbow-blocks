@@ -203,18 +203,17 @@ export function isValidForOpen(source: string, position: number, excludedRegions
 // Pattern: for <id/all/others> : <id> use entity/configuration ... ;
 // Only matches when 'use entity' or 'use configuration' appears on the same line as 'for'
 // (configuration blocks have 'use entity' on a separate indented line)
-// Checks if 'end' keyword appears after current position on the same line
-// Used to detect compact configuration blocks: for ... use entity ...; end for;
-// Returns true when an `end` keyword appears within the next ~10 lines after `pos`.
-// Used to detect block-form `for label: comp use entity ...; end for;` even when the
-// `end for;` appears on a separate line from the `use entity` clause.
-function hasEndKeywordOnSameLine(
-  source: string,
-  pos: number,
-  len: number,
-  excludedRegions: ExcludedRegion[],
-  callbacks: VhdlValidationCallbacks
-): boolean {
+// Detects a block-form configuration (`for label : comp use entity ...; end for;`)
+// by checking whether the first `end` keyword appearing after `pos` (within ~10 lines)
+// is an `end for`. A block configuration is the only construct whose `for` is closed by
+// `end for` (LRM 7.3.1), so the trailing keyword after `end` must be `for`.
+//
+// Returning true only for `end for` is load-bearing: a single-line config spec
+// (`for all : comp use entity work.impl;`) that merely SITS INSIDE another block must not
+// be mistaken for a block-form `for`. The first `end` it reaches is the enclosing block's
+// `end loop`/`end block`/`end architecture`, never `end for`, so it correctly returns false
+// and the `for` is treated as a single-line statement instead of a block opener.
+function hasEndForKeyword(source: string, pos: number, len: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
   let j = pos;
   let lineCount = 0;
   const maxLines = 10;
@@ -238,7 +237,33 @@ function hasEndKeywordOnSameLine(
     if (/[a-zA-Z_]/.test(ch)) {
       const ws = j;
       while (j < len && /[a-zA-Z0-9_]/.test(source[j])) j++;
-      if (source.slice(ws, j).toLowerCase() === 'end') return true;
+      if (source.slice(ws, j).toLowerCase() === 'end') {
+        // Found the first `end`. Skip whitespace and excluded regions (comments) to the
+        // trailing keyword and require it to be `for`. Any other `end <type>` belongs to an
+        // enclosing block, so this `for` is a single-line config spec, not a block opener.
+        let k = j;
+        while (k < len) {
+          if (callbacks.isInExcludedRegion(k, excludedRegions)) {
+            const region = callbacks.findExcludedRegionAt(k, excludedRegions);
+            if (region) {
+              k = region.end;
+              continue;
+            }
+          }
+          const wc = source[k];
+          if (wc === ' ' || wc === '\t' || wc === '\n' || wc === '\r') {
+            k++;
+            continue;
+          }
+          break;
+        }
+        if (k < len && /[a-zA-Z_]/.test(source[k])) {
+          const ts = k;
+          while (k < len && /[a-zA-Z0-9_]/.test(source[k])) k++;
+          if (source.slice(ts, k).toLowerCase() === 'for') return true;
+        }
+        return false;
+      }
       continue;
     }
     j++;
@@ -295,9 +320,9 @@ function hasUseEntityOrConfigAfterFor(
           const nextWord = source.slice(nextWordStart, k).toLowerCase();
           if (nextWord === 'entity' || nextWord === 'configuration') {
             if (!callbacks.isInExcludedRegion(wordStart, excludedRegions)) {
-              // Check if 'end' follows later on the same line (compact configuration block)
-              // If so, this is a block, not a single-line config spec
-              if (hasEndKeywordOnSameLine(source, k, len, excludedRegions, callbacks)) {
+              // If the next `end` after the use clause is `end for`, this is a block-form
+              // configuration (a real block), not a single-line config spec
+              if (hasEndForKeyword(source, k, len, excludedRegions, callbacks)) {
                 return false;
               }
               return true;
