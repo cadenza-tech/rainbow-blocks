@@ -77,6 +77,15 @@ const INTERMEDIATE_TO_OPENERS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
   ['then', new Set(['if', 'unless', 'case', 'select'])]
 ]);
 
+// Context-dependent keywords that double as ordinary identifiers. When written as
+// `KEYWORD.method` (receiver) or `KEYWORD = expr` (assignment target) the keyword is a
+// variable/value, not a block opener. Unlike `do`/`if` (guarded by isLoopDo/
+// isPostfixConditional), these have no other positional guard, so an identifier use of
+// one of them must suppress the block-open classification. Real openers are always
+// followed by a name/newline (`enum Color`, `struct Point`), never by `.`/`=` on the
+// same line, so suppressing these forms does not affect genuine blocks.
+const RECEIVER_LIKE_OPENERS = new Set(['select', 'union', 'enum', 'struct', 'lib', 'macro', 'annotation']);
+
 // Crystal interpolation check: %Q, %W, %I, %x, %r and bare % interpolate
 function isCrystalInterpolatingPercent(specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -585,6 +594,49 @@ export class CrystalBlockParser extends BaseBlockParser {
     return i + 1 < source.length && source[i] === '.' && source[i + 1] === '.';
   }
 
+  // Checks whether the context-dependent keyword ending at endOffset is being used as an
+  // ordinary identifier rather than a block opener. Two same-line forms qualify:
+  //   1. Method-call receiver `KEYWORD.method` — a single `.` (not a range `..`/`...`).
+  //   2. Assignment target `KEYWORD = expr` — a standalone `=` (not `==`/`===`/`=~`/`=>`).
+  // Spaces and tabs between the keyword and the `.`/`=` are permitted, but newlines are not
+  // crossed: a keyword alone on its line (e.g. `enum\n  Red`, `struct Point`) keeps its block
+  // role because real openers are followed by a name/newline, never by `.` or `=` on the same
+  // line. Excluded regions are skipped. Used to suppress the seven receiver-like openers
+  // (`select`, `union`, `enum`, `struct`, `lib`, `macro`, `annotation`) when used as values.
+  private isReceiverOrAssignmentUsage(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = endOffset;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i++;
+        continue;
+      }
+      break;
+    }
+    if (i >= source.length) {
+      return false;
+    }
+    // Method-call receiver: a single dot, not a range operator (`..`/`...`).
+    if (source[i] === '.' && source[i + 1] !== '.') {
+      return true;
+    }
+    // Assignment target: a standalone `=`, excluding comparison/hash-rocket operators
+    // (`==`, `===`, `=~`, `=>`). `KEYWORD =` is an assignment to a variable named after
+    // the keyword, so the keyword is not a block opener.
+    if (source[i] === '=') {
+      const next = source[i + 1];
+      return next !== '=' && next !== '~' && next !== '>';
+    }
+    return false;
+  }
+
   // Checks if `end` at position sits in the value position of a ternary expression
   // (`cond ? value : end`). Such an `end` is immediately preceded by a standalone
   // ternary colon: a `:` surrounded by whitespace, not part of `::` (scope resolution)
@@ -922,6 +974,13 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (position < 2 || source[position - 2] !== '.') {
         return false;
       }
+    }
+
+    // Reject context-dependent keywords used as ordinary identifiers: method-call
+    // receivers (`select.upcase`, `enum.foo`) or assignment targets (`select = "x"`).
+    // In both forms the keyword is a value/variable, not a block opener.
+    if (RECEIVER_LIKE_OPENERS.has(keyword) && this.isReceiverOrAssignmentUsage(source, position + keyword.length, excludedRegions)) {
+      return false;
     }
 
     // 'do' as loop separator (while/until/for condition do) is not a block
