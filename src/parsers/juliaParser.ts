@@ -148,13 +148,26 @@ export class JuliaBlockParser extends BaseBlockParser {
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
-    // Pass 1: standard LIFO matching, but DEFER `end` tokens that are followed by a binary
-    // operator (tentativeCloseOffsets). A deferred close is a value-returning block
-    // terminator (`begin...end + 1`) only when its opener survives pass 1 unmatched; if a
-    // later real `end` already closes that opener, the deferred close was an invalid bare
-    // `end+1` and stays orphaned. Deferring (rather than closing eagerly) is what keeps
-    // `if a\n end!=2\nend` pairing the `if` with its real trailing `end`.
+    // Pass 1: standard LIFO matching. An `end` followed by a binary operator
+    // (tentativeCloseOffsets) is a "tentative" close that is either a value-returning block
+    // terminator (`begin...end + 1`) or an invalid bare `end+1`. Decide its fate at its
+    // natural LIFO position by counting how many eager (non-operator-followed) closes remain
+    // after it: if the stack holds more openers than those remaining eager closes can match,
+    // this tentative close is needed to balance the stack and is closed eagerly against the
+    // stack top (a genuine value-returning terminator). Otherwise it is deferred to pass 2,
+    // which keeps `if a\n end!=2\nend` pairing the `if` with its real trailing `end` (the
+    // bare `end+1` then orphans) and keeps sibling value blocks
+    // (`begin...end + 1\n function foo()\n end`) pairing correctly.
     const deferredCloses: Token[] = [];
+    // Number of eager (non-tentative) block_close tokens still ahead in the stream. Tentative
+    // closes (`end+op`) do not decrement this; only eager closes a later pass-1 step will
+    // consume do. Compared against the stack depth to decide eager-close vs defer.
+    let remainingEagerCloses = 0;
+    for (const token of tokens) {
+      if (token.type === 'block_close' && !this.tentativeCloseOffsets.has(token.startOffset)) {
+        remainingEagerCloses++;
+      }
+    }
 
     for (const token of tokens) {
       switch (token.type) {
@@ -174,9 +187,28 @@ export class JuliaBlockParser extends BaseBlockParser {
 
         case 'block_close': {
           if (this.tentativeCloseOffsets.has(token.startOffset)) {
-            deferredCloses.push(token);
+            // Eager-close only when the stack has more openers than the eager closes that
+            // remain ahead. In that case this tentative close must terminate one of the
+            // currently-open blocks (e.g. the inner `begin...end + 1` nested in a block whose
+            // own `end` is the only remaining eager close), so close the stack top now.
+            // Otherwise defer: a later eager close will handle the surrounding block, and
+            // pass 2 rescues any earlier opener this tentative close legitimately belongs to.
+            if (stack.length > remainingEagerCloses) {
+              const openBlock = stack.pop();
+              if (openBlock) {
+                pairs.push({
+                  openKeyword: openBlock.token,
+                  closeKeyword: token,
+                  intermediates: openBlock.intermediates,
+                  nestLevel: stack.length
+                });
+              }
+            } else {
+              deferredCloses.push(token);
+            }
             break;
           }
+          remainingEagerCloses--;
           const openBlock = stack.pop();
           if (openBlock) {
             pairs.push({
