@@ -5,6 +5,34 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.54] - 2026-05-23
+
+### Fixed
+
+- Ada: Bound the line-start `or` backward scan so a `select` body with many wrapped `or` operators no longer scales quadratically
+- AppleScript: Suppress a block-open keyword used as a multi-line record key (`tell:`, `script:`) so it does not steal an outer block's close
+- Bash: Treat an array-literal close `)` as a non-separator before `}` so `{ x=(1)}` does not produce a phantom `{`/`}` pair
+- Bash: Verify that `in` before `esac` is the case header's own keyword so an argument word `in` does not close the case early
+- COBOL: Treat alphabetic relational words (`EQUAL`, `GREATER`, `LESS`) as operators so a following `ELSE`/`WHEN` is not added to intermediates
+- Crystal: Skip context-dependent keywords (`select`, `union`, `enum`) used as a receiver or assignment target so they do not break the enclosing `def`/`end` pair
+- Elixir: Restrict middle keyword attachment to openers that accept them so `else`/`rescue` are not added to the intermediates of `fn`/`defmodule`/`quote`
+- Elixir: Skip a middle keyword used as a `=~` match operand (`rescue =~ x`) so it is not added to intermediates
+- Erlang: Skip multi-character and user-defined sigil prefixes (`~r/.../`, `~json{...}`) so block keywords inside the sigil body are not detected
+- Fortran: Reject `associate ()` with an empty association list so it is not opened as a block
+- Fortran: Support fixed-form column-6 continuation in `if`-`then` headers so a wrapped block-if is paired with its `end if`
+- Julia: Pair a nested value-returning block ending with a binary operator (`begin ... end + 1`) with its inner opener instead of the outer block
+- MATLAB: Detect a variable assignment across a `...` line continuation (`end ...` then `= 5`) so the keyword is not treated as a block close or open
+- Octave: Allow Unicode horizontal whitespace around typed-close keywords (`endif` followed by NBSP) so the close is recognized
+- Octave: Reject an indexed `end`/`until` with a compound or field assignment (`end(1) += 5`, `end(1).x = 5`) so it is not treated as a block close
+- Octave: Reject `do` used in a condition position (`if do`) so it is not opened as a do/until block
+- Pascal: Handle a qualified-name constant-equality case label (`A.B = object:`) so `object`/`class` is not opened as a block
+- Ruby: Prevent a line-leading `%%` from opening an unterminated percent literal that swallows following blocks
+- Ruby: Restrict `rescue`/`ensure` attachment to blocks that accept them so they are not added to the intermediates of `while`/`until`/`for`/`case` blocks
+- Verilog: Stop `end` from closing an outer `if` before a single-statement `else` so a dangling `else` is not mispaired
+- Verilog: Suppress `fork` after `disable`/`wait` on the previous line so a newline-separated `disable fork` does not produce a phantom `fork`/`join` pair
+- VHDL: Correct the nest level of a single `generate` body so the synthetic `begin` body is not over-nested
+- VHDL: Skip a single-line configuration specification (`for all : comp use entity ...;`) so it does not steal an enclosing block's `end`
+
 ## [1.1.53] - 2026-05-22
 
 ### Fixed
@@ -2052,6 +2080,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.54]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.53...v1.1.54
 [1.1.53]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.52...v1.1.53
 [1.1.52]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.51...v1.1.52
 [1.1.51]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.50...v1.1.51
