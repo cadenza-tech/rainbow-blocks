@@ -5637,6 +5637,23 @@ do`;
     });
   });
 
+  suite('Regression: associate with empty parentheses is not a block opener', () => {
+    test('should not pair associate () with empty association list', () => {
+      // `associate ()` is invalid: ASSOCIATE requires at least one association
+      // `name => selector`. Empty parens must not open a block, consistent with the
+      // empty-paren rejection already applied to select case/where/forall/submodule.
+      const source = 'associate ()\n  x = 1\nend associate';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair associate with a non-empty association list', () => {
+      const source = 'associate (a => b)\n  x = 1\nend associate';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'associate', 'end associate');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
