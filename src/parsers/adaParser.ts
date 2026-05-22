@@ -73,6 +73,17 @@ const COMPOUND_END_PATTERN = new RegExp(
 // exact separator set tokenize used to build the token (including U+0085 NEL).
 const COMPOUND_END_CLOSE_PATTERN = new RegExp(`^end(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n]*)+(\\w+)`);
 
+// Upper bound on the number of characters isSelectAlternativeOrAtLineStart
+// scans backward from a line-start `or` while looking for the nearest delimiter
+// (`;`, `=>`, `:=`, `when`, the `select` keyword, or another reserved block
+// keyword). A select alternative boundary and its preceding statement or guard
+// span only a few lines in real Ada code, so a generous 2048-character cap never
+// rejects real code, while it keeps the scan O(1) per call — without it, a file
+// with many line-start `or` operators degrades to O(n^2) (every `or` scanning
+// back to offset 0). Mirrors MAX_PAREN_SCAN_CHARS / MAX_LOOP_PREFIX_SCAN_CHARS
+// in adaValidation.ts.
+const MAX_OR_BOUNDARY_SCAN_CHARS = 2048;
+
 export class AdaBlockParser extends BaseBlockParser {
   // Most recent source string and excluded regions seen by parse(). Used by
   // matchBlocks to scan for non-keyword markers (e.g., `do` in accept/return
@@ -1003,7 +1014,17 @@ export class AdaBlockParser extends BaseBlockParser {
     const reservedBlockKeywords = new Set([...this.keywords.blockOpen, ...this.keywords.blockClose].map((k) => k.toLowerCase()));
     const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
     let p = orStart - 1;
+    let scannedChars = 0;
     while (p >= 0) {
+      // Stop once the scan has visited more characters than any real delimiter
+      // could be away. A delimiter farther back than MAX_OR_BOUNDARY_SCAN_CHARS
+      // cannot govern this `or`, so treat it as a select alternative boundary —
+      // the same answer the scan gives when it reaches the start of source, and
+      // the choice that adds no orphan tokens. Counting every iteration
+      // (including skipped excluded-region characters) keeps the scan O(1) per
+      // call.
+      scannedChars++;
+      if (scannedChars > MAX_OR_BOUNDARY_SCAN_CHARS) return true;
       if (this.isInExcludedRegion(p, excludedRegions)) {
         const region = this.findExcludedRegionAt(p, excludedRegions);
         p = region ? region.start - 1 : p - 1;
