@@ -1487,6 +1487,50 @@ end`;
     });
   });
 
+  suite('Regression: bare rescue/ensure only valid in begin/def/class/module/do bodies', () => {
+    test('should not collect rescue as intermediate in while body', () => {
+      const pairs = parser.parse('while c\n  x\nrescue\n  y\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not collect ensure as intermediate in until body', () => {
+      const pairs = parser.parse('until c\n  x\nensure\n  y\nend');
+      assertSingleBlock(pairs, 'until', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not collect rescue as intermediate in for body', () => {
+      const pairs = parser.parse('for i in a\n  x\nrescue\n  y\nend');
+      assertSingleBlock(pairs, 'for', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not collect ensure as intermediate in case body', () => {
+      const pairs = parser.parse('case x\nwhen 1\n  ensure\n  y\nend');
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['when']);
+    });
+
+    test('should still collect ensure as intermediate in do block (Ruby 2.6+)', () => {
+      const pairs = parser.parse('[1].each do\n  x\nensure\n  y\nend');
+      assertSingleBlock(pairs, 'do', 'end');
+      assertIntermediates(pairs[0], ['ensure']);
+    });
+
+    test('should still collect rescue as intermediate in def body', () => {
+      const pairs = parser.parse('def foo\n  risky\nrescue\n  handle\nend');
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should still collect rescue/ensure as intermediates in class body', () => {
+      const pairs = parser.parse('class Foo\n  risky\nrescue\n  handle\nensure\n  done\nend');
+      assertSingleBlock(pairs, 'class', 'end');
+      assertIntermediates(pairs[0], ['rescue', 'ensure']);
+    });
+  });
+
   suite('Regression: isLoopDo loop keyword context validation', () => {
     test('should treat x.while do as block do, not loop do', () => {
       const source = `x.while do |y|
