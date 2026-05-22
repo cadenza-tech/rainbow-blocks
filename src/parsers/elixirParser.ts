@@ -1,6 +1,6 @@
 // Elixir block parser: handles sigils, do: one-liners, keyword arguments, and atoms
 
-import type { ExcludedRegion, LanguageKeywords, Token } from '../types';
+import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import {
   type InterpolationScanHandlers,
@@ -25,6 +25,25 @@ const DEFINITION_KEYWORDS = new Set(['def', 'defp', 'defmodule', 'defmacro', 'de
 // handled separately (assignment vs `==`/`=>`/`=~`); `.` is handled separately (field access
 // vs `..` range).
 const EXPRESSION_OPERATOR_LEAD_CHARS = new Set(['+', '-', '*', '/', '<', '>', '|', '^', '&', '~']);
+
+// Which middle keywords each opener accepts. A middle keyword (else/rescue/catch/after)
+// belongs to the enclosing opener only if that opener actually has that branch:
+//   if/unless -> else
+//   try       -> rescue/catch/after/else
+//   receive   -> after
+//   with      -> else
+// All other openers (case/cond/fn/quote/for and the def-family/defmodule definition
+// keywords) accept no middle keyword. When the opener on the stack top does not accept a
+// middle keyword, that keyword is a stray identifier and is left orphaned (not attached as
+// an intermediate), matching the best-effort "prefer unhighlighted over mis-highlighted"
+// principle. Openers absent from this map accept nothing.
+const MIDDLE_KEYWORDS_BY_OPENER: Readonly<Record<string, ReadonlySet<string>>> = {
+  if: new Set(['else']),
+  unless: new Set(['else']),
+  try: new Set(['rescue', 'catch', 'after', 'else']),
+  receive: new Set(['after']),
+  with: new Set(['else'])
+};
 
 export class ElixirBlockParser extends BaseBlockParser {
   protected readonly keywords: LanguageKeywords = {
@@ -301,6 +320,50 @@ export class ElixirBlockParser extends BaseBlockParser {
       j--;
     }
     return false;
+  }
+
+  // Matches blocks with the default LIFO algorithm, but only attaches a block_middle token
+  // (else/rescue/catch/after) to the opener on the stack top when that opener actually
+  // accepts it (see MIDDLE_KEYWORDS_BY_OPENER). The base implementation attaches any middle
+  // keyword to whatever opener happens to be on top, which mis-attributes e.g. the stray
+  // `else` in `fn x -> :a else :b end` to the fn block. Openers that accept no middle keyword
+  // (fn/quote/case/cond/for and the def-family/defmodule keywords) leave the keyword orphaned.
+  protected matchBlocks(tokens: Token[]): BlockPair[] {
+    const pairs: BlockPair[] = [];
+    const stack: OpenBlock[] = [];
+
+    for (const token of tokens) {
+      switch (token.type) {
+        case 'block_open':
+          stack.push({ token, intermediates: [] });
+          break;
+
+        case 'block_middle':
+          if (stack.length > 0) {
+            const opener = stack[stack.length - 1].token.value;
+            const accepted = MIDDLE_KEYWORDS_BY_OPENER[opener];
+            if (accepted?.has(token.value)) {
+              stack[stack.length - 1].intermediates.push(token);
+            }
+          }
+          break;
+
+        case 'block_close': {
+          const openBlock = stack.pop();
+          if (openBlock) {
+            pairs.push({
+              openKeyword: openBlock.token,
+              closeKeyword: token,
+              intermediates: openBlock.intermediates,
+              nestLevel: stack.length
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    return pairs;
   }
 
   // Filter out middle keywords followed by colon, preceded by dot, or preceded by @ (module attributes)
