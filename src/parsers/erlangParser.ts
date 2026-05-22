@@ -722,8 +722,12 @@ export class ErlangBlockParser extends BaseBlockParser {
     // OTP 27 also allows other delimiters: paired (){}[]<> and same-char / | ` # .
     if (char === '~' && pos + 1 < source.length) {
       let offset = pos + 1;
-      // Skip optional sigil modifier letter (OTP 27+: only s, S, b, B are valid)
-      if (/[sSbB]/.test(source[offset]) && offset + 1 < source.length) {
+      // Skip the optional sigil prefix. OTP 27 allows any letter sequence as a prefix
+      // (standard s/S/b/B as well as user-defined names like ~r, ~json), so consume a
+      // run of ASCII letters and treat the character right after it as the delimiter.
+      // A prefix with no following delimiter (e.g. trailing ~r at EOF) leaves offset
+      // past the source end, so no region is produced (matching prior behavior for ~b).
+      while (offset < source.length && /[a-zA-Z]/.test(source[offset])) {
         offset++;
       }
       const delim = source[offset];
