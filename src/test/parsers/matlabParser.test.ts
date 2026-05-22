@@ -2698,5 +2698,58 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: assignment to keyword across ... line continuation', () => {
+    test('should not treat end as block close when = follows across a ... line continuation', () => {
+      // `end ...\n      = 5;` is `end = 5;` split across a line continuation — the `end`
+      // is being assigned as a variable, an invalid use of the reserved word but not a
+      // block close. The same-line `end = 5;` form is already rejected; the continuation
+      // form must be symmetric. The `if` must therefore pair with the LAST end (line 3),
+      // and the line-1 `end` must be excluded.
+      const source = 'if true\n  end ...\n      = 5;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'if should pair with the last end, not the continuation-assigned end');
+    });
+
+    test('should not treat end as block close when compound assignment follows across a ... line continuation', () => {
+      // `end ...\n      += 1;` ≡ `end += 1;` (≡ `end = end + 1`) split across a line
+      // continuation — a compound assignment to the reserved word `end`, not a block close.
+      const source = 'if true\n  end ...\n      += 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'if should pair with the last end, not the continuation-assigned end');
+    });
+
+    test('should not treat for as block open when = follows across a ... line continuation', () => {
+      // `for ...\n    = 10` is `for = 10` split across a line continuation — the `for`
+      // is being assigned as a variable, not a loop header. The same-line `for = 10`
+      // form is already rejected; the continuation form must be symmetric. The `for`
+      // must be excluded so the `if` pairs with `end`.
+      const source = 'if true\n  for ...\n    = 10\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat if as block open when = follows across a ... line continuation', () => {
+      const source = 'function f()\n  if ...\n    = 5;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat same-line end = 5 as variable (no regression)', () => {
+      // The same-line assignment form must keep working after the continuation change.
+      const source = 'if true\n  end = 5;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'close keyword should be the last end');
+    });
+
+    test('should still treat same-line for = 10 as variable (no regression)', () => {
+      const source = 'for = 10;\nif true\n  x = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
