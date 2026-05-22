@@ -613,6 +613,18 @@ export class BashBlockParser extends BaseBlockParser {
     return this.isArrayLiteralOpener(this.enclosingParenAtPos[position]);
   }
 
+  // Checks whether the `)` at pos closes a `var=(...)` / `var+=(...)` array literal.
+  // For a `)` token the enclosing-paren cache holds the index of its matching `(`, so
+  // the close is an array-literal close iff that `(` is an array-literal opener. Used
+  // to keep a `}` after such a `)` from being treated as a command group close
+  // (`{ x=(1)}` is a syntax error: the `)` ends the array literal, not a command).
+  private isArrayLiteralCloseParen(pos: number): boolean {
+    if (this.enclosingParenAtPos === null || pos < 0 || pos >= this.enclosingParenAtPos.length || this.cachedSource?.[pos] !== ')') {
+      return false;
+    }
+    return this.isArrayLiteralOpener(this.enclosingParenAtPos[pos]);
+  }
+
   // Checks whether the `(` at parenIndex opens a `var=(...)` / `var+=(...)` array
   // literal. parenIndex < 0 means no enclosing paren.
   private isArrayLiteralOpener(parenIndex: number): boolean {
@@ -752,7 +764,10 @@ export class BashBlockParser extends BaseBlockParser {
         if (j >= 0 && this.isInExcludedRegion(j, excludedRegions)) {
           continue;
         }
-        if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && source[j] !== ')') {
+        // A `)` is a valid separator only when it closes a subshell/command (e.g.
+        // `{ (echo)}`), not a `var=(...)` array literal (`{ x=(1)}` is invalid bash).
+        const closeParenIsSeparator = source[j] === ')' && !this.isArrayLiteralCloseParen(j);
+        if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && !closeParenIsSeparator) {
           // Check if preceded by block close keywords (fi, done, esac)
           const blockCloseKeywords = ['fi', 'done', 'esac', '}'];
           let isAfterBlockClose = false;
