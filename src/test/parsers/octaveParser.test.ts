@@ -2325,5 +2325,22 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: do in a condition position is not a block opener', () => {
+    test('should keep if/end pair when do is used in the if condition (if do)', () => {
+      // `if do` uses the reserved word `do` in expression position; it is not a do/until
+      // opener. Treating it as one leaves a spurious `do` that the generic `end` cannot
+      // close, dropping the if/end pair. The if must still pair with end.
+      const source = 'if do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still open a do/until block on its own line inside an if (regression guard)', () => {
+      const source = 'if x\ndo\n a;\nuntil y\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
