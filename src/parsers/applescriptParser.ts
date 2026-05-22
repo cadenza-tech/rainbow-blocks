@@ -507,6 +507,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
+      // Reject compound block_open used as a record key (e.g., multi-line
+      // `{\n  with timeout: 5\n}`). Mirrors the block_close/block_middle guards:
+      // even at logical line start the keyword may be a property name inside a
+      // record literal that spans multiple lines, in which case it must not
+      // open a block and steal an outer block's close keyword.
+      if (type === 'block_open' && this.isAtRecordKeyPosition(source, i, flexMatch, excludedRegions)) {
+        return { nextPos: flexMatch };
+      }
+
       // Check if compound open keyword is used as a variable name
       if (type === 'block_open') {
         const ls = findLogicalLineStart(source, i, excludedRegions, this.helperCallbacks);
@@ -612,6 +621,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         if (this.isPrecededByExpressionTerminator(source, i, excludedRegions)) {
           return { nextPos: endPos };
         }
+      }
+
+      // Reject single block_open used as a record key (e.g., multi-line
+      // `{\n  tell: 5\n}`). Mirrors the block_close/block_middle guards: even at
+      // logical line start the keyword may be a property name inside a record
+      // literal that spans multiple lines, in which case it must not open a
+      // block and steal an outer block's close keyword.
+      if (type === 'block_open' && this.isAtRecordKeyPosition(source, i, endPos, excludedRegions)) {
+        return { nextPos: endPos };
       }
 
       // Validate block open keywords (e.g., single-line if)
