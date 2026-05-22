@@ -671,6 +671,14 @@ export class FortranBlockParser extends BaseBlockParser {
           }
           continue;
         }
+        // Fixed-form column-6 continuation: a non-blank, non-letter marker in column 6 of the
+        // next physical line continues this logical line (e.g. a block-if header split across
+        // lines). Reached only when there is no trailing `&` (free-form) continuation.
+        const fixedContPos = this.fixedFormContinuationContentStart(source, i);
+        if (fixedContPos >= 0) {
+          i = fixedContPos;
+          continue;
+        }
         break;
       }
 
@@ -678,6 +686,42 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     return false;
+  }
+
+  // Returns the offset just after column 6 of the next physical line if that line is a fixed-form
+  // continuation of the current one, otherwise -1. A fixed-form continuation has columns 1-5
+  // blank or a numeric label and column 6 holding a non-blank continuation marker. To avoid
+  // misreading free-form indented code, the marker must not be a letter (a letter in column 6 is
+  // ordinary indented code, not a continuation marker) and must not be '0' or a comment char.
+  private fixedFormContinuationContentStart(source: string, lineBreakPos: number): number {
+    let lineStart = lineBreakPos + 1;
+    if (source[lineBreakPos] === '\r' && source[lineBreakPos + 1] === '\n') {
+      lineStart = lineBreakPos + 2;
+    }
+    const col6 = lineStart + 5;
+    if (col6 >= source.length) {
+      return -1;
+    }
+    // A comment marker in column 1 (C/c/*/!) disqualifies the line.
+    const col1 = source[lineStart];
+    if (col1 === 'C' || col1 === 'c' || col1 === '*' || col1 === '!') {
+      return -1;
+    }
+    // Columns 1-5 must be blank or a numeric label (spaces/digits only).
+    for (let c = lineStart; c < col6; c++) {
+      const ch = source[c];
+      if (ch !== ' ' && !(ch >= '0' && ch <= '9')) {
+        return -1;
+      }
+    }
+    const marker = source[col6];
+    if (marker === ' ' || marker === '\t' || marker === '\n' || marker === '\r' || marker === '0' || marker === '!') {
+      return -1;
+    }
+    if ((marker >= 'a' && marker <= 'z') || (marker >= 'A' && marker <= 'Z')) {
+      return -1;
+    }
+    return col6 + 1;
   }
 
   protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
