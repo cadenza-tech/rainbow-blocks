@@ -229,6 +229,17 @@ export class FortranBlockParser extends BaseBlockParser {
       }
     }
 
+    // 'associate' requires at least one association `(name => selector)`. Reject empty parens
+    // `associate ()`, consistent with the empty-paren rejection for select case/where/forall/submodule.
+    if (lowerKeyword === 'associate') {
+      const afterAssocStart = position + keyword.length;
+      let afterAssoc = source.slice(afterAssocStart, findLogicalLineEnd(source, afterAssocStart));
+      afterAssoc = collapseContinuationLines(afterAssoc);
+      if (/^[ \t]*\([ \t]*\)/.test(afterAssoc)) {
+        return false;
+      }
+    }
+
     if (lowerKeyword === 'procedure') {
       return isValidProcedureOpen(keyword, source, position, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
     }
