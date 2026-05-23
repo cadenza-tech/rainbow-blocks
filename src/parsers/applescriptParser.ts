@@ -1174,10 +1174,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         continue;
       }
       // Line continuation: `¬` followed by optional whitespace and an optional
-      // single-line comment (`-- ...`), then a newline.
+      // single-line comment (`-- ...`), then a newline. The whitespace between
+      // `¬` and the newline may include Unicode whitespace (NBSP, IDEOGRAPHIC
+      // SPACE, ZWSP, etc.) so this consumes the same set as the loop's leading
+      // whitespace handling above.
       if (ch === '¬') {
         let next = probe + 1;
-        while (next < source.length && (source[next] === ' ' || source[next] === '\t')) next++;
+        while (next < source.length && (source[next] === ' ' || source[next] === '\t' || isUnicodeWhitespace(source[next]))) next++;
         if (next + 1 < source.length && source[next] === '-' && source[next + 1] === '-') {
           while (next < source.length && source[next] !== '\r' && source[next] !== '\n') next++;
         }
