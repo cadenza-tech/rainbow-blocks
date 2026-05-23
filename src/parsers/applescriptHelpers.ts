@@ -64,14 +64,14 @@ export function matchCompoundKeyword(source: string, pos: number, keyword: strin
             j++;
           }
         }
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t' || isUnicodeWhitespace(source[j]))) {
           j++;
         }
       }
       // Handle continuation character(s) followed by optional whitespace/comments, newline, then optional whitespace
       while (j < source.length && source[j] === '\u00AC') {
         j++;
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t' || isUnicodeWhitespace(source[j]))) {
           j++;
         }
         // Skip single-line comment (-- to end of line) after continuation
@@ -95,7 +95,7 @@ export function matchCompoundKeyword(source: string, pos: number, keyword: strin
               j++;
             }
           }
-          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t' || isUnicodeWhitespace(source[j]))) {
             j++;
           }
         }
@@ -111,7 +111,7 @@ export function matchCompoundKeyword(source: string, pos: number, keyword: strin
         if (!foundNewline) {
           return -1;
         }
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+        while (j < source.length && (source[j] === ' ' || source[j] === '\t' || isUnicodeWhitespace(source[j]))) {
           j++;
         }
         // After the continuation's newline, consume any comments on the following line
@@ -143,7 +143,7 @@ export function matchCompoundKeyword(source: string, pos: number, keyword: strin
             }
             changed = true;
           }
-          while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+          while (j < source.length && (source[j] === ' ' || source[j] === '\t' || isUnicodeWhitespace(source[j]))) {
             j++;
             changed = true;
           }
