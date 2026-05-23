@@ -527,6 +527,46 @@ export class VerilogBlockParser extends BaseBlockParser {
         i--;
         continue;
       }
+      // Cast expression `(type)`: walk back from `)` to its matching `(` and
+      // examine the word INSIDE the parens. SystemVerilog casts use the form
+      // `(type_name)expr`, so when the close keyword sits right after `)` the
+      // type name is the word between `(` and `)`. Tokenizing the reserved-word
+      // operand of a cast would falsely add a close keyword that does not exist;
+      // suppressing it preserves the outer BlockPair set.
+      if (ch === ')') {
+        let depth = 1;
+        let j = i - 1;
+        while (j >= 0 && depth > 0) {
+          if (excludedRegions !== undefined && this.isInExcludedRegion(j, excludedRegions)) {
+            j--;
+            continue;
+          }
+          if (source[j] === ')') depth++;
+          else if (source[j] === '(') depth--;
+          if (depth > 0) j--;
+        }
+        if (j < 0 || depth !== 0) return false;
+        // j points to the matching `(`. The cast type is the word inside `(...)`.
+        // Skip whitespace just after `(`, then read the identifier word, then
+        // verify only whitespace remains before the closing `)`.
+        let k = j + 1;
+        while (k < i && (source[k] === ' ' || source[k] === '\t')) k++;
+        if (k >= i || !/[a-zA-Z_]/.test(source[k])) return false;
+        const wordStart = k;
+        while (k < i && /[a-zA-Z0-9_$]/.test(source[k])) k++;
+        const wordEnd = k;
+        // Reject identifier chunks touching `$` (system task names cannot be cast types)
+        if (k < i && source[k] === '$') return false;
+        // Only whitespace allowed between the identifier and the closing `)`.
+        while (k < i && (source[k] === ' ' || source[k] === '\t')) k++;
+        if (k !== i) return false;
+        const word = source.slice(wordStart, wordEnd);
+        if (DATA_TYPE_KEYWORDS.has(word)) return true;
+        if (METHOD_QUALIFIER_KEYWORDS.has(word) && keyword !== undefined && !METHOD_QUALIFIER_TARGETS.has(keyword)) {
+          return true;
+        }
+        return false;
+      }
       // Skip block comment `/* ... */` backward: when current position is in an
       // excluded region whose end equals i+1, jump to just before its start.
       // Only block comments are skipped — other excluded regions (escaped
