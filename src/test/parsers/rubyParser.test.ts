@@ -4443,6 +4443,22 @@ end`;
     });
   });
 
+  suite('Regression: multi-line ternary with end in value position', () => {
+    test('should not pair def with stray end in multi-line ternary value position', () => {
+      // Bug: in a multi-line ternary expression where `?` and `:` are on different lines,
+      // the stray `end` in the value position (e.g. `cond ?\n  a :\n  end`) was tokenized
+      // as block_close and mis-paired with the outer `def`. The `?` scan in
+      // isEndInTernaryValuePosition stopped at the newline, so the colon was not
+      // recognized as a ternary colon. Allow the scan to cross newlines (still stopping
+      // at `;` statement separators and excluded regions).
+      const source = 'def m\n  x = cond ?\n  a :\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The real outer `end` (last occurrence) should be the close.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: heredoc terminator with trailing whitespace', () => {
     test('should match terminator line with trailing space/tab characters', () => {
       // Bug: a heredoc terminator line with trailing whitespace (e.g. `EOF \t`) did not
