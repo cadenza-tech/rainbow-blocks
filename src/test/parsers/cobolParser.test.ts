@@ -2953,6 +2953,39 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-23: period-less COPY recognises END-* keywords as statement boundary', () => {
+    // Bug: a period-less COPY that is followed directly by an END-* close keyword
+    // swallowed the close keyword as the copybook name (or as the library word after
+    // OF/IN). findBlockVerbAfterCopybook (and the helpers in cobolHelpers /
+    // cobolPseudoText) only recognised block-opening verbs and non-block verbs as the
+    // statement boundary, so close keywords like END-IF, END-EVALUATE etc. were never
+    // treated as a boundary. As a result the enclosing IF/EVALUATE lost its END-* and
+    // the BlockPair disappeared.
+    test('should pair IF with END-IF when COPY ABC sits between them', () => {
+      const source = 'IF X\nCOPY ABC\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+    test('should pair IF with END-IF when COPY ABC OF (no library yet) sits between them', () => {
+      // OF/IN with no following library word: the END-IF on the next line must still
+      // terminate the COPY rather than being absorbed as the library name.
+      const source = 'IF X\nCOPY ABC OF\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+    test('should pair IF with END-IF when COPY ABC OF LIB sits between them', () => {
+      const source = 'IF X\nCOPY ABC OF LIB\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+    test('should pair EVALUATE with END-EVALUATE when COPY ABC and a WHEN sit between them', () => {
+      const source = 'EVALUATE X\nCOPY ABC\nWHEN 1\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+  });
+
   suite('Regression 2026-05-19: dangling operator before a newline keeps ELSE/WHEN intermediate', () => {
     test('should register ELSE as IF intermediate when the condition ends with a dangling operator before a newline', () => {
       // Bug: isInExpressionContext skipped the newline and reached the `>` that
