@@ -2890,6 +2890,54 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: binary operator + end with Unicode horizontal whitespace', () => {
+    test('should not treat end after + NBSP (U+00A0) as block close', () => {
+      // `1 +<NBSP>end` — `end` is in operand context (preceded by binary `+`), invalid
+      // MATLAB outside indexing. Without the fix the NBSP is not recognised as whitespace
+      // so the operator-skip loop stops at the NBSP and treats `end` as a real block close,
+      // consuming the outer function's `end`.
+      const source = 'function f\n  1 + end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+
+    test('should not treat end after + VT (\\v) as block close', () => {
+      const source = 'function f\n  1 +\vend\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end after + FF (\\f) as block close', () => {
+      const source = 'function f\n  1 +\fend\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end after + U+2003 (em space) as block close', () => {
+      const source = 'function f\n  1 + end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not treat end preceded by * NBSP (U+00A0) as block close', () => {
+      // Symmetric backward check: `2 *<NBSP>end` should reject end as block close.
+      const source = 'function f\n  2 * end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should still treat real end with no operator before as block close (sanity)', () => {
+      const source = 'function f\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-23: end inside if/while/switch header expression is not block close', () => {
     test('should not treat end after if as block close (if end != 0)', () => {
       // `if end != 0` — `end` is part of the header expression, not a block close.
