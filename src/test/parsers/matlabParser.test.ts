@@ -2751,5 +2751,26 @@ end`;
     });
   });
 
+  suite('Regression: end used as case value should not be block close', () => {
+    test('should not consume end when used as case value in switch', () => {
+      // `case end` uses `end` as the case value (a reserved-word abuse for some MATLAB
+      // numerical constant). Currently the inner `end` is greedily consumed as a block
+      // close, which destroys the outer switch/end pair. The switch must still pair with
+      // the final `end` on the last line.
+      const source = 'switch x\n  case end\n    y = 1;\n  case 2\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5, 'switch should pair with the final end');
+    });
+
+    test('should not consume end when used as otherwise value in switch', () => {
+      // Symmetric form: `otherwise end` (less common but parsing should remain safe).
+      const source = 'switch x\n  case 1\n    y = 1;\n  otherwise end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'switch should pair with the final end');
+    });
+  });
+
   generateCommonTests(config);
 });
