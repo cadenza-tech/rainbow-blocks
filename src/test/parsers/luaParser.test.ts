@@ -676,6 +676,15 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should handle \\<LF><CR> line continuation (バグ1)', () => {
+      // Lua 5.4 treats all four newline forms (LF, CR, LF+CR, CR+LF) as a
+      // single real newline. `\<newline>` line continuation must accept the
+      // \n\r pair as well, mirroring the existing \r\n handling.
+      const source = 'x = "abc\\\n\rif true then end"\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   suite('Goto label edge cases', () => {
