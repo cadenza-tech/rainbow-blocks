@@ -879,6 +879,10 @@ export class VhdlBlockParser extends BaseBlockParser {
         // Here stmtBefore is just the entity_class keyword (single word) when the colon
         // ends the previous line. The upward scan will verify the `attribute` declaration
         // is present and act as a safety net for unrelated single-word patterns.
+        // Tracks whether this `is` is the multi-line block header `is` of a block opener
+        // (e.g., `package body p\nis\n  null;`). When set, the VHDL-2008 `is null/is new/
+        // is (expr)` filter below is skipped so the `is` is preserved as a block intermediate.
+        let isBlockHeaderIs = false;
         if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore) || /^\w+\s*$/.test(stmtBefore)) {
           let skipThisIs = false;
           let scanPos = lineStart - 1;
@@ -943,6 +947,11 @@ export class VhdlBlockParser extends BaseBlockParser {
               ) {
                 if (this.lineContainsStandaloneIs(source, prevLineStart, scanPos, excludedRegions)) {
                   skipThisIs = true;
+                } else {
+                  // Block opener header line without its own `is` (e.g., `package body p`).
+                  // This `is` is the block's header `is`, so the VHDL-2008 `is null/is new/
+                  // is (expr)` filter must not apply or it would drop the intermediate.
+                  isBlockHeaderIs = true;
                 }
                 break;
               }
@@ -967,7 +976,10 @@ export class VhdlBlockParser extends BaseBlockParser {
         //   - `procedure p is null;` (null procedure)
         //   - `function f(...) return T is (expr);` (expression function)
         // The `is` token here is part of a declaration, not a block intermediate, so skip it.
-        {
+        // Skip this filter entirely when the `is` is the multi-line block header `is` of a
+        // block opener (e.g., `package body p\nis\n  null;`). The earlier upward scan
+        // confirms this by reaching a block-opener line that has no standalone `is`.
+        if (!isBlockHeaderIs) {
           let afterIs = startOffset + 2;
           while (afterIs < source.length) {
             if (source[afterIs] === ' ' || source[afterIs] === '\t' || source[afterIs] === '\n' || source[afterIs] === '\r') {
