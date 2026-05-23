@@ -5654,6 +5654,33 @@ do`;
     });
   });
 
+  suite('Regression 2026-05-23: dot operator before block_middle keyword identifier', () => {
+    test('should not treat else after .and. as block_middle intermediate', () => {
+      // `.and. else` uses `else` as a variable in a logical expression. The middle keyword
+      // detector must recognize the Fortran dot operator (e.g., `.and.`) as expression context,
+      // not just simple ASCII operators like `+`/`-`.
+      const source = 'if (x) then\n  integer :: else\n  y = z .and. else\nelse\n  print *, 1\nend if';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      // Only the real `else` on line 3 should be intermediate (plus `then` on line 0).
+      const elseIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'else');
+      assert.strictEqual(elseIntermediates.length, 1, 'only the real else on line 3 should register as intermediate');
+      assert.strictEqual(elseIntermediates[0].line, 3, 'the registered else must be the keyword at column 0 of line 3');
+      assert.strictEqual(elseIntermediates[0].column, 0);
+    });
+
+    test('should not treat case after .or. as block_middle intermediate', () => {
+      // Same defense, exercised on `select case` middle keyword `case` used as a variable name.
+      const source = 'select case (x)\ncase (1)\n  integer :: case\n  y = a .or. case\nend select';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      // Only the real `case` on line 1 should be intermediate.
+      const caseIntermediates = pairs[0].intermediates.filter((i) => i.value.toLowerCase() === 'case');
+      assert.strictEqual(caseIntermediates.length, 1, 'only the real case (line 1) should register as intermediate');
+      assert.strictEqual(caseIntermediates[0].line, 1);
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
