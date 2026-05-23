@@ -515,10 +515,25 @@ export class BashBlockParser extends BaseBlockParser {
     // Hyphen (existing case)
     if (ch === '-') return true;
     // Other non-word, non-shell-meta chars that fuse with the preceding word in bash
-    // Exclude: shell metacharacters (\s ; | & ( ) { } < > $ ` " ' \), word-boundary handled (=, [, +)
+    // Exclude: shell metacharacters (\s ; | & ( ) { } < > ` " '), word-boundary handled (=, [, +)
     // and characters already covered by isFollowedByEquals
     // The set: # . : ~ , @ % ^ ! /
     if (ch === '#' || ch === '.' || ch === ':' || ch === '~' || ch === ',' || ch === '@' || ch === '%' || ch === '^' || ch === '!' || ch === '/') {
+      return true;
+    }
+    // `]` fuses with the preceding word: `done]` is one POSIX word, not the reserved keyword.
+    if (ch === ']') return true;
+    // `$` fuses with the preceding word for non-brace expansions: `done$var`, `done$1`, `done$$`,
+    // etc. are all single words. `done$(cmd)`, `done${...}`, `done$'...'`, `done$"..."` are
+    // already rejected via isFollowedByExcludedRegion (those starts are excluded regions),
+    // so a blanket `$` check here is safe.
+    if (ch === '$') return true;
+    // `\` fuses with the next character: `done\foo` is the literal word `donefoo`. The one
+    // exception is `\<newline>` (line continuation), which is removed by the shell and leaves
+    // `done` as the keyword.
+    if (ch === '\\') {
+      const next = source[afterPos + 1];
+      if (next === '\n' || next === '\r') return false;
       return true;
     }
     return false;
