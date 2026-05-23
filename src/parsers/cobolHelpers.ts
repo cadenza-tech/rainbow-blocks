@@ -485,6 +485,24 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
   return -1;
 }
 
+// Returns true when the position immediately after word 0 of a COPY statement
+// looks like a copybook-name boundary: either the next non-whitespace character
+// is a `.` (statement terminator — word 0 is a legitimate copybook name with a
+// reserved-word spelling such as `COPY IF.`) or the next word is `OF`/`IN`
+// (library qualifier introducing `COPY name OF lib`). When false, a bare COPY
+// has been followed directly by a block-opening verb and the verb begins a new
+// statement.
+function isCopybookNameContextRaw(source: string, afterWord: number): boolean {
+  let pos = afterWord;
+  while (pos < source.length && /\s/.test(source[pos])) pos++;
+  if (pos >= source.length) return false;
+  if (source[pos] === '.') return true;
+  let wordEnd = pos;
+  while (wordEnd < source.length && /[a-zA-Z0-9_-]/.test(source[wordEnd])) wordEnd++;
+  const nextWord = source.slice(pos, wordEnd).toUpperCase();
+  return nextWord === 'OF' || nextWord === 'IN';
+}
+
 // Scans from just after a COPY keyword for the first statement verb that
 // appears past the copybook name. The copybook name is the first word after
 // COPY; an optional `OF`/`IN <library>` qualifier may follow it. A statement
@@ -526,8 +544,18 @@ function findBlockVerbAfterCopy(source: string, copyEnd: number, limit: number, 
       while (i < source.length && /[a-zA-Z0-9_-]/.test(source[i])) i++;
       if (wordStart >= limit) break;
       const upper = source.slice(wordStart, i).toUpperCase();
-      // Word 0 is the copybook name itself — never a statement boundary.
+      // Word 0 is normally the copybook name itself — never a statement boundary.
+      // Exception: a bare COPY (with no copybook name typed yet) followed directly
+      // by a block-opening verb is best treated as a COPY with no operand, with the
+      // verb starting a new statement. Otherwise the verb (and its END-* close) are
+      // swallowed as the copybook name and the enclosing block pair disappears.
+      // Only trigger when the next significant token is neither `.` (statement
+      // terminator, which makes the verb a legitimate copybook name like `COPY IF.`)
+      // nor `OF`/`IN` (library qualifier, which begins `COPY name OF lib`).
       if (wordIndex === 0) {
+        if (COPY_TERMINATING_VERBS.has(upper) && !isCopybookNameContextRaw(source, i)) {
+          return wordStart;
+        }
         wordIndex++;
         continue;
       }
