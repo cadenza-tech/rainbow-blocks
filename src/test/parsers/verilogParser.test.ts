@@ -4438,6 +4438,30 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: isPrecededByScopeResolution skips comments between :: and keyword', () => {
+    // Bug: isPrecededByScopeResolution's whitespace skip only catches space,
+    // tab, and newlines — not block/line comments. So `pkg::/* c */begin`
+    // doesn't recognize the `::` preceding the keyword and `begin` slips
+    // through as a real block opener.
+    test('should reject begin preceded by :: and block comment', () => {
+      const source = 'module m;\n  initial begin\n    x = pkg::/* c */begin;\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      // Only the outer `initial begin` should be tokenized; the inner
+      // `pkg::/* c */begin` is a scoped identifier, not a block opener.
+      assert.strictEqual(beginTokens.length, 1, '`pkg::/* c */begin` should not be tokenized as block_open');
+    });
+
+    test('should reject end preceded by :: and line comment', () => {
+      const source = 'module m;\n  initial begin\n    x = pkg:: // c\n    end;\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      // Only the outer `end` (closing `initial begin`) should be tokenized; the inner
+      // `pkg:: // c\n end` is a scoped identifier, not a block closer.
+      assert.strictEqual(endTokens.length, 1, '`pkg:: // c\\n end` should not be tokenized as block_close');
+    });
+  });
+
   suite('Bug fix: isPrecededByDataTypeKeyword skips comma-separated declarations', () => {
     // Bug: For comma-separated variable declarations like `reg a, endmodule;`,
     // the second identifier (`endmodule`) is preceded by `, a, ` — not directly
