@@ -5765,6 +5765,40 @@ end program`;
     });
   });
 
+  suite('Regression 2026-05-24: select-type guard split across line continuation', () => {
+    test('should detect `type &\\n  is (...)` as block_middle across continuation', () => {
+      // `type is (...)` is a select-type guard. When split across a Fortran free-form
+      // continuation line (`type &\n  is (...)`), the guard injection must still
+      // emit a block_middle so the select-type construct gets its intermediate.
+      const source = `select type (x)
+  type &
+    is (integer)
+    y = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'continuation `type & \\n is` must register as block_middle');
+      // The token preserves the raw continuation form (`&` and newline) in value;
+      // normalizing away `&` / whitespace yields the canonical `type is` phrase.
+      const normalized = pairs[0].intermediates[0].value.toLowerCase().replace(/&/g, ' ').replace(/\s+/g, ' ').trim();
+      assert.strictEqual(normalized, 'type is');
+    });
+
+    test('should detect `class &\\n  is (...)` as block_middle across continuation', () => {
+      // Same defense for `class is (...)` guard split across continuation.
+      const source = `select type (x)
+  class &
+    is (integer)
+    y = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'continuation `class & \\n is` must register as block_middle');
+      const normalized = pairs[0].intermediates[0].value.toLowerCase().replace(/&/g, ' ').replace(/\s+/g, ' ').trim();
+      assert.strictEqual(normalized, 'class is');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
