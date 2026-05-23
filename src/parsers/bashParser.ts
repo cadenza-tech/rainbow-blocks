@@ -23,7 +23,7 @@ import {
 } from './bashStringHelpers';
 import type { BashValidationCallbacks } from './bashValidation';
 import { isAtCommandPosition, isCasePattern } from './bashValidation';
-import { findExcludedRegionAt, findLastOpenerByType } from './parserUtils';
+import { findExcludedRegionAt } from './parserUtils';
 
 // Keywords that are closed by `done`
 const DONE_OPENERS = new Set(['for', 'while', 'until', 'select']);
@@ -844,17 +844,22 @@ export class BashBlockParser extends BaseBlockParser {
 
         case 'block_close': {
           const closeValue = token.value;
+          // Subshell scope barrier: a close keyword inside `(...)` must not pair with
+          // an opener outside it, and vice versa. The enclosing-paren cache yields
+          // each position's innermost open paren (or -1) in O(1).
+          const closeScope = this.getEnclosingParen(token.startOffset);
           let matchIndex = -1;
 
-          // Find the matching opener based on the close keyword
+          // Find the matching opener based on the close keyword, filtering openers
+          // whose enclosing paren scope differs from the close keyword.
           if (closeValue === 'fi') {
-            matchIndex = findLastOpenerByType(stack, 'if');
+            matchIndex = this.findLastOpenerInScope(stack, 'if', closeScope);
           } else if (closeValue === 'esac') {
-            matchIndex = findLastOpenerByType(stack, 'case');
+            matchIndex = this.findLastOpenerInScope(stack, 'case', closeScope);
           } else if (closeValue === 'done') {
-            matchIndex = this.findLastDoneOpenerIndex(stack);
+            matchIndex = this.findLastDoneOpenerIndex(stack, closeScope);
           } else if (closeValue === '}') {
-            matchIndex = findLastOpenerByType(stack, '{');
+            matchIndex = this.findLastOpenerInScope(stack, '{', closeScope);
           }
 
           if (matchIndex >= 0) {
@@ -881,13 +886,54 @@ export class BashBlockParser extends BaseBlockParser {
     return pairs;
   }
 
-  // Finds the index of the last opener that can be closed by `done`
-  private findLastDoneOpenerIndex(stack: OpenBlock[]): number {
+  // Reads the precomputed enclosing-paren index for `pos`. Returns -1 when there
+  // is no enclosing `(`, or when the cache is unavailable (defensive fallback so
+  // matchBlocks degrades to the pre-fix LIFO behavior instead of crashing).
+  private getEnclosingParen(pos: number): number {
+    if (this.enclosingParenAtPos === null || pos < 0 || pos >= this.enclosingParenAtPos.length) {
+      return -1;
+    }
+    return this.enclosingParenAtPos[pos];
+  }
+
+  // Like findLastOpenerByType, but rejects openers whose enclosing paren scope is
+  // shallower than the close's. A close strictly deeper than the opener means a
+  // subshell `(` was opened between them that the opener is not in -- pairing
+  // would cross a subshell barrier (anchor-set principle violation).
+  //
+  // The reverse direction (close shallower than opener) is NOT rejected here:
+  // a case pattern `)` (e.g. `(case x in a) ... esac)`) makes the enclosing-paren
+  // cache report the apparent scope as -1 for tokens after the `a)` even though
+  // they are still inside the outer subshell. Rejecting that direction would
+  // break legitimate case-esac pairings inside subshells.
+  private findLastOpenerInScope(stack: OpenBlock[], targetValue: string, closeScope: number): number {
     for (let i = stack.length - 1; i >= 0; i--) {
-      if (DONE_OPENERS.has(stack[i].token.value)) {
-        return i;
-      }
+      if (stack[i].token.value !== targetValue) continue;
+      if (!this.isOpenerInSameOrOuterScope(stack[i].token.startOffset, closeScope)) continue;
+      return i;
     }
     return -1;
+  }
+
+  // Finds the index of the last opener that can be closed by `done` and that is
+  // not strictly outside the close's subshell scope.
+  private findLastDoneOpenerIndex(stack: OpenBlock[], closeScope: number): number {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (!DONE_OPENERS.has(stack[i].token.value)) continue;
+      if (!this.isOpenerInSameOrOuterScope(stack[i].token.startOffset, closeScope)) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  // Returns true when the opener's enclosing-paren scope is the same as or
+  // shallower (more outer) than the close's. A close strictly deeper than the
+  // opener (closeScope > openerScope) means a subshell `(` was opened between
+  // them that the opener is not in -- reject the pairing.
+  private isOpenerInSameOrOuterScope(openerPos: number, closeScope: number): boolean {
+    if (closeScope === -1) return true;
+    const openerScope = this.getEnclosingParen(openerPos);
+    if (openerScope === -1) return false;
+    return openerScope <= closeScope;
   }
 }
