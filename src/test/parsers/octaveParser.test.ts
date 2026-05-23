@@ -2403,6 +2403,19 @@ end`;
       assert.strictEqual(functionBlock.closeKeyword.line, 3, 'function should pair with the trailing end on line 3');
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should treat end<NBSP>(1) = 5 as indexing assignment (Unicode horizontal whitespace)', () => {
+      // `end<U+00A0>(1) = 5` is an indexing assignment with NBSP between end and `(`.
+      // Same semantics as `end (1) = 5`. The Octave-side helper must skip Unicode
+      // horizontal whitespace (NBSP / U+2000-200A / Ideographic Space etc.), not just
+      // ASCII space/tab, to detect this single-line indexing form.
+      const NBSP = String.fromCharCode(0x00a0);
+      const source = `function f\nend${NBSP}(1) = 5;\nend`;
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2, 'function should pair with the trailing end on line 2');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
   });
 
   generateCommonTests(config);
