@@ -2865,6 +2865,19 @@ end if;`;
       const caseTokens = tokens.filter((t) => t.value.toLowerCase() === 'case');
       assert.strictEqual(caseTokens.length, 0, 'case inside parameter default value should be filtered out');
     });
+
+    test('should not tokenize if inside invalid F(G(); if Cond then ...) expression', () => {
+      // Malformed: a `;` cannot legally appear at depth 0 inside a function call
+      // expression in Ada. Best-effort parsing: the forward-close-paren check
+      // sees the unmatched `)` and treats the `;` as an intra-paren character,
+      // so the `if` is filtered out (no block_open tokens, no orphan pairs).
+      const source = 'X := F(G(); if Cond then 1 else 0);';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 0, 'malformed expression should produce no pairs');
+      const tokens = parser.getTokens(source);
+      const ifLikeTokens = tokens.filter((t) => ['if', 'then', 'else'].includes(t.value.toLowerCase()));
+      assert.strictEqual(ifLikeTokens.length, 0, 'if/then/else inside parens should not be tokenized');
+    });
   });
 
   suite('Regression 2026-04-29: unterminated paren before if block', () => {
