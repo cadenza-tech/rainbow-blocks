@@ -505,14 +505,16 @@ export class AdaBlockParser extends BaseBlockParser {
         if (bp >= 0 && source[bp] === '.') {
           continue;
         }
-        // Check for 'raise' or 'new' preceding exception (type reference contexts)
+        // Check for 'raise', 'new', or 'with' preceding exception (type
+        // reference contexts: raise-statement, derived type, record extension /
+        // aspect specification).
         if (bp >= 0 && /[a-zA-Z_]/.test(source[bp])) {
           let wordStart = bp;
           while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
             wordStart--;
           }
           const prevWord = source.slice(wordStart, bp + 1).toLowerCase();
-          if (prevWord === 'raise' || prevWord === 'new') {
+          if (prevWord === 'raise' || prevWord === 'new' || prevWord === 'with') {
             continue;
           }
         }
