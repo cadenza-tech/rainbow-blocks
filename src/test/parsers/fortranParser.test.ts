@@ -5654,6 +5654,35 @@ do`;
     });
   });
 
+  suite('Regression 2026-05-23: end[N] coarray element assignment is not a block close', () => {
+    test('should not treat end[1] = 5 as block close (coarray indexing)', () => {
+      // Fortran 2008+ coarray image selector uses square brackets: `end[1] = 5`
+      // means assignment to image 1 of the coarray named `end`. This is parallel to
+      // `end(1) = 5` (array indexing) which is already handled.
+      const source = 'program test\n  integer :: end[10]\n  end[1] = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat enddo[1] = 5 as block close (compound-end coarray indexing)', () => {
+      // Same coarray defense for compound-end keywords used as variable names.
+      // Use a surrounding do block to confirm `enddo[1]` does not steal its close.
+      const source = 'program test\n  integer :: enddo[10]\n  do i = 1, 3\n    enddo[1] = 5\n  enddo\nend program';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const programPair = findBlock(pairs, 'program');
+      assert.strictEqual(programPair.closeKeyword?.value.toLowerCase(), 'end program');
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword?.line, 4, 'do must close at the real enddo on line 4, not enddo[1] on line 3');
+    });
+
+    test('should not treat end[1][2] = 5 as block close (consecutive coarray groups)', () => {
+      const source = 'program test\n  integer :: end[10][10]\n  end[1][2] = 5\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
   suite('Regression 2026-05-23: dot operator before block_middle keyword identifier', () => {
     test('should not treat else after .and. as block_middle intermediate', () => {
       // `.and. else` uses `else` as a variable in a logical expression. The middle keyword
