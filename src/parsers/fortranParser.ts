@@ -354,11 +354,14 @@ export class FortranBlockParser extends BaseBlockParser {
 
   // Detects construct names following 'end <type>' (e.g., 'end if program', 'end do block').
   // The name identifier is on the same line after 'end <type>' and may match a keyword.
+  // Also handles the concatenated form `endif program` / `enddo loop` where the compound
+  // end keyword is written without whitespace between `end` and the type. `[ \t]*` lets
+  // the `end` and `<type>` be either separated by whitespace or concatenated.
   private isFortranEndConstructName(source: string, position: number): boolean {
     const lineStart = findLineStart(source, position);
     const before = source.slice(lineStart, position);
-    // Match 'end <compound-type> ' at the tail of `before`
-    const pattern = new RegExp(`\\bend[ \\t]+(${COMPOUND_END_TYPES.join('|')})[ \\t]+$`, 'i');
+    // Match 'end<compound-type> ' (concatenated or whitespace-separated) at the tail of `before`
+    const pattern = new RegExp(`\\bend[ \\t]*(${COMPOUND_END_TYPES.join('|')})[ \\t]+$`, 'i');
     return pattern.test(before);
   }
 
