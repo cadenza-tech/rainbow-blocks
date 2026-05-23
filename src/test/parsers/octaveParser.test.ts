@@ -2459,6 +2459,43 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-24: quote followed by Unicode letter is string opener (not transpose)', () => {
+    test("should treat quote followed by Greek letter as string opener (disp'θ end')", () => {
+      // `disp'θ end'` is `disp` followed by the string literal `'θ end'`. The `'` after the
+      // identifier `disp` would otherwise be a transpose operator, but transpose cannot be
+      // followed by an identifier character — and θ (U+03B8 Greek small theta) is a Unicode
+      // letter, so the next char is an identifier char and `'` must begin a string. Treating
+      // it as transpose leaves `θ end'` unquoted, exposing `end` as a stray block close which
+      // wrongly pairs with the outer `try` and lets the real outermost `end` orphan.
+      const source = "try\n  disp'θ end'\n  for i=1:3\n  end\nend";
+      const pairs = parser.parse(source);
+      // Expected: try (L0) pairs with the OUTERMOST end (L4) and for (L2) pairs with end (L3).
+      // 2 pairs total; the `end` inside the string must NOT participate in any pair.
+      assertBlockCount(pairs, 2);
+      const tryBlock = findBlock(pairs, 'try');
+      assert.strictEqual(tryBlock.closeKeyword.line, 4, 'try must pair with the outermost end on line 4');
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.closeKeyword.line, 3, 'for must pair with the inner end on line 3');
+    });
+
+    test('should treat quote followed by full-width Latin letter as string opener', () => {
+      // Full-width A (U+FF21) is also a Unicode letter and must be treated like ASCII A.
+      // The `end` inside the string must not be a block close.
+      const source = "try\n  disp'Ａ end'\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      const tryBlock = findBlock(pairs, 'try');
+      assert.strictEqual(tryBlock.closeKeyword.line, 2, 'try must pair with the end on line 2, not the one inside the string');
+    });
+
+    test("should still treat A' as transpose when followed by non-letter", () => {
+      // Regression guard: ASCII letter followed by `'` followed by non-letter stays transpose.
+      const source = "try\n  B = A';\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+    });
+  });
+
   suite('Regression 2026-05-24: indexing assignment with cell {}, brackets [] and chain ()()', () => {
     test('should not treat end{1} = 5 as block close (cell-array indexing assignment)', () => {
       // `end{1} = 5;` is a cell-array indexing assignment to a variable named `end`,
