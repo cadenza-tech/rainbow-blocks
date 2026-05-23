@@ -4438,5 +4438,37 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: O(N^2) cast detection on attribute-prefixed modules', () => {
+    // Bug: isPrecededByDataTypeKeyword's cast-detection branch enters the `)`
+    // depth-walk path whenever a close keyword (or block opener like `module`)
+    // is preceded by `)`. The `)` of a SystemVerilog attribute closer `*)`
+    // triggers this path: the loop scans backward through the excluded
+    // attribute region looking for the matching `(`, but the `(` of `(*` is
+    // itself inside the excluded region and gets skipped via j--. The loop
+    // then runs past the attribute into prior source content. With N attribute-
+    // prefixed modules in sequence, the loop for the Nth module scans back ~N
+    // characters of prior modules, producing total O(N^2) work.
+    test('should parse 4000 attribute-prefixed modules well under the debounce budget', () => {
+      // Pre-fix measurement at N=4000 took >12s. Linearized parsing finishes
+      // in tens of ms; a 4000ms ceiling keeps headroom for CI load and GC
+      // pauses while still failing by an order of magnitude if the O(N^2)
+      // cast-detection scan returns.
+      const warmUp = '(* attr *) module m; endmodule\n'.repeat(100);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = '(* attr *) module m; endmodule\n'.repeat(4000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      // Every (* attr *) module m; endmodule generates one module/endmodule pair.
+      assertBlockCount(pairs, 4000);
+      assert.ok(
+        elapsed < 4000,
+        `4000 attribute-prefixed modules parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) cast-detection regression)`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
