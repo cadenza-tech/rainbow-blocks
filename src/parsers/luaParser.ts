@@ -223,6 +223,15 @@ export class LuaBlockParser extends BaseBlockParser {
   // act as opaque walls: `goto` text on the far side of an excluded region does
   // NOT bind the keyword that follows the region, so we stop the walk-back at
   // the region boundary and return false.
+  //
+  // Lua labels must be Names (identifiers) and cannot be reserved keywords.
+  // Therefore this function never confirms a goto-target binding when the only
+  // text between `goto` and the current keyword is whitespace: the current
+  // keyword is reserved (the caller only invokes this for block keywords) and
+  // cannot serve as a label, so the goto statement is malformed. Returning
+  // false in that case keeps the keyword in the token stream so its enclosing
+  // block opener is not orphaned (best-effort parsing prefers un-coloured
+  // leftovers over destroyed pairs).
   private isAfterGoto(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -255,7 +264,11 @@ export class LuaBlockParser extends BaseBlockParser {
         }
       }
     }
-    return true;
+    // We landed directly on `goto` after skipping only whitespace, which means
+    // no Name (label identifier) sits between `goto` and the current keyword.
+    // The current keyword is reserved and cannot be a valid label, so the goto
+    // is malformed; do not treat the keyword as a goto target.
+    return false;
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
