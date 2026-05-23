@@ -883,16 +883,21 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Checks if % at position is a modulo operator (not a percent literal)
   private isModuloOperator(source: string, pos: number): boolean {
-    // A line-leading `%%` whose second `%` is followed by whitespace, a line break, or EOF is a
-    // degenerate/unterminated percent literal (a real `%`-delimited literal like `%%text%` has
-    // non-blank content right after the delimiter). Treat the `%` as a non-literal token so it
-    // does not open an unterminated literal that swallows the rest of the source.
-    const atLineStart = pos === 0 || source[pos - 1] === '\n' || source[pos - 1] === '\r';
-    if (atLineStart && source[pos + 1] === '%') {
-      const afterDelim = source[pos + 2];
-      if (afterDelim === undefined || afterDelim === ' ' || afterDelim === '\t' || afterDelim === '\n' || afterDelim === '\r') {
-        return true;
-      }
+    const nextChar = source[pos + 1];
+    // `%%` is always treated as modulo, regardless of position. Ruby cannot use `%` as
+    // both the literal-introducer and the delimiter (a `%`-delimited literal like
+    // `%%text%` would open and immediately close as empty content, or swallow input
+    // unpredictably when the close `%` is far away). Treating both `%` characters as
+    // modulo operators avoids unterminated literals that swallow the rest of the source
+    // (e.g. `x=%%`, `%%foo`, `x=%%\nif true\nend`).
+    if (nextChar === '%') {
+      return true;
+    }
+    // `%=` is always compound assignment (modulo-and-assign), never a percent literal,
+    // regardless of position. Without this rule, `x=%=\nif true\nend` would open an
+    // unterminated `%=...=` literal that swallows the rest of the source.
+    if (nextChar === '=') {
+      return true;
     }
     if (pos === 0) return false;
     // Look back, skipping whitespace
@@ -913,14 +918,10 @@ export class RubyBlockParser extends BaseBlockParser {
     if (next < source.length && '({[<'.includes(source[next])) {
       return false;
     }
-    // %= is always compound assignment, not a percent literal
-    if (next < source.length && source[next] === '=') {
-      return true;
-    }
     // Non-paired delimiter without specifier is also a percent literal
     // e.g. puts %|text|, %~text~
-    // Exclude %% (double percent) — treat first % as modulo to avoid unterminated literals
-    if (next < source.length && source[next] !== '%' && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
+    // (`%%` and `%=` are already handled at the top of this function as modulo.)
+    if (next < source.length && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
       return false;
     }
     return true;
