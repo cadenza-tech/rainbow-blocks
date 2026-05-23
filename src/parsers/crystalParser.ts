@@ -595,13 +595,14 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Checks whether the context-dependent keyword ending at endOffset is being used as an
-  // ordinary identifier rather than a block opener. Two same-line forms qualify:
+  // ordinary identifier rather than a block opener. Three same-line forms qualify:
   //   1. Method-call receiver `KEYWORD.method` — a single `.` (not a range `..`/`...`).
   //   2. Assignment target `KEYWORD = expr` — a standalone `=` (not `==`/`===`/`=~`/`=>`).
-  // Spaces and tabs between the keyword and the `.`/`=` are permitted, but newlines are not
+  //   3. Function-call form `KEYWORD(args)` — a `(` immediately after the keyword.
+  // Spaces and tabs between the keyword and the `.`/`=`/`(` are permitted, but newlines are not
   // crossed: a keyword alone on its line (e.g. `enum\n  Red`, `struct Point`) keeps its block
-  // role because real openers are followed by a name/newline, never by `.` or `=` on the same
-  // line. Excluded regions are skipped. Used to suppress the seven receiver-like openers
+  // role because real openers are followed by a name/newline, never by `.`, `=`, or `(` on the
+  // same line. Excluded regions are skipped. Used to suppress the seven receiver-like openers
   // (`select`, `union`, `enum`, `struct`, `lib`, `macro`, `annotation`) when used as values.
   private isReceiverOrAssignmentUsage(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = endOffset;
@@ -633,6 +634,13 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (source[i] === '=') {
       const next = source[i + 1];
       return next !== '=' && next !== '~' && next !== '>';
+    }
+    // Function-call form: `KEYWORD(args)`. Real opener forms never take parens
+    // (`enum Color`, `struct Point`, `lib LibFoo`, `macro name`, `annotation A`,
+    // `union U`, `select` without arguments), so a `(` here always means the
+    // keyword is being called as a method/function.
+    if (source[i] === '(') {
+      return true;
     }
     return false;
   }
