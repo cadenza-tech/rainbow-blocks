@@ -3104,5 +3104,24 @@ foo() ->
     });
   });
 
+  suite('Bug: hasUnclosedOpenerInMapScope must not count fun references as openers', () => {
+    test('should pair begin with outer end when map contains fun reference and end as key', () => {
+      // #{fun foo/1 => 1, end => 2} contains a fun-reference (not a block opener) and an
+      // 'end' that is a map key. The outer begin must pair with the final 'end', not the
+      // map-key 'end'.
+      const source = 'begin\n  X = #{fun foo/1 => 1, end => 2},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should pair begin with outer end when map contains Module:fun/N reference and end as key', () => {
+      const source = 'begin\n  X = #{fun mymod:foo/1 => 1, end => 2},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
