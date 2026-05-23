@@ -85,6 +85,19 @@ export class ElixirBlockParser extends BaseBlockParser {
   private valueMemoSource: string | null = null;
   private valueMemo = new Map<number, boolean>();
 
+  // Transient source reference for matchBlocks. Captured at the start of parse() and
+  // cleared afterwards; only valid during a single parse() call.
+  private currentSource: string | null = null;
+
+  parse(source: string): BlockPair[] {
+    this.currentSource = source;
+    try {
+      return super.parse(source);
+    } finally {
+      this.currentSource = null;
+    }
+  }
+
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
     const skipInterpolationBound = this.skipInterpolation.bind(this);
@@ -368,33 +381,76 @@ export class ElixirBlockParser extends BaseBlockParser {
   // keyword to whatever opener happens to be on top, which mis-attributes e.g. the stray
   // `else` in `fn x -> :a else :b end` to the fn block. Openers that accept no middle keyword
   // (fn/quote/case/cond/for and the def-family/defmodule keywords) leave the keyword orphaned.
+  //
+  // Also tracks paren/bracket/brace depth from the source so a `block_close` inside parens
+  // can only pair with a `block_open` at the same depth. This prevents `if (x end) do ...
+  // end` from pairing the stray inner `end` with the outer `if` (which would orphan the
+  // real outer `end`). Real `(fn -> :ok end)` and `(if cond do :ok end)` still pair because
+  // their open and close are both at depth > 0.
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
-    const stack: OpenBlock[] = [];
+    const stack: { open: OpenBlock; bracketDepth: number }[] = [];
+    const source = this.currentSource;
+    const excludedRegions = source !== null ? this.findExcludedRegions(source) : [];
+    // Pre-compute bracket depth at each token's startOffset (linear scan).
+    const tokenDepth = new Map<number, number>();
+    if (source !== null) {
+      let p = 0;
+      let depth = 0;
+      let tokenIdx = 0;
+      while (p <= source.length && tokenIdx < tokens.length) {
+        while (tokenIdx < tokens.length && tokens[tokenIdx].startOffset <= p) {
+          tokenDepth.set(tokens[tokenIdx].startOffset, depth);
+          tokenIdx++;
+        }
+        if (p >= source.length) break;
+        const region = this.findExcludedRegionAt(p, excludedRegions);
+        if (region) {
+          p = region.end;
+          continue;
+        }
+        const ch = source[p];
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if ((ch === ')' || ch === ']' || ch === '}') && depth > 0) depth--;
+        p++;
+      }
+    }
 
     for (const token of tokens) {
+      const depth = tokenDepth.get(token.startOffset) ?? 0;
       switch (token.type) {
         case 'block_open':
-          stack.push({ token, intermediates: [] });
+          stack.push({ open: { token, intermediates: [] }, bracketDepth: depth });
           break;
 
         case 'block_middle':
           if (stack.length > 0) {
-            const opener = stack[stack.length - 1].token.value;
+            const top = stack[stack.length - 1];
+            const opener = top.open.token.value;
             const accepted = MIDDLE_KEYWORDS_BY_OPENER[opener];
             if (accepted?.has(token.value)) {
-              stack[stack.length - 1].intermediates.push(token);
+              top.open.intermediates.push(token);
             }
           }
           break;
 
         case 'block_close': {
-          const openBlock = stack.pop();
-          if (openBlock) {
+          // Only pair with the most recent opener at the same bracket depth. If the top of
+          // the stack is at a shallower depth than the close, the close is stray inside
+          // parens (e.g. `if (x end) do ... end`) and must not pop the outer opener.
+          if (stack.length === 0) break;
+          const top = stack[stack.length - 1];
+          if (top.bracketDepth !== depth) {
+            // Stray close at a different depth — leave it unpaired so the outer block can
+            // still match its real close.
+            break;
+          }
+          const popped = stack.pop();
+          if (popped) {
             pairs.push({
-              openKeyword: openBlock.token,
+              openKeyword: popped.open.token,
               closeKeyword: token,
-              intermediates: openBlock.intermediates,
+              intermediates: popped.open.intermediates,
               nestLevel: stack.length
             });
           }
