@@ -775,12 +775,24 @@ export class JuliaBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
+  // Set of reserved block keywords. Cannot be used as string/command macro names, so a
+  // backtick immediately following one is an unprefixed Cmd literal, not a macro call.
+  // Built lazily once per parser instance from `this.keywords` and shared across parses.
+  private blockKeywordSet: ReadonlySet<string> | null = null;
+  private getBlockKeywordSet(): ReadonlySet<string> {
+    if (this.blockKeywordSet === null) {
+      this.blockKeywordSet = new Set<string>([...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle]);
+    }
+    return this.blockKeywordSet;
+  }
+
   // Matches triple backtick command string: ``` ... ```
   private matchTripleBacktickCommand(source: string, pos: number): ExcludedRegion {
     let i = pos + 3;
-    // A backtick command is "prefixed" if preceded by an identifier-continuation char.
-    // See isPrecededByCommandMacroPrefix for surrogate-pair handling (BMP-outside chars).
-    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos);
+    // A backtick command is "prefixed" if preceded by a valid identifier that is not a
+    // reserved block keyword. See isPrecededByCommandMacroPrefix for surrogate-pair
+    // handling (BMP-outside chars).
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getBlockKeywordSet());
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -830,15 +842,16 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   private skipJuliaInterpolation(source: string, pos: number): number {
-    return skipJuliaInterpolation(source, pos);
+    return skipJuliaInterpolation(source, pos, this.getBlockKeywordSet());
   }
 
   // Matches command string (backtick)
   private matchCommandString(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
-    // A backtick command is "prefixed" if preceded by an identifier-continuation char.
-    // See isPrecededByCommandMacroPrefix for surrogate-pair handling (BMP-outside chars).
-    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos);
+    // A backtick command is "prefixed" if preceded by a valid identifier that is not a
+    // reserved block keyword. See isPrecededByCommandMacroPrefix for surrogate-pair
+    // handling (BMP-outside chars).
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getBlockKeywordSet());
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {

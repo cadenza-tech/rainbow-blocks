@@ -100,8 +100,10 @@ export function skipPrefixedStringInInterpolation(source: string, pos: number, h
   return source.length;
 }
 
-// Skips a nested string inside interpolation (handles both regular and triple-quoted)
-export function skipNestedJuliaString(source: string, pos: number): number {
+// Skips a nested string inside interpolation (handles both regular and triple-quoted).
+// `blockKeywords` is forwarded to nested `$()` interpolation handling so backtick
+// macro prefix detection knows which prefixes are reserved.
+export function skipNestedJuliaString(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
   // Check for triple-quoted string
   if (source.slice(pos, pos + 3) === '"""') {
     let i = pos + 3;
@@ -111,7 +113,7 @@ export function skipNestedJuliaString(source: string, pos: number): number {
         continue;
       }
       if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        i = skipJuliaInterpolation(source, i + 2);
+        i = skipJuliaInterpolation(source, i + 2, blockKeywords);
         continue;
       }
       if (source.slice(i, i + 3) === '"""') {
@@ -129,7 +131,7 @@ export function skipNestedJuliaString(source: string, pos: number): number {
       continue;
     }
     if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-      i = skipJuliaInterpolation(source, i + 2);
+      i = skipJuliaInterpolation(source, i + 2, blockKeywords);
       continue;
     }
     if (source[i] === '"') {
@@ -140,30 +142,50 @@ export function skipNestedJuliaString(source: string, pos: number): number {
   return i;
 }
 
-// Returns true if `source[pos]` (a backtick) is preceded by an identifier-continuation
-// character, indicating the backtick is part of a prefixed command macro call (e.g.
-// `prefix\`cmd\``). Identifier-continuation chars: ASCII word (a-zA-Z0-9_) or Unicode
-// Letter/Number (\p{L}, \p{N}). Handles BMP-outside characters encoded as surrogate
-// pairs (e.g. 𝐀 U+1D400 = high surrogate 0xD835 + low surrogate 0xDC00) by inspecting
-// the full code point at pos - 2 when pos - 1 is a low surrogate.
-export function isPrecededByCommandMacroPrefix(source: string, pos: number): boolean {
+// Returns true if `source[pos]` (a backtick) is preceded by a valid Julia identifier
+// prefix, meaning the backtick is part of a prefixed command macro call (e.g.
+// `prefix\`cmd\``). Walks backward collecting identifier-continuation chars (ASCII word,
+// Unicode Letter/Number) and rejects when the resulting prefix is a reserved block
+// keyword (reserved words cannot be macro names). Handles BMP-outside characters
+// encoded as surrogate pairs (e.g. 𝐀 U+1D400).
+export function isPrecededByCommandMacroPrefix(source: string, pos: number, blockKeywords: ReadonlySet<string>): boolean {
   if (pos <= 0) return false;
-  const prevChar = source[pos - 1];
-  // BMP-outside char: low surrogate at pos - 1, high surrogate at pos - 2.
-  if (prevChar >= '\uDC00' && prevChar <= '\uDFFF' && pos >= 2) {
-    const cp = source.codePointAt(pos - 2);
-    if (cp !== undefined && cp > 0xffff && /[\p{L}\p{N}]/u.test(String.fromCodePoint(cp))) {
-      return true;
+  // Walk backward collecting identifier-continuation chars.
+  let prefixStart = pos;
+  while (prefixStart > 0) {
+    const prevPos = prefixStart - 1;
+    const c = source[prevPos];
+    // BMP-outside char: low surrogate at prevPos, high surrogate at prevPos - 1.
+    if (c >= '\uDC00' && c <= '\uDFFF' && prevPos >= 1) {
+      const cp = source.codePointAt(prevPos - 1);
+      if (cp !== undefined && cp > 0xffff && /[\p{L}\p{N}]/u.test(String.fromCodePoint(cp))) {
+        prefixStart -= 2;
+        continue;
+      }
+      break;
     }
-    return false;
+    if (/[a-zA-Z0-9_]/.test(c)) {
+      prefixStart--;
+      continue;
+    }
+    if (c.charCodeAt(0) > 127 && /[\p{L}\p{N}]/u.test(c)) {
+      prefixStart--;
+      continue;
+    }
+    break;
   }
-  if (/[a-zA-Z0-9_]/.test(prevChar)) return true;
-  return prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar);
+  if (prefixStart === pos) return false;
+  // Reserved block keywords cannot be macro names.
+  const prefix = source.slice(prefixStart, pos);
+  if (blockKeywords.has(prefix)) return false;
+  return true;
 }
 
-// Skips a backtick command string (for use inside interpolation/nested string scanning)
-export function skipBacktickString(source: string, pos: number): number {
-  const isPrefixed = isPrecededByCommandMacroPrefix(source, pos);
+// Skips a backtick command string (for use inside interpolation/nested string scanning).
+// `blockKeywords` is the full set of block-related reserved words; prefixes matching
+// these are rejected (reserved words cannot be macro names).
+export function skipBacktickString(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
+  const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, blockKeywords);
   // Check for triple backtick
   if (source.slice(pos, pos + 3) === '```') {
     let i = pos + 3;
@@ -173,7 +195,7 @@ export function skipBacktickString(source: string, pos: number): number {
         continue;
       }
       if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        i = skipJuliaInterpolation(source, i + 2);
+        i = skipJuliaInterpolation(source, i + 2, blockKeywords);
         continue;
       }
       if (source.slice(i, i + 3) === '```') {
@@ -195,7 +217,7 @@ export function skipBacktickString(source: string, pos: number): number {
       continue;
     }
     if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-      i = skipJuliaInterpolation(source, i + 2);
+      i = skipJuliaInterpolation(source, i + 2, blockKeywords);
       continue;
     }
     if (source[i] === '`') {
@@ -210,8 +232,9 @@ export function skipBacktickString(source: string, pos: number): number {
   return i;
 }
 
-// Skips $() interpolation block, tracking paren depth
-export function skipJuliaInterpolation(source: string, pos: number): number {
+// Skips $() interpolation block, tracking paren depth. `blockKeywords` is forwarded
+// to backtick scanning so command macro prefix detection can reject reserved words.
+export function skipJuliaInterpolation(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
   let depth = 1;
   let i = pos;
   while (i < source.length && depth > 0) {
@@ -248,7 +271,7 @@ export function skipJuliaInterpolation(source: string, pos: number): number {
     }
     // Handle backtick command strings inside interpolation
     if (source[i] === '`') {
-      i = skipBacktickString(source, i);
+      i = skipBacktickString(source, i, blockKeywords);
       continue;
     }
     if (source[i] === '(') {
@@ -270,7 +293,7 @@ export function skipJuliaInterpolation(source: string, pos: number): number {
           continue;
         }
       }
-      i = skipNestedJuliaString(source, i);
+      i = skipNestedJuliaString(source, i, blockKeywords);
       continue;
     }
     i++;
