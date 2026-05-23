@@ -61,6 +61,14 @@ export function matchVhdlCharacterLiteral(source: string, pos: number): Excluded
     }
     return { start: pos, end: pos + 1 + charLen + 1 };
   }
+  // Tolerant handling for non-standard escape-like character literals 'X' where the
+  // inner sequence is 2 chars (e.g. '\n', '\t'). VHDL has no escape sequences, but
+  // editors and test fixtures often include such literals. Without this branch the
+  // leading backslash would start an extended identifier and absorb following keywords.
+  // Consume the full 4-char `'\\X'` literal when the closing quote is at pos+3.
+  if (innerChar === '\\' && pos + 3 < source.length && source[pos + 3] === "'" && source[pos + 2] !== '\n' && source[pos + 2] !== '\r') {
+    return { start: pos, end: pos + 4 };
+  }
   // Attribute tick: skip the attribute name to avoid matching keywords
   let i = pos + 1;
   while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
