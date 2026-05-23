@@ -556,6 +556,27 @@ export function isMiddleInExpressionContext(source: string, position: number): b
   if (char === '=') {
     return true;
   }
+  // Fortran dot-operators: .eq., .ne., .lt., .gt., .le., .ge., .and., .or., .not., .eqv., .neqv.,
+  // and user-defined operators .<letter-list>. (up to 63 chars per Fortran spec).
+  // Scan backward to the matching opening `.` then validate against the dot-operator pattern.
+  if (char === '.') {
+    // Fortran user-defined operator names are letters only and at most 63 chars,
+    // so the matching `.` is within (63 + 1) = 64 chars to the left.
+    const minStart = Math.max(0, i - 64);
+    for (let k = i - 1; k >= minStart; k--) {
+      const c = source[k];
+      if (c === '.') {
+        const textBefore = source.slice(k, i + 1);
+        if (FORTRAN_DOT_OPERATOR_PATTERN.test(textBefore)) {
+          return true;
+        }
+        break;
+      }
+      if (!/[a-zA-Z]/.test(c)) {
+        break;
+      }
+    }
+  }
   return false;
 }
 
