@@ -4888,6 +4888,45 @@ end`;
     });
   });
 
+  suite('Bug: non-heredoc triple-quoted string with identifier suffix', () => {
+    test('should not leak inner end as block close from """abc"""end', () => {
+      // `"""abc"""end` — the """ at offset 6 is immediately followed by `end` (identifier).
+      // Without the fix, the inner """ is treated as terminator and `end` becomes a
+      // block_close token, mis-pairing with the outer `if`. With the fix, the triple-quoted
+      // string requires a word-boundary after its terminator: `"""end` is not a valid
+      // terminator, so the literal continues. The malformed input is treated as
+      // unterminated string (per "best-effort" parsing — prefer unhighlighted over
+      // mis-highlighted). The outer if/end MUST NOT pair with the inner end.
+      const source = 'if cond do\n  x = """abc"""end\n  z = 1\nend';
+      const pairs = parser.parse(source);
+      // The inner end at offset 26 must not pair with the outer if (cascade prevention).
+      for (const pair of pairs) {
+        assert.notStrictEqual(pair.closeKeyword.startOffset, 26, 'Inner end inside """end must not pair');
+      }
+    });
+
+    test("should not leak inner end as block close from '''abc'''end", () => {
+      const source = "if cond do\n  x = '''abc'''end\n  z = 1\nend";
+      const pairs = parser.parse(source);
+      for (const pair of pairs) {
+        assert.notStrictEqual(pair.closeKeyword.startOffset, 26, "Inner end inside '''end must not pair");
+      }
+    });
+
+    test('should still terminate """abc""" followed by non-identifier (e.g. newline)', () => {
+      const source = 'if cond do\n  x = """abc"""\n  z = 1\nend';
+      const pairs = parser.parse(source);
+      // The """ at offset 17 is followed by newline → real terminator.
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still terminate """abc""" followed by operator', () => {
+      const source = 'if cond do\n  x = """abc""" <> "y"\n  z = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Bug: end inside parentheses should be identifier (cascade prevention)', () => {
     test('should not pair if with end inside parens of condition (if (x end) do)', () => {
       // `if (x end) do ... end` is invalid Elixir, but the `end` inside parens must not
