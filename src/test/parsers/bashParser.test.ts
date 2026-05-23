@@ -5684,6 +5684,26 @@ fi`;
     });
   });
 
+  suite('Regression: empty case in subshell on one line closes properly', () => {
+    // Plain subshell `(case x in esac)` is not an excluded region (unlike $(...), <(...), >(...))
+    // so isCasePattern must not mistake the final `esac)` for a POSIX case pattern of the
+    // enclosing subshell. Pre-fix, the paren-scope check returned true (whitespace-only
+    // textBefore between `(` and `esac`), suppressing the case-esac pair entirely.
+    test('should pair case-esac inside same-line subshell (case x in esac)', () => {
+      const source = '(case x in esac)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 1);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 11);
+    });
+
+    test('should pair case-esac inside same-line subshell with statements between', () => {
+      const source = '(case x in a) echo;; esac)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
   suite('Regression: esac as pipe-separated case pattern alternative', () => {
     test('should treat esac in foo|esac) as case pattern, not block close', () => {
       const source = 'case x in foo|esac) echo;; esac';
