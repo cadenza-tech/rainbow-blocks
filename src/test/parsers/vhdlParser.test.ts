@@ -3736,6 +3736,45 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-23: stray end inside expression must not close enclosing block', () => {
+    test('should reject end in mid-expression and keep enclosing block pairing intact', () => {
+      const source = `architecture a of e is
+begin
+  process(clk) begin
+    case x is
+      when 0 => sig <= a end b;
+      when others => null;
+    end case;
+  end process;
+end architecture;`;
+      const pairs = parser.parse(source);
+      // The stray `end` between `a` and `b;` must be rejected so the real
+      // `end case`, `end process`, `end architecture` close their own openers.
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.closeKeyword?.value.toLowerCase(), 'end case');
+      const processBlock = findBlock(pairs, 'process');
+      assert.strictEqual(processBlock.closeKeyword?.value.toLowerCase(), 'end process');
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value.toLowerCase(), 'end architecture');
+    });
+
+    test('should still accept end at start of line', () => {
+      const source = `if x then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should still accept end immediately after then/loop on same line (empty body)', () => {
+      const source = `for i in 0 to 7 loop end loop; loop
+  wait;
+end loop;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-23: concurrent assertion when condition not added to case intermediates', () => {
     test('should not include trailing when of assert-when inside case branch as case intermediate', () => {
       const source = `architecture a of e is
