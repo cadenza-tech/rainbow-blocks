@@ -131,8 +131,12 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
       if (!/[)\]}]/.test(source[i])) {
         const afterLtLt = source.slice(pos + 2);
         const isFlaggedHeredoc = /^[~-]/.test(afterLtLt);
-        // Check if the following word is a Ruby keyword (shift operator, not heredoc)
-        const followingWordMatch = afterLtLt.match(/^(['"`]?)([A-Za-z_][A-Za-z0-9_]*)/);
+        // Check if the following word is a Ruby keyword (shift operator, not heredoc).
+        // Ruby heredoc identifiers may contain non-ASCII letters (e.g. `<<日本語`),
+        // so use Unicode-aware identifier classes. Keywords themselves are all ASCII,
+        // so a Unicode-only identifier will never match a keyword (which is the desired
+        // behavior — `<<日本語` is treated as a heredoc, not a shift operator).
+        const followingWordMatch = afterLtLt.match(/^(['"`]?)([\p{L}_][\p{L}\p{M}\p{N}\p{Pc}]*)/u);
         const followingWord = followingWordMatch ? followingWordMatch[2] : '';
         const isRubyKeyword = RUBY_KEYWORDS.has(followingWord);
         if (!isFlaggedHeredoc && (!skippedSpace || isRubyKeyword)) {
@@ -151,8 +155,10 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
   // Pattern matches quoted (<<'EOF', <<"EOF", <<`EOF`) or unquoted (<<EOF) heredocs.
   // Quoted forms allow any characters except the matching quote and newline,
   // including spaces, hyphens, dots, and the empty string.
-  // Unquoted form follows Ruby identifier rules.
-  const heredocPattern = /<<([~-]?)"([^"\n\r]*)"|<<([~-]?)'([^'\n\r]*)'|<<([~-]?)`([^`\n\r]*)`|<<([~-]?)([A-Za-z_][A-Za-z0-9_]*)/g;
+  // Unquoted form follows Ruby identifier rules: Letter or underscore start, then
+  // Letter / Mark / Number / Connector Punctuation. Ruby permits non-ASCII identifiers
+  // (e.g. `<<日本語`), so use Unicode property classes with the `u` flag.
+  const heredocPattern = /<<([~-]?)"([^"\n\r]*)"|<<([~-]?)'([^'\n\r]*)'|<<([~-]?)`([^`\n\r]*)`|<<([~-]?)([\p{L}_][\p{L}\p{M}\p{N}\p{Pc}]*)/gu;
 
   // Find line end
   let lineEnd = pos;
