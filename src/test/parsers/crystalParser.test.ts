@@ -4444,6 +4444,24 @@ end`;
     });
   });
 
+  suite('Regression: unterminated char literal followed by backslash should not extend to next line', () => {
+    test('should pair if/end after unterminated char literal with trailing backslash', () => {
+      // The unterminated `'a\` is invalid Crystal, but the trailing `\<NL>` must not be
+      // interpreted as a logical line continuation that swallows the next line's `if`
+      // into the same line, turning it into a postfix conditional.
+      const source = "x = 'a\\\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair if/end after unterminated char literal at line end (no backslash)', () => {
+      // Baseline: same scenario without the trailing backslash.
+      const source = "x = 'a\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression: receiver-like keyword followed by [ or | should not open a block', () => {
     test('should not treat select[0] index access as a select block opener', () => {
       // `select[0]` is index access on a value named `select` (an assignment target),
