@@ -552,8 +552,16 @@ export class CobolBlockParser extends BaseBlockParser {
         continue;
       }
 
-      // Skip keywords used as filename in COPY statements (e.g., COPY END-IF., COPY IF.)
-      if ((type === 'block_close' || type === 'block_open') && this.isInCopyStatement(source, startOffset, excludedRegions)) {
+      // Skip keywords used as filename in COPY statements (e.g., COPY END-IF., COPY IF., COPY WHEN., COPY ELSE.).
+      // The check covers all three token types: a copybook name that happens to spell a
+      // COBOL keyword must not be tokenised at all, regardless of whether the keyword is
+      // an opener (IF/PERFORM), closer (END-IF/...) or a middle keyword (WHEN/ELSE).
+      // Without the block_middle branch, `COPY WHEN.` injected a phantom WHEN as an
+      // intermediate of the surrounding EVALUATE.
+      if (
+        (type === 'block_close' || type === 'block_open' || type === 'block_middle') &&
+        this.isInCopyStatement(source, startOffset, excludedRegions)
+      ) {
         continue;
       }
 
