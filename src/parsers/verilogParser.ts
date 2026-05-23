@@ -344,11 +344,14 @@ export class VerilogBlockParser extends BaseBlockParser {
     for (const argMatch of source.matchAll(directiveArgPattern)) {
       if (this.isInExcludedRegion(argMatch.index, excludedRegions)) continue;
       let argStart = argMatch.index + argMatch[0].length;
-      // Skip whitespace (space/tab) and excluded regions (block comments) between
-      // the directive and the macro name. Per IEEE 1800-2017, block comments are
-      // valid whitespace, so `\`ifdef /* comment */ MACRO` is a valid directive form.
+      // Skip whitespace (space/tab/newline) and excluded regions (block comments)
+      // between the directive and the macro name. Per IEEE 1800-2017, block
+      // comments are valid whitespace, so `\`ifdef /* comment */ MACRO` is a
+      // valid directive form. Newlines are also accepted because real-world
+      // sources sometimes wrap the directive across lines.
       while (argStart < source.length) {
-        if (source[argStart] === ' ' || source[argStart] === '\t') {
+        const ch = source[argStart];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
           argStart++;
           continue;
         }
