@@ -4401,5 +4401,24 @@ end`;
     });
   });
 
+  suite('Regression: macro template with heredoc opener and macro close on same line', () => {
+    test('should close {{ }} at }} when <<-IDENT opener and }} share the opener line', () => {
+      // The `<<-EOF` opener and the `}}` macro close are on the same physical line.
+      // The macro body must end at `}}`, and the heredoc body must only span the
+      // following lines until `EOF`. The trailing `class C / end` must remain
+      // visible (not engulfed into an excluded region that extends past `}}`).
+      const source = '{{ <<-EOF }}\nbody\nEOF\nclass C\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should close {% %} at %} when <<-IDENT opener and %} share the opener line', () => {
+      // Same as above but for the {% %} macro template form.
+      const source = '{% <<-EOF %}\nbody\nEOF\nclass C\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
