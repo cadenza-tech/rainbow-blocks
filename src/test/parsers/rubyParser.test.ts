@@ -4443,6 +4443,21 @@ end`;
     });
   });
 
+  suite('Regression: heredoc with indented terminator under no-flag form', () => {
+    test('should treat indented terminator as terminator under <<EOF when terminator line matches after trimming trailing whitespace', () => {
+      // Bug: under no-flag heredoc form `<<EOF`, an indented terminator line (e.g. `  EOF`)
+      // did not match because the matcher required an exact match. The heredoc body then
+      // extended to the source end, swallowing the surrounding `def`/`end` block. While
+      // strict Ruby rejects indented terminators under no-flag form, the user's clear
+      // intent is to close the heredoc; treat indented terminators as terminators here
+      // too (best-effort parsing, anchor-set principle).
+      const source = 'def foo\n  x = <<EOF\n  body\n  EOF\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      // The surrounding def/end block should pair correctly with zero orphans.
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Regression: end after hash label colon should not pair with surrounding block', () => {
     test('should not pair def with stray end after hash label colon (x = {a: end})', () => {
       // Bug: `end` after a hash label colon (e.g., `{a: end}`) was tokenized as block_close
