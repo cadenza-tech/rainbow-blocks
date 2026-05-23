@@ -22,6 +22,34 @@ function isHorizontalWhitespace(ch: string | undefined): boolean {
   return ch === ' ' || ch === '\t' || ch === '\v' || ch === '\f' || HORIZONTAL_WHITESPACE_PATTERN.test(ch);
 }
 
+// Skips horizontal whitespace (ASCII space/tab/VT/FF and Unicode horizontal whitespace)
+// and Octave line continuations (`...<NL>` and `\<NL>`) starting at `from`. Returns the
+// new offset past all such skippable content. Used by Octave-specific validators that
+// need to look at the next "real" character in the same logical line — line continuations
+// and Unicode whitespace must be transparent to those checks.
+function skipHorizontalWhitespaceAndContinuations(source: string, from: number): number {
+  let i = from;
+  while (i < source.length) {
+    if (isHorizontalWhitespace(source[i])) {
+      i++;
+      continue;
+    }
+    const rest = source.slice(i);
+    const dotsCont = rest.match(LINE_CONTINUATION_PATTERN);
+    if (dotsCont) {
+      i += dotsCont[0].length;
+      continue;
+    }
+    const bsCont = rest.match(BACKSLASH_CONTINUATION_PATTERN);
+    if (bsCont) {
+      i += bsCont[0].length;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
 const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
   endfunction: 'function',
   endif: 'if',
@@ -278,7 +306,72 @@ export class OctaveBlockParser extends MatlabBlockParser {
     ) {
       this.octavePhantomSectionPositions.push(position);
     }
+    // Rescue path for `if \<NL>...`, `while \<NL>...`, `for \<NL>...`, etc.: the parent's
+    // isFollowedByBinaryOperator check only skips ASCII whitespace, so a `\<NL>` line
+    // continuation appearing immediately after the keyword is misread as the left-division
+    // binary operator (`\`), causing the parent to reject the block opener and dropping the
+    // surrounding pair. When the rejection cause is only the line-continuation misread (i.e.
+    // the post-continuation char is NOT a real binary operator), override the parent's
+    // rejection. Section keywords are excluded here; they have their own explicit handling.
+    // Pre-parent checks (assignment / `do`-specific paths) already returned false for
+    // genuine rejection cases, so by here the rejection is plausibly only the operator misread.
+    if (!result && !OctaveBlockParser.OCTAVE_SECTION_KEYWORDS.has(keyword)) {
+      if (this.isFalseOperatorRejectionDueToContinuation(keyword, source, position)) {
+        return true;
+      }
+    }
     return result;
+  }
+
+  // Returns true when the parent's isFollowedByBinaryOperator likely fired only because
+  // a `\<NL>` line continuation immediately follows the keyword and was misread as the
+  // left-division operator. Detection:
+  //   1. The first non-ASCII-whitespace char after the keyword is a `\<NL>` matching the
+  //      backslash-continuation pattern, OR a `...` line continuation starting with `.`.
+  //   2. After skipping the continuation(s) and horizontal whitespace, the next char is
+  //      NOT one of the binary-operator chars the parent would (correctly) reject:
+  //      `* / ^ \ < > & | : = ~ !` and the prefix-capable `+ - ~ !` for for/parfor/try/
+  //      spmd/classdef. A genuine binary operator after the continuation still rejects
+  //      (matching the parent's intent).
+  // Pre-position rejection causes (dot/at-sign/preceded-by-operator/command-syntax) are
+  // independent of the line-continuation case so they are not affected by this rescue.
+  private isFalseOperatorRejectionDueToContinuation(keyword: string, source: string, position: number): boolean {
+    const afterKw = position + keyword.length;
+    let probe = afterKw;
+    while (probe < source.length && (source[probe] === ' ' || source[probe] === '\t')) probe++;
+    if (probe >= source.length) return false;
+    const restAtProbe = source.slice(probe);
+    const dotsCont = restAtProbe.match(LINE_CONTINUATION_PATTERN);
+    const bsCont = restAtProbe.match(BACKSLASH_CONTINUATION_PATTERN);
+    if (!dotsCont && !bsCont) return false;
+    const nextPos = skipHorizontalWhitespaceAndContinuations(source, afterKw);
+    if (nextPos >= source.length) {
+      // Continuation followed by EOF (`if \\\n` with no body). Accept the opener; if no
+      // body follows, the trailing close will leave it orphan (cost-minimal). Mirrors
+      // the parent's intent for `if<NL>` (which is similarly headerless).
+      return true;
+    }
+    const ch = source[nextPos];
+    const next = nextPos + 1 < source.length ? source[nextPos + 1] : '';
+    // Binary operators / compound-assignment leaders that genuinely reject the opener
+    // (mirroring matlabHelpers.isFollowedByBinaryOperator).
+    if (next === '=' && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '^' || ch === '\\' || ch === '&' || ch === '|')) {
+      return false;
+    }
+    if (ch === '.' && nextPos + 2 < source.length && source[nextPos + 2] === '=') {
+      const op = next;
+      if (op === '*' || op === '/' || op === '^' || op === '\\') return false;
+    }
+    if ('*/^\\<>&|:'.includes(ch)) return false;
+    if (ch === '=' && next === '=') return false;
+    if ((ch === '~' || ch === '!') && next === '=') return false;
+    if (
+      (keyword === 'for' || keyword === 'parfor' || keyword === 'try' || keyword === 'spmd' || keyword === 'classdef') &&
+      (ch === '+' || ch === '-' || ch === '~' || ch === '!')
+    ) {
+      return false;
+    }
+    return true;
   }
 
   // Returns true when `position` lies at the start of its line (only whitespace before).
