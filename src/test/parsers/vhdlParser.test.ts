@@ -3880,6 +3880,23 @@ end architecture;`;
     });
   });
 
+  suite("Regression 2026-05-24: 5-character backslash-escape character literal '\\nX' should be consumed as a unit", () => {
+    test("should treat '\\nX' as a 5-char character literal and not absorb subsequent keywords as extended identifier", () => {
+      const source = `x := '\\nX'; entity e is
+end entity;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+
+    test("should treat '\\tA' (any non-newline char pair after backslash) as a 5-char character literal", () => {
+      const source = `x := '\\tA'; architecture a of e is
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
   suite('Regression 2026-05-24: control-flow keyword followed by character literal opens block', () => {
     test('should open if-block when condition starts with a character literal', () => {
       const source = `if 'a' = c then
