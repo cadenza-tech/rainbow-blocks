@@ -5935,6 +5935,40 @@ fi`;
     });
   });
 
+  suite('Regression: multiple heredocs on one line have correct body offsets', () => {
+    test('should start the second heredoc body after the first terminator newline', () => {
+      // `cat <<A <<B` opens two stacked heredocs; their bodies appear back-to-back.
+      // Pre-fix the second body started at the first terminator's `\n`, absorbing
+      // one extra leading character and shifting every following lookup by 1.
+      const source = 'cat <<A <<B\naaa\nA\nbbb\nB\nif true; then echo; fi';
+      const regions = parser.getExcludedRegions(source);
+      const firstBody = regions.find((r) => source.slice(r.start, r.end).startsWith('aaa'));
+      const secondBody = regions.find((r) => source.slice(r.start, r.end).startsWith('bbb'));
+      assert.ok(firstBody, `expected a heredoc body starting with "aaa"; got ${JSON.stringify(regions)}`);
+      assert.ok(secondBody, `expected a heredoc body starting with "bbb"; got ${JSON.stringify(regions)}`);
+      assert.strictEqual(source.slice(firstBody.start, firstBody.end), 'aaa\nA');
+      assert.strictEqual(source.slice(secondBody.start, secondBody.end), 'bbb\nB');
+    });
+
+    test('should still pair if/fi after two stacked heredocs', () => {
+      const source = 'cat <<A <<B\naaa\nA\nbbb\nB\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should handle three stacked heredocs without off-by-one drift', () => {
+      const source = 'cat <<A <<B <<C\naaa\nA\nbbb\nB\nccc\nC\nif true; then echo; fi';
+      const regions = parser.getExcludedRegions(source);
+      const first = regions.find((r) => source.slice(r.start, r.end).startsWith('aaa'));
+      const second = regions.find((r) => source.slice(r.start, r.end).startsWith('bbb'));
+      const third = regions.find((r) => source.slice(r.start, r.end).startsWith('ccc'));
+      assert.ok(first && second && third, `expected three heredoc bodies; got ${JSON.stringify(regions)}`);
+      assert.strictEqual(source.slice(first.start, first.end), 'aaa\nA');
+      assert.strictEqual(source.slice(second.start, second.end), 'bbb\nB');
+      assert.strictEqual(source.slice(third.start, third.end), 'ccc\nC');
+    });
+  });
+
   suite('Regression: env var prefix with chained equals (A=B=C if)', () => {
     test('should detect if/fi after A=B=C env var prefix', () => {
       // A=B=C is a single env var assignment where the value is "B=C"
