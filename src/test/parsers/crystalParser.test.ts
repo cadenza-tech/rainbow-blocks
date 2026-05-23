@@ -4444,6 +4444,31 @@ end`;
     });
   });
 
+  suite('Regression: receiver-like keyword followed by [ or | should not open a block', () => {
+    test('should not treat select[0] index access as a select block opener', () => {
+      // `select[0]` is index access on a value named `select` (an assignment target),
+      // not a block opener. Treating it as a select block consumes the next `end`,
+      // hiding the genuine def/end below.
+      const source = 'def bar\n  x = select[0]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum|x| block argument as an enum block opener', () => {
+      // `enum |x| ...` would be method-call form `enum { |x| ... }` style block argument;
+      // `enum` is the receiver of a method call here, not a block opener.
+      const source = 'def bar\n  x = enum|x|\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat struct[key] index access as a struct block opener', () => {
+      const source = 'def bar\n  x = struct[key]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Regression: def with parameter default value (no parens) should pair with end', () => {
     test('should pair def/end when parameter has a default value without parens', () => {
       // `def foo x = 1` defines a method with a single parameter `x` defaulting to `1`.
