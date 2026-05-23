@@ -603,7 +603,12 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
     // Forward scan from #{ to the 'end' token: count real openers vs block-closing 'end's
+    // within the immediate map scope only. Nested '{' (including inner maps and tuples)
+    // bumps nestedBraceDepth so that openers/closers found inside the nested scope are
+    // excluded from this map's count: those keywords belong to the inner scope, not the
+    // outer map.
     let depth = 0;
+    let nestedBraceDepth = 0;
     let i = mapStart;
     while (i < endOffset) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -612,22 +617,36 @@ export class ErlangBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[i];
+      if (ch === '{') {
+        nestedBraceDepth++;
+        i++;
+        continue;
+      }
+      if (ch === '}') {
+        if (nestedBraceDepth > 0) {
+          nestedBraceDepth--;
+        }
+        i++;
+        continue;
+      }
       if (/[a-z]/i.test(ch) && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
         let wordEnd = i;
         while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) {
           wordEnd++;
         }
         const word = source.slice(i, wordEnd);
-        if (BLOCK_OPENER_KEYWORDS.has(word) && !this.isMapKeyKeyword(source, wordEnd)) {
-          // `fun` may be a fun-reference (fun Mod:Func/N, fun Func/N, fun 'q'/N) which is
-          // NOT a block opener. Match the same logic as isValidBlockOpen so that a map like
-          // #{fun foo/1 => 1, end => 2} does not phantom-depth and incorrectly treat the
-          // map-key `end` as a real block close.
-          if (word !== 'fun' || !this.isFunReferenceAt(source, i)) {
-            depth++;
+        if (nestedBraceDepth === 0) {
+          if (BLOCK_OPENER_KEYWORDS.has(word) && !this.isMapKeyKeyword(source, wordEnd)) {
+            // `fun` may be a fun-reference (fun Mod:Func/N, fun Func/N, fun 'q'/N) which is
+            // NOT a block opener. Match the same logic as isValidBlockOpen so that a map like
+            // #{fun foo/1 => 1, end => 2} does not phantom-depth and incorrectly treat the
+            // map-key `end` as a real block close.
+            if (word !== 'fun' || !this.isFunReferenceAt(source, i)) {
+              depth++;
+            }
+          } else if (word === 'end' && !this.isMapKeyKeyword(source, wordEnd)) {
+            depth = Math.max(0, depth - 1);
           }
-        } else if (word === 'end' && !this.isMapKeyKeyword(source, wordEnd)) {
-          depth = Math.max(0, depth - 1);
         }
         i = wordEnd;
         continue;
