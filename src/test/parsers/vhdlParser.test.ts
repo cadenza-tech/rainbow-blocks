@@ -3880,6 +3880,34 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-24: is null/is new/is ( filter applies only to subprogram openers', () => {
+    test('should retain process intermediate is when body starts with null statement', () => {
+      const source = `process is
+  null;
+begin
+  null;
+end process;`;
+      const pairs = parser.parse(source);
+      const processBlock = findBlock(pairs, 'process');
+      assert.ok(
+        processBlock.intermediates.some((t) => t.value.toLowerCase() === 'is'),
+        'expected is in process intermediates'
+      );
+    });
+
+    test('should still drop is in null procedure declaration', () => {
+      const source = `package p is
+  procedure noop is null;
+end package;`;
+      const pairs = parser.parse(source);
+      const packageBlock = findBlock(pairs, 'package');
+      // The procedure is a null procedure (no body), so its is should NOT be in intermediates of any block.
+      // The package's intermediates should contain its own is, but no procedure-is.
+      const isCount = packageBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, 'expected exactly one is (the package header is) in intermediates');
+    });
+  });
+
   suite("Regression 2026-05-24: 5-character backslash-escape character literal '\\nX' should be consumed as a unit", () => {
     test("should treat '\\nX' as a 5-char character literal and not absorb subsequent keywords as extended identifier", () => {
       const source = `x := '\\nX'; entity e is
