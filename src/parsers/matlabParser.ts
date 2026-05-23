@@ -13,6 +13,7 @@ import {
   isFollowedByBinaryOperator,
   isFollowedByCompoundAssignment,
   isFollowedBySimpleAssignment,
+  isHorizontalWhitespace,
   isKeywordUsedAsFunctionCall,
   isPrecededByAtSign,
   isPrecededByBinaryOperator,
@@ -191,9 +192,12 @@ export class MatlabBlockParser extends BaseBlockParser {
   // IS the leading identifier is excluded. The per-logical-line metadata is cached by
   // tokenize(), so this answers in O(1) rather than walking the source backward.
   private isCommandSyntaxArgument(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
-    // Require at least one space/tab between the previous token and the keyword (so
-    // `xend` is not detected — though adjacency is already handled by the word boundary).
-    if (position <= 0 || (source[position - 1] !== ' ' && source[position - 1] !== '\t')) return false;
+    // Require at least one horizontal whitespace character (ASCII space/tab, VT/FF, or
+    // Unicode horizontal whitespace such as NBSP / em space / ideographic space) between
+    // the previous token and the keyword. `xend` adjacency is already handled by the word
+    // boundary, but `disp\vif` etc. would otherwise be missed because the regex word
+    // boundary still recognises `\v` as a non-word char.
+    if (position <= 0 || !isHorizontalWhitespace(source[position - 1])) return false;
     const info = this.getLogicalLineInfo(source, position, excludedRegions ?? []);
     if (info === null || info.commandLeadIdentStart < 0) {
       return false;

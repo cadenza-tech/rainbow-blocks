@@ -3,6 +3,24 @@
 import type { ExcludedRegion } from '../types';
 import { findExcludedRegionAt } from './parserUtils';
 
+// Unicode horizontal whitespace characters that act like ASCII space/tab for the
+// purpose of command-syntax separation and inter-token spacing inside a logical
+// line. Covers U+0085 (NEL), U+00A0 (NBSP), U+1680 (Ogham Space Mark),
+// U+2000-U+200A (En Quad..Hair Space), U+2028 (Line Separator), U+2029
+// (Paragraph Separator), U+202F (Narrow No-Break Space), U+205F (Medium
+// Mathematical Space), U+3000 (Ideographic Space). Excludes `\r` / `\n` which
+// terminate the logical line.
+const UNICODE_HORIZONTAL_WHITESPACE_PATTERN = /[\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
+
+// Returns true when `ch` is horizontal whitespace: ASCII space/tab, vertical tab
+// (\v), form feed (\f), or any Unicode horizontal whitespace listed above.
+// `\r` and `\n` are NOT matched — they terminate the logical line and must be
+// handled separately by the caller.
+export function isHorizontalWhitespace(ch: string | undefined): boolean {
+  if (ch === undefined) return false;
+  return ch === ' ' || ch === '\t' || ch === '\v' || ch === '\f' || UNICODE_HORIZONTAL_WHITESPACE_PATTERN.test(ch);
+}
+
 // Checks if position is at line start allowing leading whitespace.
 // Also skips a leading UTF-8/UTF-16 BOM (U+FEFF) so files saved with a byte-order mark
 // still recognise block comments (`%{`/`#{`) and shell escapes (`!`) at the file start.

@@ -1,6 +1,7 @@
 // MATLAB per-parse cache builders: bracket depth, logical-line starts, logical-line metadata
 
 import type { ExcludedRegion } from '../types';
+import { isHorizontalWhitespace } from './matlabHelpers';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
 // Per-logical-line metadata, computed once per parse and consulted by the
@@ -172,10 +173,11 @@ export function computeLogicalLineInfo(
   let i = lineStart;
   while (i < len && statementStarts !== null && statementStarts[i] === lineStart) {
     const ch = source[i];
-    // Skip whitespace, a leading BOM, and the newline of a `...`/`\` continuation.
-    // The loop guard guarantees any newline reached here belongs to this logical
-    // line (a continuation break), so it is treated as whitespace within the run.
-    if (ch === ' ' || ch === '\t' || ch === '\u{FEFF}' || ch === '\n' || ch === '\r') {
+    // Skip whitespace (ASCII + Unicode horizontal whitespace such as NBSP / em space /
+    // VT / FF / ideographic space), a leading BOM, and the newline of a `...`/`\`
+    // continuation. The loop guard guarantees any newline reached here belongs to this
+    // logical line (a continuation break), so it is treated as whitespace within the run.
+    if (isHorizontalWhitespace(ch) || ch === '\u{FEFF}' || ch === '\n' || ch === '\r') {
       i++;
       continue;
     }
