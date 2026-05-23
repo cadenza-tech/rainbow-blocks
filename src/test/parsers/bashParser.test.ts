@@ -5812,6 +5812,36 @@ fi`;
       assertSingleBlock(pairs, 'for', 'done');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
     });
+    test('should not treat done in done$var as block close', () => {
+      // POSIX word splitting fuses `done$var` into one word: only standalone `done` is the
+      // reserved keyword. The early `done$var` must not pair with the outer `for`.
+      const source = 'for i in 1; do\n  done$var\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
+    test('should not treat fi in fi$var as block close', () => {
+      const source = 'if true; then\n  fi$var\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('fi'));
+    });
+    test('should not treat done in done\\foo as block close', () => {
+      // A backslash after `done` escapes the following character into the same word;
+      // `done\\foo` is the literal word `donefoo`, not the reserved keyword.
+      const source = 'for i in 1; do\n  done\\foo\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
+    test('should not treat done in done] as block close', () => {
+      // A trailing `]` fuses with the preceding word (e.g., a literal pattern). The
+      // early `done]` is not the reserved keyword.
+      const source = 'for i in 1; do\n  done]\ndone';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('done'));
+    });
   });
 
   suite('Regression: time coproc { ... } anonymous coprocess', () => {
