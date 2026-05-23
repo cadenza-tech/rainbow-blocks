@@ -261,6 +261,12 @@ function recordContextKeywordRole(
       if (isForwardDeclarationAfter(source, keywordStart + 9, excludedRegions, callbacks)) {
         return 'ignore';
       }
+      // `=` followed by `interface` can be either a type definition (`IFoo = interface`)
+      // or a comparison expression (`if X = interface then`). Reuse the comparison-context
+      // scan so the keyword is classified as 'ignore' for the latter.
+      if (ii >= 0 && source[ii] === '=' && isPrecededByComparisonEquals(source, keywordStart, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
       return 'open-block';
     }
     case 'class': {
