@@ -4438,6 +4438,32 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: isValidWaitOpen newline handling in wait fork statement', () => {
+    // Bug: isValidWaitOpen's forward scan past `wait` only skips space/tab,
+    // not `\n` or `\r`. So `wait\nfork;` slips past the `fork` detector and
+    // makes the `wait` keyword falsely treated as a control-keyword opener
+    // that pairs with a subsequent `end`. Since SystemVerilog is free-form,
+    // a newline between `wait` and `fork` is equivalent to a space, so
+    // `wait\nfork;` is the same statement as `wait fork;` and must be rejected.
+    test('should not treat wait\\nfork; as a control keyword opener', () => {
+      const source = 'module m;\n  initial begin\n    wait\n    fork;\n    x = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // Expected: module/endmodule, initial/end, begin/end (3 pairs)
+      // wait must NOT pair with end
+      assertBlockCount(pairs, 3);
+      const waitPair = pairs.find((p) => p.openKeyword.value === 'wait');
+      assert.strictEqual(waitPair, undefined, 'wait\\nfork; should not open a block');
+    });
+
+    test('should not treat wait\\rfork; as a control keyword opener (CR-only)', () => {
+      const source = 'module m;\r  initial begin\r    wait\r    fork;\r    x = 1;\r  end\rendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const waitPair = pairs.find((p) => p.openKeyword.value === 'wait');
+      assert.strictEqual(waitPair, undefined, 'wait\\rfork; should not open a block');
+    });
+  });
+
   suite('Bug fix: O(N^2) cast detection on attribute-prefixed modules', () => {
     // Bug: isPrecededByDataTypeKeyword's cast-detection branch enters the `)`
     // depth-walk path whenever a close keyword (or block opener like `module`)
