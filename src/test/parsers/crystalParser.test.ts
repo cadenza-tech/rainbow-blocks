@@ -4444,5 +4444,29 @@ end`;
     });
   });
 
+  suite('Regression: def with parameter default value (no parens) should pair with end', () => {
+    test('should pair def/end when parameter has a default value without parens', () => {
+      // `def foo x = 1` defines a method with a single parameter `x` defaulting to `1`.
+      // The `=` here is part of the parameter default, not the Crystal 1.0 shorthand
+      // `def name = expr` form, which requires the `=` to come before any parameter name.
+      const source = 'def foo x = 1\n  puts x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should pair def/end with multiple no-paren default args', () => {
+      const source = 'def foo x = 1, y = 2\n  puts x + y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still suppress shorthand def name = expr form', () => {
+      // Sanity: must not break the real shorthand def form.
+      const source = 'class Vector\n  def magnitude = 42\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
