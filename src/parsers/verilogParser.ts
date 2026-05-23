@@ -21,6 +21,7 @@ import {
   isFollowedByBinaryOperator,
   isFollowedByWord,
   isInsideParenHeaderControlBody,
+  isInsideParenlessControlBody,
   isInsideParens,
   isOnDpiLine,
   isPrecededByAssertionVerb,
@@ -500,6 +501,12 @@ export class VerilogBlockParser extends BaseBlockParser {
         // control statement's body, not a case_item label, so it must not become
         // a case `block_middle` intermediate.
         if (isInsideParenHeaderControlBody(source, token.startOffset, excludedRegions, this.validationCallbacks)) {
+          return false;
+        }
+        // Reject `default` that is the single-statement body of a paren-less
+        // control keyword (forever, initial, final, always_*, else)
+        // — e.g. `forever default: x = 1;`, `else default: y = 1;`.
+        if (isInsideParenlessControlBody(source, token.startOffset, excludedRegions, this.validationCallbacks)) {
           return false;
         }
         let j = token.endOffset;

@@ -682,6 +682,21 @@ export function isFollowedByBinaryOperator(
 // not at a case_item position — e.g. `if (c) default: x = 1;`.
 const PAREN_HEADER_CONTROL_KEYWORDS: ReadonlySet<string> = new Set(['if', 'for', 'while', 'foreach', 'repeat']);
 
+// Control keywords that introduce a single-statement body without a parenthesized
+// header (forever, initial, final, always_*, else). When a `default` keyword
+// follows one of these on the same statement (after only trivia), it is the
+// single-statement body, not a case_item label.
+const PARENLESS_CONTROL_KEYWORDS: ReadonlySet<string> = new Set([
+  'forever',
+  'initial',
+  'final',
+  'always',
+  'always_comb',
+  'always_ff',
+  'always_latch',
+  'else'
+]);
+
 // Returns true when the `default` keyword at `position` is the single-statement
 // body of a parenthesized-header control statement (if/for/while/foreach/repeat).
 // Detection: the nearest non-trivia char before `position` is `)`, that `)`
@@ -725,6 +740,30 @@ export function isInsideParenHeaderControlBody(
   if (w >= 0 && (source[w] === '$' || source[w] === '\\')) return false;
   const word = source.slice(w + 1, wordEnd + 1);
   return PAREN_HEADER_CONTROL_KEYWORDS.has(word);
+}
+
+// Returns true when the `default` keyword at `position` is the single-statement
+// body of a paren-less control keyword (forever, initial, final, always_*) or
+// of an `else` clause. Detection: the nearest non-trivia chars before `position`
+// form one of those keywords (e.g. `forever default: x = 1;`, `else default: x = 1;`).
+// In that situation `default` is a misused identifier-like token inside the
+// control body, not a case_item label, so it must not be tokenized as a case
+// `block_middle`.
+export function isInsideParenlessControlBody(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const wordEnd = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
+  if (wordEnd < 0 || !/[a-zA-Z0-9_]/.test(source[wordEnd])) return false;
+  if (callbacks.isInExcludedRegion(wordEnd, excludedRegions)) return false;
+  let w = wordEnd;
+  while (w >= 0 && /[a-zA-Z0-9_]/.test(source[w])) w--;
+  // Reject when the word boundary touches `$` (system tasks) or `\` (escaped id).
+  if (w >= 0 && (source[w] === '$' || source[w] === '\\')) return false;
+  const word = source.slice(w + 1, wordEnd + 1);
+  return PARENLESS_CONTROL_KEYWORDS.has(word);
 }
 
 // Scans forward from a control keyword to find 'begin' before any statement terminator
