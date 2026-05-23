@@ -3456,5 +3456,32 @@ end try`;
     });
   });
 
+  suite('Bug AS-LOW-3: pipe-delimited identifier backslash should not escape newline', () => {
+    test('should terminate unterminated pipe identifier at newline (LF)', () => {
+      const source = 'tell app\n  set x to |a\\\nb|\nend tell';
+      const regions = parser.getExcludedRegions(source);
+      // The unterminated pipe identifier `|a` should end at the LF, not span to the closing `|`
+      const pipeRegion = regions.find((r) => source[r.start] === '|');
+      assert.ok(pipeRegion, 'expected an excluded region for the pipe identifier');
+      const regionText = source.slice(pipeRegion.start, pipeRegion.end);
+      assert.ok(!regionText.includes('\n'), `pipe region should not contain newline: ${JSON.stringify(regionText)}`);
+    });
+
+    test('should terminate unterminated pipe identifier at CR newline', () => {
+      const source = 'tell app\r  set x to |a\\\rb|\rend tell';
+      const regions = parser.getExcludedRegions(source);
+      const pipeRegion = regions.find((r) => source[r.start] === '|');
+      assert.ok(pipeRegion, 'expected an excluded region for the pipe identifier');
+      const regionText = source.slice(pipeRegion.start, pipeRegion.end);
+      assert.ok(!regionText.includes('\r'), `pipe region should not contain CR: ${JSON.stringify(regionText)}`);
+    });
+
+    test('should still pair tell-end tell when pipe identifier is unterminated by backslash-newline', () => {
+      const source = 'tell app\n  set x to |a\\\nb|\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+  });
+
   generateCommonTests(config);
 });
