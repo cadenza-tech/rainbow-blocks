@@ -399,13 +399,22 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
     if (i < 0 || source[i] !== ':') return false;
     // Found `:`; now scan further back, skipping a contiguous run of identifier/whitespace/dot chars,
-    // looking for the `of` keyword followed eventually by `attribute`
+    // looking for the `of` keyword followed eventually by `attribute`. Exhaustion of SCAN_LIMIT
+    // before either `;` (statement terminator) or the start of source is reached returns true
+    // conservatively: the `:` already signals that we are likely inside an attribute_specification,
+    // and false-promoting the entity_class keyword to a block opener would pollute the surrounding
+    // block's intermediates (e.g., absorb the architecture's `begin`).
     i--;
     let foundOf = false;
     let foundAttribute = false;
+    let scanLimitExhausted = false;
     let scanned = 0;
     const SCAN_LIMIT = 4096;
-    while (i >= 0 && scanned < SCAN_LIMIT) {
+    while (i >= 0) {
+      if (scanned >= SCAN_LIMIT) {
+        scanLimitExhausted = true;
+        break;
+      }
       if (this.isInExcludedRegion(i, excludedRegions)) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
         if (region) {
@@ -436,7 +445,11 @@ export class VhdlBlockParser extends BaseBlockParser {
       i--;
       scanned++;
     }
-    return foundAttribute;
+    // On scan exhaustion, conservatively return true: the preceding `:` already strongly
+    // suggests this is an attribute_specification, and false-promoting the entity_class
+    // keyword to a block opener would silently corrupt the surrounding block's
+    // intermediates (e.g., absorb its `begin`).
+    return foundAttribute || scanLimitExhausted;
   }
 
   // Rejects VHDL-2008 package instantiations: `package X is new Y generic map(...);`
