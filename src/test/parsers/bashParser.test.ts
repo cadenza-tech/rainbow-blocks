@@ -5895,6 +5895,24 @@ fi`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });
+    test('should accept non-ASCII letter in heredoc terminator (Greek zeta)', () => {
+      // Real bash allows essentially any non-metacharacter (including non-ASCII letters)
+      // in a heredoc delimiter. `XYΖ` mixes Latin and Greek capital zeta (U+0396).
+      const source = 'cat <<XYΖ\nbody\nXYΖ\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should accept Japanese kanji in heredoc terminator', () => {
+      const source = 'cat <<終\nbody\n終\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+    test('should accept non-ASCII letters with ASCII prefix in heredoc terminator', () => {
+      // Mixed ASCII + non-ASCII (cyrillic) terminator: bash accepts any non-metacharacter.
+      const source = 'cat <<EOFвыход\nbody\nEOFвыход\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
   });
 
   suite('Regression: heredoc with escaped backslash delimiter', () => {
