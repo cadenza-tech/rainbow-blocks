@@ -2383,5 +2383,27 @@ end`;
     });
   });
 
+  suite('Regression: indexing assignment with continuation between end and parens', () => {
+    test('should treat end ...<NL>(1) = 5 as indexing assignment (not block close)', () => {
+      // `end ...<NL>(1) = 5` is a single logical line `end(1) = 5` — indexing assignment
+      // to a variable named `end`, not a block close. Without skipping the continuation,
+      // the indexing-assignment check fails to detect the `(` and the keyword consumes
+      // the function block, leaving the trailing real `end` orphan.
+      const source = 'function f\nend ...\n(1) = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 3, 'function should pair with the trailing end on line 3');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat end\\<NL>(1) = 5 as indexing assignment (backslash continuation)', () => {
+      const source = 'function f\nend \\\n(1) = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 3, 'function should pair with the trailing end on line 3');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
