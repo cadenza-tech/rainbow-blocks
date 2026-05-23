@@ -3512,5 +3512,59 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-24: class-qualified method modifiers (const/type/threadvar)', () => {
+    test('should treat class const inside record as method modifier, not block opener', () => {
+      // `class const KSize = 10;` declares a class-level constant. The `class` token
+      // is a method modifier (like `class function`), so it must not count as an
+      // 'open-block' for the surrounding record-context scan. Without the modifier
+      // list including `const`, the variant `case` after it is misclassified.
+      const source = `type
+  TFoo = record
+    class const KSize = 10;
+    case Integer of
+      0: (V: Integer);
+  end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const classPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'class');
+      assert.strictEqual(classPairs.length, 0, 'class const must not produce a class..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, 'variant case inside a record must not produce its own pair');
+    });
+
+    test('should treat class type inside record as method modifier, not block opener', () => {
+      const source = `type
+  TFoo = record
+    class type TInner = Integer;
+    case Integer of
+      0: (V: Integer);
+  end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const classPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'class');
+      assert.strictEqual(classPairs.length, 0, 'class type must not produce a class..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, 'variant case inside a record must not produce its own pair');
+    });
+
+    test('should treat class threadvar inside record as method modifier, not block opener', () => {
+      const source = `type
+  TFoo = record
+    class threadvar GTLS: Integer;
+    case Integer of
+      0: (V: Integer);
+  end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const classPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'class');
+      assert.strictEqual(classPairs.length, 0, 'class threadvar must not produce a class..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, 'variant case inside a record must not produce its own pair');
+    });
+  });
+
   generateCommonTests(config);
 });
