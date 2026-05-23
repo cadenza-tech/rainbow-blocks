@@ -1204,7 +1204,7 @@ export class FortranBlockParser extends BaseBlockParser {
     let guardMatch = SELECT_TYPE_GUARD_PATTERN.exec(source);
     while (guardMatch !== null) {
       const pos = guardMatch.index;
-      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
+      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions) && !isInsideParentheses(source, pos)) {
         const fullMatch = guardMatch[1];
         // Trim trailing `(` from `type is (` / `class is (` so the token value is
         // the keyword phrase only. `class default` has no trailing paren.
