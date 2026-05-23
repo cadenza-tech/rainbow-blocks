@@ -21,6 +21,24 @@ function findRegionAt(pos: number, regions: readonly ExcludedRegion[]): Excluded
   return null;
 }
 
+// Checks whether a macro close marker (`%}` or `}}`) appears on the same
+// physical line as `heredocOpenerPos`, between that position and the end of
+// the line. When true, the heredoc opener is on the macro's closing line and
+// the macro must close at its closer rather than have its body extended to
+// the heredoc terminator (which would engulf code past the macro close).
+// Both inner-quote and inner-comment characters are ignored — a simple
+// substring scan suffices because macro closers are 2-byte literals and a
+// false positive here only prevents heredoc-body skipping (degrading to the
+// safer "let the macro close" path).
+function macroCloserOnSameLine(source: string, heredocOpenerPos: number, closer: string): boolean {
+  for (let k = heredocOpenerPos; k < source.length; k++) {
+    const ch = source[k];
+    if (ch === '\n' || ch === '\r') return false;
+    if (source[k] === closer[0] && source[k + 1] === closer[1]) return true;
+  }
+  return false;
+}
+
 // Matches macro template {% %} or {{ }}, handling strings and comments inside
 export function matchMacroTemplate(source: string, pos: number): ExcludedRegion | null {
   // {% ... %}
@@ -41,12 +59,17 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         continue;
       }
       // Skip heredoc body (<<- or <<~) so internal %} or end keywords inside the
-      // body do not prematurely close the macro template
+      // body do not prematurely close the macro template. Suppress this when the
+      // macro closer `%}` appears on the same physical line as the heredoc
+      // opener: in that case the macro must close at its `%}` rather than have
+      // its body extended past the macro closer to the heredoc terminator.
       if (char === '<' && i + 2 < source.length && source[i + 1] === '<' && (source[i + 2] === '-' || source[i + 2] === '~')) {
-        const heredocResult = matchHeredoc(source, i);
-        if (heredocResult) {
-          i = heredocResult.end;
-          continue;
+        if (!macroCloserOnSameLine(source, i, '%}')) {
+          const heredocResult = matchHeredoc(source, i);
+          if (heredocResult) {
+            i = heredocResult.end;
+            continue;
+          }
         }
       }
       // Skip regex literals (/.../) when at expression start position
@@ -90,12 +113,17 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         continue;
       }
       // Skip heredoc body (<<- or <<~) so internal }} or end keywords inside the
-      // body do not prematurely close the macro template
+      // body do not prematurely close the macro template. Suppress this when the
+      // macro closer `}}` appears on the same physical line as the heredoc
+      // opener: in that case the macro must close at its `}}` rather than have
+      // its body extended past the macro closer to the heredoc terminator.
       if (char === '<' && i + 2 < source.length && source[i + 1] === '<' && (source[i + 2] === '-' || source[i + 2] === '~')) {
-        const heredocResult = matchHeredoc(source, i);
-        if (heredocResult) {
-          i = heredocResult.end;
-          continue;
+        if (!macroCloserOnSameLine(source, i, '}}')) {
+          const heredocResult = matchHeredoc(source, i);
+          if (heredocResult) {
+            i = heredocResult.end;
+            continue;
+          }
         }
       }
       // Skip regex literals (/.../) when at expression start position
