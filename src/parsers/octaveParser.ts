@@ -691,6 +691,18 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if ((lowerKw === 'end' || lowerKw === 'until') && this.isIndexingAssignment(keyword, source, position, excludedRegions)) {
       return false;
     }
+    // Reject `end` appearing on the same logical line as a preceding `until` outside
+    // parens, e.g. `until end > 0` / `until end == 1`. The `end` here is an operand in
+    // the until condition expression (not a block close), and treating it as a close
+    // consumes an outer block opener (function/while/etc.) and orphans the real close.
+    // The parent's same-line checks reject `end` after binary operators (`+`, `-`, `*`,
+    // `/`, etc.) but deliberately leave comparison operators (`>`, `<`, `==`, `~=`)
+    // untouched, so `until end > 0` and `until end == 1` slip through without this
+    // Octave-specific guard. Only applies to bare `end` — typed Octave closes (`endif`,
+    // `endfor`, ...) are already constrained by isAtStatementLeadingPosition.
+    if (lowerKw === 'end' && this.isPrecededByUntilOnLogicalLine(source, position, excludedRegions)) {
+      return false;
+    }
     // Reject typed-end keywords (endif/endfor/endwhile/etc.) used as identifiers in
     // expression context (e.g., `if endif == 5`). When the keyword does not appear at
     // the start of a statement, it is being used as a variable/identifier rather than
@@ -755,6 +767,53 @@ export class OctaveBlockParser extends MatlabBlockParser {
           return false;
         }
       }
+      return true;
+    }
+    return false;
+  }
+
+  // Returns true when `position` (pointing at a bare `end`) lies on the same logical
+  // line as a preceding `until` keyword that itself sits at statement-leading position
+  // and is not inside parens/brackets. Used to reject `until end > 0` / `until end == 1`
+  // — comparison-operator forms that the parent's same-line operator checks deliberately
+  // leave alone. Scans backward through horizontal whitespace, `...`/`\` continuations,
+  // and excluded regions to locate the previous identifier; if that identifier is `until`
+  // (case-insensitive) AND is at a statement-leading position AND is not inside a paren
+  // context, the `end` is part of the until condition. Stops on a physical newline that
+  // is NOT a continuation (the `until` would not reach a same-line `end` across a raw
+  // newline) — but since `end` here is already on the same line as the `until` per the
+  // statement-leading semantics, the scan naturally terminates at the `until` token.
+  private isPrecededByUntilOnLogicalLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (isHorizontalWhitespace(source[i])) {
+        i--;
+        continue;
+      }
+      // Skip `...`/`\` line continuations transparently — they continue the logical line.
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.start - 1;
+        continue;
+      }
+      // A raw newline that is NOT a continuation terminates the scan: anything before is
+      // on a previous logical line. Cost-minimal: do not consume an outer opener.
+      if (source[i] === '\n' || source[i] === '\r') return false;
+      // Reached a non-whitespace, non-continuation character. If it is an identifier
+      // character, read the identifier and check whether it is `until`.
+      if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+      const idEnd = i;
+      while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+      const ident = source.slice(i + 1, idEnd + 1).toLowerCase();
+      if (ident !== 'until') return false;
+      const untilStart = i + 1;
+      // The `until` must itself be at statement-leading position (so we are not catching
+      // `x = until_something + end`), and must not be inside parens/brackets (we already
+      // know `end` is not inside parens because the parent rejects it via the trailing
+      // isInsideParensOrBrackets check, but `until` could still in principle be in a
+      // bracket scope — guard it for symmetry).
+      if (!this.isAtStatementLeadingPosition(source, untilStart, excludedRegions)) return false;
+      if (this.isInsideParensOrBrackets(source, untilStart, excludedRegions)) return false;
       return true;
     }
     return false;
