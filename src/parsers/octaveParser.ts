@@ -291,6 +291,22 @@ export class OctaveBlockParser extends MatlabBlockParser {
       }
       return false;
     }
+    // Section-keyword rejection when followed by an operator across a line continuation,
+    // e.g. `properties ...<NL>+ 1` or `methods \<NL>* 2`. The parent's section-keyword
+    // operator-rejection check only skips ASCII whitespace and falls through when it sees
+    // the `...` excluded region (line continuation), wrongly accepting the keyword as a
+    // section opener. Detect the case explicitly so Octave rejects (mirroring the
+    // single-line form `properties + 1`). The check must run BEFORE the parent call so
+    // the parent does not accept the wrong section opener.
+    if (
+      OctaveBlockParser.OCTAVE_SECTION_KEYWORDS.has(keyword) &&
+      this.isAtSectionKeywordLineStart(source, position) &&
+      !this.isInsideParensOrBrackets(source, position, excludedRegions) &&
+      this.isSectionKeywordRejectedByOperatorAcrossContinuation(source, position, keyword, excludedRegions)
+    ) {
+      this.octavePhantomSectionPositions.push(position);
+      return false;
+    }
     const result = super.isValidBlockOpen(keyword, source, position, excludedRegions);
     // Mirror MATLAB phantom-section tracking for the operator/punctuation case: when a
     // section keyword at line-start is followed by something other than newline / `(` /
@@ -401,6 +417,49 @@ export class OctaveBlockParser extends MatlabBlockParser {
       nextChar !== '%' &&
       nextChar !== ';' &&
       nextChar !== ',' &&
+      !this.isCommentChar(nextChar)
+    );
+  }
+
+  // Returns true when a line-start section keyword is followed by an operator after a
+  // `...<NL>` or `\<NL>` line continuation (after horizontal whitespace), e.g.
+  // `properties ...<NL>+ 1`. The parent's check only skips ASCII whitespace and falls
+  // through on the `...` excluded region, wrongly accepting such forms. Treats the same
+  // operator set as the parent's section-keyword rejector — anything other than newline /
+  // `(` / `;` / `,` / comment after the continuation rejects the keyword. `=` (simple
+  // assignment) is excluded because the parent already handles that via
+  // skipWhitespaceAndContinuations and the assignment branch above; including it here
+  // would double-record the phantom-section position.
+  private isSectionKeywordRejectedByOperatorAcrossContinuation(
+    source: string,
+    position: number,
+    keyword: string,
+    excludedRegions: ExcludedRegion[]
+  ): boolean {
+    const afterKw = position + keyword.length;
+    // Only act when there is a real line continuation immediately after the keyword
+    // (after horizontal whitespace). Otherwise the parent's check handles it correctly.
+    let probe = afterKw;
+    while (probe < source.length && isHorizontalWhitespace(source[probe])) probe++;
+    if (probe >= source.length) return false;
+    const restAtProbe = source.slice(probe);
+    const dotsCont = restAtProbe.match(LINE_CONTINUATION_PATTERN);
+    const bsCont = restAtProbe.match(BACKSLASH_CONTINUATION_PATTERN);
+    if (!dotsCont && !bsCont) return false;
+    // Now skip continuations and horizontal whitespace fully, then inspect the next char.
+    const nextPos = skipHorizontalWhitespaceAndContinuations(source, afterKw);
+    if (nextPos >= source.length) return false;
+    const region = this.findExcludedRegionAt(nextPos, excludedRegions);
+    if (region) return false;
+    const nextChar = source[nextPos];
+    return (
+      nextChar !== '\n' &&
+      nextChar !== '\r' &&
+      nextChar !== '(' &&
+      nextChar !== '%' &&
+      nextChar !== ';' &&
+      nextChar !== ',' &&
+      nextChar !== '=' &&
       !this.isCommentChar(nextChar)
     );
   }
