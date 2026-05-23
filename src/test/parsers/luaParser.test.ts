@@ -1182,6 +1182,19 @@ end`;
     });
   });
 
+  suite('Regression: goto without a label name should not consume the next reserved keyword', () => {
+    test('should pair function/end when goto has no label and end appears on the next line (バグ2)', () => {
+      // Lua spec requires a Name (identifier) after `goto`. When goto is followed
+      // only by whitespace and then a reserved keyword, the goto statement is
+      // incomplete; per best-effort parsing, the reserved keyword must NOT be
+      // consumed as a goto target. Otherwise the surrounding function opener is
+      // orphaned and produces no coloured block.
+      const source = 'function f()\n  goto\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: goto label whitespace handling for form-feed and vertical-tab', () => {
     test('should treat goto end with form-feed whitespace as goto label', () => {
       const pairs = parser.parse('function f()\n  goto\fend\nend');
@@ -1220,23 +1233,35 @@ end`;
   });
 
   suite('Regression: isDoPartOfLoop should skip end after goto', () => {
-    test('should pair for...end when goto end appears between for and do', () => {
-      // Bug: end after goto (a label name) was treated as a real end keyword
-      // in isDoPartOfLoop's forward scan, breaking the loop scope detection
-      // and causing do to be treated as a standalone block opener.
+    test('should pair for/end with the first end and do/end with the second when goto end appears between for and do', () => {
+      // Lua labels are Names (identifiers); reserved keywords cannot be labels.
+      // So `goto end` is malformed Lua and `end` is no longer treated as the
+      // goto target. The for header is then incomplete, the inner `end` closes
+      // `for`, and the trailing `do x = 1 end` pairs on its own as a standalone
+      // do/end block. This matches the cost-minimisation principle: no orphans
+      // are produced for either reading, and the new structure recognises both
+      // keyword pairs that the user typed.
       const pairs = parser.parse('for goto end do x = 1 end');
-      assertSingleBlock(pairs, 'for', 'end');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'do');
     });
 
     test('should pair for...end when goto-targeted keyword appears in loop header', () => {
-      // The same scenario with a different goto target keyword
+      // `until` only closes `repeat`, so an `until` without a matching `repeat`
+      // is silently dropped during matchBlocks. The remaining tokens (for, do,
+      // end) therefore still pair as a single for/end block (do is classified
+      // as the loop's do).
       const pairs = parser.parse('for goto until do x = 1 end');
       assertSingleBlock(pairs, 'for', 'end');
     });
 
-    test('should pair while...end when goto end appears in condition expression area', () => {
+    test('should pair while/end with the first end and do/end with the second when goto end appears between while and do', () => {
+      // Same shape as the `for goto end do ... end` case above.
       const pairs = parser.parse('while goto end do x = 1 end');
-      assertSingleBlock(pairs, 'while', 'end');
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'while');
+      findBlock(pairs, 'do');
     });
   });
 
@@ -1377,23 +1402,26 @@ end`;
   });
 
   suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
-    test('should pair standalone do/end and outer function/end when goto for precedes do', () => {
-      // Bug: outer loop-keyword scan in isDoPartOfLoop did not check isAfterGoto.
-      // `goto for` makes `for` a label name, not a real loop keyword, so the
-      // following `do` must be treated as a standalone block opener.
+    test('should pair for/end inside function/end when goto for precedes do', () => {
+      // Lua labels cannot be reserved keywords, so `goto for` is malformed Lua
+      // and `for` is no longer dropped as a goto target. The `for` then opens a
+      // real loop header, the following `do` becomes the loop's `do` (no
+      // separate do/end pair), and the inner `end` closes the for. The outer
+      // `end` pairs with the outer function. Both pairs nest properly inside
+      // function.
       const pairs = parser.parse('function f()\n  goto for\n  do print(1) end\nend');
       assertBlockCount(pairs, 2);
       const fn = findBlock(pairs, 'function');
-      const doBlock = findBlock(pairs, 'do');
+      const forBlock = findBlock(pairs, 'for');
       assert.strictEqual(fn.nestLevel, 0);
-      assert.strictEqual(doBlock.nestLevel, 1);
+      assert.strictEqual(forBlock.nestLevel, 1);
     });
 
-    test('should pair standalone do/end when goto while precedes do', () => {
+    test('should pair while/end inside function/end when goto while precedes do', () => {
       const pairs = parser.parse('function f()\n  goto while\n  do print(1) end\nend');
       assertBlockCount(pairs, 2);
       findBlock(pairs, 'function');
-      findBlock(pairs, 'do');
+      findBlock(pairs, 'while');
     });
   });
 
