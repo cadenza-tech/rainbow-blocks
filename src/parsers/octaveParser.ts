@@ -1133,14 +1133,28 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (/[a-zA-Z0-9_)\]}.'"]/.test(prevChar) || /\p{L}/u.test(prevChar) || isSurrogatePairLetter) {
         // This `'` sits in a transpose position (it follows a value-like character).
         // The transpose operator cannot be validly followed by an identifier character
-        // (letter or `_`): in that case the `'` actually begins a string literal, e.g.
-        // `disp'end'` is `disp` followed by the string `'end'`, and `[1'text']` is
-        // `1` followed by `'text'`. So fall through to string matching when the next
-        // character is an identifier char; otherwise treat it as transpose. `A''`
-        // (double transpose) stays transpose because the second `'` is followed by
+        // (ASCII letter / `_` or any Unicode letter): in that case the `'` actually begins
+        // a string literal, e.g. `disp'end'` is `disp` followed by the string `'end'`,
+        // `disp'θ end'` is `disp` followed by `'θ end'` (θ is a Unicode letter so the `'`
+        // is the string opener), and `[1'text']` is `1` followed by `'text'`. Including
+        // Unicode letters via `\p{L}` is symmetric with the transpose-eligibility check
+        // above (which already accepts a preceding Unicode letter as a value char). The
+        // surrogate-pair case is handled explicitly so e.g. `A𝐀'foo'` (𝐀 = U+1D400 Math
+        // Bold Cap A, encoded as a surrogate pair) is correctly recognised as a string.
+        // `A''` (double transpose) stays transpose because the second `'` is followed by
         // another `'` (not an identifier char).
         const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
-        if (!(nextChar && /[a-zA-Z_]/.test(nextChar))) {
+        const isSurrogateHighStart =
+          nextChar !== undefined &&
+          nextChar >= '\uD800' &&
+          nextChar <= '\uDBFF' &&
+          pos + 2 < source.length &&
+          (() => {
+            const cp = source.codePointAt(pos + 1);
+            return cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp));
+          })();
+        const isIdentifierLikeNext = nextChar !== undefined && (/[a-zA-Z_]/.test(nextChar) || /\p{L}/u.test(nextChar) || isSurrogateHighStart);
+        if (!isIdentifierLikeNext) {
           return { start: pos, end: pos + 1 };
         }
       }
