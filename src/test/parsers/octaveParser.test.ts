@@ -2459,5 +2459,69 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-24: indexing assignment with cell {}, brackets [] and chain ()()', () => {
+    test('should not treat end{1} = 5 as block close (cell-array indexing assignment)', () => {
+      // `end{1} = 5;` is a cell-array indexing assignment to a variable named `end`,
+      // not a block close. The function must pair with the trailing real `end`. Without
+      // recognising `{` as an indexing opener, the keyword consumes the function opener
+      // and the trailing real `end` becomes orphan.
+      const source = 'function f\nend{1} = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2, 'function should pair with the trailing end on line 2');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end{1}.x = 5 as block close (cell index then field assignment)', () => {
+      // `end{1}.x = 5;` cell-indexes a variable named `end`, then assigns to a field.
+      // Same rejection logic as `end(1).x = 5` from the 2026-05-23 fix but with `{`.
+      const source = 'function f\nend{1}.x = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end(1)(2) = 5 as block close (Octave chained indexing)', () => {
+      // Octave supports chain indexing `a()()()`, so `end(1)(2) = 5` is two-level indexing
+      // assignment to a variable named `end`. Recognising only a single `()` chain would let
+      // the keyword consume the function opener after seeing `)` followed by `(`.
+      const source = 'function f\nend(1)(2) = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end(1){2} = 5 as block close (paren chain then cell index)', () => {
+      const source = 'function f\nend(1){2} = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat end[1] = 5 as block close (bracket indexing assignment)', () => {
+      // `end[1]` is not valid MATLAB syntax but Octave-flavoured code in the wild sometimes
+      // uses `[]` for indexing (or for the assignment LHS in `[a,b] = ...`). Treating `end`
+      // here as a block close destroys outer pairing; recognising `[` as an indexing-like
+      // opener leaves the keyword unmatched (cost-minimal).
+      const source = 'function f\nend[1] = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat end(1) = 5 as indexing assignment (regression guard)', () => {
+      // Pre-existing behaviour from the 2026-05-15 fix must be preserved.
+      const source = 'function f\nend(1) = 5;\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 2);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
