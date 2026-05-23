@@ -590,6 +590,41 @@ export class VerilogBlockParser extends BaseBlockParser {
         }
         return false;
       }
+      // Skip `, identifier` chains for comma-separated declarations like
+      // `reg a, endmodule;`. The second identifier (`endmodule`) is preceded by
+      // `, a, ` — not directly by a data-type keyword. Skip back through the
+      // comma and the preceding identifier to find the data-type keyword at
+      // the head of the declaration list.
+      if (ch === ',') {
+        let m = i - 1;
+        while (m >= 0 && (source[m] === ' ' || source[m] === '\t' || source[m] === '\n' || source[m] === '\r')) m--;
+        // Skip dimension specifier `[...]` on the previous identifier (e.g., `reg a[7], endmodule;`)
+        while (m >= 0 && source[m] === ']') {
+          let depth = 1;
+          m--;
+          while (m >= 0 && depth > 0) {
+            if (excludedRegions !== undefined && this.isInExcludedRegion(m, excludedRegions)) {
+              m--;
+              continue;
+            }
+            if (source[m] === ']') depth++;
+            else if (source[m] === '[') depth--;
+            if (depth > 0) m--;
+          }
+          if (m < 0) return false;
+          m--;
+          while (m >= 0 && (source[m] === ' ' || source[m] === '\t')) m--;
+        }
+        // The previous element must be an identifier (the previous declared name).
+        if (m < 0 || !/[a-zA-Z0-9_]/.test(source[m])) return false;
+        while (m >= 0 && /[a-zA-Z0-9_$]/.test(source[m])) m--;
+        // Reject if identifier boundary touches `$` or `\` (escaped id).
+        if (m >= 0 && (source[m] === '$' || source[m] === '\\')) return false;
+        // Continue the outer loop from just before the identifier; we expect to
+        // find either another `, identifier` chain or the data-type keyword.
+        i = m;
+        continue;
+      }
       // Skip block comment `/* ... */` backward: when current position is in an
       // excluded region whose end equals i+1, jump to just before its start.
       // Only block comments are skipped — other excluded regions (escaped
