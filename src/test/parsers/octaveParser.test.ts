@@ -2459,6 +2459,48 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-24: end keyword inside until condition is not block close', () => {
+    test('should not treat end in "until end > 0" as block close', () => {
+      // `until end > 0` uses `end` as an operand in the until condition expression. The
+      // bare `end` (`end > 0`) is invalid Octave outside array indexing, but parsing it
+      // as a block_close consumes the function opener and leaves the real outermost end
+      // orphan. Treat the `end` as part of the until condition and reject it as a close;
+      // the function/end pair must be preserved.
+      const source = 'function f\n  do\n    body\n  until end > 0\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 4, 'function should pair with the outermost end on line 4');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat end in "until end == 1" as block close (equality comparison)', () => {
+      const source = 'function f\n  do\n    body\n  until end == 1\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 4);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should not treat end in "until end + x > 0" as block close (binary operator)', () => {
+      const source = 'function f\n  do\n    body\n  until end + x > 0\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 4);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still treat end inside until x(end) parens correctly (regression guard)', () => {
+      // `until x(end) > 0` uses `end` as a valid array-index keyword inside parens; the
+      // existing isInsideParensOrBrackets check rejects it as a block close. Pre-fix behaviour
+      // already handles this case; the test guards against future regression.
+      const source = 'function f\n  do\n    body\n  until x(end) > 0\nend';
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 4);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-24: quote followed by Unicode letter is string opener (not transpose)', () => {
     test("should treat quote followed by Greek letter as string opener (disp'θ end')", () => {
       // `disp'θ end'` is `disp` followed by the string literal `'θ end'`. The `'` after the
