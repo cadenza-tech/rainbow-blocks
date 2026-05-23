@@ -2854,5 +2854,20 @@ end`;
     });
   });
 
+  suite('Regression: end followed by struct field access across line continuation is not block close', () => {
+    test('should not treat end ...\\n .field as block close (continuation field access)', () => {
+      const source = 'function f\n  end ...\n      .field\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should pair with the final end');
+    });
+
+    test('should still treat end .field on the same line as field access (no regression)', () => {
+      const source = 'function f\n  end .field\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
