@@ -229,11 +229,12 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     const line = source.slice(contentLineStart, contentLineEnd);
 
     const currentTerminator = terminators[terminatorIndex];
-    // Strict Ruby requires the terminator to start in column 0 under no-flag heredoc form.
-    // Best-effort parsing (anchor-set principle): accept indented terminators under no-flag
-    // form as well, so the heredoc closes instead of swallowing the rest of the source when
-    // the user writes `<<EOF` with an indented terminator.
-    const trimmedLine = line.trimStart();
+    // Strict Ruby requires the terminator to start in column 0 under no-flag heredoc form
+    // and to have no trailing characters. Best-effort parsing (anchor-set principle):
+    // accept indented terminators and terminators with trailing whitespace under all
+    // forms, so the heredoc closes instead of swallowing the rest of the source when
+    // the user writes a slightly-malformed terminator (e.g. `EOF  \t` or `  EOF`).
+    const trimmedLine = line.trim();
 
     if (trimmedLine === currentTerminator.terminator) {
       terminatorIndex++;
