@@ -666,6 +666,29 @@ export class VerilogBlockParser extends BaseBlockParser {
     return span !== null && span.close >= position && span.open > 0 && source[span.open - 1] === "'";
   }
 
+  // Returns true when `position` is inside a `#(...)` delay/parameter expression.
+  // Detection: walk back from the nearest enclosing `(` and check the immediately
+  // preceding non-whitespace, non-comment character is `#`. A delay expression
+  // (`#(expr)`) cannot legitimately contain reserved-word identifiers, so block
+  // keywords appearing inside must be suppressed.
+  private isInsideDelayExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const span = this.getParenIndex(source, excludedRegions).enclosing(position);
+    if (span === null || span.close < position) return false;
+    let k = span.open - 1;
+    while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+    // Block comments / line comments between `#` and `(` are allowed; skip them.
+    while (k >= 0 && this.isInExcludedRegion(k, excludedRegions)) {
+      const region = this.findExcludedRegionAt(k, excludedRegions);
+      if (!region) break;
+      const isBlockComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*';
+      const isLineComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '/';
+      if (!isBlockComment && !isLineComment) break;
+      k = region.start - 1;
+      while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+    }
+    return k >= 0 && source[k] === '#';
+  }
+
   // Returns true when the keyword at `position` follows a label colon whose label
   // name is itself a reserved word AND the enclosing block is a case statement.
   // In that situation the preceding `<keyword> :` is a case_item label (its name
@@ -704,6 +727,13 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject any keyword preceded by backtick (macro invocation like `begin, `module)
     if (position > 0 && source[position - 1] === '`') {
+      return false;
+    }
+
+    // Reject any keyword inside a `#(...)` delay/parameter expression. Reserved
+    // words cannot legitimately appear as delay/parameter expression operands;
+    // tokenizing them would generate bogus BlockPairs against later close keywords.
+    if (this.isInsideDelayExpression(source, position, excludedRegions)) {
       return false;
     }
 
@@ -844,6 +874,13 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject close keywords preceded by backtick (macro invocation like `end, `endmodule)
     if (position > 0 && source[position - 1] === '`') {
+      return false;
+    }
+
+    // Reject any close keyword inside a `#(...)` delay/parameter expression
+    // (mirrors the isValidBlockOpen check). Reserved words cannot legitimately
+    // appear as delay/parameter expression operands.
+    if (this.isInsideDelayExpression(source, position, excludedRegions)) {
       return false;
     }
 
