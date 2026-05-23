@@ -2890,6 +2890,36 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: command-syntax with embedded string literal continues past quoted argument', () => {
+    test('should treat keyword after disp "..." as command-syntax argument', () => {
+      // `disp "end" if x` is command-syntax: `disp` is the command, `"end"`, `if`, and
+      // `x` are string arguments. The `if` keyword inside the run must NOT be tokenised
+      // as a real block opener — otherwise it consumes an inner end and destroys outer
+      // pairing.
+      const source = 'function f\n  disp "end" if x\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0, 'if after disp "end" must not be a block opener');
+    });
+
+    test("should treat keyword after disp '...' as command-syntax argument (single-quoted)", () => {
+      // Same pattern with a single-quoted argument.
+      const source = "function f\n  disp 'end' if x\n  end";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0);
+    });
+
+    test('should still detect real if-end block (no command-syntax) as sanity check', () => {
+      // Sanity: a real if/end without leading command must still be detected.
+      const source = 'function f\n  if x > 0\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-23: end preceded by value token on same logical line is not block close', () => {
     test('should not treat end after identifier as block close (x = a end)', () => {
       // `x = a end` places `end` in operand position after the identifier `a`. Invalid
