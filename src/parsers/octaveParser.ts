@@ -599,25 +599,18 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return false;
   }
 
-  // Returns true when the close keyword (`end` or `until`) at `position` is the target
-  // of an indexing assignment such as `end(1) = 5;`, `end(1) += 5;`, `end(1).x = 5;`, or
-  // `until(1) = 5`. Detection: directly followed (after whitespace) by `(`, then a balanced
-  // run to the matching `)`, then either an assignment / compound assignment (covered by
-  // isFollowedByAssignment, which excludes `==`) or a `.` field access — `end(1).x = 5`
-  // assigns to a field of the indexed variable. A trailing `...` (line continuation) after
-  // `)` is not field access and is therefore excluded. String/comment regions are skipped
-  // via `excludedRegions` while scanning the parens body.
-  private isIndexingAssignment(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Skip horizontal whitespace (ASCII + Unicode, e.g. NBSP) and line continuations
-    // (`...<NL>` and `\<NL>`) between the keyword and `(` so `end ...<NL>(1) = 5`,
-    // `end \<NL>(1) = 5`, and `end<NBSP>(1) = 5` are all detected as indexing assignment,
-    // mirroring the single-line `end(1) = 5` form. Skipping only ASCII space/tab misses
-    // these single-logical-line variants and lets the keyword consume an outer opener.
-    const j = skipHorizontalWhitespaceAndContinuations(source, position + keyword.length);
-    if (j >= source.length || source[j] !== '(') return false;
-    // Find the matching `)` ignoring excluded regions and tracking nesting.
+  // Walks a single balanced indexing group `(...)`, `{...}`, or `[...]` starting at
+  // `pos` (which must be the opening delimiter). Returns the offset immediately after
+  // the matching closer, or -1 when the group is unterminated. Nested groups inside
+  // (including mixed `(` / `{` / `[`) are tracked together; excluded regions are
+  // transparent. Used by isIndexingAssignment to chain indexing operations like
+  // `end(1)(2)`, `end{1}.x`, `end(1){2}` (Octave permits `a()()()` style chain
+  // indexing, and `{}` for cell-array indexing).
+  private skipBalancedIndexingGroup(source: string, pos: number, excludedRegions: ExcludedRegion[]): number {
+    const opener = source[pos];
+    if (opener !== '(' && opener !== '{' && opener !== '[') return -1;
     let depth = 1;
-    let k = j + 1;
+    let k = pos + 1;
     while (k < source.length && depth > 0) {
       if (this.isInExcludedRegion(k, excludedRegions)) {
         const region = this.findExcludedRegionAt(k, excludedRegions);
@@ -627,24 +620,59 @@ export class OctaveBlockParser extends MatlabBlockParser {
         }
       }
       const ch = source[k];
-      if (ch === '(') depth++;
-      else if (ch === ')') depth--;
-      if (depth === 0) break;
+      if (ch === '(' || ch === '{' || ch === '[') depth++;
+      else if (ch === ')' || ch === '}' || ch === ']') depth--;
+      if (depth === 0) return k + 1;
       k++;
     }
-    if (depth !== 0) return false;
-    // After the closing `)`, skip horizontal whitespace AND line continuations so
-    // `end(1) ...<NL>= 5` and `end(1)\<NL>.x = 5` are still detected.
-    const after = skipHorizontalWhitespaceAndContinuations(source, k + 1);
-    if (after >= source.length) return false;
-    // Field access (`end(1).x = ...`): a `.` here continues an lvalue, so the keyword is a
-    // variable being indexed and field-assigned, not a block close. `...` (line continuation)
-    // is not field access and must be excluded.
-    if (source[after] === '.' && !(source[after + 1] === '.' && source[after + 2] === '.')) {
+    return -1;
+  }
+
+  // Returns true when the close keyword (`end` or `until`) at `position` is the target
+  // of an indexing assignment such as `end(1) = 5;`, `end(1) += 5;`, `end(1).x = 5;`,
+  // `until(1) = 5`, or the cell-array / chained variants `end{1} = 5`, `end{1}.x = 5`,
+  // `end(1)(2) = 5`, `end(1){2} = 5`, `end[1] = 5`. Detection: directly followed (after
+  // whitespace and continuations) by `(`, `{`, or `[`, then one or more balanced indexing
+  // groups (any mix of `(...)` `{...}` `[...]`, Octave chain-indexing-style), then either
+  // an assignment / compound assignment (covered by isFollowedByAssignment, which excludes
+  // `==`) or a `.` field access — `end(1).x = 5` assigns to a field of the indexed
+  // variable. A trailing `...` (line continuation) after the chain is not field access
+  // and is therefore excluded. String/comment regions are skipped via `excludedRegions`
+  // while scanning each group.
+  private isIndexingAssignment(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Skip horizontal whitespace (ASCII + Unicode, e.g. NBSP) and line continuations
+    // (`...<NL>` and `\<NL>`) between the keyword and the first indexer so
+    // `end ...<NL>(1) = 5`, `end \<NL>(1) = 5`, and `end<NBSP>(1) = 5` are all detected.
+    const j = skipHorizontalWhitespaceAndContinuations(source, position + keyword.length);
+    if (j >= source.length) return false;
+    const firstCh = source[j];
+    if (firstCh !== '(' && firstCh !== '{' && firstCh !== '[') return false;
+    // Walk the first indexing group plus any chained groups: `a()()()`, `a(){}`, `a[](){}`
+    // are all valid Octave indexing chains. After each group we again skip horizontal
+    // whitespace and continuations so `a() ...<NL>(2)` still chains correctly.
+    let after = this.skipBalancedIndexingGroup(source, j, excludedRegions);
+    if (after < 0) return false;
+    for (;;) {
+      const probe = skipHorizontalWhitespaceAndContinuations(source, after);
+      if (probe >= source.length) break;
+      const ch = source[probe];
+      if (ch !== '(' && ch !== '{' && ch !== '[') break;
+      const next = this.skipBalancedIndexingGroup(source, probe, excludedRegions);
+      if (next < 0) return false;
+      after = next;
+    }
+    // After the (possibly chained) indexing groups, skip horizontal whitespace AND line
+    // continuations so `end(1) ...<NL>= 5` and `end(1)\<NL>.x = 5` are still detected.
+    const tail = skipHorizontalWhitespaceAndContinuations(source, after);
+    if (tail >= source.length) return false;
+    // Field access (`end(1).x = ...`, `end{1}.x = ...`): a `.` here continues an lvalue,
+    // so the keyword is a variable being indexed and field-assigned, not a block close.
+    // `...` (line continuation) is not field access and must be excluded.
+    if (source[tail] === '.' && !(source[tail + 1] === '.' && source[tail + 2] === '.')) {
       return true;
     }
     // Plain or compound assignment (`=`, `+=`, `*=`, `.^=`, ... but not `==`).
-    return this.isFollowedByAssignment(source, after);
+    return this.isFollowedByAssignment(source, tail);
   }
 
   // Reject block close keywords used as variable names (end = 5, endif = 1, etc.)
