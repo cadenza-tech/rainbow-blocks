@@ -3736,6 +3736,23 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-23: multi-line wait...for is terminated by semicolon, not continued into next for-loop', () => {
+    test('should pair the for loop opener after multi-line wait for clause', () => {
+      const source = `process
+begin
+  wait
+    for 10 ns;
+  for i in 0 to 7 loop
+    null;
+  end loop;
+end process;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.closeKeyword?.value, 'end loop');
+    });
+  });
+
   suite("Regression 2026-05-23: character literal with backslash inner char doesn't trigger extended identifier", () => {
     test("should treat '\\n' as character literal and not absorb subsequent keywords as extended identifier", () => {
       const source = `x <= '\\n'; entity e is
