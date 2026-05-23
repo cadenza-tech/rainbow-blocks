@@ -4443,6 +4443,38 @@ end`;
     });
   });
 
+  suite('Regression: symbol literals with Unicode characters', () => {
+    test('should recognise Greek letter symbol :Π as excluded region', () => {
+      // Bug: isSymbolStart rejected non-ASCII letters, so `:Π` was not tokenized as a
+      // symbol literal. The body was not added to excluded regions; the subsequent
+      // `end` on the same line was then tokenized as block_close, mis-pairing with the
+      // outer `def` and leaving the real outer `end` orphan.
+      const source = 'def foo\n  x = :Π end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The real outer `end` should be the close, not a stray `end` after the symbol.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should recognise Japanese identifier symbol :日本語 as excluded region', () => {
+      // Bug: simple-symbol identifier match used [a-zA-Z0-9_] only, so `:日本語` ended
+      // at the colon and the body was scanned as code.
+      const source = 'def foo\n  x = :日本語 end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should recognise emoji symbol as excluded region (surrogate pair)', () => {
+      // Bug: surrogate pair (U+1F600 grinning face) was not recognised as a symbol
+      // identifier character.
+      const source = 'def foo\n  x = :\u{1F600} end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: multi-line ternary with end in value position', () => {
     test('should not pair def with stray end in multi-line ternary value position', () => {
       // Bug: in a multi-line ternary expression where `?` and `:` are on different lines,
