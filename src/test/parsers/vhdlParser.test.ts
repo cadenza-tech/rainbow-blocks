@@ -3880,6 +3880,30 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-24: VHDL-2019 view declarations do not pollute surrounding block intermediates', () => {
+    test('should pair view ... end view as its own block without absorbing the enclosing package end', () => {
+      // VHDL-2019 view declaration (LRM 6.5.2.2): `view <name> of <type> is ... end view [<name>];`
+      // The view must not absorb the enclosing package's `end package;` or pollute its
+      // intermediates with the view's own `is`.
+      const source = `package p is
+  view bus_view of bus_record_t is
+    addr : in;
+    data : out;
+  end view;
+end package;`;
+      const pairs = parser.parse(source);
+      // Expect 2 pairs: view → end view (compound), package → end package.
+      assertBlockCount(pairs, 2);
+      const packageBlock = findBlock(pairs, 'package');
+      assert.strictEqual(packageBlock.closeKeyword?.value, 'end package');
+      // Package's intermediates should contain a single `is` (its own header), NOT the view's `is`.
+      const isCount = packageBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, 'expected exactly one is (the package header is) in package intermediates');
+      const viewBlock = findBlock(pairs, 'view');
+      assert.strictEqual(viewBlock.closeKeyword?.value, 'end view');
+    });
+  });
+
   suite('Regression 2026-05-24: attribute reference check tolerates whitespace before the apostrophe', () => {
     test('should reject process as block opener when attribute reference apostrophe is on the next line', () => {
       // VHDL whitespace tolerance: `process'foreign` and `process\n  'foreign` denote the same
