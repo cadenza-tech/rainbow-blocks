@@ -3439,5 +3439,31 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-24: comparison-context class inside record', () => {
+    test('should not treat class in `X = class` comparison as record-context open-block', () => {
+      // `if X = class then` inside a record-embedded begin..end uses `class` as a
+      // comparison-context operand (the magic value of a class reference). The
+      // record-context scan must classify this `class` as 'ignore'; otherwise the
+      // following variant `case` is no longer seen as inside a record and variant-case
+      // suppression breaks (the variant case incorrectly produces its own pair).
+      const source = `type
+  TRec = record
+    procedure M;
+    begin
+      if X = class then DoY;
+    end;
+    case Integer of
+      0: (V: Integer);
+  end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, 'variant case inside a record must not produce its own pair');
+    });
+  });
+
   generateCommonTests(config);
 });
