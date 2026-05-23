@@ -4443,5 +4443,20 @@ end`;
     });
   });
 
+  suite('Regression: end after hash label colon should not pair with surrounding block', () => {
+    test('should not pair def with stray end after hash label colon (x = {a: end})', () => {
+      // Bug: `end` after a hash label colon (e.g., `{a: end}`) was tokenized as block_close
+      // and mis-paired with the outer `def`, leaving the real outer `end` orphan. `end` is
+      // a reserved word and cannot be a hash value, so this is invalid Ruby. Per
+      // cost-minimization (Tree-sitter principle), filter the stray `end` so the real
+      // def/end pair correctly with zero orphans.
+      const source = 'def foo\n  x = {a: end}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The real outer `end` (last occurrence) should be the close, not the inner stray end.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
