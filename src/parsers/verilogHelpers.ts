@@ -467,6 +467,16 @@ export function matchMacroArgList(source: string, pos: number, parenStart: numbe
       let bareNewline = false;
       while (i < source.length && source[i] !== '"') {
         if (source[i] === '\\' && i + 1 < source.length) {
+          const nextChar = source[i + 1];
+          if (nextChar === '\n') {
+            i += 2;
+            continue;
+          }
+          if (nextChar === '\r') {
+            const skip = i + 2 < source.length && source[i + 2] === '\n' ? 3 : 2;
+            i += skip;
+            continue;
+          }
           i += 2;
           continue;
         }
