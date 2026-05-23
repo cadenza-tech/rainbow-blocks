@@ -4418,5 +4418,17 @@ end`;
     });
   });
 
+  suite('Regression: heredoc identifier with Unicode characters', () => {
+    test('should detect heredoc with Japanese identifier and not tokenize body keywords', () => {
+      // Bug: heredoc identifier was matched with ASCII-only regex, so `<<日本語` was not
+      // recognized as a heredoc. The body lines containing `if true\nend` were then
+      // tokenized as a real block, mis-pairing inside the heredoc body.
+      const source = 'foo(<<日本語)\nif true\nend\n日本語\nbar';
+      const pairs = parser.parse(source);
+      // Inner `if true\nend` is heredoc body, so should NOT be tokenized as a block.
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
