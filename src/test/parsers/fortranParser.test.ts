@@ -5824,6 +5824,34 @@ end select`;
     });
   });
 
+  suite('Regression 2026-05-24: select-type guard injection adjacent to unicode letter', () => {
+    test('should not inject type-is intermediate when adjacent to unicode letter', () => {
+      // `étype is (...)` reads as the identifier `étype` followed by `is (...)`.
+      // The non-ASCII letter `é` makes `type is` part of a longer identifier, not a guard.
+      // The injection must reject this position via isAdjacentToUnicodeLetter, mirroring
+      // the behaviour of the bare-keyword tokenizer loop.
+      const source = `select type (x)
+  étype is (integer)
+    y = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'no type-is intermediate must be injected when adjacent to unicode letter');
+    });
+
+    test('should not inject class-is intermediate when adjacent to unicode letter', () => {
+      // Same defense for `αclass is (...)` where the preceding non-ASCII letter `α`
+      // makes the whole `αclass` an identifier.
+      const source = `select type (x)
+  αclass is (integer)
+    y = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'no class-is intermediate must be injected when adjacent to unicode letter');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
