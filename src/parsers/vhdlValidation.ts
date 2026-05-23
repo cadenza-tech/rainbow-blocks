@@ -150,9 +150,19 @@ export function isValidForOpen(source: string, position: number, excludedRegions
       if (isWaitBeforeFor(source, prevLineNoComment, windowStart + prevNl + 1, rawPrevLine, excludedRegions, callbacks)) {
         return false;
       }
+      // A previous line that ends with `;` outside excluded regions terminates the
+      // statement, so it cannot be a continuation of a wait clause or port/generic map.
+      // Without this guard, e.g. `wait\n  for 10 ns;\nfor i in 0 to 7 loop` would be
+      // misread as a 3-line wait statement and the second `for` would be rejected.
+      const prevLineEndsWithSemicolon = lineEndsWithSemicolonOutsideExcluded(
+        windowStart + prevNl + 1 + prevTrimOffset,
+        prevLineNoComment,
+        excludedRegions,
+        callbacks
+      );
       // Continue scanning upward through wait-clause continuation lines (`on signal_list`,
       // `until cond`, `for time`) so a multi-line wait statement is detected as a whole.
-      if (/^[ \t]*(on|until|for)\b/i.test(prevLineNoComment)) {
+      if (!prevLineEndsWithSemicolon && /^[ \t]*(on|until|for)\b/i.test(prevLineNoComment)) {
         if (prevNl <= 0) break;
         scanEnd = prevNl;
         if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
@@ -161,7 +171,7 @@ export function isValidForOpen(source: string, position: number, excludedRegions
         continue;
       }
       // Continue scanning upward through port map / generic map lines
-      if (/\b(port|generic)[ \t]+map\b/.test(prevLineNoComment)) {
+      if (!prevLineEndsWithSemicolon && /\b(port|generic)[ \t]+map\b/.test(prevLineNoComment)) {
         if (prevNl <= 0) break;
         scanEnd = prevNl;
         if (scanEnd > 0 && textBefore[scanEnd - 1] === '\r') {
@@ -938,6 +948,25 @@ function stripTrailingComment(
     }
   }
   return lineText;
+}
+
+// Returns true when the trimmed line text (with trailing comment stripped) ends with `;`,
+// where the `;` is not inside an excluded region. The absolute offset corresponds to the
+// first character of `lineTextNoComment` in the source. Used to detect terminated
+// statements that cannot be continuations of multi-line wait clauses or port/generic maps.
+function lineEndsWithSemicolonOutsideExcluded(
+  lineAbsOffset: number,
+  lineTextNoComment: string,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  for (let ci = lineTextNoComment.length - 1; ci >= 0; ci--) {
+    const ch = lineTextNoComment[ci];
+    if (ch === ' ' || ch === '\t') continue;
+    if (ch !== ';') return false;
+    return !callbacks.isInExcludedRegion(lineAbsOffset + ci, excludedRegions);
+  }
+  return false;
 }
 
 // Checks if 'wait' at the end of line text is a real wait statement
