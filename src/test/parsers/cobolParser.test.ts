@@ -3119,5 +3119,51 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-24: bare COPY before a block-opening verb does not swallow the verb', () => {
+    // Bug: `COPY\nIF X\nEND-IF` (a COPY statement with no copybook name typed yet)
+    // treated the following IF as the copybook name, so the IF token was filtered out
+    // by isInCopyStatement. The trailing END-IF survived as orphan and the IF/END-IF
+    // pair disappeared. Per cost-minimization, when word 0 of a period-less COPY is
+    // itself a block-opening verb and the next significant token is neither `.` nor
+    // `OF`/`IN`, the COPY has no operand and the verb begins a new statement — pair
+    // it with its END-* close instead of dropping the whole block.
+    test('should pair IF with END-IF when a bare COPY precedes the IF', () => {
+      const source = 'COPY\nIF X\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+    test('should pair PERFORM with END-PERFORM when a bare COPY precedes the PERFORM', () => {
+      const source = 'COPY\nPERFORM UNTIL X\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should pair EVALUATE with END-EVALUATE when a bare COPY precedes the EVALUATE', () => {
+      const source = 'COPY\nEVALUATE Z\n  WHEN 1\n    DISPLAY OK\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+    test('should still treat IF as the copybook name when followed by a period', () => {
+      // Guard: `COPY IF.` is a legitimate copybook name that happens to spell a
+      // reserved word, terminated by the period. The IF must NOT be tokenised as a
+      // block opener.
+      const source = 'COPY IF.\nDISPLAY OK';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.some((t) => t.value.toUpperCase() === 'IF'),
+        false
+      );
+    });
+    test('should still treat IF as the copybook name when followed by OF/IN qualifier', () => {
+      // Guard: `COPY IF OF LIB.` is also a legitimate copybook with a library qualifier.
+      const source = 'COPY IF OF LIB.\nDISPLAY OK';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.some((t) => t.value.toUpperCase() === 'IF'),
+        false
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
