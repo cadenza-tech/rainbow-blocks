@@ -30,6 +30,44 @@ export const COPY_TERMINATING_VERBS = new Set([
   'DIVIDE'
 ]);
 
+// Block-middle keywords (uppercase) that end a period-less COPY statement.
+// Mirrors CobolBlockParser.keywords.blockMiddle. WHEN/ELSE always begin a new
+// branch of the enclosing EVALUATE/IF, so a period-less COPY directly followed
+// by WHEN or ELSE must terminate before that keyword — otherwise the COPY
+// swallows the middle keyword (or its surrounding statement) and the enclosing
+// block loses an intermediate or its close.
+export const COPY_TERMINATING_MIDDLE_VERBS = new Set(['WHEN', 'ELSE']);
+
+// Block-closing keywords (uppercase) that end a period-less COPY statement.
+// Mirrors CobolBlockParser.keywords.blockClose. An END-* keyword always begins a
+// new statement (the end of a structured block); without including these here, a
+// period-less COPY directly followed by an END-* keyword swallowed the close as a
+// copybook name (or as the library word after OF/IN), causing the enclosing block
+// pair to disappear.
+export const COPY_TERMINATING_CLOSE_VERBS = new Set([
+  'END-PERFORM',
+  'END-IF',
+  'END-EVALUATE',
+  'END-READ',
+  'END-WRITE',
+  'END-REWRITE',
+  'END-DELETE',
+  'END-START',
+  'END-RETURN',
+  'END-SEARCH',
+  'END-STRING',
+  'END-UNSTRING',
+  'END-ACCEPT',
+  'END-DISPLAY',
+  'END-CALL',
+  'END-INVOKE',
+  'END-COMPUTE',
+  'END-ADD',
+  'END-SUBTRACT',
+  'END-MULTIPLY',
+  'END-DIVIDE'
+]);
+
 // Non-block COBOL Procedure Division verbs (uppercase) that do not open a block
 // pair. A COPY statement accepts only `copybook-name [OF/IN library] [SUPPRESS]
 // [REPLACING ...]`; once one of these statement verbs appears past the copybook
@@ -493,16 +531,33 @@ function findBlockVerbAfterCopy(source: string, copyEnd: number, limit: number, 
         wordIndex++;
         continue;
       }
-      // `COPY name OF lib` / `COPY name IN lib`: the library name is part of COPY.
+      // `COPY name OF lib` / `COPY name IN lib`: the library name follows the
+      // OF/IN qualifier. If what we expected to be the library name is actually
+      // a statement verb (block-opening, non-block, or block-closing), the COPY
+      // ended at OF/IN with no library — the verb begins the next statement.
+      // Without this guard `COPY ABC OF\nEND-IF` swallowed END-IF as the library.
       if (expectLibrary) {
         expectLibrary = false;
+        if (
+          COPY_TERMINATING_VERBS.has(upper) ||
+          COPY_TERMINATING_NONBLOCK_VERBS.has(upper) ||
+          COPY_TERMINATING_CLOSE_VERBS.has(upper) ||
+          COPY_TERMINATING_MIDDLE_VERBS.has(upper)
+        ) {
+          return wordStart;
+        }
         continue;
       }
       if (upper === 'OF' || upper === 'IN') {
         expectLibrary = true;
         continue;
       }
-      if (COPY_TERMINATING_VERBS.has(upper) || COPY_TERMINATING_NONBLOCK_VERBS.has(upper)) {
+      if (
+        COPY_TERMINATING_VERBS.has(upper) ||
+        COPY_TERMINATING_NONBLOCK_VERBS.has(upper) ||
+        COPY_TERMINATING_CLOSE_VERBS.has(upper) ||
+        COPY_TERMINATING_MIDDLE_VERBS.has(upper)
+      ) {
         return wordStart;
       }
       wordIndex++;

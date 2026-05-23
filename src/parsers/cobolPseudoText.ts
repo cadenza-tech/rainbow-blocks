@@ -3,7 +3,13 @@
 import type { ExcludedRegion } from '../types';
 import { isFixedFormatCommentLine } from './cobolFixedFormat';
 import type { CobolHelperCallbacks } from './cobolHelpers';
-import { COPY_TERMINATING_NONBLOCK_VERBS, COPY_TERMINATING_VERBS, matchExecBlock } from './cobolHelpers';
+import {
+  COPY_TERMINATING_CLOSE_VERBS,
+  COPY_TERMINATING_MIDDLE_VERBS,
+  COPY_TERMINATING_NONBLOCK_VERBS,
+  COPY_TERMINATING_VERBS,
+  matchExecBlock
+} from './cobolHelpers';
 import { isInExcludedRegion } from './parserUtils';
 
 // Single-pass scan to collect all period positions that are not inside
@@ -97,9 +103,21 @@ export function findBlockVerbAfterCopybook(
       continue;
     }
     // `COPY name OF lib` / `COPY name IN lib`: the library name follows the
-    // OF/IN qualifier and is also part of the COPY statement.
+    // OF/IN qualifier and is also part of the COPY statement. If what we expected
+    // to be the library name is itself a statement verb (block-opening, non-block,
+    // or block-closing END-*), the COPY ended at OF/IN with no library — the verb
+    // begins the next statement. Without this guard `IF X\nCOPY ABC OF\nEND-IF`
+    // swallowed END-IF as the library name.
     if (expectLibrary) {
       expectLibrary = false;
+      if (
+        blockOpen.some((kw) => kw === upper.toLowerCase()) ||
+        COPY_TERMINATING_NONBLOCK_VERBS.has(upper) ||
+        COPY_TERMINATING_CLOSE_VERBS.has(upper) ||
+        COPY_TERMINATING_MIDDLE_VERBS.has(upper)
+      ) {
+        return wordPos;
+      }
       match = WORD_PATTERN.exec(source);
       continue;
     }
@@ -108,15 +126,19 @@ export function findBlockVerbAfterCopybook(
       match = WORD_PATTERN.exec(source);
       continue;
     }
-    // A statement verb (block-opening or not) after the copybook name ends the
-    // COPY statement. Mirrors findBlockVerbAfterCopy in cobolHelpers.ts and the
-    // getPseudoTextStarts scan further below, which both already accept either
-    // COPY_TERMINATING_VERBS (block-opening) or COPY_TERMINATING_NONBLOCK_VERBS
-    // (MOVE, SET, STOP, OPEN, CLOSE, CONTINUE, ...) as the boundary. Without
-    // including the non-block set here, isInCopyStatement extended a
-    // period-less COPY past a following MOVE/SET/etc. line, hiding the body
-    // (and END-keywords) of the following block from tokenisation.
-    if (blockOpen.some((kw) => kw === upper.toLowerCase()) || COPY_TERMINATING_NONBLOCK_VERBS.has(upper)) {
+    // A statement verb (block-opening, non-block, or block-closing) after the
+    // copybook name ends the COPY statement. Mirrors findBlockVerbAfterCopy in
+    // cobolHelpers.ts and the getPseudoTextStarts scan further below, which both
+    // accept the same three sets as the boundary. Without including the
+    // block-closing set here, a period-less COPY directly followed by an END-*
+    // keyword swallowed the close as the copybook name, dropping the enclosing
+    // block pair.
+    if (
+      blockOpen.some((kw) => kw === upper.toLowerCase()) ||
+      COPY_TERMINATING_NONBLOCK_VERBS.has(upper) ||
+      COPY_TERMINATING_CLOSE_VERBS.has(upper) ||
+      COPY_TERMINATING_MIDDLE_VERBS.has(upper)
+    ) {
       return wordPos;
     }
     wordIndex++;
@@ -291,16 +313,33 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
         // Words inside an in-progress COPY statement. word 0 is the copybook
         // name; `OF`/`IN <lib>` may qualify it. Any statement verb past the
         // copybook name ends a period-less COPY, so drop sawCopy — this stops
-        // a later REPLACING from being treated as part of this COPY. Both
-        // block-opening verbs (IF, PERFORM, ...) and non-block verbs (MOVE,
-        // SET, ...) end the COPY; only data-name words are walked over.
+        // a later REPLACING from being treated as part of this COPY. Block-opening
+        // verbs (IF, PERFORM, ...), non-block verbs (MOVE, SET, ...), and
+        // block-closing END-* keywords all end the COPY; only data-name words
+        // are walked over. The expected library slot ends the same way: if the
+        // word that should have been the library name is itself a statement verb,
+        // the COPY ended at OF/IN with no library and the verb starts the next
+        // statement.
         if (copyWordsSeen === 0) {
           copyWordsSeen = 1;
         } else if (expectCopyLibrary) {
           expectCopyLibrary = false;
+          if (
+            COPY_TERMINATING_VERBS.has(word) ||
+            COPY_TERMINATING_NONBLOCK_VERBS.has(word) ||
+            COPY_TERMINATING_CLOSE_VERBS.has(word) ||
+            COPY_TERMINATING_MIDDLE_VERBS.has(word)
+          ) {
+            sawCopy = false;
+          }
         } else if (word === 'OF' || word === 'IN') {
           expectCopyLibrary = true;
-        } else if (COPY_TERMINATING_VERBS.has(word) || COPY_TERMINATING_NONBLOCK_VERBS.has(word)) {
+        } else if (
+          COPY_TERMINATING_VERBS.has(word) ||
+          COPY_TERMINATING_NONBLOCK_VERBS.has(word) ||
+          COPY_TERMINATING_CLOSE_VERBS.has(word) ||
+          COPY_TERMINATING_MIDDLE_VERBS.has(word)
+        ) {
           sawCopy = false;
         } else {
           copyWordsSeen++;
