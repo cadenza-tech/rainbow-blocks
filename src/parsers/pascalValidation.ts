@@ -318,9 +318,11 @@ function recordContextKeywordRole(
         }
       } else {
         // Skip 'class' as method modifier (followed by function, procedure, var, etc.)
+        // Also handles `class const`, `class type`, `class threadvar` (Delphi/FreePascal
+        // class-level declarations) so they are not classified as block openers.
         const cj = skipWsExcludedForward(source, keywordStart + 6, excludedRegions, callbacks);
         const afterClass = lowerSource.slice(cj, cj + 12);
-        if (/^(function|procedure|var|property|constructor|destructor|operator)\b/.test(afterClass)) {
+        if (/^(function|procedure|var|property|constructor|destructor|operator|threadvar|type|const)\b/.test(afterClass)) {
           return 'ignore';
         }
       }
