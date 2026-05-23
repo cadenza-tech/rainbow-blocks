@@ -3736,6 +3736,44 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-23: concurrent assertion when condition not added to case intermediates', () => {
+    test('should not include trailing when of assert-when inside case branch as case intermediate', () => {
+      const source = `architecture a of e is
+begin
+  process(clk) begin
+    case x is
+      when 0 =>
+        assert y = 1 severity error when go;
+        sig <= '0';
+      when others =>
+        sig <= '1';
+    end case;
+  end process;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assertIntermediates(caseBlock, ['is', 'when', 'when']);
+    });
+
+    test('should not include assert-when even with sequential assert (no severity clause)', () => {
+      const source = `architecture a of e is
+begin
+  process begin
+    case x is
+      when 0 =>
+        assert ready when go;
+        sig <= '0';
+      when others =>
+        sig <= '1';
+    end case;
+  end process;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assertIntermediates(caseBlock, ['is', 'when', 'when']);
+    });
+  });
+
   suite('Regression 2026-05-23: multi-line is intermediate retained for package body with null body', () => {
     test('should keep is intermediate for package body p\\nis\\n  null;', () => {
       const source = `package body p
