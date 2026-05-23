@@ -390,10 +390,54 @@ export function isValidLoopOpen(source: string, position: number, excludedRegion
 // back to offset 0) degrade to O(n^2).
 const MAX_PAREN_SCAN_CHARS = 2048;
 
+// Scans forward from `position` and returns true if the position is enclosed
+// by an unmatched `)` ahead — i.e., a `)` appears before any top-level `;`,
+// without a balancing `(` between `position` and that `)`. Used to recognize
+// when a backward-scan `;` is actually a parameter-list separator (e.g.,
+// `F(X : Integer; Y : Integer := if A then 0 else 1)`) rather than a real
+// statement terminator. Bounded by MAX_PAREN_SCAN_CHARS to keep the call O(1)
+// per use, matching the backward-scan bound.
+function isEnclosedByForwardCloseParen(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: AdaValidationCallbacks
+): boolean {
+  let depth = 0;
+  let scanned = 0;
+  for (let i = position; i < source.length; i++) {
+    scanned++;
+    if (scanned > MAX_PAREN_SCAN_CHARS) return false;
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end - 1;
+        continue;
+      }
+    }
+    const ch = source[i];
+    if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      if (depth === 0) return true;
+      depth--;
+    } else if (ch === ';' && depth === 0) {
+      return false;
+    }
+  }
+  return false;
+}
+
 // Checks if position is inside parentheses using proper nesting tracking
 // Ada 2012 conditional/case expressions can appear inside any parentheses,
 // including function call arguments: F(X, if A > 0 then B else C)
 export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: AdaValidationCallbacks): boolean {
+  // Pre-check via forward scan: if a `)` ahead is unmatched at our depth, the
+  // position is inside parens regardless of what the backward scan finds.
+  // This handles parameter lists that use `;` as a separator, where the naive
+  // backward scan would otherwise see the `;` at depth 0 and conclude (wrongly)
+  // that we are at statement-top-level.
+  const enclosedByForwardClose = isEnclosedByForwardCloseParen(source, position, excludedRegions, callbacks);
   let parenDepth = 0;
   let crossedNewline = false;
   let scannedChars = 0;
@@ -417,7 +461,13 @@ export function isInsideParens(source: string, position: number, excludedRegions
     // cannot span a statement boundary, so at paren depth 0 a `;` means the
     // position is not inside parentheses. This also bounds the scan to the
     // current statement.
-    if (ch === ';' && parenDepth === 0) {
+    //
+    // Exception: a parameter list (`procedure F(X : Integer; Y : Integer := ...) is`)
+    // uses `;` as an intra-paren separator. When the forward scan already
+    // confirmed an enclosing `)` ahead with no top-level `;` before it, this
+    // `;` cannot be a real statement terminator — keep scanning so the matching
+    // `(` (when reachable within the bound) is found.
+    if (ch === ';' && parenDepth === 0 && !enclosedByForwardClose) {
       return false;
     }
     if (ch === ')') {
