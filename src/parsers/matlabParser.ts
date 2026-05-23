@@ -110,6 +110,14 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (keyword === 'end' && this.isPrecededByCaseOrOtherwiseOnLogicalLine(source, position, excludedRegions)) {
       return false;
     }
+    // Reject end appearing on the same logical line as a leading `if`/`elseif`/`while`/
+    // `switch` keyword (`if end != 0`, `while end == n`, `switch end`). The `end` here is
+    // part of the header expression, not a block close. Without this guard the header
+    // `end` is wrongly matched as the closer of the same if/while/switch (consuming the
+    // real block close), destroying the outer block pairing.
+    if (keyword === 'end' && this.isInsideHeaderExpressionOnSameLine(source, position, excludedRegions)) {
+      return false;
+    }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
@@ -177,6 +185,62 @@ export class MatlabBlockParser extends BaseBlockParser {
       return false;
     }
     return true;
+  }
+
+  // Header keywords that take an expression on the same logical line. When `end`
+  // appears later on the same logical line as one of these leading keywords, it is part
+  // of the header expression rather than a block close. Lowercase comparison.
+  private static readonly HEADER_EXPRESSION_KEYWORDS = new Set(['if', 'elseif', 'while', 'switch']);
+
+  // Returns true when the `end` at `position` sits on the same logical line as a leading
+  // `if`/`elseif`/`while`/`switch` keyword (possibly after horizontal whitespace and
+  // `...`/`\` line continuations at line start). Such `end` is part of the header
+  // expression (e.g. `if end != 0`, `switch end`), not the block close.
+  // Generalises the earlier case/otherwise check: same shape (find the leading identifier
+  // on the logical line, verify the keyword name), but the leading identifier must be one
+  // of the header keywords above. Octave overrides HEADER_EXPRESSION_KEYWORDS via
+  // getHeaderExpressionKeywords to add `until`.
+  protected isInsideHeaderExpressionOnSameLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.statementStartAtPos === null) {
+      return false;
+    }
+    const clamped = position < 0 ? 0 : position >= this.statementStartAtPos.length ? this.statementStartAtPos.length - 1 : position;
+    const lineStart = this.statementStartAtPos[clamped];
+    // Scan forward from lineStart through leading whitespace and `...`/`\` continuation
+    // regions to reach the first significant token on the logical line.
+    let i = lineStart;
+    while (i < position) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\v' || ch === '\f') {
+        i++;
+        continue;
+      }
+      break;
+    }
+    if (i >= position) {
+      return false;
+    }
+    // The leading run must be an identifier; otherwise it's not a header keyword.
+    if (!/[a-zA-Z_]/.test(source[i])) {
+      return false;
+    }
+    const identStart = i;
+    while (i < position && /[a-zA-Z0-9_]/.test(source[i])) {
+      i++;
+    }
+    const leading = source.slice(identStart, i).toLowerCase();
+    return this.getHeaderExpressionKeywords().has(leading);
+  }
+
+  // Returns the set of header keywords whose `end` operands must be rejected as block
+  // closes. Overridable for Octave (adds `until` for the `do...until <expr>` form).
+  protected getHeaderExpressionKeywords(): Set<string> {
+    return MatlabBlockParser.HEADER_EXPRESSION_KEYWORDS;
   }
 
   // Returns true when the keyword at `position` is the argument of a command-syntax
