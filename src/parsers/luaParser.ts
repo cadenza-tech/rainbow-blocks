@@ -441,6 +441,10 @@ export class LuaBlockParser extends BaseBlockParser {
         // \<newline> is a line continuation
         if (next === '\n') {
           i += 2;
+          // \n\r counts as single newline continuation (mirror of \r\n)
+          if (i < source.length && source[i] === '\r') {
+            i++;
+          }
           continue;
         }
         if (next === '\r') {
