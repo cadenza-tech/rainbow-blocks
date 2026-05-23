@@ -3519,6 +3519,36 @@ end error`;
     });
   });
 
+  suite('Bug AS-LOW-2: handler declaration probe should handle Unicode whitespace between continuation and newline', () => {
+    test('should pair on with end when continuation is followed by NBSP before newline', () => {
+      const NBSP = '\u00a0';
+      const source = `on ¬${NBSP}\n  myHandler()\n  beep\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should pair on with end when continuation is followed by IDEOGRAPHIC SPACE before newline', () => {
+      const IDEO = '\u3000';
+      const source = `on ¬${IDEO}\n  myHandler()\n  beep\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should pair on with end when continuation is followed by ZWSP before newline', () => {
+      const ZWSP = '\u200b';
+      const source = `on ¬${ZWSP}\n  myHandler()\n  beep\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should pair to with end when continuation is followed by NBSP before newline', () => {
+      const NBSP = '\u00a0';
+      const source = `to ¬${NBSP}\n  myHandler()\n  beep\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+  });
+
   suite('Bug AS-MEDIUM-2: if(condition) function-call form should not open a block', () => {
     test('should not treat if(x) as a block open inside a handler body', () => {
       const source = `on run
