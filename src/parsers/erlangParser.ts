@@ -1134,7 +1134,14 @@ export class ErlangBlockParser extends BaseBlockParser {
     // outside nested function calls. Tuple braces ({...}), list brackets ([...]) and
     // grouping parens ((...)) inside the body still hold real expressions too: a real
     // block (fun(...)/begin/case...) is recognized while a bare reserved word stays filtered.
-    if (attrName === 'define' && sawCommaAtTopLevel && !insideNestedCall) {
+    // Nested function calls (e.g. list:map(fun(X) -> X end, L)) also contain real
+    // expressions when wrapped in a -define body, so the opener-stack analysis applies.
+    if (attrName === 'define' && sawCommaAtTopLevel) {
+      if (insideNestedCall) {
+        // Inside a nested call inside -define body: filter only bare reserved words; a real
+        // anonymous fun (fun followed by '(') paired with its matching 'end' must remain.
+        return this.isBareReservedWordInDefineBody(source, pos, span, excludedRegions);
+      }
       // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
       // itself, so it's a reserved-word reference, not a real block opener.
       if (!insideUnmatchedBrace && !insideUnmatchedList && !insideGroupingParen && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
