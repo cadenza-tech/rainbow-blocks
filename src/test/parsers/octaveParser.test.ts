@@ -2435,5 +2435,29 @@ end`;
     });
   });
 
+  suite('Regression: typed-close followed by continuation', () => {
+    test('should treat endif ...<NL> as block close (continuation is not trailing content)', () => {
+      // `endif ...<NL>` ends the if-statement; the trailing `...` is a line continuation
+      // to the (empty) next physical line and is not real content. Without skipping the
+      // continuation, the typed-close trailing-content check rejects `endif` and the
+      // if-block is dropped.
+      const source = 'if true\n  x = 1;\n  endif ...\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should treat endif \\<NL> as block close (backslash continuation)', () => {
+      const source = 'if true\n  x = 1;\n  endif \\\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should treat endfor ...<NL> as block close', () => {
+      const source = 'for i = 1:3\n  x = i;\n  endfor ...\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'endfor');
+    });
+  });
+
   generateCommonTests(config);
 });
