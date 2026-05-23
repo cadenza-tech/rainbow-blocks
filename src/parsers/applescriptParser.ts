@@ -427,11 +427,18 @@ export class ApplescriptBlockParser extends BaseBlockParser {
 
       // Reject compound block openers/middles followed by `(` (with optional whitespace) — these
       // are function call forms (e.g., `with timeout(5)`, `with timeout (5)`, `on error()`)
-      // rather than block keywords.
+      // rather than block keywords. For compound keywords whose first word is itself a
+      // single-word opener (`on error` -> `on`, `else if` -> `else`), break out of the
+      // compound loop so the caller falls back to the single-word matcher. That lets
+      // `on error()` be parsed as a handler declaration named `error` rather than
+      // swallowing the whole `on error` span and discarding the bare `on` opener.
       if (type === 'block_open' || type === 'block_middle') {
         let parenScan = flexMatch;
         while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
         if (parenScan < source.length && source[parenScan] === '(') {
+          if (keyword === 'on error' || keyword === 'else if') {
+            return null;
+          }
           return { nextPos: flexMatch };
         }
       }
