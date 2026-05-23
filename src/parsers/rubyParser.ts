@@ -838,11 +838,22 @@ export class RubyBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Symbol must start with letter, underscore, quote, or operator character
-    // Operator symbols: :+, :-, :*, :/, :%, :**, :<, :>, :<=, :>=, :==, :===,
-    // :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>, :[], :[]=, :-@, :+@, :`
-    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^[`]/.test(nextChar)) {
-      return false;
+    // Symbol must start with letter, underscore, quote, or operator character.
+    // Ruby permits non-ASCII letters in identifiers, so accept Unicode Letter (L)
+    // characters as well (e.g. `:Π`, `:日本語`). For codepoints outside the BMP
+    // (surrogate pair, e.g. emoji `:😀`), check the full codepoint against the
+    // identifier-extend categories. Operator symbols: :+, :-, :*, :/, :%, :**,
+    // :<, :>, :<=, :>=, :==, :===, :<=>, :!=, :=~, :!~, :&, :|, :^, :~, :<<, :>>,
+    // :[], :[]=, :-@, :+@, :`
+    if (!/[a-zA-Z_"'+\-*/%<>=!~&|^[`\p{L}]/u.test(nextChar)) {
+      if (nextChar < '\uD800' || nextChar > '\uDBFF' || pos + 2 >= source.length) {
+        return false;
+      }
+      // High surrogate followed by a low surrogate: check the full codepoint.
+      const cp = source.codePointAt(pos + 1);
+      if (cp === undefined || cp <= 0xffff || !/[\p{L}\p{M}\p{N}\p{Pc}\p{So}\p{Sk}\p{Sm}]/u.test(String.fromCodePoint(cp))) {
+        return false;
+      }
     }
 
     // Colon after another colon is scope resolution (::), not symbol
@@ -850,10 +861,11 @@ export class RubyBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Colon after identifier/number/bracket is ternary, not symbol
+    // Colon after identifier/number/bracket is ternary, not symbol. Use Unicode
+    // letter/number classes so non-ASCII identifiers before `:` are recognised.
     if (pos > 0) {
       const prevChar = source[pos - 1];
-      if (/[a-zA-Z0-9_)\]}]/.test(prevChar)) {
+      if (/[a-zA-Z0-9_)\]}\p{L}\p{M}\p{N}]/u.test(prevChar)) {
         return false;
       }
     }
@@ -928,7 +940,10 @@ export class RubyBlockParser extends BaseBlockParser {
       return { start: pos, end: i };
     }
 
-    // Simple symbol
+    // Simple symbol. Ruby permits non-ASCII letters in identifiers, so accept Unicode
+    // identifier-continue characters as well (\p{L} letter, \p{M} mark, \p{N} number,
+    // \p{Pc} connector punctuation). Surrogate pairs (codepoints > U+FFFF, e.g. emoji)
+    // are advanced as a pair so they are included in the matched range.
     let i = pos + 1;
     while (i < source.length) {
       const char = source[i];
@@ -940,6 +955,21 @@ export class RubyBlockParser extends BaseBlockParser {
       if (char === '?' || char === '!') {
         i++;
         break;
+      }
+      // High surrogate: check the full codepoint against the Unicode identifier-extend
+      // categories and advance by two code units when accepted.
+      if (char >= '\uD800' && char <= '\uDBFF' && i + 1 < source.length) {
+        const cp = source.codePointAt(i);
+        if (cp !== undefined && cp > 0xffff && /[\p{L}\p{M}\p{N}\p{Pc}\p{So}\p{Sk}\p{Sm}]/u.test(String.fromCodePoint(cp))) {
+          i += 2;
+          continue;
+        }
+        break;
+      }
+      // BMP non-ASCII identifier-continue (Letter / Mark / Number / Connector Punctuation)
+      if (/[\p{L}\p{M}\p{N}\p{Pc}]/u.test(char)) {
+        i++;
+        continue;
       }
       break;
     }
