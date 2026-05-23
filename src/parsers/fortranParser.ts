@@ -1215,6 +1215,14 @@ export class FortranBlockParser extends BaseBlockParser {
             phraseEnd--;
           }
         }
+        // Reject when the guard phrase is adjacent to a non-ASCII Unicode identifier
+        // continuation character (e.g., `étype is (...)` reads `étype` as one identifier).
+        // The bare-keyword tokenizer applies the same check; the guard injection must
+        // mirror it to avoid emitting a phantom block_middle from inside an identifier.
+        if (this.isAdjacentToUnicodeLetter(source, pos, phraseEnd)) {
+          guardMatch = SELECT_TYPE_GUARD_PATTERN.exec(source);
+          continue;
+        }
         const phrase = source.slice(pos, pos + phraseEnd);
         const { line, column } = this.getLineAndColumn(pos, newlinePositions);
         result.push({
