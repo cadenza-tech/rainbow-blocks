@@ -97,8 +97,79 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (keyword === 'end' && this.isCommandSyntaxArgument(source, position, excludedRegions)) {
       return false;
     }
+    // Reject end used as the value of a switch `case`/`otherwise` arm (`case end`,
+    // `otherwise end`). `end` here is an operand in expression context (the case value),
+    // not a block close. Treating it as block_close destroys the outer switch/end pair.
+    if (keyword === 'end' && this.isPrecededByCaseOrOtherwiseOnLogicalLine(source, position, excludedRegions)) {
+      return false;
+    }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
+  }
+
+  // Returns true when the `end` at `position` is the (sole) value of a `case` /
+  // `otherwise` arm on the current logical line. Walks backward through whitespace
+  // and `...`/`\` line-continuation regions to find the immediately preceding
+  // identifier, then checks whether that identifier is `case` or `otherwise` and
+  // sits at the very start of the logical line (allowing only leading whitespace).
+  // The leading-whitespace check ensures forms like `x = case` (no real case at line
+  // start) are NOT rejected — though those are caught by the operand-context check above.
+  private isPrecededByCaseOrOtherwiseOnLogicalLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.statementStartAtPos === null) {
+      return false;
+    }
+    const clamped = position < 0 ? 0 : position >= this.statementStartAtPos.length ? this.statementStartAtPos.length - 1 : position;
+    const lineStart = this.statementStartAtPos[clamped];
+    // Walk backward from position - 1 to find the immediately preceding identifier.
+    let i = position - 1;
+    while (i >= lineStart) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
+        i = region.start - 1;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < lineStart) {
+      return false;
+    }
+    // Scan backward over identifier characters to find the start of the preceding word.
+    if (!/[a-zA-Z0-9_]/.test(source[i])) {
+      return false;
+    }
+    const identEnd = i + 1;
+    let identStart = i;
+    while (identStart > lineStart && /[a-zA-Z0-9_]/.test(source[identStart - 1])) {
+      identStart--;
+    }
+    const word = source.slice(identStart, identEnd);
+    if (word !== 'case' && word !== 'otherwise') {
+      return false;
+    }
+    // Ensure that `case`/`otherwise` itself is at the start of the logical line
+    // (only whitespace and continuation regions before it). Without this guard,
+    // `disp case end` would also match, but command-syntax `end` is already filtered
+    // by isCommandSyntaxArgument, so this is a defensive consistency check.
+    let j = identStart - 1;
+    while (j >= lineStart) {
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\')) {
+        j = region.start - 1;
+        continue;
+      }
+      const ch = source[j];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        j--;
+        continue;
+      }
+      return false;
+    }
+    return true;
   }
 
   // Returns true when the keyword at `position` is the argument of a command-syntax
