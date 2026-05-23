@@ -4796,6 +4796,23 @@ end program`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
     });
+
+    test('should not treat end after .myverylongop. (12-char operator) as block_close', () => {
+      // User-defined operator names may be up to 63 chars per Fortran spec. The dot-operator
+      // detector must scan back to the matching `.` rather than capping at a fixed slice
+      // length (previously 7 chars). Without the fix, operators longer than 5 characters
+      // were not recognized and the trailing `end` was treated as a real block close.
+      const source = 'program test\n  integer :: end\n  end = 5\n  x = y .myverylongop. end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should not treat end after long user-defined operator (10-char name) as block_close', () => {
+      // Another long user-defined operator name (10 chars excluding dots).
+      const source = 'program test\n  integer :: end\n  end = 5\n  x = y .extendedop. end\nend program';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
   });
 
   suite('Regression 2026-05-08: bare end inside select case must not close the select block', () => {
