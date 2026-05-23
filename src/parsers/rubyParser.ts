@@ -525,9 +525,10 @@ export class RubyBlockParser extends BaseBlockParser {
   // Checks if `end` at position is in expression value position on the same physical line:
   // immediately preceded (skipping spaces/tabs and excluded regions) by an opening bracket
   // (`(`, `[`, `{`) or a binary operator (`=` not part of `==`/`=~`/`=>`, `,`, `+`, `-`,
-  // `*`, `/`, `%`, `<`, `>`, `&`, `|`, `^`, `~`, `!`). Since `end` is a reserved word and
-  // cannot appear in expression position, such occurrences are invalid Ruby — e.g.,
-  // `def foo(end)`, `[end]`, `x = /pat/ end`, `x = end`. The scan stops at the physical
+  // `*`, `/`, `%`, `<`, `>`, `&`, `|`, `^`, `~`, `!`), or by a hash label colon
+  // (`identifier:`, e.g. `{a: end}`). Since `end` is a reserved word and cannot appear
+  // in expression position, such occurrences are invalid Ruby — e.g., `def foo(end)`,
+  // `[end]`, `x = /pat/ end`, `x = end`, `{a: end}`. The scan stops at the physical
   // line start (`\n`, `\r`) or at a `;`, both of which are valid statement separators
   // after which `end` is legitimate.
   private isEndInExpressionPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -585,6 +586,22 @@ export class RubyBlockParser extends BaseBlockParser {
       // also an operator char that we've already classified as expression position. So
       // returning true here is safe (assignment is also expression position).
       return true;
+    }
+    // Hash label colon: `identifier:` followed by value (e.g., `{a: end}`). A label colon
+    // is identified by an identifier character immediately before `:` (no whitespace) and
+    // no second `:` on either side (which would be scope resolution `::`). Ternary colons
+    // are whitespace-surrounded and are handled by isEndInTernaryValuePosition; reaching
+    // here means the colon is glued to the previous identifier, so it is a label.
+    if (ch === ':') {
+      // Reject scope resolution `::` (colon adjacent to another colon on either side)
+      if (source[i - 1] === ':' || source[i + 1] === ':') {
+        return false;
+      }
+      // Require an identifier character immediately before the colon (label syntax)
+      if (i >= 1 && /[a-zA-Z0-9_]/.test(source[i - 1])) {
+        return true;
+      }
+      return false;
     }
     return false;
   }
