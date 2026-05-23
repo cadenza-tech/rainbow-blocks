@@ -640,6 +640,21 @@ export class VerilogBlockParser extends BaseBlockParser {
     return isEnclosingBlockCase(source, labelWord.wordStart - 1, excludedRegions, this.keywords, this.validationCallbacks);
   }
 
+  // Returns true when a keyword at `position` is being used as the case_item label
+  // NAME itself: the keyword is immediately followed by a single `:` (not `::`)
+  // AND the enclosing block is a case statement. The case_item label is an
+  // identifier expression and reserved words cannot legitimately be identifiers,
+  // so the keyword must be treated as a misused label name rather than a real
+  // block opener/closer. Restricted to case context because outside a case,
+  // `<keyword> : <name>` is the named-block syntax where the leading keyword
+  // really does open a block.
+  private isCaseItemLabelName(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (!isFollowedByLabelColon(source, position, keywordLength, excludedRegions)) {
+      return false;
+    }
+    return isEnclosingBlockCase(source, position - 1, excludedRegions, this.keywords, this.validationCallbacks);
+  }
+
   // Validates block open: control keywords need a following 'begin' to be valid
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     // Reject keywords preceded by dot (hierarchical reference like inst.begin, .begin(signal))
@@ -730,6 +745,16 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Inside a case statement, reject any block_open keyword used as a case_item
+    // label NAME (e.g., `case (s) module: x = 1;`). The case_item label is an
+    // identifier expression and reserved words cannot legitimately be identifiers.
+    // Without this check the keyword would be tokenized and pair with a later
+    // close keyword, breaking the BlockPair set. Restricted to case context so
+    // outside a case the named-block `<keyword> : <name>` form still opens a block.
+    if (!CONTROL_KEYWORDS.includes(keyword) && this.isCaseItemLabelName(source, position, keyword.length, excludedRegions)) {
+      return false;
+    }
+
     // Reject modifier-prefixed keywords (extern module/function/task, typedef class, pure virtual function/task)
     if (isPrecededByModifierKeyword(source, position, keyword, excludedRegions, this.validationCallbacks)) {
       return false;
@@ -802,6 +827,15 @@ export class VerilogBlockParser extends BaseBlockParser {
     // (e.g., `int endmodule;` — endmodule is an illegal variable name preceded by `int`,
     // or `reg [7:0] endmodule;` — same with packed dimension specifier).
     if (this.isPrecededByDataTypeKeyword(source, position, keyword, excludedRegions)) {
+      return false;
+    }
+
+    // Inside a case statement, reject any block_close keyword used as a case_item
+    // label NAME (e.g., `case (s) endcase: x = 1;`). The case_item label is an
+    // identifier expression and reserved words cannot legitimately be identifiers.
+    // Without this check the close keyword would prematurely pair with an earlier
+    // open, breaking the outer case/endcase BlockPair.
+    if (this.isCaseItemLabelName(source, position, keyword.length, excludedRegions)) {
       return false;
     }
 
