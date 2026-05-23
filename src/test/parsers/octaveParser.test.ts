@@ -2342,5 +2342,28 @@ end`;
     });
   });
 
+  suite('Regression: block_open keyword followed by backslash line continuation', () => {
+    test('should accept if followed by backslash line continuation before condition', () => {
+      // `if \<NL>true` — the backslash is Octave's line continuation, not the left-division
+      // operator. Without skipping the continuation, the parent's binary-operator check sees
+      // `\` and rejects `if` as a block opener, dropping the if/end pair.
+      const source = 'if \\\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should accept while followed by backslash line continuation before condition', () => {
+      const source = 'while \\\n  cond\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should accept for followed by backslash line continuation before iterator', () => {
+      const source = 'for \\\n  i = 1:3\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
