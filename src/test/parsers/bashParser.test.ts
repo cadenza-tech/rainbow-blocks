@@ -4111,10 +4111,14 @@ fi`;
     // Line 156: <<( should not be treated as process substitution
     // When matchHeredoc fails for <<( (invalid delimiter), the ( is checked
     // for process substitution. The <<( guard prevents false matching.
+    // The unmatched `(` opens a subshell scope that contains `done` but not
+    // `for`; the subshell-scope barrier rejects the cross-scope pairing
+    // (anchor-set principle), so no pair is produced. Coverage of the <<(
+    // guard branch is exercised by parsing without crashing.
     test('should not treat <<( as process substitution', () => {
       const source = 'for i in 1; do\n  echo <<(\ndone';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'for', 'done');
+      assertNoBlocks(pairs);
     });
 
     test('should not treat ${# as comment start (isParameterExpansion)', () => {
@@ -6271,6 +6275,66 @@ fi`;
       // is a real command, so `}` closes the command group.
       const pairs = parser.parse('{ (echo)}');
       assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
+  suite('Regression: subshell scope must not cross-pair block keywords', () => {
+    // A subshell `(...)` is an independent scope: a `done`/`fi`/`esac` inside the
+    // subshell cannot pair with an opener outside it, and vice versa. Pre-fix the
+    // outer `for` cross-paired with the inner orphan `done` because matchBlocks
+    // walked the entire stack without seeing the subshell boundary.
+    test('should not cross-pair outer for with done inside subshell', () => {
+      const source = 'for i in 1; do\n  (echo; done)\ndone\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      // The matched done is the outer one (line 2, 0-indexed), not the one inside the subshell.
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not cross-pair outer if with fi inside subshell', () => {
+      const source = 'if true; then\n  (echo; fi)\nfi\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not cross-pair outer case with esac inside subshell', () => {
+      const source = 'case $x in\n  a) (echo; esac);;\nesac\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should not cross-pair done inside subshell with for outside', () => {
+      // Reverse direction: an orphan `done` inside `(...)` followed by a real
+      // for/done pair outside; the inner `done` must not steal the outer for.
+      const source = '(done)\nfor i in 1; do echo; done\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should still pair if/fi entirely inside a subshell', () => {
+      const source = '(if true; then echo; fi)\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still pair for/done entirely inside a subshell', () => {
+      const source = '(for i in 1; do echo; done)\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should pair if/fi and for/done in nested subshell independently', () => {
+      // Each subshell scope contains its own complete pair; neither leaks past the
+      // surrounding subshell boundaries.
+      const source = '(if true; then echo; fi)\n(for i in 1; do echo; done)\n';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(ifPair.closeKeyword.value, 'fi');
+      assert.strictEqual(forPair.closeKeyword.value, 'done');
     });
   });
 
