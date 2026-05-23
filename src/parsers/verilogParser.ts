@@ -18,6 +18,7 @@ import type { VerilogValidationCallbacks } from './verilogValidation';
 import {
   getPrecedingLabelColonWord,
   isEnclosingBlockCase,
+  isFollowedByBinaryOperator,
   isFollowedByWord,
   isInsideParenHeaderControlBody,
   isInsideParens,
@@ -771,6 +772,14 @@ export class VerilogBlockParser extends BaseBlockParser {
       (isPrecededByAssignmentOperator(source, position, excludedRegions, this.validationCallbacks) ||
         isPrecededByBinaryOperator(source, position, excludedRegions, this.validationCallbacks))
     ) {
+      return false;
+    }
+
+    // Reject case-statement keywords used as the LEFT operand of a binary operator
+    // (e.g., `if (case == x)`). The canonical case statement form is `case (expr)`
+    // so a directly-following operator means the keyword is being misused as an
+    // expression operand. Mirrors the preceding-operator suppression above.
+    if (CASE_KEYWORDS.has(keyword) && isFollowedByBinaryOperator(source, position, keyword.length, excludedRegions, this.validationCallbacks)) {
       return false;
     }
 

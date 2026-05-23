@@ -638,6 +638,40 @@ export function isPrecededByBinaryOperator(
   return OPERATOR_TAIL_CHARS.has(source[opPos]);
 }
 
+// Returns true when the keyword starting at `position` (length `keywordLength`)
+// is immediately followed (skipping whitespace and comments) by a character that
+// starts a binary operator. The canonical form for a case statement is
+// `case (expr)`, so if the next char is an operator instead of `(` / `;` / `[`
+// / whitespace-then-`(`, the keyword is being misused as an expression operand.
+// Used to reject `case` / `casex` / `casez` / `randcase` on the left-hand side
+// of an operator (e.g. `if (case == x)`).
+export function isFollowedByBinaryOperator(
+  source: string,
+  position: number,
+  keywordLength: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  let j = position + keywordLength;
+  while (j < source.length) {
+    const ch = source[j];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      j++;
+      continue;
+    }
+    if (callbacks.isInExcludedRegion(j, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(j, excludedRegions);
+      if (region) {
+        j = region.end;
+        continue;
+      }
+    }
+    break;
+  }
+  if (j >= source.length) return false;
+  return OPERATOR_TAIL_CHARS.has(source[j]);
+}
+
 // Control keywords that take a parenthesized header `(condition)` immediately
 // followed by their single-statement body. When a `default` keyword sits right
 // after such a header's closing `)`, it is inside that single statement body,
