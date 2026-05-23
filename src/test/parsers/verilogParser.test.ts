@@ -4438,6 +4438,34 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: default inside paren-less control single-statement body', () => {
+    // Bug: `default` after paren-less control keywords (forever, initial,
+    // final, always_*) or `else` is the single-statement body of those
+    // control statements, not a case_item label. The existing
+    // isInsideParenHeaderControlBody only catches parenthesized headers
+    // (if, for, while, foreach, repeat).
+    test('should not attach default to outer case when inside forever body', () => {
+      const source = 'case (sel)\n  1: forever default: x = 1;\n  default: y = 1;\nendcase';
+      const pairs = parser.parse(source);
+      // The outer case/endcase should have exactly one `default` intermediate
+      // (the one on line 2 — `default: y = 1`). The `default` inside `forever`
+      // body should not be tokenized.
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(casePair, 'case should pair with endcase');
+      const defaultIntermediates = casePair.intermediates.filter((t) => t.value === 'default');
+      assert.strictEqual(defaultIntermediates.length, 1, `Expected case to have 1 default intermediate, got ${defaultIntermediates.length}`);
+    });
+
+    test('should not attach default to outer case when inside else single-statement body', () => {
+      const source = 'case (sel)\n  1: if (x) y = 1; else default: z = 1;\n  default: w = 1;\nendcase';
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(casePair, 'case should pair with endcase');
+      const defaultIntermediates = casePair.intermediates.filter((t) => t.value === 'default');
+      assert.strictEqual(defaultIntermediates.length, 1, `Expected case to have 1 default intermediate, got ${defaultIntermediates.length}`);
+    });
+  });
+
   suite('Bug fix: filter block keywords inside array subscript brackets', () => {
     // Bug: SystemVerilog reserved words used as identifiers inside `[...]`
     // (e.g., `arr[case]`, `arr[end]`) are tokenized as block_open/block_close,
