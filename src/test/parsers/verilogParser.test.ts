@@ -4438,6 +4438,33 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: isPrecededByDataTypeKeyword skips attribute regions', () => {
+    // Bug: isPrecededByDataTypeKeyword's backward scan skips whitespace,
+    // dimension specifiers, and block comments — but NOT attribute regions.
+    // So `int (* attr *) endmodule;` doesn't suppress the trailing `endmodule`
+    // because the scan terminates at the `)` of `*)` (an excluded region but
+    // not a block-comment one). After skipping the attribute, the scan should
+    // find `int` and suppress the keyword.
+    test('should suppress endmodule preceded by data type with attribute', () => {
+      const source = 'module m;\n  int (* attr *) endmodule;\nendmodule';
+      // The inner `endmodule` is a data-type identifier after `int (* attr *)`,
+      // not a real close keyword. The token stream should contain only the
+      // outer `module` and its matching trailing `endmodule`.
+      const tokens = parser.getTokens(source);
+      const tokenValues = tokens.map((t) => t.value);
+      assert.deepStrictEqual(tokenValues, ['module', 'endmodule']);
+      // The outer module pair should match the trailing endmodule, not the
+      // inner data-type identifier `endmodule`.
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const pair = pairs[0];
+      assert.strictEqual(pair.openKeyword.value, 'module');
+      assert.strictEqual(pair.closeKeyword.value, 'endmodule');
+      // Trailing endmodule starts at the last line (after the attribute line).
+      assert.ok(pair.closeKeyword.line >= 2, `Expected close keyword on line >= 2, got line ${pair.closeKeyword.line}`);
+    });
+  });
+
   suite('Bug fix: skipDelayExpression block comment skip', () => {
     // Bug: skipDelayExpression's leading whitespace skip uses /\s/ which only
     // catches whitespace, not block/line comments. So `#/* delay */ 5 begin`
