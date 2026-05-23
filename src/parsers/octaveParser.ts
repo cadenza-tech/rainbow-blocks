@@ -556,8 +556,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // Empty parens `arguments()` and the recognised attributes preserve normal
   // block-opener semantics so existing MATLAB-style attribute lists keep working.
   private isArgumentsFunctionCall(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let j = position + 'arguments'.length;
-    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    // Skip horizontal whitespace (ASCII + Unicode) and line continuations between
+    // `arguments` and `(` so `arguments ...<NL>(obj);` and `arguments \<NL>(obj);` are
+    // detected as function calls (single logical line `arguments(obj);`).
+    const j = skipHorizontalWhitespaceAndContinuations(source, position + 'arguments'.length);
     if (j >= source.length || source[j] !== '(') return false;
     // Find the matching `)` ignoring excluded regions and tracking nesting.
     let depth = 1;
@@ -578,9 +580,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
     }
     if (depth !== 0) return false;
     const inner = source.slice(j + 1, k).trim();
-    // Pattern 1: trailing `;` after `)` (statement-call form, e.g. `arguments(obj);`)
-    let after = k + 1;
-    while (after < source.length && (source[after] === ' ' || source[after] === '\t' || source[after] === '\v' || source[after] === '\f')) after++;
+    // Pattern 1: trailing `;` after `)` (statement-call form, e.g. `arguments(obj);`).
+    // Skip horizontal whitespace and line continuations after `)` so a continuation
+    // before the `;` still detects the statement form.
+    const after = skipHorizontalWhitespaceAndContinuations(source, k + 1);
     if (after < source.length && source[after] === ';') {
       return true;
     }
