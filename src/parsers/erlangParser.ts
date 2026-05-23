@@ -757,13 +757,16 @@ export class ErlangBlockParser extends BaseBlockParser {
         }
         return this.matchVerbatimString(source, pos, offset, "'");
       }
-      // Paired delimiters: scan to the matching close delimiter (no nesting)
+      // Paired delimiters: scan to the matching close delimiter (no nesting).
+      // OTP 27 EEP-64 allows paired-delimiter sigils to span multiple lines.
       if (delim === '(' || delim === '[' || delim === '{' || delim === '<') {
-        return this.matchSigilDelimited(source, pos, offset, PAIRED_SIGIL_DELIMITERS[delim]);
+        return this.matchSigilDelimited(source, pos, offset, PAIRED_SIGIL_DELIMITERS[delim], true);
       }
-      // Same-char delimiters: scan to the next occurrence of the same character
+      // Same-char delimiters: scan to the next occurrence of the same character.
+      // Newline terminates the region (verbatim-string semantics) to keep an orphan
+      // delimiter from absorbing the rest of the source.
       if (delim === '/' || delim === '|' || delim === '`' || delim === '#' || delim === '.') {
-        return this.matchSigilDelimited(source, pos, offset, delim);
+        return this.matchSigilDelimited(source, pos, offset, delim, false);
       }
     }
 
@@ -812,14 +815,17 @@ export class ErlangBlockParser extends BaseBlockParser {
   // Matches OTP 27+ sigil with non-quote delimiters (no backslash escapes, no nesting)
   // delimStart points at the opening delimiter; closeChar is the matching close character
   // (same char for /|`#. delimiters, the paired bracket for (){}[]<>)
-  // Unterminated or newline before close extends to source.length, matching matchVerbatimString
-  private matchSigilDelimited(source: string, regionStart: number, delimStart: number, closeChar: string): ExcludedRegion {
+  // allowNewlines: paired-delimiter sigils ((){}[]<>) may span multiple lines per OTP 27
+  // EEP-64, so newlines are part of the body and only the closeChar terminates the region.
+  // Same-char delimiters (/|`#.) treat a newline as an unterminated-region signal and
+  // extend to source.length to match matchVerbatimString behavior.
+  private matchSigilDelimited(source: string, regionStart: number, delimStart: number, closeChar: string, allowNewlines: boolean): ExcludedRegion {
     let i = delimStart + 1;
     while (i < source.length) {
       if (source[i] === closeChar) {
         return { start: regionStart, end: i + 1 };
       }
-      if (source[i] === '\n' || source[i] === '\r') {
+      if (!allowNewlines && (source[i] === '\n' || source[i] === '\r')) {
         return { start: regionStart, end: source.length };
       }
       i++;
