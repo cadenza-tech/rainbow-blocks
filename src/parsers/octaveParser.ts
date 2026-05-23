@@ -605,8 +605,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // `)` is not field access and is therefore excluded. String/comment regions are skipped
   // via `excludedRegions` while scanning the parens body.
   private isIndexingAssignment(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let j = position + keyword.length;
-    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    // Skip horizontal whitespace (ASCII + Unicode, e.g. NBSP) and line continuations
+    // (`...<NL>` and `\<NL>`) between the keyword and `(` so `end ...<NL>(1) = 5`,
+    // `end \<NL>(1) = 5`, and `end<NBSP>(1) = 5` are all detected as indexing assignment,
+    // mirroring the single-line `end(1) = 5` form. Skipping only ASCII space/tab misses
+    // these single-logical-line variants and lets the keyword consume an outer opener.
+    const j = skipHorizontalWhitespaceAndContinuations(source, position + keyword.length);
     if (j >= source.length || source[j] !== '(') return false;
     // Find the matching `)` ignoring excluded regions and tracking nesting.
     let depth = 1;
@@ -626,9 +630,9 @@ export class OctaveBlockParser extends MatlabBlockParser {
       k++;
     }
     if (depth !== 0) return false;
-    // After the closing `)`, skip whitespace and inspect the next token.
-    let after = k + 1;
-    while (after < source.length && (source[after] === ' ' || source[after] === '\t')) after++;
+    // After the closing `)`, skip horizontal whitespace AND line continuations so
+    // `end(1) ...<NL>= 5` and `end(1)\<NL>.x = 5` are still detected.
+    const after = skipHorizontalWhitespaceAndContinuations(source, k + 1);
     if (after >= source.length) return false;
     // Field access (`end(1).x = ...`): a `.` here continues an lvalue, so the keyword is a
     // variable being indexed and field-assigned, not a block close. `...` (line continuation)
