@@ -928,6 +928,26 @@ end`;
         const pairs = parser.parse(source);
         assertNoBlocks(pairs);
       });
+
+      test('should not treat keyword with ~ prefix as block keyword (~end)', () => {
+        // ~end<newline> is not a valid sigil (no delimiter follows the sigil name),
+        // so the trailing end must not be tokenized as a block_close. Otherwise the
+        // outer def would mis-pair with the bare end inside ~end on line 1.
+        const source = `def foo do
+  ~end
+  end
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+        // The matched close must not be the bare 'end' inside ~end on line 1.
+        const pair = findBlock(pairs, 'def');
+        assert.notStrictEqual(pair.closeKeyword?.line, 1, 'def must not pair with the end inside ~end on line 1');
+        // No standalone 'end' token may be derived from offset inside ~end (offsets 14..16).
+        const tokens = parser.getTokens(source);
+        for (const t of tokens) {
+          assert.ok(t.startOffset < 13 || t.startOffset > 16, `no token should originate from inside ~end (got '${t.value}'@${t.startOffset})`);
+        }
+      });
     });
 
     suite('do: one-liners', () => {
