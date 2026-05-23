@@ -249,6 +249,13 @@ function recordContextKeywordRole(
       if (oi >= 0 && source[oi] === ':') {
         return 'ignore';
       }
+      // `=` followed by `object` can be either a type definition (`TFoo = object`) or
+      // a comparison expression (`if X = object then`). Without the comparison check
+      // the latter is classified as 'open-record' and a following inner `end` pops
+      // the wrong stack entry.
+      if (oi >= 0 && source[oi] === '=' && isPrecededByComparisonEquals(source, keywordStart, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
       return 'open-record';
     }
     case 'interface': {
