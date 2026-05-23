@@ -3880,6 +3880,30 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-24: attribute reference check tolerates whitespace before the apostrophe', () => {
+    test('should reject process as block opener when attribute reference apostrophe is on the next line', () => {
+      // VHDL whitespace tolerance: `process'foreign` and `process\n  'foreign` denote the same
+      // attribute reference. Without newline tolerance, the latter would be erroneously
+      // tokenized as a real process block opener and would corrupt the surrounding
+      // architecture's intermediates (architecture's begin would be captured by the orphan
+      // process instead).
+      const source = `architecture a of e is
+  signal s : process
+    'foreign;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      // architecture's intermediates must contain both `is` and `begin`. If `process` was
+      // false-promoted to a block opener, `begin` would be attached to the orphan process
+      // and missing from architecture's intermediates.
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), 'expected is in architecture intermediates');
+      assert.ok(intermediateValues.includes('begin'), 'expected begin in architecture intermediates');
+    });
+  });
+
   suite('Regression 2026-05-24: nested if-generate inner simple end closes both generate and control prefix', () => {
     test('should pair both inner if and inner generate when nested if-generate uses bare end', () => {
       const source = `if X generate
