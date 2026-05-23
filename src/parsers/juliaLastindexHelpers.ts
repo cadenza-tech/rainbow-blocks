@@ -6,12 +6,18 @@ import { isIndexingBracket, isTransposeOperator } from './juliaHelpers';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
 // Checks whether the character at `pos` is the start of a binary operator that can
-// follow `end` as lastindex (e.g., `!=`, `==`, `+`, `-`, `<`, `>`, `<=`, `>=`).
+// follow `end` as lastindex (e.g., `!=`, `==`, `+`, `-`, `<`, `>`, `<=`, `>=`, `:`,
+// `&`, `&&`, `|`, `||`, `=>`). The colon case excludes `::` (type assertion) because
+// the parser already classifies `end::` via isPrecededByBinaryOperator on the closing
+// side; here we only care about the bare range/Pair-start `:`. This must stay in sync
+// with isPrecededByBinaryOperator so that `<op>end<op>` is rejected from both sides
+// rather than only the trailing side.
 function isBinaryOperatorStart(source: string, pos: number): boolean {
   const c = source[pos];
   const c2 = pos + 1 < source.length ? source[pos + 1] : '';
   if (c === '!' && c2 === '=') return true;
   if (c === '=' && c2 === '=') return true;
+  if (c === '=' && c2 === '>') return true;
   if (c === '<' && c2 === '=') return true;
   if (c === '>' && c2 === '=') return true;
   if (c === '<' && c2 !== ':') return true;
@@ -22,6 +28,9 @@ function isBinaryOperatorStart(source: string, pos: number): boolean {
   if (c === '/') return true;
   if (c === '%') return true;
   if (c === '^') return true;
+  if (c === ':' && c2 !== ':') return true;
+  if (c === '&') return true;
+  if (c === '|') return true;
   return false;
 }
 
