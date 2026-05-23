@@ -2890,5 +2890,58 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: arguments(obj) inside function body is function call, not block opener', () => {
+    test('should not treat arguments(obj) as block opener inside function body', () => {
+      // `arguments(obj)` inside a function body is a function call (e.g. retrieving
+      // argument metadata via reflection), not a `arguments` validation block.
+      // Treating it as a block opener consumes the outer function's `end`, destroying
+      // the function/end pair.
+      const source = 'function f(obj)\n  arguments(obj)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+
+    test('should not treat arguments(x) inside function body as block opener', () => {
+      // Same pattern with a different argument name.
+      const source = 'function r = f(x)\n  arguments(x)\n  r = x;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still detect arguments (Input) as block opener inside function (sanity check)', () => {
+      // `arguments (Input)` is a valid attribute-decorated arguments block.
+      const source = 'function r = f(x)\n  arguments (Input)\n    x double\n  end\n  r = x;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argsBlock = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(argsBlock, 'arguments (Input) should still be recognised as a block opener');
+    });
+
+    test('should still detect arguments (Output) as block opener inside function (sanity check)', () => {
+      const source = 'function r = f(x)\n  arguments (Output)\n    r double\n  end\n  r = x;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argsBlock = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(argsBlock, 'arguments (Output) should still be recognised as a block opener');
+    });
+
+    test('should still detect arguments (Repeating) as block opener (sanity check)', () => {
+      const source = 'function r = f(varargin)\n  arguments (Repeating)\n    varargin\n  end\n  r = varargin;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argsBlock = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(argsBlock, 'arguments (Repeating) should still be recognised as a block opener');
+    });
+
+    test('should still detect bare arguments as block opener (no parentheses, sanity check)', () => {
+      const source = 'function r = f(x)\n  arguments\n    x double\n  end\n  r = x;\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argsBlock = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(argsBlock, 'bare arguments should still be recognised as a block opener');
+    });
+  });
+
   generateCommonTests(config);
 });
