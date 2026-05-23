@@ -4259,6 +4259,37 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: reserved word inside #(...) delay expression', () => {
+    test('should not tokenize a block_open keyword inside #(...) delay expression', () => {
+      // Bug: `#(module)` — `module` inside the delay expression is a misused
+      // identifier (syntax error in SystemVerilog: a reserved word cannot be a
+      // delay expression operand). Without suppression, the inner `module` was
+      // tokenized and prematurely paired with the trailing `endmodule`, leaving
+      // the outer `module sub();...endmodule` orphaned.
+      const source = 'module m;\n  module sub();\n  endmodule\n  initial #(module) x = 1;\nendmodule';
+      const tokens = parser.getTokens(source);
+      // Only 2 module openers (outer m, inner sub) and 2 endmodule closers.
+      const moduleOpenTokens = tokens.filter((t) => t.value === 'module' && t.type === 'block_open');
+      assert.strictEqual(moduleOpenTokens.length, 2, '`module` inside #(...) must not be tokenized as a block_open');
+      const pairs = parser.parse(source);
+      // Both module-endmodule pairs must form correctly.
+      const modulePairs = pairs.filter((p) => p.openKeyword.value === 'module');
+      assert.strictEqual(modulePairs.length, 2, 'both inner sub and outer m must pair');
+    });
+
+    test('should not tokenize a block_close keyword inside #(...) delay expression', () => {
+      // Same bug class for close keywords inside #(...). `endmodule` inside the
+      // delay expression is a misused identifier.
+      const source = 'module m;\n  initial #(endmodule) x = 1;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      // Only the trailing real `endmodule` must be tokenized.
+      assert.strictEqual(endmoduleTokens.length, 1, '`endmodule` inside #(...) must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   suite('Bug fix: reserved word after cast expression', () => {
     test('should not tokenize a close keyword that follows a (type) cast as the cast operand', () => {
       // Bug: `(int)endmodule` — the `endmodule` is the operand of the cast and
