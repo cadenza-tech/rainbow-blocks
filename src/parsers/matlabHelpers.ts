@@ -187,7 +187,7 @@ export function isFollowedByBinaryOperator(source: string, afterPos: number, key
 // comparisons) with the block-open side's isFollowedByBinaryOperator.
 export function isEndFollowedByBinaryOperator(source: string, afterPos: number): boolean {
   let i = afterPos;
-  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+  while (i < source.length && isHorizontalWhitespace(source[i])) {
     i++;
   }
   if (i >= source.length) {
@@ -277,7 +277,7 @@ export function isPrecededByBinaryOperator(source: string, position: number, exc
         continue;
       }
     }
-    if (source[i] === ' ' || source[i] === '\t') {
+    if (isHorizontalWhitespace(source[i])) {
       i--;
       continue;
     }
@@ -316,7 +316,7 @@ export function isPrecededByBinaryOperator(source: string, position: number, exc
   // (b) it follows `=`, `(`, `,`, `;`, `[`, `{`, or another operator (unary minus on RHS).
   if (ch === '-') {
     let j = i - 1;
-    while (j >= 0 && (source[j] === ' ' || source[j] === '\t')) j--;
+    while (j >= 0 && isHorizontalWhitespace(source[j])) j--;
     if (j < 0) return false;
     const prev = source[j];
     if (/[a-zA-Z0-9_)\]}]/.test(prev)) return true;
