@@ -348,9 +348,14 @@ export function matchTripleQuotedString(source: string, pos: number, delimiter: 
       i = skipInterpolation(source, i + 2);
       continue;
     }
+    // The terminator must always be followed by a non-identifier-continuation char
+    // (regardless of heredoc/single-line). Otherwise `"""abc"""end` would terminate at
+    // the inner """ and leak `end` as a block close token. Heredoc terminators additionally
+    // require line-start anchoring (only whitespace before the """).
     if (
       source.slice(i, i + 3) === delimiter &&
-      (!isHeredoc || (isAtLineStartAllowingWhitespace(source, i) && isLineEndAfterTerminator(source, i + 3)))
+      isLineEndAfterTerminator(source, i + 3) &&
+      (!isHeredoc || isAtLineStartAllowingWhitespace(source, i))
     ) {
       return { start: pos, end: i + 3 };
     }
