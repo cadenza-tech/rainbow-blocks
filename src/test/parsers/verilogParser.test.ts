@@ -4438,6 +4438,29 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: skipDelayExpression block comment skip', () => {
+    // Bug: skipDelayExpression's leading whitespace skip uses /\s/ which only
+    // catches whitespace, not block/line comments. So `#/* delay */ 5 begin`
+    // after `always` makes scanForBeginAfterControl fail to skip the delay,
+    // breaking the chain pairing of `always` with the trailing `end`.
+    test('should pair always with end through #/* comment */ N delay', () => {
+      const source = 'module m;\n  always #/* delay */ 5 begin\n    x = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      // Expected: module/endmodule, always/end, begin/end (3 pairs)
+      assertBlockCount(pairs, 3);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should pair with end through #/* comment */ N delay');
+    });
+
+    test('should pair always with end through # // line comment\\n N delay', () => {
+      const source = 'module m;\n  always # // delay\n  5 begin\n    x = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const alwaysPair = pairs.find((p) => p.openKeyword.value === 'always');
+      assert.ok(alwaysPair, 'always should pair with end through # // line-comment N delay');
+    });
+  });
+
   suite('Bug fix: isValidWaitOpen newline handling in wait fork statement', () => {
     // Bug: isValidWaitOpen's forward scan past `wait` only skips space/tab,
     // not `\n` or `\r`. So `wait\nfork;` slips past the `fork` detector and
