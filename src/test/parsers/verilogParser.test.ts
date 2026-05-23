@@ -4438,6 +4438,32 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: isPrecededByDataTypeKeyword skips comma-separated declarations', () => {
+    // Bug: For comma-separated variable declarations like `reg a, endmodule;`,
+    // the second identifier (`endmodule`) is preceded by `, a, ` — not directly
+    // by a data-type keyword. The backward scan currently terminates at the
+    // comma and returns false, falsely tokenizing `endmodule` as a close keyword.
+    // Fix: scan back through `, identifier` chains to find the data-type keyword
+    // at the head of the declaration list.
+    test('should suppress endmodule used as 2nd identifier in reg declaration', () => {
+      const source = 'module m;\n  reg a, endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const tokenValues = tokens.map((t) => t.value);
+      assert.deepStrictEqual(tokenValues, ['module', 'endmodule']);
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      // Verify outer module pairs with trailing endmodule (not the inner one).
+      assert.ok(pairs[0].closeKeyword.line >= 2, `Expected close keyword on line >= 2, got line ${pairs[0].closeKeyword.line}`);
+    });
+
+    test('should suppress endmodule used as 3rd identifier in reg declaration', () => {
+      const source = 'module m;\n  reg a, b, endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const tokenValues = tokens.map((t) => t.value);
+      assert.deepStrictEqual(tokenValues, ['module', 'endmodule']);
+    });
+  });
+
   suite('Bug fix: isPrecededByDataTypeKeyword skips attribute regions', () => {
     // Bug: isPrecededByDataTypeKeyword's backward scan skips whitespace,
     // dimension specifiers, and block comments — but NOT attribute regions.
