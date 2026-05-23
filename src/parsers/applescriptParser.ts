@@ -181,6 +181,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return true;
     }
 
+    // Reject the `if(...)` function-call form (no whitespace before `(`). The
+    // parenthesized variant `if (cond) then` (with whitespace) is still valid as
+    // a multi-line block opener, so only the tight `if(` shape is rejected here.
+    // Without this guard, `if(x)` would be tokenized as a block opener and steal
+    // an enclosing `end`/`end if`, producing a geometrically crossing pair.
+    if (position + keyword.length < source.length && source[position + keyword.length] === '(') {
+      return false;
+    }
+
     // Check if 'if' is inside another if/repeat condition (e.g., 'if if then')
     if (isInsideIfCondition(source, position, keyword.length, excludedRegions, this.helperCallbacks)) {
       return false;
