@@ -675,9 +675,11 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // statement: anything other than a separator (newline / EOF / `;` / `,`) or a comment
     // immediately after rejects them as a block close (e.g., `endif()`, `endif x = 5`).
     // `until` is excluded because it requires a condition expression (`until cond`).
+    // Skip horizontal whitespace AND line continuations so `endif ...<NL>` and
+    // `endif \<NL>` are still treated as bare typed-close (the `...` / `\` continues to
+    // the next physical line whose first real token is the newline / EOF / separator).
     if (isTypedClose && lowerKw !== 'until') {
-      let after = position + keyword.length;
-      while (after < source.length && isHorizontalWhitespace(source[after])) after++;
+      const after = skipHorizontalWhitespaceAndContinuations(source, position + keyword.length);
       if (after < source.length) {
         const ch = source[after];
         if (ch !== '\n' && ch !== '\r' && ch !== ';' && ch !== ',' && ch !== '%' && ch !== '#') {
