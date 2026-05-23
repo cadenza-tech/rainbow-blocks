@@ -4888,6 +4888,47 @@ end`;
     });
   });
 
+  suite('Bug: end inside parentheses should be identifier (cascade prevention)', () => {
+    test('should not pair if with end inside parens of condition (if (x end) do)', () => {
+      // `if (x end) do ... end` is invalid Elixir, but the `end` inside parens must not
+      // steal the outer if-end pair. The inner end is an identifier in the expression.
+      const source = 'if (x end) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // The if should pair with the LAST end (after body), not the one inside parens.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair case with end inside parens of value (case (x end) do)', () => {
+      const source = 'case (x end) do\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end inside square brackets (if [x end] do)', () => {
+      const source = 'if [x end] do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end inside braces (if {x end} do)', () => {
+      const source = 'if {x end} do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still handle real fn-end pairs inside parens', () => {
+      // `with fn -> :ok end do` — fn..end is a complete block inside parens; the fn-end
+      // pair should be produced as before. Regression guard for the existing behaviour.
+      const source = 'with fn -> :ok end do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Bug: character literal followed by keyword should not tokenize keyword', () => {
     test('should not tokenize end after ?# character literal', () => {
       // `?#end`: ?# is a char literal for '#', followed by identifier `end` (not a block close).
