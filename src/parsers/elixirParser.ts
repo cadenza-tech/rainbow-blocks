@@ -751,6 +751,8 @@ export class ElixirBlockParser extends BaseBlockParser {
         // Also exclude fn used as a value/variable for a preceding block keyword
         // (e.g., `case fn do ... end` — fn is the case value, do belongs to case).
         // Detected only when fn is directly followed by `do` (not `->`, which is real fn syntax).
+        // Also exclude `fn` used as the function name after a definition keyword
+        // (e.g., `def fn do ... end` — fn is the function name, not anonymous fn keyword).
         if (
           source.slice(i, i + 2) === 'fn' &&
           (i === 0 ||
@@ -760,7 +762,8 @@ export class ElixirBlockParser extends BaseBlockParser {
               !(source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
           (i + 2 >= source.length || (!/[a-zA-Z0-9_:?!]/.test(source[i + 2]) && source[i + 2] !== '(')) &&
           !this.isAdjacentToUnicodeLetter(source, i, 2) &&
-          !this.isFnDirectlyFollowedByDoAfterBlockKw(source, i, excludedRegions)
+          !this.isFnDirectlyFollowedByDoAfterBlockKw(source, i, excludedRegions) &&
+          !this.isFunctionNameAfterDefinitionKeyword(source, i, excludedRegions)
         ) {
           fnDepth++;
         }
