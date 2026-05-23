@@ -3054,5 +3054,55 @@ foo() ->
     });
   });
 
+  suite('Bug: paired-delimiter sigil should allow newlines in content', () => {
+    test('should treat ~b{...} with newlines as a single excluded region', () => {
+      // OTP 27 EEP-64: paired delimiter sigils ({}, [], (), <>) may span multiple lines.
+      // The newline inside ~b{...} must NOT terminate the sigil; the outer begin/end pair
+      // must still be recognized.
+      const source = 'X = ~b{multi\nline\nbody},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~b{multi\nline\nbody}');
+    });
+
+    test('should treat ~b[...] with newlines as a single excluded region', () => {
+      const source = 'X = ~b[multi\nline\nbody],\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~b[multi\nline\nbody]');
+    });
+
+    test('should treat ~b(...) with newlines as a single excluded region', () => {
+      const source = 'X = ~b(multi\nline\nbody),\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~b(multi\nline\nbody)');
+    });
+
+    test('should treat ~b<...> with newlines as a single excluded region', () => {
+      const source = 'X = ~b<multi\nline\nbody>,\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1);
+      assert.strictEqual(source.slice(regions[0].start, regions[0].end), '~b<multi\nline\nbody>');
+    });
+
+    test('should still terminate same-char delimiter sigil at newline', () => {
+      // Regression guard: same-char delimiters (/|`#.) must keep their newline-terminates
+      // behavior as before; only paired delimiters change.
+      const source = '~b/begin\n/ end';
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions[0].start, 0);
+      assert.strictEqual(regions[0].end, source.length);
+    });
+  });
+
   generateCommonTests(config);
 });
