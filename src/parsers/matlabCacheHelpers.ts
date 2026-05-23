@@ -181,11 +181,33 @@ export function computeLogicalLineInfo(
       i++;
       continue;
     }
-    // Treat `...`/`\` continuation regions as whitespace within the run.
+    // Treat `...`/`\` continuation regions as whitespace within the run, and treat
+    // string literals (`"..."`, `'...'`) as opaque tokens that the leading command
+    // implicitly receives as string arguments. Skipping past them keeps the
+    // command-syntax detection alive for forms like `disp "end" if x` where a
+    // quoted argument sits between the command and a later keyword-shaped argument.
     const region = findExcludedRegionAt(i, excludedRegions);
-    if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
-      i = region.end;
-      continue;
+    if (region) {
+      const startChar = source[region.start];
+      if ((startChar === '.' || startChar === '\\') && region.end > region.start + 1) {
+        // Line continuation marker — keep walking as if whitespace.
+        i = region.end;
+        continue;
+      }
+      if (startChar === '"' || startChar === "'") {
+        // String literal — treat as one opaque argument. Require a leading identifier
+        // command to be already seen, otherwise the line starts with a string and is
+        // not command-syntax.
+        if (identCount === 0) {
+          break;
+        }
+        identCount++;
+        i = region.end;
+        pureRunEnd = i;
+        continue;
+      }
+      // Other excluded region kinds (comments, etc.) end the leading run.
+      break;
     }
     if (!/[a-zA-Z0-9_]/.test(ch)) {
       break;
