@@ -2890,6 +2890,46 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: single-quote followed by Unicode letter is string-start, not transpose', () => {
+    test("should treat ' followed by Unicode letter as string-start (Greek epsilon)", () => {
+      // `]'ε...'` with prev=`]` (value-like) and next=Greek `ε` (Unicode letter) should be
+      // a string literal, not a transpose. The ASCII counterpart `]'e...'` already works.
+      // Without the fix the inner `end` is wrongly tokenized as block close, destroying outer pairing.
+      const source = "function f\n  x = a]'ε end ε'\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // function should pair with the OUTER end on line 2, not the inner `end` mis-tokenised inside the string.
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end');
+    });
+
+    test("should treat ' followed by Unicode letter as string-start (Latin a-umlaut)", () => {
+      // Same pattern with `ä` (Latin small letter a with diaeresis, U+00E4). Same Unicode
+      // letter category, so it must be treated identically to the ASCII case.
+      const source = "function f\n  x = a]'ä end ä'\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('excluded regions should span the full string when prev is value-like and next is Unicode letter', () => {
+      // Direct check: the excluded region must run from the first `'` to the second `'`
+      // (a single contiguous string), not be two separate transpose markers.
+      const source = "x = a]'ε end ε'";
+      const regions = parser.getExcludedRegions(source);
+      assert.strictEqual(regions.length, 1, 'should be a single string region, not two transpose markers');
+      assert.strictEqual(regions[0].start, 6, 'string starts at the first single quote');
+      assert.strictEqual(regions[0].end, source.length, 'string ends at the second single quote');
+    });
+
+    test("should still treat ' followed by ASCII letter as string-start (sanity check)", () => {
+      // The ASCII counterpart must keep working.
+      const source = "function f\n  x = a]'e end e'\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   suite('Regression 2026-05-23: arguments(obj) inside function body is function call, not block opener', () => {
     test('should not treat arguments(obj) as block opener inside function body', () => {
       // `arguments(obj)` inside a function body is a function call (e.g. retrieving
