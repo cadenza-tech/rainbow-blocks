@@ -2869,5 +2869,26 @@ end`;
     });
   });
 
+  suite('Regression: block_middle (case/otherwise) followed by simple assignment across line continuation', () => {
+    test('should not register case as intermediate when = follows across a ... line continuation', () => {
+      // `case ...\n  = 5` is `case = 5` split across a line continuation — `case` is used
+      // as a variable, not as a switch intermediate. Symmetric with the block_open side
+      // which already handles `for ...\n = 10`.
+      const source = 'switch x\n  case ...\n     = 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case should not be registered as intermediate');
+    });
+
+    test('should not register otherwise as intermediate when = follows across a ... line continuation', () => {
+      const source = 'switch x\n  case 1\n  otherwise ...\n     = 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      // Only `case` should appear as intermediate; `otherwise` is consumed by the line-continuation assignment.
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'only case should be registered');
+      assert.strictEqual(pairs[0].intermediates[0].value, 'case');
+    });
+  });
+
   generateCommonTests(config);
 });
