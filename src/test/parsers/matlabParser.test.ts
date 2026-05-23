@@ -2890,6 +2890,71 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: end inside if/while/switch header expression is not block close', () => {
+    test('should not treat end after if as block close (if end != 0)', () => {
+      // `if end != 0` — `end` is part of the header expression, not a block close.
+      // Without the fix the header `end` is wrongly matched as the if-block closer,
+      // consuming the real inner `end` and destroying outer pairing.
+      const source = 'function f\n  if end != 0\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3, 'if should pair with the inner end (line 3)');
+    });
+
+    test('should not treat end after if as block close (if end == 0)', () => {
+      const source = 'function f\n  if end == 0\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+
+    test('should not treat end after if as block close (if end <= 5)', () => {
+      const source = 'function f\n  if end <= 5\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+
+    test('should not treat end after while as block close (while end != 0)', () => {
+      const source = 'function f\n  while end != 0\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const whileBlock = findBlock(pairs, 'while');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+      assert.strictEqual(whileBlock.closeKeyword.line, 3);
+    });
+
+    test('should not treat lone end after switch as block close (switch end)', () => {
+      // `switch end` — the `end` is the switched-on value (often used for indexing in
+      // array operations). It is not a block close. Without the fix `switch` wrongly
+      // pairs with this header `end`, consuming the real inner end.
+      const source = 'function f\n  switch end\n    case 1\n      body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const switchBlock = findBlock(pairs, 'switch');
+      assert.strictEqual(funcBlock.closeKeyword.line, 5, 'function should pair with the outer end');
+      assert.strictEqual(switchBlock.closeKeyword.line, 4, 'switch should pair with the inner end');
+    });
+
+    test('should still treat real if block close as block close (sanity check)', () => {
+      // Sanity: a normal if/end block must still pair correctly.
+      const source = 'function f\n  if x > 0\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression 2026-05-23: VT/FF/NBSP/Unicode horizontal whitespace as command-syntax separator', () => {
     test('should treat \\v (vertical tab) between disp and if as command-syntax separator', () => {
       // `disp\vif true` is command-syntax — `disp` is a command, `if` and `true` are
