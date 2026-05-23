@@ -693,6 +693,15 @@ export class BashBlockParser extends BaseBlockParser {
       return true;
     });
 
+    // Second pass: detect keywords split across `\<newline>` line continuations
+    // (e.g. `i\<newline>f`). Bash collapses backslash-newline during lexing, so the
+    // logical word `if` should be recognized as the if keyword. The regex-based
+    // super.tokenize() misses these because the keyword text is not contiguous.
+    const splitTokens = this.findSplitKeywordTokens(source, excludedRegions);
+    if (splitTokens.length > 0) {
+      tokens.push(...splitTokens);
+    }
+
     const newlinePositions = this.buildNewlinePositions(source);
 
     // Match { } for command grouping (not brace expansion)
@@ -828,6 +837,175 @@ export class BashBlockParser extends BaseBlockParser {
 
     // Sort by position
     return tokens.sort((a, b) => a.startOffset - b.startOffset);
+  }
+
+  // Detects keywords split across `\<newline>` line continuations and returns
+  // synthesized tokens. Bash collapses backslash-newline during lexical processing
+  // so `i\<newline>f` is the `if` keyword, but the regex-based base tokenizer
+  // misses it because the keyword text is not contiguous.
+  private findSplitKeywordTokens(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    const tokens: Token[] = [];
+    const allKeywords = new Set<string>([...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle]);
+    const newlinePositions = this.buildNewlinePositions(source);
+
+    let i = 0;
+    while (i < source.length - 1) {
+      if (source[i] !== '\\' || (source[i + 1] !== '\n' && source[i + 1] !== '\r')) {
+        i++;
+        continue;
+      }
+      // Verify odd backslash count (so the last `\` truly escapes the newline)
+      let bsCount = 0;
+      let bsScan = i;
+      while (bsScan >= 0 && source[bsScan] === '\\') {
+        bsCount++;
+        bsScan--;
+      }
+      if (bsCount % 2 === 0) {
+        i++;
+        continue;
+      }
+      // Skip line continuations inside excluded regions (e.g. quoted strings)
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        i++;
+        continue;
+      }
+      // Require an identifier character immediately before the backslash; without
+      // one the line continuation cannot be inside a keyword (e.g. `foo \<nl>bar`
+      // is two separate words, not a split keyword)
+      if (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) {
+        i++;
+        continue;
+      }
+      // Expand left to capture the start of the keyword (preceding identifier
+      // characters). The keyword may itself be preceded by other split segments,
+      // so walk through `\<newline>` sequences encountered on the way too.
+      let leftStart = i;
+      while (leftStart > 0 && /[a-zA-Z0-9_]/.test(source[leftStart - 1])) {
+        leftStart--;
+      }
+      // Expand right through identifier characters and any further `\<newline>`
+      // sequences encountered within the same logical word
+      let endInSource = i + 2;
+      if (source[i + 1] === '\r' && endInSource < source.length && source[endInSource] === '\n') {
+        endInSource++;
+      }
+      let logicalWord = source.slice(leftStart, i);
+      while (endInSource < source.length) {
+        const ch = source[endInSource];
+        if (/[a-zA-Z0-9_]/.test(ch)) {
+          logicalWord += ch;
+          endInSource++;
+          continue;
+        }
+        // Another `\<newline>` inside the keyword (e.g. `i\<nl>f` split twice)
+        if (ch === '\\' && endInSource + 1 < source.length && (source[endInSource + 1] === '\n' || source[endInSource + 1] === '\r')) {
+          endInSource += 2;
+          if (source[endInSource - 1] === '\r' && endInSource < source.length && source[endInSource] === '\n') {
+            endInSource++;
+          }
+          continue;
+        }
+        break;
+      }
+      // Bail early if the assembled word is not a known keyword (handles
+      // `i\<nl>fx` -> `ifx`, which must not produce an `if` token)
+      if (allKeywords.has(logicalWord) && this.isValidSplitKeyword(logicalWord, source, leftStart, endInSource, excludedRegions)) {
+        const tokenType = this.getTokenType(logicalWord);
+        const { line, column } = this.getLineAndColumn(leftStart, newlinePositions);
+        tokens.push({
+          type: tokenType,
+          value: logicalWord,
+          startOffset: leftStart,
+          endOffset: endInSource,
+          line,
+          column
+        });
+      }
+      // Advance past the entire logical word so the outer loop does not rescan
+      // its interior `\<newline>` sequences
+      i = endInSource;
+    }
+    return tokens;
+  }
+
+  // Validates a split keyword using the actual span (startOffset..endInSource)
+  // in source. The standard isValidBlock{Open,Close} path bakes in
+  // `position + keyword.length`, which is the wrong end position when the
+  // keyword text is interleaved with `\<newline>` sequences.
+  private isValidSplitKeyword(keyword: string, source: string, startOffset: number, endInSource: number, excludedRegions: ExcludedRegion[]): boolean {
+    // After-keyword checks: look at character at endInSource (the first non-keyword
+    // character after the logical word)
+    if (this.isFollowedByCharAfter(source, endInSource, 'hyphen')) return false;
+    if (this.isFollowedByExcludedRegionAt(endInSource, excludedRegions)) return false;
+    if (this.isInsideExtglob(source, startOffset, excludedRegions)) return false;
+    if (this.isInsideDoubleBracket(source, startOffset, excludedRegions)) return false;
+    const tokenType = this.getTokenType(keyword);
+    if (!this.isAtCommandPosition(source, startOffset, excludedRegions)) {
+      if (!(tokenType === 'block_close' && keyword === 'esac' && this.isPrecededByIn(source, startOffset, excludedRegions))) {
+        return false;
+      }
+    }
+    if (this.isFollowedByCharAfter(source, endInSource, 'equals')) return false;
+    if (this.isFollowedByFunctionParensAt(source, endInSource)) return false;
+    return true;
+  }
+
+  // Variant of isFollowedByHyphen / isFollowedByEquals that accepts an explicit
+  // afterPos (the first character index after the keyword text). Used by
+  // isValidSplitKeyword because the split keyword's `endOffset` is not
+  // `position + keyword.length`.
+  private isFollowedByCharAfter(source: string, afterPos: number, kind: 'hyphen' | 'equals'): boolean {
+    if (afterPos >= source.length) return false;
+    const ch = source[afterPos];
+    if (kind === 'hyphen') {
+      if (ch === '-') return true;
+      if (ch === '#' || ch === '.' || ch === ':' || ch === '~' || ch === ',' || ch === '@' || ch === '%' || ch === '^' || ch === '!' || ch === '/') {
+        return true;
+      }
+      if (ch === ']' || ch === '$') return true;
+      if (ch === '\\') {
+        const next = source[afterPos + 1];
+        if (next === '\n' || next === '\r') return false;
+        return true;
+      }
+      return false;
+    }
+    // equals
+    if (ch === '=') return true;
+    if (ch === '+' && afterPos + 1 < source.length && source[afterPos + 1] === '=') return true;
+    if (ch === '[') return true;
+    return false;
+  }
+
+  // Variant of isFollowedByExcludedRegion that accepts an explicit afterPos
+  private isFollowedByExcludedRegionAt(afterPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    const region = this.findExcludedRegionAt(afterPos, excludedRegions);
+    return region !== null && region.start === afterPos;
+  }
+
+  // Variant of isFollowedByFunctionParens that accepts an explicit afterPos
+  private isFollowedByFunctionParensAt(source: string, afterPos: number): boolean {
+    let j = afterPos;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== '(') return false;
+    j++;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== ')') return false;
+    j++;
+    while (j < source.length) {
+      const c = source[j];
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+        j++;
+        continue;
+      }
+      if (c === '\\' && j + 1 < source.length && (source[j + 1] === '\n' || source[j + 1] === '\r')) {
+        j += 2;
+        continue;
+      }
+      break;
+    }
+    return j < source.length && source[j] === '{';
   }
 
   // Matches blocks with Bash-specific pairing: fi→if, esac→case, done→for/while/until/select, }→{
