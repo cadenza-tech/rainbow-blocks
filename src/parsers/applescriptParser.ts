@@ -1155,10 +1155,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         probe++;
         continue;
       }
-      // Line continuation: `¬` followed by optional whitespace, then a newline
+      // Line continuation: `¬` followed by optional whitespace and an optional
+      // single-line comment (`-- ...`), then a newline.
       if (ch === '¬') {
         let next = probe + 1;
         while (next < source.length && (source[next] === ' ' || source[next] === '\t')) next++;
+        if (next + 1 < source.length && source[next] === '-' && source[next + 1] === '-') {
+          while (next < source.length && source[next] !== '\r' && source[next] !== '\n') next++;
+        }
         if (next < source.length && (source[next] === '\r' || source[next] === '\n')) {
           if (source[next] === '\r') next++;
           if (next < source.length && source[next] === '\n') next++;
