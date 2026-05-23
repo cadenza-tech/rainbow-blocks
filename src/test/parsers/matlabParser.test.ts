@@ -2890,6 +2890,52 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: VT/FF/NBSP/Unicode horizontal whitespace as command-syntax separator', () => {
+    test('should treat \\v (vertical tab) between disp and if as command-syntax separator', () => {
+      // `disp\vif true` is command-syntax — `disp` is a command, `if` and `true` are
+      // string arguments. The `if` must NOT be tokenised as a real block opener. Without
+      // the fix the `if` consumes an inner `end`, destroying outer pairing.
+      const source = 'function f\ndisp\vif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The `if` keyword must NOT appear as a token (command-syntax string argument).
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0, 'if after disp<VT> must be a command-syntax argument, not a block opener');
+    });
+
+    test('should treat \\f (form feed) between disp and if as command-syntax separator', () => {
+      const source = 'function f\ndisp\fif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0);
+    });
+
+    test('should treat NBSP (U+00A0) between disp and if as command-syntax separator', () => {
+      const source = 'function f\ndisp if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0);
+    });
+
+    test('should treat U+2003 (em space) between disp and if as command-syntax separator', () => {
+      const source = 'function f\ndisp if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0);
+    });
+
+    test('should treat U+3000 (ideographic space) between disp and if as command-syntax separator', () => {
+      const source = 'function f\ndisp　if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(tokens.filter((t) => t.value === 'if').length, 0);
+    });
+  });
+
   suite('Regression 2026-05-23: single-quote followed by Unicode letter is string-start, not transpose', () => {
     test("should treat ' followed by Unicode letter as string-start (Greek epsilon)", () => {
       // `]'ε...'` with prev=`]` (value-like) and next=Greek `ε` (Unicode letter) should be
