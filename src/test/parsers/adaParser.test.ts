@@ -2853,6 +2853,18 @@ end if;`;
       const ifTokens = tokens.filter((t) => t.value.toLowerCase() === 'if');
       assert.strictEqual(ifTokens.length, 0, 'if inside parameter default value should be filtered out');
     });
+
+    test('should keep procedure pair when case-expression default value uses parameter-list semicolon', () => {
+      // procedure F(X : Integer; Y : Integer := case A is when 1 => 0, when others => 1) is ...
+      // Same root cause as the if-expression case above.
+      const source = 'procedure F(X : Integer; Y : Integer := case A is when 1 => 0, when others => 1) is\nbegin\n   null;\nend F;';
+      const pairs = parser.parse(source);
+      const procPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'procedure');
+      assert.ok(procPair, 'procedure block should be paired');
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value.toLowerCase() === 'case');
+      assert.strictEqual(caseTokens.length, 0, 'case inside parameter default value should be filtered out');
+    });
   });
 
   suite('Regression 2026-04-29: unterminated paren before if block', () => {
