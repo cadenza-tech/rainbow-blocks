@@ -3483,5 +3483,41 @@ end try`;
     });
   });
 
+  suite('Bug AS-MEDIUM-1: on error() handler declaration should be recognized', () => {
+    test('should pair on error() function-style handler with bare end', () => {
+      const source = `on error()
+  beep
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should pair on error() function-style handler with end error trailing identifier', () => {
+      // `end error` tokenizes as bare `end` (the trailing `error` is an identifier
+      // serving as the handler name, not part of a compound close keyword).
+      const source = `on error()
+  beep
+end error`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should pair on error(arg) function-style handler with arguments', () => {
+      const source = `on error(msg)
+  display dialog msg
+end error`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should pair on error () function-style handler with whitespace before paren', () => {
+      const source = `on error ()
+  beep
+end error`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
