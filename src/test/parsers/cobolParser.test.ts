@@ -2986,6 +2986,24 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-23: COPY filename filter applies to block_middle keywords', () => {
+    // Bug: the tokenize override only suppressed block_open / block_close keywords
+    // used as a COPY copybook name. block_middle (ELSE/WHEN) was tokenised, so
+    // `COPY WHEN.` injected an extra WHEN intermediate into the enclosing EVALUATE.
+    test('should not treat COPY WHEN. as a WHEN intermediate of the surrounding EVALUATE', () => {
+      const source = 'EVALUATE X\n  COPY WHEN.\n  WHEN 1\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+    test('should not treat COPY ELSE. as an ELSE intermediate of the surrounding IF', () => {
+      const source = 'IF X\n  COPY ELSE.\n  ELSE\n  DISPLAY OK\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+  });
+
   suite('Regression 2026-05-19: dangling operator before a newline keeps ELSE/WHEN intermediate', () => {
     test('should register ELSE as IF intermediate when the condition ends with a dangling operator before a newline', () => {
       // Bug: isInExpressionContext skipped the newline and reached the `>` that
