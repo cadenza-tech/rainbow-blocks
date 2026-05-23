@@ -4430,5 +4430,18 @@ end`;
     });
   });
 
+  suite('Regression: loop-do with trailing comment on previous line', () => {
+    test('should recognise do as loop separator when previous line is while cond # comment', () => {
+      // Bug: `do` on a new line after `while cond # comment` was treated as a standalone
+      // block opener, mis-pairing with the trailing `end` and leaving `while` orphan.
+      // Treat the `do` as a loop separator (so `while` pairs with `end` instead) — this
+      // matches the user's clear intent even though strict Ruby grammar rejects this form.
+      const source = 'while cond # comment\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      // Should produce a single while/end pair (do is filtered as loop separator).
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
