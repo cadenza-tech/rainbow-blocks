@@ -5799,6 +5799,31 @@ end select`;
     });
   });
 
+  suite('Regression 2026-05-24: select-type guard injection inside parenthesized expression', () => {
+    test('should not inject class-is intermediate inside parenthesized expression', () => {
+      // The guard phrase `class is (...)` appears inside `(...)`, which makes it part of
+      // an expression rather than a select-type intermediate. The guard injection pass
+      // must respect isInsideParentheses just like the keyword tokenizer loop, otherwise
+      // a phantom block_middle would be added when the parent is in fact `select type`.
+      const source = `select type (x)
+  arr = (class is (integer))
+end select`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'no class-is intermediate must be injected from inside parens');
+    });
+
+    test('should not inject type-is intermediate inside parenthesized expression', () => {
+      // Same defense for `type is (...)` inside a parenthesized expression.
+      const source = `select type (x)
+  arr = (type is (integer))
+end select`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'no type-is intermediate must be injected from inside parens');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
