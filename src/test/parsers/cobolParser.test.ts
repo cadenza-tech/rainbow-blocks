@@ -3004,6 +3004,29 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-23: standalone PERFORM. is not paired with END-PERFORM', () => {
+    // Bug: `PERFORM.` (the verb followed directly by a period) is not a structured
+    // PERFORM — the period terminates the statement with no body or iteration phrase,
+    // so it must remain an orphan paragraph-style PERFORM with no opener. The
+    // following END-PERFORM has nothing to pair with. computeValidPositions wrongly
+    // accepted such a PERFORM as a structured opener because its peek-ahead only
+    // looked at the next word and ignored statement-ending punctuation.
+    test('should not pair PERFORM. with a following END-PERFORM', () => {
+      const source = 'PERFORM.\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+    test('should still pair a structured PERFORM whose UNTIL phrase begins on the next line', () => {
+      // Guard the fix: when the next non-blank token is a structured PERFORM phrase
+      // (UNTIL/VARYING/WITH/TEST) the opener must still be accepted even though it
+      // starts on a different physical line. Only a period (statement terminator)
+      // disqualifies the opener.
+      const source = 'PERFORM\n  UNTIL DONE\n  DISPLAY X\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
   suite('Regression 2026-05-19: dangling operator before a newline keeps ELSE/WHEN intermediate', () => {
     test('should register ELSE as IF intermediate when the condition ends with a dangling operator before a newline', () => {
       // Bug: isInExpressionContext skipped the newline and reached the `>` that
