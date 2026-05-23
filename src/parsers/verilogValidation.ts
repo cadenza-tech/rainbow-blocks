@@ -40,7 +40,11 @@ export function isValidWaitOpen(source: string, position: number, excludedRegion
   let i = position + 4; // length of 'wait'
   while (i < source.length) {
     const ch = source[i];
-    if (ch === ' ' || ch === '\t') {
+    // Treat newlines as whitespace (SystemVerilog free-form: a newline between
+    // `wait` and `fork` is equivalent to a space, so `wait\nfork;` is the same
+    // statement as `wait fork;`). This mirrors the backward scan in
+    // isValidForkOpen, which already skips newlines before `fork`.
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
       i++;
       continue;
     }
