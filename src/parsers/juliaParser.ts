@@ -15,7 +15,7 @@ import {
   isLoneEndInArrayConstruction
 } from './juliaBracketHelpers';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
-import { isSymbolStart, isTransposeOperator, skipJuliaInterpolation } from './juliaHelpers';
+import { isPrecededByCommandMacroPrefix, isSymbolStart, isTransposeOperator, skipJuliaInterpolation } from './juliaHelpers';
 import { isFollowedByBinaryOperator, isPrecededByBinaryOperator, isPrecededBySubtypeOperator } from './juliaLastindexHelpers';
 
 export class JuliaBlockParser extends BaseBlockParser {
@@ -775,20 +775,12 @@ export class JuliaBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Returns true if the character could be the last char of a command macro prefix
-  // (i.e., the backtick that follows it is part of a prefixed command macro call).
-  // Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
-  private isCommandMacroPrefixChar(c: string): boolean {
-    if (/[a-zA-Z0-9_]/.test(c)) return true;
-    return c.charCodeAt(0) > 127 && /\p{L}/u.test(c);
-  }
-
   // Matches triple backtick command string: ``` ... ```
   private matchTripleBacktickCommand(source: string, pos: number): ExcludedRegion {
     let i = pos + 3;
-    // A backtick command is "prefixed" if preceded by an identifier char.
-    // Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
-    const isPrefixed = pos > 0 && this.isCommandMacroPrefixChar(source[pos - 1]);
+    // A backtick command is "prefixed" if preceded by an identifier-continuation char.
+    // See isPrecededByCommandMacroPrefix for surrogate-pair handling (BMP-outside chars).
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -844,9 +836,9 @@ export class JuliaBlockParser extends BaseBlockParser {
   // Matches command string (backtick)
   private matchCommandString(source: string, pos: number): ExcludedRegion {
     let i = pos + 1;
-    // A backtick command is "prefixed" if preceded by an identifier char.
-    // Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
-    const isPrefixed = pos > 0 && this.isCommandMacroPrefixChar(source[pos - 1]);
+    // A backtick command is "prefixed" if preceded by an identifier-continuation char.
+    // See isPrecededByCommandMacroPrefix for surrogate-pair handling (BMP-outside chars).
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {

@@ -140,17 +140,30 @@ export function skipNestedJuliaString(source: string, pos: number): number {
   return i;
 }
 
-// Returns true if the character could be the last char of a command macro prefix
-// (i.e., the backtick that follows it is part of a prefixed command macro call).
-// Identifier chars: ASCII word (a-zA-Z0-9_) or Unicode Letter (\p{L}).
-function isCommandMacroPrefixChar(c: string): boolean {
-  if (/[a-zA-Z0-9_]/.test(c)) return true;
-  return c.charCodeAt(0) > 127 && /\p{L}/u.test(c);
+// Returns true if `source[pos]` (a backtick) is preceded by an identifier-continuation
+// character, indicating the backtick is part of a prefixed command macro call (e.g.
+// `prefix\`cmd\``). Identifier-continuation chars: ASCII word (a-zA-Z0-9_) or Unicode
+// Letter/Number (\p{L}, \p{N}). Handles BMP-outside characters encoded as surrogate
+// pairs (e.g. 𝐀 U+1D400 = high surrogate 0xD835 + low surrogate 0xDC00) by inspecting
+// the full code point at pos - 2 when pos - 1 is a low surrogate.
+export function isPrecededByCommandMacroPrefix(source: string, pos: number): boolean {
+  if (pos <= 0) return false;
+  const prevChar = source[pos - 1];
+  // BMP-outside char: low surrogate at pos - 1, high surrogate at pos - 2.
+  if (prevChar >= '\uDC00' && prevChar <= '\uDFFF' && pos >= 2) {
+    const cp = source.codePointAt(pos - 2);
+    if (cp !== undefined && cp > 0xffff && /[\p{L}\p{N}]/u.test(String.fromCodePoint(cp))) {
+      return true;
+    }
+    return false;
+  }
+  if (/[a-zA-Z0-9_]/.test(prevChar)) return true;
+  return prevChar.charCodeAt(0) > 127 && /\p{L}/u.test(prevChar);
 }
 
 // Skips a backtick command string (for use inside interpolation/nested string scanning)
 export function skipBacktickString(source: string, pos: number): number {
-  const isPrefixed = pos > 0 && isCommandMacroPrefixChar(source[pos - 1]);
+  const isPrefixed = isPrecededByCommandMacroPrefix(source, pos);
   // Check for triple backtick
   if (source.slice(pos, pos + 3) === '```') {
     let i = pos + 3;
