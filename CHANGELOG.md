@@ -5,6 +5,70 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.56] - 2026-05-24
+
+### Fixed
+
+- AppleScript: Recognize `on error()` function-style handler declaration so the `on`/`end` pair is detected when `error` is used as a handler name
+- AppleScript: Reject `if(condition)` function-call form so it does not open a block (`if (cond) then` with whitespace is still valid)
+- AppleScript: Handle Unicode whitespace after `¬` continuation in the handler-name probe so handlers spanning Unicode-indented continuation lines are recognized
+- Bash: Reject `esac` as a POSIX case pattern in paren-scope check so `(case x in esac)` inside a same-line subshell still pairs
+- Bash: Detect keywords split by `\<newline>` line continuation (e.g. `i\<NL>f`, `f\<NL>i`, `do\<NL>ne`) so they are paired as `if`/`fi`/`done`
+- COBOL: Support `PERFORM N TIMES` iteration phrase split across newlines so `PERFORM 3\n TIMES ... END-PERFORM` is detected as a block
+- COBOL: Treat a dangling `,`/`;`/`(` before a newline as an incomplete expression so the next-line `ELSE`/`WHEN` is kept as an intermediate
+- COBOL: Recognize a bare `COPY` (no copybook name) before a block-opening verb so the following `IF`/`PERFORM`/`EVALUATE` block is not swallowed as a copybook name
+- Crystal: Pair `def`/`end` when a parameter has a default value without parens (`def foo x = 1`) so it is not misread as a shorthand `def`
+- Crystal: Suppress receiver-like keywords (`select`, `enum`, `union`, `struct`, `lib`, `macro`, `annotation`) followed by `[` or `|` so an index access or block argument does not break the enclosing block
+- Crystal: Mark an unterminated char literal trailing backslash as an excluded region so the following `if` is not misread as a postfix conditional
+- Elixir: Skip `fn` as a value when followed by `do` after a block keyword (`case fn do ... end`) so the outer block keyword is not orphaned
+- Elixir: Skip `fn` as a function name after a definition keyword (`def fn do ... end`) so the `def`/`end` pair is detected
+- Elixir: Skip newlines and comments between `fn(...)` and `do` so `if fn(x)\ndo` does not misclassify `fn` as a block opener
+- Elixir: Skip keyword tokens immediately after a `?<char>` character literal so a bare `end` after `?#` does not close an outer block
+- Elixir: Reject stray `end` inside parentheses to prevent cascade pairing with an enclosing block
+- Elixir: Require a word boundary after a triple-quoted string terminator so `"""abc"""end` is recognized as an unterminated triple-quoted string and `end` does not leak as a block close
+- Erlang: Track nested brace depth in the map opener scan so a `begin`/`end` inside an inner map literal does not falsely close an outer block
+- Erlang: Detect a real `fun`/`end` pair inside a nested function call in a `-define` body so `list:map(fun(X) -> X end, L)` is paired
+- Fortran: Recognize a construct name after a concatenated compound end (`endif do`, `enddo if`) so the trailing label is not misread as a phantom block opener
+- Fortran: Support line continuation in `select type` guard tokens (`type & \n is`, `class & \n is`) so the guard is added as an intermediate
+- Fortran: Skip `select type` guard injection inside parentheses so `(class is (integer))` does not inject a phantom `block_middle`
+- Fortran: Skip `select type` guard injection adjacent to a Unicode letter so identifiers like `étype` are not partially matched as `type is`
+- Julia: Reject `end` followed by range/logical/bitwise/pair operators (`:`, `&&`, `||`, `&`, `|`, `=>`) outside indexing brackets so the inner `end` does not steal the outer block's `end`
+- MATLAB: Reject `arguments(obj)` as a function call inside a function body so the outer `function`/`end` pair is not broken by a misidentified `arguments` block
+- MATLAB: Treat a single-quote followed by a Unicode letter as a string-start, not transpose, so non-ASCII string literals are recognized correctly
+- MATLAB: Treat VT/FF/Unicode horizontal whitespace as a command-syntax separator so `disp<VT>if` is recognized as command syntax
+- MATLAB: Reject `end` inside `if`/`while`/`switch` header expressions so a stray `end` in a condition does not close the enclosing block
+- MATLAB: Skip Unicode horizontal whitespace in the binary-operator detection for `end` so `1 + <NBSP>end` does not misclassify `end` as a block close
+- MATLAB: Reject `end` after a value token (identifier, `)`, `]`, `}`, `.`, `--`) on the same logical line so `x = a end` does not close an outer block
+- MATLAB: Skip string literals when scanning the command-syntax identifier run so `disp "end" if x` is recognized as command syntax
+- Octave: Recognize cell `{}`, bracket `[]`, and chained `()()` indexing assignment so `end{1} = 5`, `end[1] = 5`, `end(1)(2) = 5`, `end{1}.x = 5` do not close an outer block
+- Octave: Treat a quote followed by a Unicode letter as a string opener so `disp'θ end'` is recognized as a string and the inner `end` does not leak
+- Octave: Reject `end` as a block close when used in an `until` condition so `until end > 0` does not close the enclosing block
+- Pascal: Skip `class` in a comparison context (`X = class`) inside a record so it is not treated as a record-context `open-block` and the surrounding `record`/`end` pair survives
+- Pascal: Skip `interface` in a comparison context inside a record so the record/end pair survives
+- Pascal: Skip `object` in a comparison context inside a record so the record/end pair survives
+- Pascal: Recognize `class const`/`class type`/`class threadvar` as method modifiers in a record so they are not treated as block openers
+- Ruby: Skip `end` after a hash label colon (`{a: end}`) so it does not close an outer block
+- Ruby: Accept an indented terminator under a no-flag heredoc (`<<EOF`) so a typo of `<<EOF` with indented `  EOF` does not swallow the rest of the source
+- Ruby: Trim trailing whitespace on a heredoc terminator line so `EOF<space>` still terminates the heredoc
+- Ruby: Allow newline crossing in the ternary scan for `end` value position so a multi-line ternary `cond ?\n a :\n end` does not misclassify `end` as a block close
+- Ruby: Recognize Unicode and emoji symbol literals (`:Π`, `:日本語`, `:a😀b`) as excluded regions
+- Verilog/SystemVerilog: Skip cast detection when `)` is inside an `(* attr *)` attribute region so attribute-prefixed module declarations parse in linear time (was `O(N²)`)
+- Verilog/SystemVerilog: Treat newlines as whitespace in the `wait fork` detection so `wait\nfork;` is recognized as a free-form `wait fork` statement
+- Verilog/SystemVerilog: Skip comments inside `#`-delay expressions so `always # /* delay */ N begin` is paired with `end`
+- Verilog/SystemVerilog: Skip `(* attr *)` attribute regions in the data-type-keyword backward scan so `int (* attr *) endmodule;` suppresses the inner identifier
+- Verilog/SystemVerilog: Skip comma-separated declaration chains in data-type detection so `reg a, endmodule;` suppresses the trailing identifier as a close keyword
+- Verilog/SystemVerilog: Skip comments inside scope resolution detection so `pkg::/* c */begin` suppresses the trailing keyword
+- Verilog/SystemVerilog: Filter block keywords inside array subscript brackets so `foreach (arr[case])` does not misclassify `case` as a block opener
+- Verilog/SystemVerilog: Skip `default` inside a paren-less control (`forever`, `initial`, `final`, `always_*`) or `else` single-statement body so it is not attached to an outer `case`
+- Verilog/SystemVerilog: Skip comments inside ``pragma protect`` directive arguments so a comment-mixed `pragma protect begin`/`end` is recognized
+- VHDL: Limit the attribute reference check to declarative item keywords so `if 'a' = c then` is recognized as a control-flow opener
+- VHDL: Consume 5-character backslash-escape character literals (`'\nX'`) so an unterminated tolerant char literal does not leak as an extended identifier
+- VHDL: Restrict the `is null`/`is (expr)` filter to subprogram headers so the `is` intermediate of `process is null;` etc. is preserved
+- VHDL: Treat attribute_specification scan-limit exhaustion as conservative-true so an entity_class keyword after a long attribute declaration is not promoted to a block opener
+- VHDL: Close `generate` and its control prefix (`if`/`for`/`while`/`case`) together for a bare `end;` inside a nested if-generate so the inner `if` is not orphaned
+- VHDL: Tolerate newlines between a keyword and an attribute reference apostrophe so `process\n'foreign` is recognized as an attribute reference
+- VHDL: Recognize VHDL-2019 `view` declarations as block openers so `view ... end view` is paired and does not pollute the surrounding intermediates
+
 ## [1.1.55] - 2026-05-23
 
 ### Fixed
@@ -2139,6 +2203,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.56]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.55...v1.1.56
 [1.1.55]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.54...v1.1.55
 [1.1.54]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.53...v1.1.54
 [1.1.53]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.52...v1.1.53
