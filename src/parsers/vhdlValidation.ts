@@ -847,6 +847,21 @@ export function isInSignalAssignment(
         return keyword === 'when' || foundWhen;
       }
     }
+    // 'assert' starts a (concurrent or sequential) assertion statement that may carry a
+    // trailing `when condition` (concurrent assertion guard). The trailing `when` is NOT
+    // a case branch intermediate, so filter it out the same way as a conditional signal
+    // assignment. The boundary keywords below (then/begin/loop/generate/is/end) and `;`
+    // already stop the scan from leaking out of the assertion's enclosing statement.
+    if (i >= 5) {
+      const assertSlice = lowerSource.slice(i - 5, i + 1);
+      if (
+        assertSlice === 'assert' &&
+        (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
+        (i + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 1]))
+      ) {
+        return keyword === 'when' || foundWhen;
+      }
+    }
     // Stop at block boundary keywords that start a new context
     // Note: 'else'/'elsif' are NOT boundaries here because chained conditional
     // signal assignments use else (e.g., sig <= a when c1 else b when c2 else c;)
