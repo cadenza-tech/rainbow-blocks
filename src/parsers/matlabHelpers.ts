@@ -158,6 +158,52 @@ export function isFollowedByBinaryOperator(source: string, afterPos: number, key
   return false;
 }
 
+// Returns true when `end` (whose end is `afterPos`) is immediately followed by a binary
+// operator that makes `end` a left operand: arithmetic `+ - * / ^ \`, logical `& |`, or
+// element-wise `.^ .* ./ .\` (without `=`, which would be a compound assignment caught
+// separately). Comparison operators (`==`, `~=`, `<=`, `>=`, `!=`) and `<`/`>`/`:` are
+// deliberately NOT matched: a real block close may be followed by a stray comparison,
+// and `end:5` belongs to a for-header range (already handled by isEndInForHeaderRange).
+// Compound-assignment operators (`+= -= *=` ...) are NOT matched here because
+// isFollowedByCompoundAssignment already covers them. Symmetric (but more permissive on
+// comparisons) with the block-open side's isFollowedByBinaryOperator.
+export function isEndFollowedByBinaryOperator(source: string, afterPos: number): boolean {
+  let i = afterPos;
+  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+    i++;
+  }
+  if (i >= source.length) {
+    return false;
+  }
+  const ch = source[i];
+  const next = i + 1 < source.length ? source[i + 1] : '';
+  // Strictly-binary arithmetic / logical operators that put `end` in left-operand context.
+  // The trailing `=` check rules out compound-assignment forms (`+=`, `&=` ...) which the
+  // compound-assignment helper handles separately.
+  if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '^' || ch === '\\' || ch === '&' || ch === '|') {
+    if (next === '=') {
+      return false;
+    }
+    return true;
+  }
+  // Element-wise binary operators (`.*`, `./`, `.^`, `.\`) — `.+` and `.-` are not MATLAB
+  // syntax, so they are not matched. The `..` (continuation marker prefix) and `...` cases
+  // are excluded by requiring a known operator char as the second char.
+  if (ch === '.' && i + 1 < source.length) {
+    const op = next;
+    if (op === '*' || op === '/' || op === '^' || op === '\\') {
+      // Reject only when this is NOT a compound assignment (`.*=`); that form is handled
+      // by isFollowedByCompoundAssignment.
+      const third = i + 2 < source.length ? source[i + 2] : '';
+      if (third === '=') {
+        return false;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 // Checks if a classdef section keyword is used as a function call
 // Returns true if the keyword is followed by '(' and preceded by
 // assignment, expression operator, or appears inside an expression

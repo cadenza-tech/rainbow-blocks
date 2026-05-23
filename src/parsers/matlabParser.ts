@@ -9,6 +9,7 @@ import {
   isAtLineStartForSectionKeyword,
   isAtLineStartWithWhitespace,
   isAtStatementStart,
+  isEndFollowedByBinaryOperator,
   isFollowedByBinaryOperator,
   isFollowedByCompoundAssignment,
   isFollowedBySimpleAssignment,
@@ -67,6 +68,14 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Comparison operators (`== ~= >= <=`) are NOT compound assignments and are
     // deliberately left alone (a real block close may be followed by a stray comparison).
     if (this.isFollowedByCompoundAssignment(source, assignFrom)) {
+      return false;
+    }
+    // Reject end followed by an arithmetic/logical binary operator (`end + 1`, `end - 1`,
+    // `end * 2`, etc.). Such forms put `end` in left-operand context — invalid MATLAB
+    // outside array indexing. The same-line and `end ...\n + 1` continuation forms are
+    // handled symmetrically because `assignFrom` already skips `...` continuations.
+    // Comparison operators (`==`, `~=`, etc.) are deliberately left alone (above).
+    if (keyword === 'end' && isEndFollowedByBinaryOperator(source, assignFrom)) {
       return false;
     }
     // Reject end followed by a single `.` (possibly preceded by whitespace) that is NOT
