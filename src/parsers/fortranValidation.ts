@@ -687,8 +687,8 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
     if (i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
       return false;
     }
-    if (i < source.length && source[i] === '(') {
-      const j = skipConsecutiveParenGroups(source, i);
+    if (i < source.length && (source[i] === '(' || source[i] === '[')) {
+      const j = skipConsecutiveBracketGroups(source, i);
       let k = j;
       while (k < source.length && (source[k] === ' ' || source[k] === '\t')) {
         k++;
@@ -696,8 +696,9 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
       if (k < source.length && source[k] === '=' && (k + 1 >= source.length || source[k + 1] !== '=')) {
         return false;
       }
-      // Keyword directly followed by ( with no = or % after parens: function call pattern
-      if (firstCharAfterKw === '(') {
+      // Keyword directly followed by ( or [ with no = or % after groups:
+      // function call / array indexing / coarray image selector pattern (e.g., `enddo[1]`)
+      if (firstCharAfterKw === '(' || firstCharAfterKw === '[') {
         return false;
       }
     }
@@ -785,10 +786,10 @@ export function isValidFortranBlockClose(keyword: string, source: string, positi
   if (i < source.length && source[i] === '=' && (i + 1 >= source.length || source[i + 1] !== '=')) {
     return false;
   }
-  // end(1) = ... or end(1)(2) = ... (array element/section assignment)
-  if (i < source.length && source[i] === '(') {
-    let j = skipConsecutiveParenGroups(source, i);
-    // Handle & continuation after paren: end(1) &\n  = value
+  // end(1) = ... / end[1] = ... / end(1)(2) = ... / end[1][2] = ... (array element / coarray image assignment)
+  if (i < source.length && (source[i] === '(' || source[i] === '[')) {
+    let j = skipConsecutiveBracketGroups(source, i);
+    // Handle & continuation after group: end(1) &\n  = value
     if (j < source.length && source[j] === '&') {
       j++;
       while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
@@ -861,14 +862,18 @@ function skipCommentAndContinuationLines(source: string, start: number): number 
   return i;
 }
 
-// Skips consecutive parenthesized groups: end(1)(2)(3)
-function skipConsecutiveParenGroups(source: string, start: number): number {
+// Skips consecutive bracket groups: end(1)(2)(3) or end[1][2] or end(1)[2]
+// Handles both parenthesis groups (array indexing / function calls) and square bracket
+// groups (Fortran 2008+ coarray image selectors).
+function skipConsecutiveBracketGroups(source: string, start: number): number {
   let j = start;
-  while (j < source.length && source[j] === '(') {
+  while (j < source.length && (source[j] === '(' || source[j] === '[')) {
+    const open = source[j];
+    const close = open === '(' ? ')' : ']';
     let depth = 1;
     j++;
     while (j < source.length && depth > 0) {
-      // Skip string literals inside parenthesized expressions
+      // Skip string literals inside grouped expressions
       if ((source[j] === "'" || source[j] === '"') && depth > 0) {
         const quote = source[j];
         j++;
@@ -886,8 +891,8 @@ function skipConsecutiveParenGroups(source: string, start: number): number {
         }
         continue;
       }
-      if (source[j] === '(') depth++;
-      else if (source[j] === ')') depth--;
+      if (source[j] === open) depth++;
+      else if (source[j] === close) depth--;
       j++;
     }
     while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
