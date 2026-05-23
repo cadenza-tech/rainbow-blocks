@@ -500,8 +500,9 @@ export class RubyBlockParser extends BaseBlockParser {
     if (beforeColon === undefined || !(beforeColon === ' ' || beforeColon === '\t')) {
       return false;
     }
-    // Look for a matching ternary `?` earlier on the same line (stop at newline,
-    // statement separator `;`, or start of source). Skip excluded regions so that
+    // Look for a matching ternary `?` earlier. Stop at statement separator `;` or start
+    // of source. Newlines are not barriers because the `?` and `:` of a ternary can sit
+    // on different lines (e.g., `cond ?\n  a :\n  end`). Skip excluded regions so that
     // `?x` character literals and `?` inside strings/comments are ignored.
     for (let j = i - 1; j >= 0; j--) {
       if (this.isInExcludedRegion(j, excludedRegions)) {
@@ -512,7 +513,7 @@ export class RubyBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[j];
-      if (ch === '\n' || ch === '\r' || ch === ';') {
+      if (ch === ';') {
         return false;
       }
       if (ch === '?') {
