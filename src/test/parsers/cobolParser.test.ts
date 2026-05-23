@@ -3027,6 +3027,40 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-24: PERFORM N TIMES split across newline still pairs', () => {
+    // Bug: when the iteration phrase of a structured PERFORM was split across a
+    // newline (e.g. `PERFORM 3` on one line and `TIMES` on the next),
+    // computeValidPositions only peeked at the next word on the same physical line
+    // via `^[ \\t]+`, so the TIMES verb was missed. The PERFORM was misclassified
+    // as a paragraph call and rejected, leaving the END-PERFORM orphan. The lookahead
+    // must treat the inter-word whitespace as any horizontal-or-vertical blank within
+    // the same statement (terminated by a period).
+    test('should pair PERFORM with END-PERFORM when the count and TIMES are split across a newline', () => {
+      const source = 'PERFORM 3\n  TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should pair PERFORM with END-PERFORM when the count, variable, and TIMES are all split across newlines', () => {
+      const source = 'PERFORM\n  WS-COUNT\n  TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should not pair PERFORM with END-PERFORM when a period intervenes before TIMES', () => {
+      // Guard: a period closes the statement; the TIMES on the next line is no
+      // longer part of the PERFORM and the opener stays a paragraph call.
+      const source = 'PERFORM 3.\n  TIMES\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+    test('should pair PERFORM with END-PERFORM when paragraph THRU split across a newline is rejected', () => {
+      // Guard: PERFORM <paragraph> THRU/THROUGH is still a paragraph call even when
+      // split across newlines. The opener must remain rejected.
+      const source = 'PERFORM PARA-A\n  THRU PARA-Z';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression 2026-05-19: dangling operator before a newline keeps ELSE/WHEN intermediate', () => {
     test('should register ELSE as IF intermediate when the condition ends with a dangling operator before a newline', () => {
       // Bug: isInExpressionContext skipped the newline and reached the `>` that
