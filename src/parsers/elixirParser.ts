@@ -384,6 +384,17 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {
         return false;
       }
+      // Sigil prefix: ~end, ~else, etc. are the start of a sigil that failed to find a
+      // valid delimiter (e.g. ~end<newline>). In real Elixir source the sigil is invalid
+      // syntax, but we must not let the trailing keyword (end/else/rescue/catch/after)
+      // be tokenized as a block keyword, because that would mis-pair with surrounding
+      // openers. The block_open path is already protected by isValidBlockOpen rejecting
+      // keywords without a following `do`; this guard adds the symmetric protection for
+      // block_close / block_middle. We only fire when `~` is *not* preceded by an
+      // identifier (otherwise `~` would not be a sigil prefix anyway).
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '~' && !this.isPrecededByIdentifier(source, token.startOffset - 1)) {
+        return false;
+      }
       // Type spec operator :: prefix: keywords after :: are type names, not block keywords
       if (token.startOffset >= 2) {
         let bi = token.startOffset - 1;
