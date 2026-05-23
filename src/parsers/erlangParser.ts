@@ -16,6 +16,18 @@ const PAIRED_SIGIL_DELIMITERS: Readonly<Record<string, string>> = {
 // Block-opening keywords used to bound backward scans for intermediate keyword validation
 const BLOCK_OPENER_KEYWORDS = new Set(['begin', 'if', 'case', 'receive', 'try', 'fun', 'maybe']);
 
+// Patterns recognizing fun-reference forms (fun Mod:Func/Arity, fun Func/Arity,
+// fun 'quoted-atom'/Arity). Shared by isValidBlockOpen and hasUnclosedOpenerInMapScope so
+// that a fun reference is consistently treated as NOT a block opener.
+const FUN_REF_ATOM_OR_IDENT = "(?:\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
+const FUN_REF_ARITY_PATTERN = '(?:\\d+|[A-Z\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\?[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
+const FUN_REF_WITH_MODULE_PATTERN = new RegExp(
+  `^\\s+${FUN_REF_ATOM_OR_IDENT}\\s*:\\s*${FUN_REF_ATOM_OR_IDENT}\\s*/\\s*${FUN_REF_ARITY_PATTERN}`,
+  'u'
+);
+const FUN_REF_NO_MODULE_PATTERN = new RegExp(`^\\s+\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*\\s*/\\s*${FUN_REF_ARITY_PATTERN}`, 'u');
+const FUN_REF_QUOTED_PATTERN = new RegExp(`^\\s+\\??'(?:[^'\\\\\\n\\r]|\\\\.)*'\\s*/\\s*${FUN_REF_ARITY_PATTERN}`, 'u');
+
 // Pre-scanned span of a module attribute: -name(...).
 interface AttributeSpan {
   // Start of the leading '-' character at line start
@@ -88,27 +100,11 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Check if fun is followed by an identifier and '/' (function reference)
-    const afterFun = source.slice(position + 3);
-    // fun Module:Function/Arity or fun Function/Arity
-    // Module can be a quoted atom: fun 'my.module':func/N
-    // Module/Function can be a macro: fun ?MODULE:handler/N, fun ?MY_FUNC/N
-    // OTP 19+ allows Unicode characters in atoms/identifiers (\p{L}/\p{N})
-    // Arity can be a literal digit (\d+), a bound variable (uppercase identifier per OTP 21+),
-    // or a macro reference (?MACRO/?macro).
-    const atomOrIdent = "(?:\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
-    const arityPattern = '(?:\\d+|[A-Z\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\?[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
-    const funRefModPattern = new RegExp(`^\\s+${atomOrIdent}\\s*:\\s*${atomOrIdent}\\s*/\\s*${arityPattern}`, 'u');
-    if (funRefModPattern.test(afterFun)) {
-      return false;
-    }
-    const funRefPattern = new RegExp(`^\\s+\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*\\s*/\\s*${arityPattern}`, 'u');
-    if (funRefPattern.test(afterFun)) {
-      return false;
-    }
-    // fun 'quoted-atom'/Arity or fun ?'quoted-atom'/Arity (function reference without module prefix)
-    const quotedFunRef = new RegExp(`^\\s+\\??'(?:[^'\\\\\\n\\r]|\\\\.)*'\\s*/\\s*${arityPattern}`, 'u');
-    if (quotedFunRef.test(afterFun)) {
+    // Check if fun is followed by an identifier and '/' (function reference).
+    // fun Module:Function/Arity / fun Function/Arity / fun 'quoted-atom'/Arity etc.
+    // Module/Function may be a macro (?MODULE:handler/N, ?MY_FUNC/N) and arity may be a
+    // literal (\d+), a bound variable (OTP 21+) or a macro (?MACRO).
+    if (this.isFunReferenceAt(source, position)) {
       return false;
     }
 
@@ -122,6 +118,7 @@ export class ErlangBlockParser extends BaseBlockParser {
 
     // fun() in type annotation context (after ::)
     // Handles: handler :: fun((atom()) -> ok) in -record declarations
+    const afterFun = source.slice(position + 3);
     if (/^[ \t]*(?:(?:\r\n|\r|\n)[ \t]*)?\(/.test(afterFun)) {
       let j = position - 1;
       while (j >= 0) {
@@ -565,6 +562,14 @@ export class ErlangBlockParser extends BaseBlockParser {
     return isCatchExpressionPrefix(source, position, excludedRegions, this.erlangHelperCallbacks);
   }
 
+  // Returns true if `fun` at `position` (where source[position..position+3] === 'fun') is a
+  // function-reference form (fun Mod:Func/N, fun Func/N, fun 'quoted'/N) rather than a real
+  // anonymous-function opener. Shared between isValidBlockOpen and hasUnclosedOpenerInMapScope.
+  private isFunReferenceAt(source: string, position: number): boolean {
+    const afterFun = source.slice(position + 3);
+    return FUN_REF_WITH_MODULE_PATTERN.test(afterFun) || FUN_REF_NO_MODULE_PATTERN.test(afterFun) || FUN_REF_QUOTED_PATTERN.test(afterFun);
+  }
+
   // Returns true if there is an unclosed block opener between the enclosing #{ and the
   // 'end' keyword at `endOffset`, meaning that 'end' closes a block rather than acting as
   // a map key. Locates the enclosing #{ by a backward brace-depth scan, then scans forward
@@ -614,7 +619,13 @@ export class ErlangBlockParser extends BaseBlockParser {
         }
         const word = source.slice(i, wordEnd);
         if (BLOCK_OPENER_KEYWORDS.has(word) && !this.isMapKeyKeyword(source, wordEnd)) {
-          depth++;
+          // `fun` may be a fun-reference (fun Mod:Func/N, fun Func/N, fun 'q'/N) which is
+          // NOT a block opener. Match the same logic as isValidBlockOpen so that a map like
+          // #{fun foo/1 => 1, end => 2} does not phantom-depth and incorrectly treat the
+          // map-key `end` as a real block close.
+          if (word !== 'fun' || !this.isFunReferenceAt(source, i)) {
+            depth++;
+          }
         } else if (word === 'end' && !this.isMapKeyKeyword(source, wordEnd)) {
           depth = Math.max(0, depth - 1);
         }
