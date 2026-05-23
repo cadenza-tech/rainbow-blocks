@@ -304,16 +304,53 @@ export function matchPragmaDirective(source: string, pos: number): ExcludedRegio
   return { start: pos, end: lineEnd };
 }
 
+// Skips whitespace and embedded block/line comments forward from `pos` up to
+// `argEnd`. Block comments (`/* ... */`) and line comments (`// ...`) are valid
+// whitespace per IEEE 1800-2017 inside pragma directives. Returns the new position.
+function skipPragmaTrivia(source: string, pos: number, argEnd: number): number {
+  let i = pos;
+  while (i < argEnd) {
+    if (source[i] === ' ' || source[i] === '\t') {
+      i++;
+      continue;
+    }
+    // Block comment /* ... */
+    if (source[i] === '/' && i + 1 < argEnd && source[i + 1] === '*') {
+      i += 2;
+      while (i < argEnd) {
+        if (source[i] === '*' && i + 1 < argEnd && source[i + 1] === '/') {
+          i += 2;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    // Line comment // ...
+    if (source[i] === '/' && i + 1 < argEnd && source[i + 1] === '/') {
+      while (i < argEnd) i++;
+      break;
+    }
+    break;
+  }
+  return i;
+}
+
 // Returns true when the `pragma directive arguments contain `protect begin` (or
-// `protect begin_protected`) as the first significant tokens (after whitespace),
-// with optional trailing args.
+// `protect begin_protected`) as the first significant tokens (after whitespace
+// or block/line comments), with optional trailing args.
 function isPragmaProtectBegin(source: string, argStart: number, argEnd: number): boolean {
-  let i = argStart;
-  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  let i = skipPragmaTrivia(source, argStart, argEnd);
   if (source.slice(i, i + 7) !== 'protect') return false;
   i += 7;
-  if (i >= argEnd || !(source[i] === ' ' || source[i] === '\t')) return false;
-  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  // The `protect` word must be followed by whitespace or a comment boundary.
+  if (
+    i >= argEnd ||
+    !(source[i] === ' ' || source[i] === '\t' || (source[i] === '/' && i + 1 < argEnd && (source[i + 1] === '*' || source[i + 1] === '/')))
+  ) {
+    return false;
+  }
+  i = skipPragmaTrivia(source, i, argEnd);
   // Accept either `begin` or `begin_protected`. Try the longer form first so that
   // `begin_protected` is not mistaken for `begin` followed by an identifier.
   if (source.slice(i, i + 15) === 'begin_protected') {
@@ -432,14 +469,20 @@ function skipLineComment(source: string, pos: number): number {
 }
 
 // Returns true when the `pragma directive arguments are `protect end` (or
-// `protect end_protected`) with optional whitespace and trailing args.
+// `protect end_protected`) with optional whitespace, block/line comments,
+// and trailing args.
 function isPragmaProtectEnd(source: string, argStart: number, argEnd: number): boolean {
-  let i = argStart;
-  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  let i = skipPragmaTrivia(source, argStart, argEnd);
   if (source.slice(i, i + 7) !== 'protect') return false;
   i += 7;
-  if (i >= argEnd || !(source[i] === ' ' || source[i] === '\t')) return false;
-  while (i < argEnd && (source[i] === ' ' || source[i] === '\t')) i++;
+  // The `protect` word must be followed by whitespace or a comment boundary.
+  if (
+    i >= argEnd ||
+    !(source[i] === ' ' || source[i] === '\t' || (source[i] === '/' && i + 1 < argEnd && (source[i + 1] === '*' || source[i + 1] === '/')))
+  ) {
+    return false;
+  }
+  i = skipPragmaTrivia(source, i, argEnd);
   // Accept either `end` or `end_protected`. Try the longer form first so that
   // `end_protected` is not mistaken for `end` followed by an identifier.
   if (source.slice(i, i + 13) === 'end_protected') {
