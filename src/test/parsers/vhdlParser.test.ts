@@ -3736,5 +3736,22 @@ end package;`;
     });
   });
 
+  suite("Regression 2026-05-23: character literal with backslash inner char doesn't trigger extended identifier", () => {
+    test("should treat '\\n' as character literal and not absorb subsequent keywords as extended identifier", () => {
+      const source = `x <= '\\n'; entity e is
+end entity;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'entity', 'end entity');
+    });
+
+    test("should treat '\\x' (any non-newline char after backslash) as character literal", () => {
+      const source = `x <= '\\t'; architecture a of e is
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+  });
+
   generateCommonTests(config);
 });
