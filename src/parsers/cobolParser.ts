@@ -347,6 +347,15 @@ export class CobolBlockParser extends BaseBlockParser {
         if (lowerKeyword === 'perform') {
           const afterInner = source.slice(pos + match[0].length);
           const nextWord = afterInner.match(/^[ \t]+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
+          // PERFORM. (verb followed directly by a period, optionally preceded by
+          // blanks) terminates the statement with no body or iteration phrase: it
+          // is a paragraph-call PERFORM with no operand, never a structured opener.
+          // Reject so the trailing END-PERFORM is left orphan. A structured PERFORM
+          // whose UNTIL/VARYING/... phrase begins on the next line still passes
+          // because that case has no period before the newline.
+          if (!nextWord && /^[ \t]*\./.test(afterInner)) {
+            continue;
+          }
           if (nextWord) {
             const word = nextWord[1].toLowerCase();
             if (word === `end-${lowerKeyword}`) {
