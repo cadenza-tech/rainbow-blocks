@@ -329,12 +329,17 @@ export function isInExpressionContext(source: string, position: number, excluded
   if (ch === '-' && i > 0 && /[a-zA-Z0-9_]/.test(source[i - 1])) {
     return false;
   }
-  // A relational/arithmetic operator left dangling at the end of the previous
-  // line is an incomplete expression (editing in progress). A WHEN/ELSE on the
-  // following line is a real control-flow intermediate, not the operator's
-  // right operand, so operand suppression for these operators applies only
-  // when the operator is on the same physical line as the keyword.
-  if (crossedNewline && (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '=' || ch === '<' || ch === '>')) {
+  // A relational/arithmetic operator, separator (`,`/`;`), or open parenthesis
+  // left dangling at the end of the previous line is an incomplete expression
+  // (editing in progress). A WHEN/ELSE on the following line is a real
+  // control-flow intermediate, not the operator's right operand, so operand
+  // suppression for these tokens applies only when the token is on the same
+  // physical line as the keyword. Comma/semicolon are COBOL operand separators
+  // and `(` opens an expression — same incomplete-expression reasoning applies.
+  if (
+    crossedNewline &&
+    (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '=' || ch === '<' || ch === '>' || ch === ',' || ch === ';' || ch === '(')
+  ) {
     return false;
   }
   // Alphabetic relational operators (EQUAL/GREATER/LESS/EXCEEDS, and the phrases
