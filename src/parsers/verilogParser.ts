@@ -538,15 +538,23 @@ export class VerilogBlockParser extends BaseBlockParser {
       // operand of a cast would falsely add a close keyword that does not exist;
       // suppressing it preserves the outer BlockPair set.
       if (ch === ')') {
-        // Reject early when the `)` itself is inside an excluded region (e.g.,
-        // the `*)` closer of a SystemVerilog attribute `(* ... *)`, or the `)`
-        // of a parenthesized expression inside a block comment / string). The
-        // backward depth-walk below would scan through the entire excluded
-        // region — and past it — looking for a matching `(`, producing O(N^2)
-        // work when many attribute-prefixed declarations appear in sequence.
-        // Since a real cast `(type)keyword` cannot have its closing `)` inside
-        // a comment or attribute, suppressing here is safe.
+        // When the `)` itself is inside an excluded region, the backward
+        // depth-walk below would scan through the entire excluded region —
+        // and past it — looking for a matching `(`, producing O(N^2) work
+        // when many attribute-prefixed declarations appear in sequence. Handle
+        // the two cases of `)` inside an excluded region specially:
+        //   - SystemVerilog attribute `(* ... *)`: it is whitespace-equivalent
+        //     trivia between the preceding word and the keyword, so skip the
+        //     entire attribute region and continue the backward scan to look
+        //     for a data-type keyword before it (e.g., `int (* attr *) endmodule`).
+        //   - Any other excluded region (comments, strings): the `)` is not
+        //     a cast closer, so return false directly.
         if (excludedRegions !== undefined && this.isInExcludedRegion(i, excludedRegions)) {
+          const region = this.findExcludedRegionAt(i, excludedRegions);
+          if (region && source[region.start] === '(' && region.start + 1 < source.length && source[region.start + 1] === '*') {
+            i = region.start - 1;
+            continue;
+          }
           return false;
         }
         let depth = 1;
