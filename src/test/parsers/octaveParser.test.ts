@@ -2418,5 +2418,22 @@ end`;
     });
   });
 
+  suite('Regression: arguments(obj) function call with continuation', () => {
+    test('should reject arguments ...<NL>(obj); as block opener (function call across continuation)', () => {
+      // `arguments ...<NL>(obj);` is a single logical line `arguments(obj);` — a function
+      // call, not an arguments block. Treating it as a block opener wrongly pairs it with
+      // the enclosing `end`, dropping the function/end pair.
+      const source = 'function f\n  arguments ...\n    (obj);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject arguments\\<NL>(obj); as block opener (backslash continuation)', () => {
+      const source = 'function f\n  arguments \\\n    (obj);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
