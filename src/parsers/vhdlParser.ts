@@ -14,6 +14,7 @@ import {
 import { matchVhdlBlockComment, matchVhdlCharacterLiteral, matchVhdlString } from './vhdlHelpers';
 import type { VhdlValidationCallbacks } from './vhdlValidation';
 import {
+  isAtStatementBoundary,
   isInSignalAssignment,
   isInsideParens,
   isPrecededByDot,
@@ -467,6 +468,12 @@ export class VhdlBlockParser extends BaseBlockParser {
     // skips whitespace, newlines, and excluded regions (line/block comments) so cases like
     // `a . /* c */ end` are also rejected.
     if (isPrecededByDot(source, position, excludedRegions, this.validationCallbacks)) {
+      return false;
+    }
+    // Reject `end` that appears in the middle of an expression (e.g., `sig <= a end b;`).
+    // Without this guard, the stray `end` would greedily close a surrounding block opener
+    // and cascade pairing errors across the enclosing process/architecture.
+    if (!isAtStatementBoundary(source, position, excludedRegions, this.validationCallbacks)) {
       return false;
     }
     return true;

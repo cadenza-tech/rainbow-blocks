@@ -355,6 +355,89 @@ export function isPrecededByDot(source: string, position: number, excludedRegion
   return i >= 0 && source[i] === '.' && !callbacks.isInExcludedRegion(i, excludedRegions);
 }
 
+// Keywords that can validly appear immediately before an `end` close keyword on the
+// same line (empty/single-line block bodies). After these keywords, `end` is a
+// legitimate block close. Any other identifier-context token before `end` strongly
+// suggests `end` is sitting inside an expression (e.g., `sig <= a end b;`).
+const VALID_PRE_END_KEYWORDS = new Set<string>([
+  'then',
+  'else',
+  'loop',
+  'begin',
+  'is',
+  'generate',
+  'record',
+  'units',
+  'body',
+  'case',
+  'process',
+  'block',
+  'function',
+  'procedure',
+  'entity',
+  'architecture',
+  'package',
+  'component',
+  'configuration',
+  'context',
+  'protected',
+  'end'
+]);
+
+// Returns true if `end` at `position` is at a statement boundary: line start, after `;`,
+// after `=>`, at start of source, or directly after a valid block-context keyword on
+// the same line. Returns false if the preceding non-whitespace, non-excluded text is an
+// identifier or arbitrary expression token, which means the `end` is inside an
+// expression (e.g., `sig <= a end b;`) and must not be treated as a block close.
+export function isAtStatementBoundary(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VhdlValidationCallbacks
+): boolean {
+  // Scan backward over whitespace and excluded regions; remember if we crossed a newline.
+  let crossedNewline = false;
+  let i = position - 1;
+  while (i >= 0) {
+    if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
+      }
+    }
+    const ch = source[i];
+    if (ch === '\n' || ch === '\r') {
+      crossedNewline = true;
+      i--;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      i--;
+      continue;
+    }
+    break;
+  }
+  // Start of source or crossed a newline → line start, valid boundary.
+  if (i < 0 || crossedNewline) return true;
+  const ch = source[i];
+  // After `;` (previous statement terminated) — valid boundary.
+  if (ch === ';') return true;
+  // After `=>` (case branch arrow with empty body, e.g., `when 0 => end case;`).
+  if (ch === '>' && i > 0 && source[i - 1] === '=') return true;
+  // After an identifier-like character: the preceding word may be a block-context
+  // keyword (e.g., `loop end loop;`, `then end if;`). Read the word and check.
+  if (/[a-zA-Z0-9_]/.test(ch)) {
+    let wordStart = i;
+    while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+      wordStart--;
+    }
+    const word = source.slice(wordStart, i + 1).toLowerCase();
+    if (VALID_PRE_END_KEYWORDS.has(word)) return true;
+  }
+  return false;
+}
+
 // Walks backward from `start` over whitespace and comments, returning the offset of the
 // next non-whitespace/non-comment character (or -1 if start of source is reached).
 export function skipBackwardWhitespaceAndComments(
