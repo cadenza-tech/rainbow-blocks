@@ -4259,6 +4259,37 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: case keyword used as left-side operand of binary operator', () => {
+    test('should not tokenize `case` followed by `==` as a block_open', () => {
+      // Bug: `case` appearing as the left-side operand of a comparison/binary
+      // operator (e.g. `if (case == x)`) was tokenized as a block_open. The
+      // canonical case statement form is `case (expr)`, so a directly-following
+      // operator means the keyword is being misused as an expression operand.
+      const source = 'module m;\n  initial if (case == x) y = 1;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0, '`case` followed by `==` must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not tokenize `casex` followed by `+` as a block_open', () => {
+      // Same bug class for casex / casez / randcase.
+      const source = 'module m;\n  initial if (casex + 1 == 0) y = 1;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const casexTokens = tokens.filter((t) => t.value === 'casex');
+      assert.strictEqual(casexTokens.length, 0, '`casex` followed by `+` must not be tokenized');
+    });
+
+    test('should still tokenize valid case statement `case (expr)`', () => {
+      // Sanity: the normal `case (expr) ... endcase` form must keep working.
+      const source = 'module m;\n  initial case (sel)\n    0: x = 1;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.closeKeyword?.value, 'endcase');
+    });
+  });
+
   suite('Bug fix: `ifdef macro name on next line', () => {
     test('should treat the identifier on the line after `ifdef as the macro-name argument', () => {
       // Bug: when the macro name follows `ifdef across a newline, the
