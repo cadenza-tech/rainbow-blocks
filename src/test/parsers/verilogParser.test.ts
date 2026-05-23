@@ -4259,6 +4259,42 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: reserved word as case_item label name inside case', () => {
+    test('should not tokenize a block_close keyword used as case_item label name', () => {
+      // Bug: `endcase` appearing as a case_item label name (followed by `:`) was
+      // tokenized as block_close, causing the outer case/endcase pair to bind
+      // prematurely to the label `endcase`, breaking the BlockPair set.
+      const source = 'module m;\n  initial case (sel)\n    endcase: x = 1;\n    default: y = 0;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      // The outer case must pair with the trailing `endcase` (last one),
+      // not the label `endcase` on the case_item line.
+      const casePair = findBlock(pairs, 'case');
+      assert.ok(casePair.closeKeyword, 'case must have a closing endcase');
+      const trailingEndcaseOffset = source.lastIndexOf('endcase');
+      assert.strictEqual(
+        casePair.closeKeyword.startOffset,
+        trailingEndcaseOffset,
+        'case must pair with the trailing endcase, not the case_item label `endcase`'
+      );
+      // module must still pair
+      const modPair = findBlock(pairs, 'module');
+      assert.strictEqual(modPair.closeKeyword?.value, 'endmodule');
+    });
+
+    test('should not tokenize a block_open keyword used as case_item label name', () => {
+      // Same class of bug for block_open keywords: `module` used as a case_item
+      // label name must not be tokenized as a block opener.
+      const source = 'module m;\n  initial case (sel)\n    module: x = 1;\n    default: y = 0;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      // Only the outer `module m;` must pair with `endmodule`. If the case_item
+      // label `module` were tokenized, it would pair with the trailing
+      // `endmodule` and the outer module would be orphaned.
+      const moduleOpeners = pairs.filter((p) => p.openKeyword.value === 'module');
+      assert.strictEqual(moduleOpeners.length, 1, 'exactly one module pair is expected');
+      assert.strictEqual(moduleOpeners[0].openKeyword.startOffset, 0, 'outer module (at offset 0) must be the open keyword');
+    });
+  });
+
   suite('Bug fix: macro arg list string with backslash line continuation (CRLF, CR-only)', () => {
     test('should keep macro arg list closed across backslash-CRLF line continuation inside string', () => {
       // Bug: matchMacroArgList only skipped the `\` + 1 char in the string body. For
