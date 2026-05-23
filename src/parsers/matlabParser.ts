@@ -118,6 +118,16 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (keyword === 'end' && this.isInsideHeaderExpressionOnSameLine(source, position, excludedRegions)) {
       return false;
     }
+    // Reject end appearing in expression context after a value-like token on the same
+    // logical line (`x = a end`, `x = [1 2] end`, `x = 10. end`, `x = foo() end`,
+    // `--end`). The `end` here is the right operand of an implicit/missing operator —
+    // invalid MATLAB outside indexing, but treating it as a block close consumes a real
+    // inner end and destroys outer pairing. The previous statement-start kept in
+    // statementStartAtPos lets us cheaply detect that something else exists on the
+    // logical line before this `end`.
+    if (keyword === 'end' && this.isPrecededByValueTokenOnSameLine(source, position, excludedRegions)) {
+      return false;
+    }
     // Check all close keywords (end, endfunction, endif, etc.) for parenthesis/bracket context
     return !this.isInsideParensOrBrackets(source, position, excludedRegions);
   }
@@ -186,6 +196,97 @@ export class MatlabBlockParser extends BaseBlockParser {
     }
     return true;
   }
+
+  // Returns true when the `end` at `position` is on the same logical line as another
+  // non-whitespace token that came before it AND that previous token ends with a
+  // value-like character (identifier letter/digit/_, closing delimiter `)`/`]`/`}`,
+  // or numeric decimal point `.`). Such forms (`x = a end`, `x = [1 2] end`,
+  // `x = 10. end`, `x = foo() end`) place `end` in expression context — invalid MATLAB
+  // outside array indexing, but treating them as block close consumes a real inner end
+  // and destroys outer pairing. The check is deliberately conservative:
+  //   * `if`/`elseif`/`while`/`switch` header expressions are handled by the separate
+  //     isInsideHeaderExpressionOnSameLine check, which runs before this one.
+  //   * Lines whose leading token is a block opener (`function`, `for`, `parfor`,
+  //     `try`, `spmd`, `classdef`, `methods`, `properties`, `events`, `enumeration`,
+  //     `arguments`) are NOT matched: the `end` there is the legitimate block close
+  //     (e.g. `function f ... \nend`). The leading-keyword exemption is what
+  //     distinguishes a continued opener header from a value-context `end`.
+  private isPrecededByValueTokenOnSameLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.statementStartAtPos === null) {
+      return false;
+    }
+    const clamped = position < 0 ? 0 : position >= this.statementStartAtPos.length ? this.statementStartAtPos.length - 1 : position;
+    const lineStart = this.statementStartAtPos[clamped];
+    // Walk backward from position - 1 through whitespace and line-continuation regions
+    // to find the immediately preceding non-whitespace character on the logical line.
+    let i = position - 1;
+    while (i >= lineStart) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.start - 1;
+        continue;
+      }
+      if (isHorizontalWhitespace(source[i]) || source[i] === '\n' || source[i] === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < lineStart) {
+      return false;
+    }
+    const prev = source[i];
+    // A value-like token tail: identifier char, closing delimiter, or decimal point.
+    // The isPrecededByBinaryOperator check (run earlier) already catches the binary
+    // operator case, so this method handles only the value-token tail.
+    if (!/[a-zA-Z0-9_)\]}.]/.test(prev)) {
+      return false;
+    }
+    // Determine the leading identifier of the logical line. If it is a block opener
+    // (function / for / parfor / try / spmd / classdef / section keyword), the `end`
+    // is the legitimate block close even when the line spans a `...` continuation, so
+    // do NOT reject. (`if`/`while`/`switch` headers were already rejected upstream.)
+    let j = lineStart;
+    while (j < position) {
+      const region = this.findExcludedRegionAt(j, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        j = region.end;
+        continue;
+      }
+      if (isHorizontalWhitespace(source[j]) || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (j < position && /[a-zA-Z_]/.test(source[j])) {
+      const identStart = j;
+      while (j < position && /[a-zA-Z0-9_]/.test(source[j])) j++;
+      const leading = source.slice(identStart, j).toLowerCase();
+      if (MatlabBlockParser.BLOCK_OPENERS_TAKING_LINE_HEADER.has(leading)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Block openers whose header may legitimately span a `...` line continuation and
+  // therefore have the closing `end` on a later physical line of the SAME logical
+  // line. `if`/`elseif`/`while`/`switch` are deliberately omitted: their `end`-in-
+  // header is invalid (handled by isInsideHeaderExpressionOnSameLine).
+  private static readonly BLOCK_OPENERS_TAKING_LINE_HEADER = new Set([
+    'function',
+    'for',
+    'parfor',
+    'try',
+    'spmd',
+    'classdef',
+    'methods',
+    'properties',
+    'events',
+    'enumeration',
+    'arguments'
+  ]);
 
   // Header keywords that take an expression on the same logical line. When `end`
   // appears later on the same logical line as one of these leading keywords, it is part
