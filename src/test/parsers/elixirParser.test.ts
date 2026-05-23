@@ -4888,5 +4888,27 @@ end`;
     });
   });
 
+  suite('Bug: isFnParensFollowedByDo should skip newlines and comments', () => {
+    test('should reject fn(x) followed by newline then do', () => {
+      // `if fn(x)\ndo ... end` — `fn(x) do` form is invalid Elixir; fn should not pair
+      // with end. Newline between `)` and `do` must still be detected.
+      const source = 'if fn(x)\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject fn() followed by CRLF then do', () => {
+      const source = 'if fn()\r\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject fn(x) followed by comment then newline then do', () => {
+      const source = 'if fn(x) # comment\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
