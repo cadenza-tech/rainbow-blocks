@@ -538,6 +538,17 @@ export class VerilogBlockParser extends BaseBlockParser {
       // operand of a cast would falsely add a close keyword that does not exist;
       // suppressing it preserves the outer BlockPair set.
       if (ch === ')') {
+        // Reject early when the `)` itself is inside an excluded region (e.g.,
+        // the `*)` closer of a SystemVerilog attribute `(* ... *)`, or the `)`
+        // of a parenthesized expression inside a block comment / string). The
+        // backward depth-walk below would scan through the entire excluded
+        // region — and past it — looking for a matching `(`, producing O(N^2)
+        // work when many attribute-prefixed declarations appear in sequence.
+        // Since a real cast `(type)keyword` cannot have its closing `)` inside
+        // a comment or attribute, suppressing here is safe.
+        if (excludedRegions !== undefined && this.isInExcludedRegion(i, excludedRegions)) {
+          return false;
+        }
         let depth = 1;
         let j = i - 1;
         while (j >= 0 && depth > 0) {
