@@ -368,6 +368,14 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (this.isKeywordUsedAsFunctionCall(source, position, keyword)) {
         return false;
       }
+      // Reject `arguments(X)` where X is not an attribute keyword (Input/Output/Repeating).
+      // A real `arguments` block can take `arguments`, `arguments (Input)`, `arguments (Output)`,
+      // or `arguments (Repeating)` — anything else (e.g. `arguments(obj)`) is a function call.
+      // Without this guard the `arguments` token is paired with an inner `end`, leaving the
+      // outer function's `end` orphan and destroying outer block pairing.
+      if (keyword === 'arguments' && this.isMatlabArgumentsFunctionCall(source, position, excludedRegions)) {
+        return false;
+      }
       // Check if keyword is used as a variable (followed by =, but not ==).
       // Skip whitespace AND `...` line continuations so `properties ...\n= 5` is
       // detected as the same assignment form as the same-line `properties = 5`.
@@ -513,6 +521,57 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Checks if a classdef section keyword is used as a function call
   private isKeywordUsedAsFunctionCall(source: string, position: number, keyword: string): boolean {
     return isKeywordUsedAsFunctionCall(source, position, keyword);
+  }
+
+  // Attribute keywords that MATLAB's `arguments` block legitimately accepts inside its
+  // optional parenthesised attribute list: `arguments (Input)` (the default), `arguments
+  // (Output)`, `arguments (Repeating)`. Case-insensitive. Anything else inside the parens
+  // (e.g. `arguments(obj)`) means the line is a function call, not a real arguments block.
+  private static readonly ARGUMENTS_ATTRIBUTES_PATTERN = /^(?:input|output|repeating)(?:\s*,\s*(?:input|output|repeating))*$/i;
+
+  // Returns true when `arguments` at `position` is followed by `(...)` where the inner
+  // content is NOT a recognised MATLAB attribute keyword (Input/Output/Repeating, optionally
+  // comma-separated). Such forms (`arguments(obj)`) are function calls — typically reflection
+  // helpers — not arguments blocks. Bare `arguments`, `arguments (Input)` etc. are NOT
+  // matched and remain valid block openers. Empty parens `arguments()` are treated as
+  // function calls because MATLAB attribute lists are never empty in valid syntax.
+  // `excludedRegions` lets the paren-matching loop skip embedded comments / strings so the
+  // braces inside them do not throw off depth tracking. Octave keeps its own private
+  // implementation that also detects the `arguments(obj);` semicolon-statement form and
+  // supports `\<NL>` line continuations; the two names coexist via TypeScript private-name
+  // semantics (each class has its own `isArgumentsFunctionCall`).
+  private isMatlabArgumentsFunctionCall(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step 1: must be followed by `(` (with optional ASCII whitespace).
+    let j = position + 'arguments'.length;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== '(') return false;
+    // Step 2: find the matching `)`, tracking nesting and skipping excluded regions so
+    // braces inside comments / strings don't desync depth.
+    let depth = 1;
+    let k = j + 1;
+    while (k < source.length && depth > 0) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        if (region) {
+          k = region.end;
+          continue;
+        }
+      }
+      const ch = source[k];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (depth === 0) break;
+      k++;
+    }
+    // Defensive: if unmatched, fall back to NOT treating as a function call so legacy
+    // behaviour is preserved on malformed input.
+    if (depth !== 0) return false;
+    const inner = source.slice(j + 1, k).trim();
+    // Step 3: empty parens — treat as function call (MATLAB attribute lists are never empty).
+    if (inner.length === 0) return true;
+    // Step 4: only the recognised attribute pattern remains a real block opener; otherwise
+    // it's a function call.
+    return !MatlabBlockParser.ARGUMENTS_ATTRIBUTES_PATTERN.test(inner);
   }
 
   // Filter out block_middle keywords that are struct field access (s.else, s . case),
