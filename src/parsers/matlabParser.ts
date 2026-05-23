@@ -78,15 +78,12 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (keyword === 'end' && isEndFollowedByBinaryOperator(source, assignFrom)) {
       return false;
     }
-    // Reject end followed by a single `.` (possibly preceded by whitespace) that is NOT
-    // part of `..` (line continuation marker prefix). `end.field` and `end .field` are
-    // both struct field-access syntax, not block close — the `end` is an identifier in
-    // expression context. Whitespace skip handles `end .x = 1` and `end\t.x = 1` forms.
-    let afterPos = position + keyword.length;
-    while (afterPos < source.length && (source[afterPos] === ' ' || source[afterPos] === '\t')) {
-      afterPos++;
-    }
-    if (source[afterPos] === '.' && source[afterPos + 1] !== '.') {
+    // Reject end followed by a single `.` (possibly preceded by whitespace or `...` line
+    // continuations) that is NOT part of `..` (line continuation marker prefix or junk).
+    // `end.field`, `end .field`, and `end ...\n .field` are all struct field-access syntax,
+    // not block close — the `end` is an identifier in expression context. The continuation
+    // skip handles the multi-line form symmetrically with the same-line form.
+    if (source[assignFrom] === '.' && source[assignFrom + 1] !== '.') {
       return false;
     }
     // Reject end immediately after `:` on a for-loop header line. Such `end` is part of
