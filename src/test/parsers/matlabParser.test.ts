@@ -2772,5 +2772,60 @@ end`;
     });
   });
 
+  suite('Regression: invalid empty-header block opener should not start a block', () => {
+    test('should not treat if; as block open', () => {
+      // `if;` has an empty condition — invalid MATLAB. Treating it as a block opener
+      // consumes the outer function's `end`, destroying the function/end pair.
+      const source = 'function f\n  if;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat for; as block open', () => {
+      // `for;` has no loop variable assignment — invalid MATLAB.
+      const source = 'function f\n  for;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat while; as block open', () => {
+      const source = 'function f\n  while;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat switch; as block open', () => {
+      const source = 'function f\n  switch;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat parfor; as block open', () => {
+      const source = 'function f\n  parfor;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat if followed by comma as block open', () => {
+      const source = 'function f\n  if,\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat if followed by newline directly as block open', () => {
+      // Bare `if` (no condition, just newline) is also invalid MATLAB.
+      const source = 'function f\n  if\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat bare try as valid block open (no condition required)', () => {
+      // `try` is the one statement that can have an empty header in MATLAB.
+      const source = 'function f\n  try\n    x = 1;\n  catch\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
