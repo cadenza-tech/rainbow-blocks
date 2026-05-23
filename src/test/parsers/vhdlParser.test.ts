@@ -3880,6 +3880,29 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-24: attribute_specification scan limit must not false-promote entity_class to block opener', () => {
+    test('should not false-promote entity_class to block opener when scan limit is reached', () => {
+      // 5000 newlines between `attribute keep` and `of foo` force the backward scan from
+      // the entity_class keyword `package` to exhaust SCAN_LIMIT before reaching the
+      // `attribute` keyword. Without conservative-true on scan-limit exhaustion, the
+      // `package` is tokenized as a block_open, which corrupts the surrounding
+      // architecture's intermediates (the architecture's `begin` is captured by the
+      // orphan `package`).
+      const longGap = '\n'.repeat(5000);
+      const source = `architecture a of e is
+  attribute keep ${longGap}of foo : package is true;
+begin
+  null;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      // The architecture must carry both `is` and `begin` intermediates.
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), 'expected is in architecture intermediates');
+      assert.ok(intermediateValues.includes('begin'), 'expected begin in architecture intermediates');
+    });
+  });
+
   suite('Regression 2026-05-24: is null/is new/is ( filter applies only to subprogram openers', () => {
     test('should retain process intermediate is when body starts with null statement', () => {
       const source = `process is
