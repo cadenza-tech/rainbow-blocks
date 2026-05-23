@@ -5727,6 +5727,44 @@ do`;
     });
   });
 
+  suite('Regression 2026-05-24: construct name after concatenated compound end', () => {
+    test('should treat program after endif as construct name (concatenated compound end)', () => {
+      // `endif program` is a concatenated `endif` followed by the construct name `program`.
+      // The trailing `program` happens to spell a Fortran keyword but is the if-construct
+      // name here. Without recognizing it as a construct name, the bare `program` token
+      // would phantom-open a `program` block that consumes the trailing `end program`,
+      // orphaning the outer program block.
+      const source = `program outer
+  program: if (a) then
+    x = 1
+  endif program
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const progPair = findBlock(pairs, 'program');
+      assert.strictEqual(progPair.openKeyword.line, 0);
+      assert.strictEqual(progPair.closeKeyword.line, 4);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.openKeyword.line, 1);
+      assert.strictEqual(ifPair.closeKeyword.value.toLowerCase(), 'endif');
+      assert.strictEqual(ifPair.closeKeyword.line, 3);
+    });
+
+    test('should treat do after enddo as construct name', () => {
+      // Same defense for `enddo NAME` where NAME spells a Fortran block keyword.
+      const source = `program outer
+  loop: do i = 1, 10
+    print *, i
+  enddo loop
+end program`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword.value.toLowerCase(), 'enddo');
+      assert.strictEqual(doPair.closeKeyword.line, 3);
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
