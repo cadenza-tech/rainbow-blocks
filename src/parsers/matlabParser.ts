@@ -310,6 +310,14 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Classdef section keywords that can also be used as function calls
   private static readonly CLASSDEF_SECTION_KEYWORDS = new Set(['properties', 'methods', 'events', 'enumeration', 'arguments']);
 
+  // Block-opener keywords that REQUIRE a non-empty header. `if`/`while`/`switch` require
+  // a condition expression; `for`/`parfor` require a loop-variable assignment. `try`,
+  // `spmd`, `function`, and `classdef` are deliberately omitted: `try` accepts an empty
+  // header, `spmd` accepts `(n)` or nothing, and `function`/`classdef` have name-based
+  // headers whose empty form is also handled elsewhere (function-name detection). The
+  // section keywords are handled in their own branch above.
+  private static readonly HEADER_REQUIRED_KEYWORDS = new Set(['if', 'while', 'switch', 'for', 'parfor']);
+
   // Returns true when `position` lies at the start of its line (only whitespace before)
   private isAtLineStartForSectionKeyword(source: string, position: number): boolean {
     return isAtLineStartForSectionKeyword(source, position);
@@ -421,6 +429,14 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (!MatlabBlockParser.CLASSDEF_SECTION_KEYWORDS.has(keyword)) {
       const assignFrom = this.skipWhitespaceAndContinuations(source, position + keyword.length, excludedRegions);
       if (this.isFollowedBySimpleAssignment(source, assignFrom)) {
+        return false;
+      }
+      // Reject empty-header block openers (`if;`, `for;`, `while,`, `if<NL>`, etc.). These
+      // statements require an expression (`if`/`while`/`switch`) or a loop-variable
+      // assignment (`for`/`parfor`) and cannot be valid with no header. `try` (and any
+      // future opener that accepts an empty header) is exempt. Treating an empty-header
+      // opener as block_open consumes the outer block's `end`, destroying outer pairing.
+      if (MatlabBlockParser.HEADER_REQUIRED_KEYWORDS.has(keyword) && this.isFollowedByEmptyHeader(source, assignFrom)) {
         return false;
       }
       // Reject block opener used as standalone identifier on the RHS of an assignment
@@ -772,6 +788,29 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Checks if keyword is followed by = (but not ==) indicating variable assignment
   protected isFollowedBySimpleAssignment(source: string, afterPos: number): boolean {
     return isFollowedBySimpleAssignment(source, afterPos);
+  }
+
+  // Returns true when the next significant character at `afterPos` is a statement
+  // terminator that leaves the header empty: `;`, `,`, line break, end-of-source, or
+  // the start of a single-line comment (`%`/`#`). Whitespace and `...`/`\` line
+  // continuations have already been skipped by the caller (via skipWhitespaceAndContinuations).
+  // A comment is treated as empty because the comment itself runs to the newline
+  // without contributing any header expression; the newline that follows still
+  // ends the logical line. Block comments (`%{`) at line start are NOT treated as
+  // empty headers because their content can span multiple lines and may include the
+  // header expression — they are extremely unusual after a block opener and are out of scope.
+  private isFollowedByEmptyHeader(source: string, afterPos: number): boolean {
+    if (afterPos >= source.length) {
+      return true;
+    }
+    const ch = source[afterPos];
+    if (ch === ';' || ch === ',' || ch === '\n' || ch === '\r') {
+      return true;
+    }
+    if (ch === '%' || this.isCommentChar(ch)) {
+      return true;
+    }
+    return false;
   }
 
   // Checks if a keyword end is followed by a compound assignment operator (`+=`, `.^=`, ...)
