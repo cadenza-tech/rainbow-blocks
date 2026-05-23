@@ -307,6 +307,15 @@ export class RubyBlockParser extends BaseBlockParser {
       if (token.value === 'end' && this.isEndInTernaryValuePosition(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Filter out `end` directly preceded by an opening bracket or a binary operator
+      // on the same physical line (skipping whitespace and excluded regions like comments
+      // or regex literals). `end` is a reserved word and cannot be in expression position,
+      // so cases like `def foo(end)` or `x = /pat/ end` are invalid Ruby. Treating them
+      // as block_close mis-pairs surrounding blocks; per the anchor-set principle, drop
+      // the stray `end` so blocks pair correctly.
+      if (token.value === 'end' && this.isEndInExpressionPosition(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       // Filter out keywords used as method names after 'def' (e.g., def do, def begin, def end)
       if (this.isAfterDefKeyword(source, token.startOffset)) {
         return false;
@@ -509,6 +518,73 @@ export class RubyBlockParser extends BaseBlockParser {
       if (ch === '?') {
         return true;
       }
+    }
+    return false;
+  }
+
+  // Checks if `end` at position is in expression value position on the same physical line:
+  // immediately preceded (skipping spaces/tabs and excluded regions) by an opening bracket
+  // (`(`, `[`, `{`) or a binary operator (`=` not part of `==`/`=~`/`=>`, `,`, `+`, `-`,
+  // `*`, `/`, `%`, `<`, `>`, `&`, `|`, `^`, `~`, `!`). Since `end` is a reserved word and
+  // cannot appear in expression position, such occurrences are invalid Ruby — e.g.,
+  // `def foo(end)`, `[end]`, `x = /pat/ end`, `x = end`. The scan stops at the physical
+  // line start (`\n`, `\r`) or at a `;`, both of which are valid statement separators
+  // after which `end` is legitimate.
+  private isEndInExpressionPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          // If this is the first non-whitespace content encountered, treat the region's
+          // ending position as the previous "token". For example, `/pat/ end` ends with
+          // a regex literal — `end` follows it directly, so we must check what precedes
+          // the regex region.
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) return false;
+    const ch = source[i];
+    // Statement separators: `;`, `\n`, `\r`. `end` is legitimate here.
+    if (ch === ';' || ch === '\n' || ch === '\r') {
+      return false;
+    }
+    // Opening brackets directly before `end`: definitely expression position.
+    if (ch === '(' || ch === '[' || ch === '{') {
+      return true;
+    }
+    // Binary operators / separators directly before `end`: expression position.
+    if (ch === ',' || ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '%') {
+      return true;
+    }
+    if (ch === '<' || ch === '>' || ch === '&' || ch === '|' || ch === '^' || ch === '~') {
+      return true;
+    }
+    if (ch === '!') {
+      // `!end` is invalid (unary not applied to reserved word in value position)
+      return true;
+    }
+    if (ch === '=') {
+      // `=` is a binary operator (assignment). `==`, `=~`, `=>` are handled because
+      // they end with `=`, `~`, `>` respectively — but the character at `i` is the
+      // trailing character of any multi-char operator. So `==` and `=~`, `=>` end with
+      // a non-`=` char... wait, `==` ends with `=`. Need to distinguish.
+      // - `==`/`!=`: last char is `=` and prev char is `=` or `!` → still operator → expression position
+      // - `=~`: last char is `~`, already covered above
+      // - `=>`: last char is `>`, already covered above
+      // So bare `=` (assignment) ends with `=`. We need to check that we're not looking
+      // at the trailing `=` of `==`/`!=`/`<=`/`>=`. In all of these the previous char is
+      // also an operator char that we've already classified as expression position. So
+      // returning true here is safe (assignment is also expression position).
+      return true;
     }
     return false;
   }
