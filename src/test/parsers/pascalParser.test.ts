@@ -3465,5 +3465,27 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-24: comparison-context interface inside record', () => {
+    test('should not treat interface in `X = interface` comparison as record-context open-block', () => {
+      // Same as the class regression, but for `interface`.
+      const source = `type
+  TRec = record
+    procedure M;
+    begin
+      if X = interface then DoY;
+    end;
+    case Integer of
+      0: (V: Integer);
+  end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, 'variant case inside a record must not produce its own pair');
+    });
+  });
+
   generateCommonTests(config);
 });
