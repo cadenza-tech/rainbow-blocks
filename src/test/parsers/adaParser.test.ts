@@ -2762,6 +2762,16 @@ end if;`;
       assertSingleBlock(pairs, 'begin', 'end');
       assertIntermediates(pairs[0], ['exception', 'when']);
     });
+
+    test('should not leak with-Exception identifier as intermediate', () => {
+      // type T is new Object with Exception: the `Exception` after `with` is an
+      // identifier (record extension / aspect specification context), not a
+      // handler-section delimiter.
+      const source = 'package P is\n   type T is new Object with Exception;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end');
+      assertIntermediates(pairs[0], ['is']);
+    });
   });
 
   suite('Regression: compound end split across newlines and comments', () => {
