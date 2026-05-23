@@ -362,8 +362,13 @@ export class CobolBlockParser extends BaseBlockParser {
               // The next word is the matching END-PERFORM closer, not a paragraph name
             } else if (word !== 'until' && word !== 'varying' && word !== 'with') {
               const afterNextWord = afterInner.slice(nextWord[0].length);
-              // Check for PERFORM <variable> TIMES pattern (accept both alpha and numeric counts)
-              const secondWord = afterNextWord.match(/^[ \t]+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
+              // Check for PERFORM <variable> TIMES pattern (accept both alpha and numeric counts).
+              // `\s+` (rather than `[ \t]+`) lets the iteration phrase wrap across a newline,
+              // because a structured PERFORM may continue on the next line. The `\s+` does NOT
+              // match a `.` so a period preceding the would-be second word still ends the
+              // statement and leaves the regex empty (the same as before), preserving the
+              // `PERFORM <name>.` paragraph-call rejection path.
+              const secondWord = afterNextWord.match(/^\s+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
               // PERFORM TEST BEFORE/AFTER ... is a structured form (WITH is optional per COBOL standard)
               if (word === 'test' && secondWord) {
                 const sw = secondWord[1].toLowerCase();
@@ -387,9 +392,12 @@ export class CobolBlockParser extends BaseBlockParser {
                 // PERFORM para THRU/THROUGH/UNTIL/VARYING/WITH/AFTER/BEFORE → paragraph call with iteration, reject
                 continue;
               } else if (secondWord) {
-                // Check for PERFORM <para> <count> TIMES pattern (paragraph call with iteration count)
+                // Check for PERFORM <para> <count> TIMES pattern (paragraph call with iteration count).
+                // `\s+` mirrors the `secondWord` widening so the TIMES verb is still recognised when
+                // a paragraph-call iteration count and its TIMES verb are split across a newline
+                // (e.g. `PERFORM PARA-A 5\n  TIMES`).
                 const afterSecondWord = afterNextWord.slice(secondWord[0].length);
-                const thirdWord = afterSecondWord.match(/^[ \t]+([a-zA-Z][a-zA-Z0-9_-]*)/i);
+                const thirdWord = afterSecondWord.match(/^\s+([a-zA-Z][a-zA-Z0-9_-]*)/i);
                 if (thirdWord && thirdWord[1].toLowerCase() === 'times') {
                   // PERFORM para <count> TIMES → paragraph call with iteration, reject
                   continue;
