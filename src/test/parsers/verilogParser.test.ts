@@ -4259,6 +4259,31 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: `ifdef macro name on next line', () => {
+    test('should treat the identifier on the line after `ifdef as the macro-name argument', () => {
+      // Bug: when the macro name follows `ifdef across a newline, the
+      // directive-arg whitespace skip stopped at the newline, so the keyword
+      // `module` on the next line was tokenized as a block_open.
+      const source = '`ifdef\nmodule\n`endif\nmodule m;\nendmodule\n';
+      const tokens = parser.getTokens(source);
+      // The `module` on line 1 is the macro-name argument and must not appear
+      // as a block_open token; only `module m;` on line 3 should.
+      const moduleOpenTokens = tokens.filter((t) => t.value === 'module' && t.type === 'block_open');
+      assert.strictEqual(moduleOpenTokens.length, 1, '`module` after `ifdef must be treated as the macro-name argument');
+      assert.strictEqual(moduleOpenTokens[0].line, 3, 'remaining module opener should be the real one on line 3');
+      const pairs = parser.parse(source);
+      // The ifdef/endif and module/endmodule pairs should match correctly.
+      const ifdefPair = pairs.find((p) => p.openKeyword.value === '`ifdef');
+      assert.ok(ifdefPair, '`ifdef must pair with `endif');
+      assert.strictEqual(ifdefPair.closeKeyword?.value, '`endif');
+      assertSingleBlock(
+        pairs.filter((p) => p.openKeyword.value === 'module'),
+        'module',
+        'endmodule'
+      );
+    });
+  });
+
   suite('Bug fix: reserved word inside #(...) delay expression', () => {
     test('should not tokenize a block_open keyword inside #(...) delay expression', () => {
       // Bug: `#(module)` — `module` inside the delay expression is a misused
