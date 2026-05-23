@@ -266,6 +266,12 @@ export class ElixirBlockParser extends BaseBlockParser {
       if (afterKeyword === '(' && this.isFnParensFollowedByDo(source, position + keyword.length, excludedRegions)) {
         return false;
       }
+      // Reject `fn` used as a value/variable for a preceding block keyword
+      // (e.g. `case fn do ... end` — fn is a value, do belongs to case). Detected only
+      // when fn is directly followed by `do` (not `->`, which is real fn arrow syntax).
+      if (this.isFnDirectlyFollowedByDoAfterBlockKw(source, position, excludedRegions)) {
+        return false;
+      }
       return true;
     }
 
@@ -285,6 +291,24 @@ export class ElixirBlockParser extends BaseBlockParser {
     }
 
     return true;
+  }
+
+  // Checks if `fn` at `position` is a value/variable for a preceding block keyword.
+  // True only when fn is directly followed by `do` (after whitespace) AND preceded by a
+  // do-block keyword on the same statement. `fn ->` (arrow syntax) is real fn and returns
+  // false. Used by hasDoKeyword's fn tracking to suppress fnDepth++ when fn is a value
+  // (e.g. `case fn do ... end` — fn is the case value, do belongs to case).
+  private isFnDirectlyFollowedByDoAfterBlockKw(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Scan forward from after `fn`. Must find `do` with word boundary before any other token.
+    let j = position + 2;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
+      j++;
+    }
+    if (source.slice(j, j + 2) !== 'do') return false;
+    const afterDo = source[j + 2];
+    if (afterDo !== undefined && /[a-zA-Z0-9_]/.test(afterDo)) return false;
+    // Must be preceded by a do-block keyword on the same statement (use existing helper).
+    return this.isValueForPrecedingBlockKeyword(source, position, 'fn', excludedRegions);
   }
 
   // Checks if this keyword is being used as a variable/value for a preceding block keyword.
@@ -724,6 +748,9 @@ export class ElixirBlockParser extends BaseBlockParser {
 
         // Track fn...end nesting at depth 0
         // Exclude fn: (keyword argument syntax), .fn (method call), @fn (module attribute), fn() (function call)
+        // Also exclude fn used as a value/variable for a preceding block keyword
+        // (e.g., `case fn do ... end` — fn is the case value, do belongs to case).
+        // Detected only when fn is directly followed by `do` (not `->`, which is real fn syntax).
         if (
           source.slice(i, i + 2) === 'fn' &&
           (i === 0 ||
@@ -732,7 +759,8 @@ export class ElixirBlockParser extends BaseBlockParser {
               source[i - 1] !== '@' &&
               !(source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
           (i + 2 >= source.length || (!/[a-zA-Z0-9_:?!]/.test(source[i + 2]) && source[i + 2] !== '(')) &&
-          !this.isAdjacentToUnicodeLetter(source, i, 2)
+          !this.isAdjacentToUnicodeLetter(source, i, 2) &&
+          !this.isFnDirectlyFollowedByDoAfterBlockKw(source, i, excludedRegions)
         ) {
           fnDepth++;
         }
