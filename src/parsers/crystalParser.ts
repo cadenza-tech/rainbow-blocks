@@ -1024,8 +1024,53 @@ export class CrystalBlockParser extends BaseBlockParser {
   // Detect Crystal shorthand method definition: `def name = expr` (no end keyword needed)
   // Looks for a standalone `=` (preceded by whitespace) outside of parens, on the def line.
   // Multi-line argument lists are allowed (newlines inside parens do not terminate the scan).
+  // After the method name, the next non-whitespace token must be `(`, `:`, or `=`.
+  // A bare identifier there indicates a no-paren parameter list like `def foo x = 1`,
+  // in which case any `=` that follows is a default value, NOT the shorthand assignment.
   private hasShorthandDefAssignment(source: string, startPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step 1: skip whitespace after `def`, then skip the method name itself.
     let i = startPos;
+    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+      i++;
+    }
+    // Skip the method name: identifier chars, optionally ending with `?`, `!`, or `=`.
+    while (i < source.length && /[A-Za-z0-9_]/.test(source[i])) {
+      i++;
+    }
+    if (i < source.length && (source[i] === '?' || source[i] === '!' || source[i] === '=')) {
+      // Trailing `=` is part of a setter method name (e.g. `def foo=(value)`).
+      // Since we just consumed identifier chars without whitespace, this `=` is attached.
+      i++;
+    }
+    // Step 2: skip whitespace and peek at the next non-whitespace char.
+    // A backslash line continuation may bridge to the next line.
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i++;
+        continue;
+      }
+      if (ch === '\\' && i + 1 < source.length && (source[i + 1] === '\n' || source[i + 1] === '\r')) {
+        i++;
+        if (source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      break;
+    }
+    if (i >= source.length) {
+      return false;
+    }
+    const afterName = source[i];
+    // If the next token after the method name is an identifier-start char, this is a
+    // no-paren parameter list (`def foo x = 1`). Not a shorthand assignment.
+    if (/[A-Za-z_]/.test(afterName)) {
+      return false;
+    }
+    // Otherwise scan for a standalone `=` outside of parens.
     let parenDepth = 0;
     while (i < source.length) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
