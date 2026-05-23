@@ -926,9 +926,22 @@ export class ElixirBlockParser extends BaseBlockParser {
       i++;
     }
     if (parenDepth !== 0) return false;
-    // i now points just past the matching ')'. Skip whitespace.
-    while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-      i++;
+    // i now points just past the matching ')'. Skip whitespace, newlines, and comments
+    // (excluded regions). Newlines must be skipped because `fn(x)\ndo` is still
+    // syntactically `fn(x) do` continuation in Elixir.
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      // Skip single-line comments (#... to end of line)
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      break;
     }
     // Check for `do` followed by a word boundary (so `done`/`do_x`/etc. don't match).
     if (source.slice(i, i + 2) !== 'do') return false;
