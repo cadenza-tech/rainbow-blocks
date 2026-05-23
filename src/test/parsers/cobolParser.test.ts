@@ -3081,5 +3081,43 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-24: dangling separator or open-paren before a newline keeps ELSE/WHEN intermediate', () => {
+    // Bug: isInExpressionContext only treated +/-/*/=/</> as "incomplete-expression-on-prior-line"
+    // operators. A separator (comma/semicolon) or an open parenthesis dangling at the end of the
+    // previous line is also an incomplete expression — the next line's ELSE/WHEN starts a new
+    // control-flow branch, not the right operand of the dangling token. Without including `,`/`;`/`(`
+    // in the cross-newline guard, the WHEN/ELSE was suppressed and the enclosing EVALUATE/IF lost
+    // its intermediate.
+    test('should register WHEN as EVALUATE intermediate when a branch ends with a dangling comma before a newline', () => {
+      const source = 'EVALUATE Z\n  ADD X,\n  WHEN B\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+    test('should register WHEN as EVALUATE intermediate when a branch ends with a dangling semicolon before a newline', () => {
+      const source = 'EVALUATE Z\n  ADD X;\n  WHEN B\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN']);
+    });
+    test('should register ELSE as IF intermediate when the condition ends with a dangling open parenthesis before a newline', () => {
+      const source = 'IF (\nELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+    test('should still treat ELSE as operand of a same-line comma', () => {
+      // Guard: a comma on the same line as ELSE/WHEN (no newline crossed) is a real
+      // operand separator, so the keyword IS used as a data name and must be suppressed.
+      // This preserves the existing same-line behaviour `CALL "P" USING A, ELSE` etc.
+      const source = 'CALL "P" USING A, ELSE';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.some((t) => t.value.toUpperCase() === 'ELSE'),
+        false
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
