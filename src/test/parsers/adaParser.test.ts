@@ -2837,6 +2837,24 @@ end if;`;
     });
   });
 
+  suite('Regression: parameter-list semicolon must not break paren detection', () => {
+    test('should keep procedure pair when if-expression default value uses parameter-list semicolon', () => {
+      // procedure F(X : Integer; Y : Integer := if A then 0 else 1) is ...
+      // The `;` separator in the parameter list previously made isInsideParens
+      // return false, causing the `if` inside the default value to be tokenized
+      // as a real block opener and stealing the enclosing procedure pair.
+      const source = 'procedure F(X : Integer; Y : Integer := if A then 0 else 1) is\nbegin\n   null;\nend F;';
+      const pairs = parser.parse(source);
+      const procPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'procedure');
+      assert.ok(procPair, 'procedure block should be paired');
+      // The if-expression keywords inside the parameter default must not appear
+      // as tokens of the procedure block (they are inside parens).
+      const tokens = parser.getTokens(source);
+      const ifTokens = tokens.filter((t) => t.value.toLowerCase() === 'if');
+      assert.strictEqual(ifTokens.length, 0, 'if inside parameter default value should be filtered out');
+    });
+  });
+
   suite('Regression 2026-04-29: unterminated paren before if block', () => {
     test('should still detect if block when ( is unterminated with terminated string after', () => {
       const source = 'procedure Main is\nbegin\n   F("hello"\n   if X > 0 then\n      null;\n   end if;\nend Main;';
