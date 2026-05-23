@@ -60,6 +60,28 @@ const COMPOUND_END_PATTERN = new RegExp(
 // Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
+// Block-opener keywords whose immediate identifier-like token can legally be the prefix
+// of an attribute reference (LRM §16.3). These keywords name a declarative item
+// (entity/architecture/package/etc.) whose attribute can be referenced as
+// `<keyword>'<attribute_name>`. Control-flow keywords (if/case/while/loop/for) start an
+// expression and the apostrophe immediately following is a character literal, NEVER an
+// attribute reference, so they are intentionally excluded.
+const ATTRIBUTE_PREFIX_KEYWORDS: ReadonlySet<string> = new Set([
+  'process',
+  'function',
+  'procedure',
+  'entity',
+  'architecture',
+  'package',
+  'component',
+  'configuration',
+  'block',
+  'protected',
+  'context',
+  'record',
+  'units'
+]);
+
 // VHDL paren-context checks only care about '()' depth (port maps, generic maps,
 // function calls). A single-kind '(' index behaves identically to a single-kind
 // '()' backward scan, so '[' and '{' are deliberately not tracked.
@@ -208,14 +230,19 @@ export class VhdlBlockParser extends BaseBlockParser {
 
     // Reject keywords followed by `'<attribute_name>` (attribute reference, LRM §16.3).
     // For example, `process'foreign` or `process 'foreign` is the foreign attribute on
-    // the `process` type, not a process block opener. Allow horizontal whitespace
-    // (spaces/tabs) between the keyword and the apostrophe.
-    let attrPos = position + keyword.length;
-    while (attrPos < source.length && (source[attrPos] === ' ' || source[attrPos] === '\t')) {
-      attrPos++;
-    }
-    if (attrPos < source.length && source[attrPos] === "'" && attrPos + 1 < source.length && /[a-zA-Z_]/.test(source[attrPos + 1])) {
-      return false;
+    // the `process` type, not a process block opener. Only apply to keywords that can
+    // legally be the prefix of an attribute reference (declarative item names).
+    // Control-flow keywords (if/case/while/loop/for) start an expression and the
+    // apostrophe immediately following is a character literal, never an attribute prefix.
+    // Allow horizontal whitespace (spaces/tabs) between the keyword and the apostrophe.
+    if (ATTRIBUTE_PREFIX_KEYWORDS.has(lowerKeyword)) {
+      let attrPos = position + keyword.length;
+      while (attrPos < source.length && (source[attrPos] === ' ' || source[attrPos] === '\t')) {
+        attrPos++;
+      }
+      if (attrPos < source.length && source[attrPos] === "'" && attrPos + 1 < source.length && /[a-zA-Z_]/.test(source[attrPos + 1])) {
+        return false;
+      }
     }
 
     // Reject keywords inside parenthesized expressions (port maps, generic maps, function calls)
