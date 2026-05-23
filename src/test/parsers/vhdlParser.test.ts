@@ -3736,6 +3736,39 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-05-23: multi-line is intermediate retained for package body with null body', () => {
+    test('should keep is intermediate for package body p\\nis\\n  null;', () => {
+      const source = `package body p
+is
+  null;
+end package body;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'package');
+      assertIntermediates(pairs[0], ['is']);
+    });
+
+    test('should still strip is for null procedure on single line', () => {
+      const source = `architecture rtl of test is
+  procedure noop is null;
+begin
+  null;
+end architecture;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertIntermediates(pairs[0], ['is', 'begin']);
+    });
+
+    test('should still strip is for package instantiation on single line', () => {
+      const source = `package my_pkg is new work.generic_pkg generic map (WIDTH => 8);
+entity E is
+end entity;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'entity');
+    });
+  });
+
   suite('Regression 2026-05-23: multi-line wait...for is terminated by semicolon, not continued into next for-loop', () => {
     test('should pair the for loop opener after multi-line wait for clause', () => {
       const source = `process
