@@ -87,9 +87,12 @@ export function matchMatlabString(source: string, pos: number): ExcludedRegion {
       // `1` followed by `'text'`. So fall through to string matching when the next
       // character is an identifier char; otherwise treat it as transpose. `A''`
       // (double transpose) stays transpose because the second `'` is followed by
-      // another `'` (not an identifier char).
+      // another `'` (not an identifier char). Unicode identifier letters (`\p{L}`)
+      // are treated identically to ASCII so `]'ε...'` is a string, symmetric with
+      // the prev-char Unicode handling above.
       const nextChar = pos + 1 < source.length ? source[pos + 1] : undefined;
-      if (!(nextChar && /[a-zA-Z_]/.test(nextChar))) {
+      const nextIsIdentifierLetter = nextChar !== undefined && (/[a-zA-Z_]/.test(nextChar) || /\p{L}/u.test(nextChar));
+      if (!nextIsIdentifierLetter) {
         return { start: pos, end: pos + 1 };
       }
     }
