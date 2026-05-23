@@ -203,8 +203,17 @@ export class BashBlockParser extends BaseBlockParser {
         regions.push(result);
         i = result.end;
 
-        // Process additional heredoc bodies that follow the first one
+        // Process additional heredoc bodies that follow the first one. Each
+        // previous body ends right before its terminator-line newline, so step
+        // past that newline (handling \r\n and bare \r) before scanning the
+        // next body. Without this, the next body region absorbs the previous
+        // terminator's trailing newline (off-by-one start position).
         for (const heredocInfo of additionalHeredocs) {
+          if (i < source.length && source[i] === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+            i += 2;
+          } else if (i < source.length && (source[i] === '\n' || source[i] === '\r')) {
+            i++;
+          }
           const bodyRegion = matchHeredocBody(source, i, heredocInfo.stripTabs, heredocInfo.terminator);
           if (bodyRegion) {
             regions.push(bodyRegion);
