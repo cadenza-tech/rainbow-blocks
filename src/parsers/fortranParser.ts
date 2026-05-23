@@ -87,7 +87,18 @@ function normalizeFortranEndType(rawType: string): string {
 // 4-char tokens; the bare-keyword loop is suppressed at these positions via
 // suppressedDefaultKeywordPositions so the compound `case default` / `rank default`
 // token is the only token emitted there.
-const SELECT_TYPE_GUARD_PATTERN = /\b(type[ \t]+is[ \t]*\(|class[ \t]+is[ \t]*\(|class[ \t]+default\b|case[ \t]+default\b|rank[ \t]+default\b)/gi;
+//
+// The separator between the two words allows either same-line whitespace `[ \t]+` or a
+// Fortran free-form line continuation (`type &\n[&] is`), matching the same continuation
+// shape used by CONTINUATION_COMPOUND_END_PATTERN: trailing `&` optionally followed by an
+// inline comment, then one or more newlines (with possible comment-only/blank lines and
+// optional leading `&`) before the next word.
+const GUARD_WORD_SEPARATOR =
+  '(?:[ \\t]+|[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*(?:![^\\r\\n]*|&[ \\t]*(?:![^\\r\\n]*)?)?(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*)';
+const SELECT_TYPE_GUARD_PATTERN = new RegExp(
+  `\\b(type${GUARD_WORD_SEPARATOR}is[ \\t]*\\(|class${GUARD_WORD_SEPARATOR}is[ \\t]*\\(|class${GUARD_WORD_SEPARATOR}default\\b|case${GUARD_WORD_SEPARATOR}default\\b|rank${GUARD_WORD_SEPARATOR}default\\b)`,
+  'gi'
+);
 
 export class FortranBlockParser extends BaseBlockParser {
   // Transient source captured during tokenize() for use in matchBlocks().
@@ -934,9 +945,10 @@ export class FortranBlockParser extends BaseBlockParser {
     // Pre-scan: collect positions where `case` / `rank` is the start of a `case default`
     // / `rank default` compound. The bare `case` / `rank` token at these positions must
     // be suppressed in the keyword loop so the compound token (injected later via
-    // SELECT_TYPE_GUARD_PATTERN) is the only token emitted.
+    // SELECT_TYPE_GUARD_PATTERN) is the only token emitted. The separator allows either
+    // same-line whitespace or a continuation line, matching SELECT_TYPE_GUARD_PATTERN.
     const suppressedDefaultKeywordPositions = new Set<number>();
-    const defaultGuardPattern = /\b(case|rank)[ \t]+default\b/gi;
+    const defaultGuardPattern = new RegExp(`\\b(case|rank)${GUARD_WORD_SEPARATOR}default\\b`, 'gi');
     let defaultMatch = defaultGuardPattern.exec(source);
     while (defaultMatch !== null) {
       const pos = defaultMatch.index;
@@ -1265,7 +1277,16 @@ export class FortranBlockParser extends BaseBlockParser {
         case 'block_middle':
           if (stack.length > 0) {
             const topBlock = stack[stack.length - 1];
-            const middleValue = token.value.toLowerCase().replace(/[ \t\r\n]+/g, ' ');
+            // Normalize the middle keyword text into a single-space canonical form so that
+            // continuation forms like `type &\n  is` and same-line `type is` compare equal.
+            // Drop `&` line-continuation markers and inline comments (`! ...` to end of line)
+            // before collapsing whitespace.
+            const middleValue = token.value
+              .toLowerCase()
+              .replace(/![^\r\n]*/g, ' ')
+              .replace(/&/g, ' ')
+              .replace(/[ \t\r\n]+/g, ' ')
+              .trim();
             const openerValue = topBlock.token.value.toLowerCase();
             // For `select` openers, peek at the source to determine the subtype
             // (`select type` vs `select case` vs `select rank`). This lets us
