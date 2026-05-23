@@ -4259,6 +4259,32 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: reserved word after cast expression', () => {
+    test('should not tokenize a close keyword that follows a (type) cast as the cast operand', () => {
+      // Bug: `(int)endmodule` — the `endmodule` is the operand of the cast and
+      // a reserved word cannot legitimately appear there. Without skipping past
+      // the `(int)` cast, `endmodule` was tokenized and prematurely paired with
+      // the outer module, leaving the trailing real `endmodule` orphaned.
+      const source = 'module m;\n  int x;\n  initial x = (int)endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      // Only the final `endmodule` on its own line is a valid close keyword;
+      // the one immediately after the cast must be suppressed.
+      assert.strictEqual(endmoduleTokens.length, 1, 'cast operand `endmodule` must not be tokenized');
+      assert.strictEqual(endmoduleTokens[0].startOffset, source.lastIndexOf('endmodule'));
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not tokenize a close keyword that follows a (logic) cast', () => {
+      // Same bug class with `logic` (another DATA_TYPE keyword).
+      const source = 'module m;\n  initial x = (logic)endmodule;\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1, 'cast operand `endmodule` after (logic) must not be tokenized');
+    });
+  });
+
   suite('Bug fix: reserved word as case_item label name inside case', () => {
     test('should not tokenize a block_close keyword used as case_item label name', () => {
       // Bug: `endcase` appearing as a case_item label name (followed by `:`) was
