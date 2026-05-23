@@ -4404,5 +4404,19 @@ end`;
     });
   });
 
+  suite('Regression: stray end after regex literal should not pair with surrounding block', () => {
+    test('should not pair if with stray end after /regex/ on same line', () => {
+      // Bug: stray `end` directly after a regex literal on the same line was tokenized
+      // as block_close and mis-paired with the outer `if`, leaving the real outer `end`
+      // orphan. Per cost-minimization, filter the stray `end` so the real if/end pair
+      // correctly with zero orphans.
+      const source = 'if cond\n  x = /pat/ end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // The real outer `end` (offset 24) should be the close, not the inner stray end (offset 20).
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
