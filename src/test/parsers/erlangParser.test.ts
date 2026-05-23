@@ -3163,5 +3163,42 @@ foo() ->
     });
   });
 
+  suite('Bug: -define body nested call must still detect real fun/end blocks', () => {
+    test('should detect fun-end pair inside nested function call in -define body', () => {
+      // -define(M, list:map(fun(X) -> X end, L)). The fun(...) -> ... end is a real
+      // anonymous function passed as an argument to list:map. Previously, the keyword filter
+      // returned true (filtered) whenever a -define body token sat inside a nested call,
+      // which suppressed both 'fun' and 'end' and prevented any pair from being recognized.
+      // The opener-stack analysis in isBareReservedWordInDefineBody already distinguishes
+      // real openers (fun followed by '(') from bare reserved words, so it must be applied
+      // even inside nested calls.
+      const source = '-define(M, list:map(fun(X) -> X end, L)).';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should detect fun-end pair inside double-nested function call in -define body', () => {
+      const source = '-define(M, outer(inner(fun(X) -> X end))).';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should still filter bare begin inside nested call in -define body', () => {
+      // -define(M, nested(begin)). The bare 'begin' inside a nested call has no real-block
+      // structure; it must remain filtered (existing behavior preserved).
+      const source = '-define(MACRO, nested(begin)).';
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0, 'bare begin inside nested() in -define body must stay filtered');
+    });
+
+    test('should detect begin-end pair inside nested function call in -define body', () => {
+      // A real begin/end inside a nested call should also be detected via opener-stack logic.
+      const source = '-define(M, foo(begin ok end)).';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
