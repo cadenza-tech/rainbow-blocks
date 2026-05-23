@@ -44,6 +44,17 @@ export function matchesWord(source: string, pos: number, word: string): boolean 
   return true;
 }
 
+// Bare heredoc-delimiter character class. Matches the existing ASCII punctuation
+// allowed by real bash plus any Unicode letter or number (so `<<XYΖ`, `<<終`,
+// `<<EOFвыход` are accepted just like ASCII identifiers). The leading-character
+// pattern omits `-` so a stray `-` doesn't open the bare word (it would be parsed
+// as the `<<-` strip-tabs operator already consumed by `opMatch`).
+const HEREDOC_DELIM_BARE_FIRST = /[\p{L}\p{N}_.+:%,=!*?]/u;
+const HEREDOC_DELIM_BARE_REST = /[\p{L}\p{N}_\-.+:%,=!*?]/u;
+// Backslash-escaped character continuation: anything except whitespace, quotes,
+// or backslash terminates the run. Unicode-letter aware via negation only.
+const HEREDOC_DELIM_BACKSLASH_TERMINATOR = /[\s'"\\]/;
+
 // Parses a heredoc operator (<<, <<-) and extracts the delimiter.
 // Real bash supports concatenating multiple delimiter parts like <<"EOF"'TAIL' or
 // <<X"Y" — the actual terminator is the concatenation of all parts.
@@ -91,7 +102,7 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
       }
       const startWord = i + 1;
       let end = startWord;
-      while (end < source.length && !/[\s'"\\]/.test(source[end])) end++;
+      while (end < source.length && !HEREDOC_DELIM_BACKSLASH_TERMINATOR.test(source[end])) end++;
       if (end === startWord) {
         if (!matched) return null;
         break;
@@ -101,9 +112,9 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
       matched = true;
       continue;
     }
-    if (matched ? /[A-Za-z0-9_\-.+:%,=!*?]/.test(ch) : /[A-Za-z_0-9.+:%,=!*?]/.test(ch)) {
+    if (matched ? HEREDOC_DELIM_BARE_REST.test(ch) : HEREDOC_DELIM_BARE_FIRST.test(ch)) {
       const start = i;
-      while (i < source.length && /[A-Za-z0-9_\-.+:%,=!*?]/.test(source[i])) i++;
+      while (i < source.length && HEREDOC_DELIM_BARE_REST.test(source[i])) i++;
       terminator += source.slice(start, i);
       matched = true;
       continue;
