@@ -4857,5 +4857,36 @@ end`;
     });
   });
 
+  suite('Bug: def fn do ... end produces a pair', () => {
+    test('should pair def with end when fn is the function name being defined', () => {
+      // `def fn do ... end` defines a function named `fn`; this is uncommon but valid:
+      // fn is the function name (an identifier), not the anonymous function keyword.
+      // The def-end pair must be produced.
+      const source = 'def fn do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should pair defp with end when fn is the function name being defined', () => {
+      const source = 'defp fn do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defp', 'end');
+    });
+
+    test('should pair defmacro with end when fn is the function name being defined', () => {
+      const source = 'defmacro fn do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmacro', 'end');
+    });
+
+    test('should pair def with end for `def fn x do ... end` form', () => {
+      // The function `fn` is defined with an unparenthesised argument `x`. fn should not
+      // be treated as the anonymous function keyword.
+      const source = 'def fn x do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
