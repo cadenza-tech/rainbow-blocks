@@ -3880,6 +3880,25 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-24: nested if-generate inner simple end closes both generate and control prefix', () => {
+    test('should pair both inner if and inner generate when nested if-generate uses bare end', () => {
+      const source = `if X generate
+  if Y generate
+    null;
+  end;
+end generate;`;
+      const pairs = parser.parse(source);
+      // Expect 4 pairs: outer if, outer generate, inner if, inner generate.
+      // (LRM-style: `end generate` closes the outer pair; the bare `end;` closes the
+      // inner pair as a best-effort match for malformed input.)
+      assertBlockCount(pairs, 4);
+      const innerPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.strictEqual(innerPairs.length, 2, 'expected two if pairs (outer and inner)');
+      const innerGeneratePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'generate');
+      assert.strictEqual(innerGeneratePairs.length, 2, 'expected two generate pairs (outer and inner)');
+    });
+  });
+
   suite('Regression 2026-05-24: attribute_specification scan limit must not false-promote entity_class to block opener', () => {
     test('should not false-promote entity_class to block opener when scan limit is reached', () => {
       // 5000 newlines between `attribute keep` and `of foo` force the backward scan from
