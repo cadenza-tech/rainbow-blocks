@@ -642,6 +642,18 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (source[i] === '(') {
       return true;
     }
+    // Indexed access: `KEYWORD[idx]`. Real opener forms never take a `[` (they
+    // require an uppercase type name or a body block), so a `[` here always
+    // means the keyword is being used as a value (e.g. `x = select[0]`).
+    if (source[i] === '[') {
+      return true;
+    }
+    // Bitwise-or / block-argument syntax: `KEYWORD|x|` or `KEYWORD | x`. Real
+    // opener forms never use `|` directly after the keyword; the keyword is a
+    // value (e.g. `x = enum | x` or method-call block args `enum |x| ...`).
+    if (source[i] === '|') {
+      return true;
+    }
     return false;
   }
 
