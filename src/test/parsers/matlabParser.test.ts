@@ -2890,6 +2890,69 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-23: end preceded by value token on same logical line is not block close', () => {
+    test('should not treat end after identifier as block close (x = a end)', () => {
+      // `x = a end` places `end` in operand position after the identifier `a`. Invalid
+      // MATLAB outside indexing, but treating it as a block close consumes the inner end.
+      const source = 'function f\n  if true\n    x = a end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3, 'if should pair with the real inner end (line 3)');
+    });
+
+    test('should not treat end after closing bracket as block close (x = [1 2] end)', () => {
+      const source = 'function f\n  if true\n    x = [1 2] end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat end after numeric decimal point as block close (x = 10. end)', () => {
+      const source = 'function f\n  if true\n    x = 10. end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat end after function call as block close (x = foo() end)', () => {
+      const source = 'function f\n  if true\n    x = foo() end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should not treat end after closing brace as block close (x = {1} end)', () => {
+      const source = 'function f\n  if true\n    x = {1} end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should still treat real end on its own line as block close (sanity check)', () => {
+      // A normal end on its own line must keep working.
+      const source = 'function f\n  if true\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still treat end after ; on same line as block close (one-liner if; body; end)', () => {
+      // `if true; body; end` is a valid one-liner: the `end` is on the same physical line
+      // but after `;` it's a new logical line, so it must still pair with `if`.
+      const source = 'function f\n  if true; body; end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 2);
+    });
+  });
+
   suite('Regression 2026-05-23: binary operator + end with Unicode horizontal whitespace', () => {
     test('should not treat end after + NBSP (U+00A0) as block close', () => {
       // `1 +<NBSP>end` — `end` is in operand context (preceded by binary `+`), invalid
