@@ -913,10 +913,15 @@ export class VhdlBlockParser extends BaseBlockParser {
         // Here stmtBefore is just the entity_class keyword (single word) when the colon
         // ends the previous line. The upward scan will verify the `attribute` declaration
         // is present and act as a safety net for unrelated single-word patterns.
-        // Tracks whether this `is` is the multi-line block header `is` of a block opener
-        // (e.g., `package body p\nis\n  null;`). When set, the VHDL-2008 `is null/is new/
-        // is (expr)` filter below is skipped so the `is` is preserved as a block intermediate.
-        let isBlockHeaderIs = false;
+        // The `is null/is new/is (` filter below targets subprogram declarations
+        // (`procedure p is null;`, `function f is new gen ...;`, `function f(...) return T is (expr);`)
+        // which are NOT block bodies. Apply it only when the `is` belongs to a `function`/`procedure`
+        // header. A same-line `function`/`procedure` keyword in `stmtBefore` is the strongest signal;
+        // the upward scan below also flags multi-line function/procedure headers. For all other
+        // block openers (process/block/package body/etc.), the `is null;` form is the block body's
+        // first statement, NOT a declaration form — applying the filter would drop the legitimate
+        // block intermediate.
+        let isSubprogramHeaderIs = /^(function|procedure)\b/.test(stmtBefore);
         if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore) || /^\w+\s*$/.test(stmtBefore)) {
           let skipThisIs = false;
           let scanPos = lineStart - 1;
@@ -981,12 +986,16 @@ export class VhdlBlockParser extends BaseBlockParser {
               ) {
                 if (this.lineContainsStandaloneIs(source, prevLineStart, scanPos, excludedRegions)) {
                   skipThisIs = true;
-                } else {
-                  // Block opener header line without its own `is` (e.g., `package body p`).
-                  // This `is` is the block's header `is`, so the VHDL-2008 `is null/is new/
-                  // is (expr)` filter must not apply or it would drop the intermediate.
-                  isBlockHeaderIs = true;
+                } else if (/^(function|procedure)\b/.test(prevLine)) {
+                  // Multi-line function/procedure header without its own `is`. The
+                  // `is null/is new/is (expr)` filter below still applies to detect
+                  // null procedures, expression functions, and subprogram instantiations.
+                  isSubprogramHeaderIs = true;
                 }
+                // For non-subprogram block openers (entity/architecture/package body/process/
+                // block/etc.), this `is` is the block's header `is`. Leaving
+                // isSubprogramHeaderIs at its default false ensures the filter does NOT
+                // drop the legitimate block intermediate.
                 break;
               }
               // Content line that doesn't match declaration → continue scanning upward
@@ -1005,15 +1014,21 @@ export class VhdlBlockParser extends BaseBlockParser {
             continue;
           }
         }
-        // VHDL-2008: subprogram/package declarations that have no body and thus no matching `end`:
-        //   - `function f is new generic_f generic map (...);` (instantiation)
+        // VHDL-2008: declarations that have no body and thus no matching `end`:
+        //   - `function f is new generic_f generic map (...);` (subprogram instantiation)
+        //   - `package p is new generic_pkg generic map (...);` (package instantiation)
         //   - `procedure p is null;` (null procedure)
         //   - `function f(...) return T is (expr);` (expression function)
         // The `is` token here is part of a declaration, not a block intermediate, so skip it.
-        // Skip this filter entirely when the `is` is the multi-line block header `is` of a
-        // block opener (e.g., `package body p\nis\n  null;`). The earlier upward scan
-        // confirms this by reaching a block-opener line that has no standalone `is`.
-        if (!isBlockHeaderIs) {
+        //
+        // `is new` is unambiguous: it always denotes an instantiation regardless of the
+        // surrounding keyword (subprogram or package), so the filter applies unconditionally.
+        //
+        // `is null;` and `is (` are valid declaration forms ONLY in subprogram
+        // (function/procedure) headers. For other block openers (process/block/package body
+        // /etc.) the same suffix is the block body's first statement and applying the filter
+        // there would drop the legitimate block intermediate.
+        {
           let afterIs = startOffset + 2;
           while (afterIs < source.length) {
             if (source[afterIs] === ' ' || source[afterIs] === '\t' || source[afterIs] === '\n' || source[afterIs] === '\r') {
@@ -1030,7 +1045,7 @@ export class VhdlBlockParser extends BaseBlockParser {
             break;
           }
           if (afterIs < source.length) {
-            // is new <name> (instantiation)
+            // is new <name> (instantiation) — applies unconditionally
             if (
               afterIs + 3 <= source.length &&
               source.slice(afterIs, afterIs + 3).toLowerCase() === 'new' &&
@@ -1038,25 +1053,28 @@ export class VhdlBlockParser extends BaseBlockParser {
             ) {
               continue;
             }
-            // is null; (null procedure)
-            if (
-              afterIs + 4 <= source.length &&
-              source.slice(afterIs, afterIs + 4).toLowerCase() === 'null' &&
-              (afterIs + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[afterIs + 4]))
-            ) {
-              let afterNull = afterIs + 4;
-              while (
-                afterNull < source.length &&
-                (source[afterNull] === ' ' || source[afterNull] === '\t' || source[afterNull] === '\n' || source[afterNull] === '\r')
-              )
-                afterNull++;
-              if (afterNull < source.length && source[afterNull] === ';') {
+            // is null; (null procedure) and is (expr); (expression function)
+            // are subprogram-only forms.
+            if (isSubprogramHeaderIs) {
+              if (
+                afterIs + 4 <= source.length &&
+                source.slice(afterIs, afterIs + 4).toLowerCase() === 'null' &&
+                (afterIs + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[afterIs + 4]))
+              ) {
+                let afterNull = afterIs + 4;
+                while (
+                  afterNull < source.length &&
+                  (source[afterNull] === ' ' || source[afterNull] === '\t' || source[afterNull] === '\n' || source[afterNull] === '\r')
+                )
+                  afterNull++;
+                if (afterNull < source.length && source[afterNull] === ';') {
+                  continue;
+                }
+              }
+              // is (expr); (expression function)
+              if (source[afterIs] === '(') {
                 continue;
               }
-            }
-            // is (expr); (expression function)
-            if (source[afterIs] === '(') {
-              continue;
             }
           }
         }
