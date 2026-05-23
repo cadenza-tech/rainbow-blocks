@@ -45,7 +45,9 @@ const COMPOUND_END_TYPES = [
   'protected',
   'for',
   'units',
-  'context'
+  'context',
+  // VHDL-2019 view declaration (LRM 6.5.2.2): `view <name> of <type> is ... end view [<name>];`
+  'view'
 ];
 
 // Pattern to match compound end keywords (case insensitive)
@@ -79,7 +81,8 @@ const ATTRIBUTE_PREFIX_KEYWORDS: ReadonlySet<string> = new Set([
   'protected',
   'context',
   'record',
-  'units'
+  'units',
+  'view'
 ]);
 
 // VHDL paren-context checks only care about '()' depth (port maps, generic maps,
@@ -200,7 +203,9 @@ export class VhdlBlockParser extends BaseBlockParser {
       'configuration',
       'protected',
       'units',
-      'context'
+      'context',
+      // VHDL-2019 view declaration (LRM 6.5.2.2)
+      'view'
     ],
     blockClose: ['end'],
     blockMiddle: ['else', 'elsif', 'when', 'then', 'is', 'begin']
