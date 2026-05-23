@@ -3399,5 +3399,42 @@ end try`;
     });
   });
 
+  suite('Bug AS-LOW-1: matchCompoundKeyword should skip Unicode whitespace indentation after continuation', () => {
+    test('should pair end tell when the tell word follows continuation + NBSP indent', () => {
+      const NBSP = ' ';
+      const source = `tell app1\n  beep\nend ¬\n${NBSP}tell\ntell app2\n  beep2\nend tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const first = findBlock(pairs, 'tell');
+      assert.strictEqual(first.closeKeyword.value, 'end tell');
+      assert.strictEqual(pairs.filter((p) => p.openKeyword.value === 'tell').length, 2);
+    });
+
+    test('should pair end tell when the tell word follows continuation + IDEOGRAPHIC SPACE indent', () => {
+      const IDEO = '　';
+      const source = `tell app1\n  beep\nend ¬\n${IDEO}tell\ntell app2\n  beep2\nend tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const first = findBlock(pairs, 'tell');
+      assert.strictEqual(first.closeKeyword.value, 'end tell');
+    });
+
+    test('should pair end tell when the tell word follows continuation + ZWSP indent', () => {
+      const ZWSP = '​';
+      const source = `tell app1\n  beep\nend ¬\n${ZWSP}tell\ntell app2\n  beep2\nend tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const first = findBlock(pairs, 'tell');
+      assert.strictEqual(first.closeKeyword.value, 'end tell');
+    });
+
+    test('should pair end if when if word follows continuation + NBSP indent', () => {
+      const NBSP = ' ';
+      const source = `if x then\n  beep\nend ¬\n${NBSP}if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   generateCommonTests(config);
 });
