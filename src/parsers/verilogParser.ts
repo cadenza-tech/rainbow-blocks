@@ -64,11 +64,36 @@ const CLOSE_TO_OPEN: Readonly<Record<string, readonly string[]>> = {
 };
 
 // Returns true when a keyword at `position` is preceded by `::` (scope resolution),
-// allowing whitespace between `::` and the keyword (e.g., `pkg :: end`).
-function isPrecededByScopeResolution(source: string, position: number): boolean {
+// allowing whitespace and block/line comments between `::` and the keyword
+// (e.g., `pkg :: end`, `pkg::/* c */end`, `pkg:: // c\nend`).
+function isPrecededByScopeResolution(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
   let i = position - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) {
-    i--;
+  while (i >= 0) {
+    const ch = source[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      i--;
+      continue;
+    }
+    // Skip block/line comments between `::` and the keyword. Other excluded
+    // regions (strings, escaped identifiers) are real tokens and break the
+    // `:: <keyword>` adjacency.
+    if (excludedRegions !== undefined) {
+      let inExcluded = false;
+      for (const region of excludedRegions) {
+        if (i >= region.start && i < region.end) {
+          const isBlockComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*';
+          const isLineComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '/';
+          if (isBlockComment || isLineComment) {
+            i = region.start - 1;
+            inExcluded = true;
+            break;
+          }
+          return false;
+        }
+      }
+      if (inExcluded) continue;
+    }
+    break;
   }
   return i >= 1 && source[i] === ':' && source[i - 1] === ':';
 }
@@ -421,7 +446,7 @@ export class VerilogBlockParser extends BaseBlockParser {
         }
         // Reject scope-resolved `pkg::default` (it's a qualified identifier, not a case label).
         // Also handles whitespace-separated `pkg :: default`.
-        if (isPrecededByScopeResolution(source, token.startOffset)) {
+        if (isPrecededByScopeResolution(source, token.startOffset, excludedRegions)) {
           return false;
         }
         // Reject default inside `'{...}` assignment pattern or any `{...}` brace
@@ -797,7 +822,7 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject keywords preceded by :: (scope resolution operator like pkg::begin),
     // including whitespace-separated forms like `pkg :: begin`.
-    if (isPrecededByScopeResolution(source, position)) {
+    if (isPrecededByScopeResolution(source, position, excludedRegions)) {
       return false;
     }
 
@@ -952,7 +977,7 @@ export class VerilogBlockParser extends BaseBlockParser {
 
     // Reject keywords preceded by :: (scope resolution operator like pkg::end),
     // including forms with whitespace between `::` and the keyword (`pkg :: end`).
-    if (isPrecededByScopeResolution(source, position)) {
+    if (isPrecededByScopeResolution(source, position, excludedRegions)) {
       return false;
     }
 
