@@ -3123,5 +3123,45 @@ foo() ->
     });
   });
 
+  suite('Bug: hasUnclosedOpenerInMapScope must track nested brace depth', () => {
+    test('should pair outer begin with correct outer end when nested map contains begin/end map-key pattern', () => {
+      // Without brace tracking in the forward scan, hasUnclosedOpenerInMapScope sees the
+      // inner-map 'begin' (inside a nested {...}) as an opener for the OUTER map scope,
+      // and the outer 'end => 2' is kept as a real token instead of being filtered as a
+      // map key. The orphan inner-map 'end' is then incorrectly paired with the outer
+      // 'begin'. The inner '#{begin x, end => 1}' itself follows the existing design rule
+      // for '#{begin a, end => v}' and produces its own pair.
+      const source = 'begin\n  X = #{a => #{begin x, end => 1}, end => 2},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = findBlock(pairs, 'begin');
+      // The outermost begin must pair with the final 'end' (at source.length-3), not with
+      // any inner-map 'end' kept as an orphan token.
+      const finalEnd = source.lastIndexOf('end');
+      const matchedBegin = pairs.find((p) => p.openKeyword.startOffset === 0 && p.closeKeyword.startOffset === finalEnd);
+      assert.ok(matchedBegin, `outer begin@0 must pair with end@${finalEnd}`);
+      // The inner-map begin/end pair must still be recognized per existing design.
+      assert.ok(
+        pairs.some((p) => p.openKeyword.startOffset !== 0 && p.openKeyword.value === 'begin'),
+        'inner-map begin must still pair with inner-map end'
+      );
+      assert.ok(outer);
+    });
+
+    test('should filter outer end-as-map-key when nested map contains inner block opener', () => {
+      // Bare case (no outer wrapper). The outer 'end => 2' must be filtered as a map key
+      // even though the nested map contains a bare 'begin'. The inner '#{begin x, end => 1}'
+      // still produces a begin-end pair per the existing #{begin a, end => v} design.
+      const source = '#{a => #{begin x, end => 1}, end => 2}';
+      const tokens = parser.getTokens(source);
+      const outerEnd = source.indexOf('end => 2');
+      assert.strictEqual(
+        tokens.some((t) => t.startOffset === outerEnd),
+        false,
+        'outer end before => must be filtered as a map key'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
