@@ -292,10 +292,13 @@ export class CrystalBlockParser extends BaseBlockParser {
       // Invalid char literal (multi-char): skip to next ' on same line
       // to prevent keywords between quotes from being detected
       let j = pos + 1;
+      let trailingBackslash = false;
       while (j < source.length && source[j] !== "'" && source[j] !== '\n' && source[j] !== '\r') {
         if (source[j] === '\\' && j + 1 < source.length) {
-          // Don't skip past newline
+          // Don't skip past newline, but remember that we hit a trailing `\<NL>`
+          // so that the backslash itself can be included in the excluded region.
           if (source[j + 1] === '\n' || source[j + 1] === '\r') {
+            trailingBackslash = true;
             break;
           }
           j += 2;
@@ -305,6 +308,15 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
       if (j < source.length && source[j] === "'") {
         return { start: pos, end: j + 1 };
+      }
+      // Unterminated on this line: still mark the partial literal as excluded.
+      // This prevents a trailing backslash (e.g. `'a\<NL>`) from being interpreted
+      // as a logical line continuation, which would merge the next line's keywords
+      // (e.g. `if`) into the same logical line as a postfix conditional.
+      // Include the trailing backslash itself when one stopped the scan.
+      const end = trailingBackslash ? j + 1 : j;
+      if (end > pos + 1) {
+        return { start: pos, end };
       }
       return null;
     }
