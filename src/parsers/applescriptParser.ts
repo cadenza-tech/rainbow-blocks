@@ -296,10 +296,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
 
     // Pipe-delimited identifier: |identifier| (with backslash escape support: |a\|b|)
+    // Backslash never escapes a newline (consistent with the string literal handling
+    // above), so an unterminated pipe identifier ends at the first newline.
     if (char === '|') {
       let j = pos + 1;
       while (j < source.length && source[j] !== '\n' && source[j] !== '\r') {
-        if (source[j] === '\\' && j + 1 < source.length) {
+        if (source[j] === '\\' && j + 1 < source.length && source[j + 1] !== '\n' && source[j + 1] !== '\r') {
           j += 2;
           continue;
         }
