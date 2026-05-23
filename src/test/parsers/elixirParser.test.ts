@@ -4834,5 +4834,28 @@ end`;
     });
   });
 
+  suite('Bug: fn keyword as value of preceding block keyword', () => {
+    test('should not treat fn as block opener when preceded by case (case fn do)', () => {
+      // `case fn do ... end` means `fn` is the value/variable, `do` belongs to `case`.
+      // Only the outer case-end should pair; the inner fn must not steal the end.
+      const source = 'case fn do\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat fn as block opener when preceded by if (if fn do)', () => {
+      // `if fn do ... end` — fn is a value, do belongs to if
+      const source = 'if fn do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat fn as block opener when preceded by unless (unless fn do)', () => {
+      const source = 'unless fn do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
