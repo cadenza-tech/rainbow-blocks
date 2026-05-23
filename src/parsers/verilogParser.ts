@@ -243,6 +243,12 @@ export class VerilogBlockParser extends BaseBlockParser {
   // independent of `{}` depth.
   private parenIndexCache: { source: string; index: BracketIndex } | null = null;
 
+  // Square-bracket index cached per source string. Separate from the brace and
+  // paren indexes because it tracks only `[` openers; reserved words used as
+  // identifiers inside `arr[case]` / `arr[end]` subscripts are filtered using
+  // this index.
+  private squareBracketIndexCache: { source: string; index: BracketIndex } | null = null;
+
   // Source text and excluded regions of the current parse pass, captured in
   // tokenize (which always runs immediately before matchBlocks in the base
   // pipeline). matchBlocks needs them to scan the raw source after a closing
@@ -286,6 +292,30 @@ export class VerilogBlockParser extends BaseBlockParser {
     const index = new BracketIndex(source, excludedRegions, new Set(['(']));
     this.parenIndexCache = { source, index };
     return index;
+  }
+
+  // Returns the square-bracket-only index for `source`, building it once and
+  // caching it by source identity. Tracks only `[` so the index matches a
+  // single-kind `[]` lookup exactly. Used to filter block keywords used as
+  // identifiers inside array subscripts (`arr[case]`, `arr[end]`).
+  private getSquareBracketIndex(source: string, excludedRegions: ExcludedRegion[]): BracketIndex {
+    if (this.squareBracketIndexCache !== null && this.squareBracketIndexCache.source === source) {
+      return this.squareBracketIndexCache.index;
+    }
+    const index = new BracketIndex(source, excludedRegions, new Set(['[']));
+    this.squareBracketIndexCache = { source, index };
+    return index;
+  }
+
+  // Detects whether position is inside any `[...]` subscript expression. The
+  // enclosing `[` is looked up in O(log n) via the square-bracket index. An
+  // unclosed `[` (an incomplete subscript still being typed) reports
+  // `close === -1`: treating `position` as "inside" it would suppress every
+  // later block keyword in the file, so per the best-effort parsing principle
+  // only a properly closed `[...]` subscript context suppresses keywords.
+  private isInsideSquareBracketExpression(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const span = this.getSquareBracketIndex(source, excludedRegions).enclosing(position);
+    return span !== null && span.close >= position;
   }
 
   protected readonly keywords: LanguageKeywords = {
@@ -459,6 +489,12 @@ export class VerilogBlockParser extends BaseBlockParser {
         if (this.isInsideBraceExpression(source, token.startOffset, excludedRegions)) {
           return false;
         }
+        // Reject `default` inside `[...]` subscript (e.g., `arr[default]`). The
+        // word is a misused identifier inside the subscript expression, not a
+        // case_item label.
+        if (this.isInsideSquareBracketExpression(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
         // Reject `default` that is the single-statement body of a parenthesized
         // control header (e.g., `if (c) default: x = 1;`). There it is inside the
         // control statement's body, not a case_item label, so it must not become
@@ -488,6 +524,12 @@ export class VerilogBlockParser extends BaseBlockParser {
       // cannot legitimately open or close a block.
       if (token.type === 'block_open' || token.type === 'block_close') {
         if (this.isInsideBraceExpression(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
+        // Reject block_open/block_close keywords inside any `[...]` subscript
+        // expression (e.g., `arr[case]`, `arr[end]`). Reserved words used inside
+        // a subscript are misused identifiers, not real block openers/closers.
+        if (this.isInsideSquareBracketExpression(source, token.startOffset, excludedRegions)) {
           return false;
         }
       }
