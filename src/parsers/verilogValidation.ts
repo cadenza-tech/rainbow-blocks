@@ -926,7 +926,24 @@ export function skipParenGroup(source: string, pos: number, excludedRegions: Exc
 export function skipDelayExpression(source: string, pos: number, excludedRegions: ExcludedRegion[], callbacks: VerilogValidationCallbacks): number {
   let i = pos;
   while (true) {
-    while (i < source.length && /\s/.test(source[i])) i++;
+    // Skip whitespace and excluded regions (block/line comments) between `#`
+    // and the delay value. Per IEEE 1800-2017, whitespace (including comments)
+    // is permitted between `#` and its delay expression operand, so
+    // `# /* comment */ 5 begin` is equivalent to `# 5 begin`.
+    while (i < source.length) {
+      if (/\s/.test(source[i])) {
+        i++;
+        continue;
+      }
+      if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.end;
+          continue;
+        }
+      }
+      break;
+    }
     if (i < source.length && source[i] === '(') {
       return skipParenGroup(source, i, excludedRegions, callbacks);
     }
