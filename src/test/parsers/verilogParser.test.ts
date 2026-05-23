@@ -4259,5 +4259,35 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: macro arg list string with backslash line continuation (CRLF, CR-only)', () => {
+    test('should keep macro arg list closed across backslash-CRLF line continuation inside string', () => {
+      // Bug: matchMacroArgList only skipped the `\` + 1 char in the string body. For
+      // `\<CRLF>` it consumed `\` + `\r` but left `\n` as a bare newline, terminating
+      // the string and ending the macro arg region prematurely. Keywords inside
+      // `(...)` then leaked out and got tokenized.
+      const source = `\`MACRO("test\\\r\nbegin x = 1; end")\nmodule m;\nendmodule\n`;
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(beginTokens.length, 0, 'begin inside macro arg string must not be tokenized');
+      assert.strictEqual(endTokens.length, 0, 'end inside macro arg string must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should keep macro arg list closed across backslash-CR line continuation inside string', () => {
+      // CR-only line ending (legacy macOS): `\<CR>` is also a line continuation
+      // per IEEE 1800-2017 §5.9. The macro arg region must extend past it.
+      const source = `\`MACRO("test\\\rbegin x = 1; end")\nmodule m;\nendmodule\n`;
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(beginTokens.length, 0, 'begin inside macro arg string must not be tokenized');
+      assert.strictEqual(endTokens.length, 0, 'end inside macro arg string must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
