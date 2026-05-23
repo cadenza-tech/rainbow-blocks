@@ -4390,5 +4390,19 @@ end`;
     });
   });
 
+  suite('Regression: end inside argument list should not pair with def', () => {
+    test('should not pair def with stray end inside its parameter list (def foo(end))', () => {
+      // Bug: `end` inside argument list was tokenized as block_close and mis-paired
+      // with the outer `def`, leaving the real closing `end` orphan. Per cost-minimization
+      // (Tree-sitter principle, CLAUDE.md), filter the stray `end` so the real def/end
+      // pair correctly with zero orphans.
+      const source = 'def foo(end)\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The real outer `end` (offset 17) should be the close, not the inner stray end (offset 8).
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
