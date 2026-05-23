@@ -1693,6 +1693,15 @@ end`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should not treat block keyword as command macro prefix', () => {
+      // `if` is a reserved word; it cannot be used as a string/command macro name.
+      // `if\`cmd\`end` is an `if` keyword followed by an unprefixed Cmd literal,
+      // pairing with the trailing `end`.
+      const source = 'if`cmd`end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Coverage: multi-line comment edge', () => {
