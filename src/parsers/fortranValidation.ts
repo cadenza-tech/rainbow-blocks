@@ -508,11 +508,23 @@ export function isPrecededByOperator(source: string, position: number): boolean 
   if (char === '=') {
     return true;
   }
-  // Fortran dot-operators: .eq., .ne., .lt., .gt., .le., .ge., .and., .or., .not., .eqv., .neqv.
+  // Fortran dot-operators: .eq., .ne., .lt., .gt., .le., .ge., .and., .or., .not., .eqv., .neqv.,
+  // plus user-defined operators .<letter-list>. (up to 63 chars per Fortran spec).
+  // Scan backward to the matching opening `.` rather than capping at a fixed slice length.
   if (char === '.') {
-    const textBefore = source.slice(Math.max(0, i - 7), i + 1);
-    if (FORTRAN_DOT_OPERATOR_PATTERN.test(textBefore)) {
-      return true;
+    const minStart = Math.max(0, i - 64);
+    for (let k = i - 1; k >= minStart; k--) {
+      const c = source[k];
+      if (c === '.') {
+        const textBefore = source.slice(k, i + 1);
+        if (FORTRAN_DOT_OPERATOR_PATTERN.test(textBefore)) {
+          return true;
+        }
+        break;
+      }
+      if (!/[a-zA-Z]/.test(c)) {
+        break;
+      }
     }
   }
   // Fortran statement keywords that take identifiers: call end, save enddo, etc.
