@@ -4438,6 +4438,25 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: pragma protect directive with embedded comments', () => {
+    // Bug: isPragmaProtectBegin/isPragmaProtectEnd's whitespace skip only catches
+    // space and tab — not block/line comments. So `\`pragma protect /* c */ begin`
+    // is not recognized as a protect-begin directive, and the protected region
+    // is not detected as excluded content.
+    test('should detect pragma protect begin with block comment between protect and begin', () => {
+      const source = '`pragma protect /* c */ begin\nbegin x = 1; end\n`pragma protect end\n';
+      const pairs = parser.parse(source);
+      // Inside the protect region, begin/end should NOT be tokenized.
+      assertNoBlocks(pairs);
+    });
+
+    test('should detect pragma protect end with block comment between protect and end', () => {
+      const source = '`pragma protect begin\nbegin x = 1; end\n`pragma protect /* c */ end\n';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Bug fix: default inside paren-less control single-statement body', () => {
     // Bug: `default` after paren-less control keywords (forever, initial,
     // final, always_*) or `else` is the single-statement body of those
