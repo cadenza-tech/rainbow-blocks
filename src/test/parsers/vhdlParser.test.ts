@@ -3880,5 +3880,43 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-24: control-flow keyword followed by character literal opens block', () => {
+    test('should open if-block when condition starts with a character literal', () => {
+      const source = `if 'a' = c then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should open while-block when condition starts with a character literal', () => {
+      const source = `while 'x' /= c loop
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      const whileBlock = findBlock(pairs, 'while');
+      assert.strictEqual(whileBlock.closeKeyword?.value, 'end loop');
+    });
+
+    test('should treat elsif followed by character literal as block intermediate', () => {
+      const source = `if a then
+  null;
+elsif 'b' = c then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      assertIntermediates(ifBlock, ['then', 'elsif', 'then']);
+    });
+
+    test('should open case-block when selector starts with a character literal', () => {
+      const source = `case 'a' is
+  when others => null;
+end case;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end case');
+    });
+  });
+
   generateCommonTests(config);
 });
