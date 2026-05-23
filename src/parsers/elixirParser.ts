@@ -293,6 +293,22 @@ export class ElixirBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // Returns true if a character literal (excluded region starting with '?') ends exactly
+  // at `position`. Used to suppress keyword tokenization for the identifier continuation
+  // right after a char literal (e.g. `?#end` produces ?# excluded region; `end` at the
+  // boundary must not be tokenized as block_close).
+  private isPrecededByCharLiteral(position: number, source: string, excludedRegions: ExcludedRegion[]): boolean {
+    // Binary search would be ideal, but a linear scan suffices: excluded regions ending
+    // exactly at `position` are rare and the list is small per source.
+    for (const region of excludedRegions) {
+      if (region.end === position && region.start < source.length && source[region.start] === '?') {
+        return true;
+      }
+      if (region.start > position) break;
+    }
+    return false;
+  }
+
   // Checks if `fn` at `position` is a value/variable for a preceding block keyword.
   // True only when fn is directly followed by `do` (after whitespace) AND preceded by a
   // do-block keyword on the same statement. `fn ->` (arrow syntax) is real fn and returns
@@ -406,6 +422,14 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
       // Character literal prefix: ?end, ?else, etc. are character literals, not keywords
       if (token.startOffset > 0 && source[token.startOffset - 1] === '?') {
+        return false;
+      }
+      // Character literal ending right before token: ?#end, ?(else, ?\\nend, etc.
+      // The character literal is an excluded region; if it ends at token.startOffset and
+      // starts with '?', the token is the identifier continuation after the literal and
+      // must not be tokenized as a keyword (it is invalid Elixir but should not steal
+      // block_close/middle pairing from surrounding blocks).
+      if (token.startOffset > 0 && this.isPrecededByCharLiteral(token.startOffset, source, excludedRegions)) {
         return false;
       }
       // Sigil prefix: ~end, ~else, etc. are the start of a sigil that failed to find a
