@@ -2365,5 +2365,23 @@ end`;
     });
   });
 
+  suite('Regression: section keyword followed by continuation and operator is not a block opener', () => {
+    test('should reject properties followed by ... continuation then + operator inside classdef', () => {
+      // `properties ...<NL>+ 1` is a single logical line `properties + 1`. Octave has no
+      // unary `+` form starting a section body, so this must be parsed as an expression
+      // statement, not a section opener. Treating it as a section opener leaves a spurious
+      // `properties` block on the stack and steals an end from the outer classdef.
+      const source = 'classdef A\n  properties ...\n    + 1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+
+    test('should reject methods followed by backslash continuation then * operator inside classdef', () => {
+      const source = 'classdef A\n  methods \\\n    * 2\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'classdef', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
