@@ -3519,5 +3519,45 @@ end error`;
     });
   });
 
+  suite('Bug AS-MEDIUM-2: if(condition) function-call form should not open a block', () => {
+    test('should not treat if(x) as a block open inside a handler body', () => {
+      const source = `on run
+  if(x)
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not treat if() with no args as a block open', () => {
+      const source = `on run
+  if()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should still treat if (cond) then as a valid multi-line block (whitespace before paren)', () => {
+      const source = `if (x > 0) then
+  beep
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should not pair if(x) with a later end if', () => {
+      const source = `on run
+  if(x)
+  beep
+end if`;
+      // if(x) is a function call, not a block; orphan end if remains unmatched.
+      const pairs = parser.parse(source);
+      // No pair for the if(x) call; on...end if should also not pair because end if requires an 'if' opener.
+      // The only legitimate pairing is on...end if via handler-name fallback ('error' / 'on error' mapping is unrelated).
+      // Confirm if(x) is not opened: there must be zero pairs whose openKeyword.value === 'if'.
+      const ifPairs = pairs.filter((p) => p.openKeyword.value === 'if');
+      assert.strictEqual(ifPairs.length, 0, 'if(x) function call should not open a block');
+    });
+  });
+
   generateCommonTests(config);
 });
