@@ -4379,5 +4379,16 @@ end`;
     });
   });
 
+  suite('Regression: line-start %%foo should not start unterminated percent literal', () => {
+    test('should treat line-start %%foo as degenerate (not unterminated percent literal) so following blocks parse', () => {
+      // Bug: `%%` followed by non-whitespace at line start started an unterminated
+      // percent literal that swallowed the rest of the source. Treat `%%` as modulo
+      // regardless of what follows.
+      const source = '%%foo\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
