@@ -538,7 +538,11 @@ export class MatlabBlockParser extends BaseBlockParser {
         return false;
       }
       if (token.type === 'block_middle') {
-        if (this.isFollowedBySimpleAssignment(source, token.startOffset + token.value.length)) {
+        // Skip whitespace AND `...` line continuations so `case ...\n  = 5` is detected as
+        // the same assignment form as the same-line `case = 5`, symmetric with the
+        // block_open side (isValidBlockOpen) and the block_close side (isValidBlockClose).
+        const middleAssignFrom = this.skipWhitespaceAndContinuations(source, token.startOffset + token.value.length, excludedRegions);
+        if (this.isFollowedBySimpleAssignment(source, middleAssignFrom)) {
           return false;
         }
         if (this.isInsideParensOrBrackets(source, token.startOffset, excludedRegions)) {
