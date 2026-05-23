@@ -488,10 +488,74 @@ function isDoBlockedFromLoopKeyword(
   return depth > 0;
 }
 
+// Returns true when `do` at `doPosition` is the first non-whitespace character on its
+// physical line (defined by `lineStart`).
+function isDoFirstOnPhysicalLine(source: string, doPosition: number, lineStart: number): boolean {
+  let physicalLineStart = doPosition;
+  while (physicalLineStart > 0 && source[physicalLineStart - 1] !== '\n' && source[physicalLineStart - 1] !== '\r') {
+    physicalLineStart--;
+  }
+  // The logical line start may already lie on a previous physical line via backslash
+  // or operator continuation. In that case, `do` is not "first" — return false.
+  if (lineStart < physicalLineStart) return false;
+  for (let i = physicalLineStart; i < doPosition; i++) {
+    const ch = source[i];
+    if (ch !== ' ' && ch !== '\t') return false;
+  }
+  return true;
+}
+
+// Returns true when the physical line ending at `lineEnd` (exclusive of the line break)
+// has a trailing `#` comment as its last syntactic element. The line need not be entirely
+// a comment — `while cond # tail` also qualifies, since the line ends inside the comment
+// region.
+function prevLineEndsWithComment(
+  source: string,
+  lineEnd: number,
+  excludedRegions: ExcludedRegion[] | undefined,
+  callbacks: RubyValidationCallbacks
+): boolean {
+  // Scan back from lineEnd-1 skipping whitespace; the last non-ws char must be inside
+  // an excluded region whose start contains `#` (single-line comment).
+  let i = lineEnd - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  if (i < 0) return false;
+  if (!excludedRegions) return false;
+  const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+  if (!region) return false;
+  // The region must be a single-line comment, identified by `#` at its start.
+  return source[region.start] === '#';
+}
+
 // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
 export function isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: RubyValidationCallbacks): boolean {
   // Find logical line start (following backslash continuations)
-  const lineStart = findLogicalLineStart(source, position, excludedRegions, callbacks);
+  let lineStart = findLogicalLineStart(source, position, excludedRegions, callbacks);
+
+  // If `do` is the first non-whitespace token on its physical line and the previous
+  // physical line ends with a comment (and is not itself blank), pretend the comment
+  // is whitespace and join the previous line. Ruby's strict grammar rejects this form
+  // (`while cond # comment\ndo\nbody\nend`), but typing this is a common mistake and
+  // recognising the loop-do here lets `while` pair correctly with `end` rather than
+  // creating a misleading `do`/`end` pair that hides the `while` orphan.
+  if (isDoFirstOnPhysicalLine(source, position, lineStart) && lineStart > 0) {
+    const prevLineEnd = lineStart - 1; // points at \n or \r before the do line
+    let prevContentEnd = prevLineEnd;
+    if (source[prevLineEnd] === '\n' && prevLineEnd > 0 && source[prevLineEnd - 1] === '\r') {
+      prevContentEnd = prevLineEnd - 1;
+    }
+    // The previous line must end with a comment (`# ...`) at its tail to qualify.
+    if (prevLineEndsWithComment(source, prevContentEnd, excludedRegions, callbacks)) {
+      // Recompute logical line start from the previous line.
+      let prevPhysicalLineStart = prevContentEnd;
+      while (prevPhysicalLineStart > 0 && source[prevPhysicalLineStart - 1] !== '\n' && source[prevPhysicalLineStart - 1] !== '\r') {
+        prevPhysicalLineStart--;
+      }
+      lineStart = findLogicalLineStart(source, prevPhysicalLineStart, excludedRegions, callbacks);
+    }
+  }
 
   // Get content before 'do' on this line
   let beforeDo = source.slice(lineStart, position);
