@@ -4420,5 +4420,29 @@ end`;
     });
   });
 
+  suite('Regression: receiver-like keyword used as function call should not open a block', () => {
+    test('should not pair select(channel) function call with following end', () => {
+      // `select(channel)` is not a valid Crystal select block (which requires a
+      // `when` branch and no parens). Treating `select` here as a block opener
+      // pairs it with the trailing `end`, hiding the genuine if/end below.
+      const source = 'select(channel)\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not open a block for enum(value) function call form', () => {
+      const source = 'enum(value)\nend\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still open a real enum block when followed by a name (no parens)', () => {
+      // Sanity: the receiver-form guard must not break real opener forms.
+      const source = 'enum Color\n  Red\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
