@@ -4888,6 +4888,33 @@ end`;
     });
   });
 
+  suite('Bug: character literal followed by keyword should not tokenize keyword', () => {
+    test('should not tokenize end after ?# character literal', () => {
+      // `?#end`: ?# is a char literal for '#', followed by identifier `end` (not a block close).
+      // The `end` token must not steal the outer if/end pair.
+      const source = 'if cond do\n  x = ?#end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // The outer if should pair with the LAST end (at the end of source, not the one inside ?#end)
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not tokenize end after ?a character literal', () => {
+      const source = 'if cond do\n  x = ?aend\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not tokenize else after ?( character literal', () => {
+      const source = 'if cond do\n  x = ?(else\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // else should not become an intermediate
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   suite('Bug: isFnParensFollowedByDo should skip newlines and comments', () => {
     test('should reject fn(x) followed by newline then do', () => {
       // `if fn(x)\ndo ... end` — `fn(x) do` form is invalid Elixir; fn should not pair
