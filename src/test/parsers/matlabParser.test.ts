@@ -2827,5 +2827,32 @@ end`;
     });
   });
 
+  suite('Regression: end followed by binary operator (same line and continuation) is not block close', () => {
+    test('should not treat end + 1 as block close on the same line', () => {
+      // `end + 1` puts `end` in operand context — invalid MATLAB outside indexing.
+      // Treating it as a block close destroys the outer function/end pair.
+      const source = 'function f\n  end + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the final end');
+    });
+
+    test('should not treat end ...\\n + 1 (continuation) as block close', () => {
+      const source = 'function f\n  end ...\n      + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function should pair with the final end');
+    });
+
+    test('should still treat end == 1 as valid block close (comparison, not assignment)', () => {
+      // Comparison operators are NOT compound assignments; the existing code deliberately
+      // allows them. Ensure this no-regression case still works.
+      const source = 'if x\n  end == 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1, 'if should pair with the first end');
+    });
+  });
+
   generateCommonTests(config);
 });
