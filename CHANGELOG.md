@@ -5,6 +5,65 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.55] - 2026-05-23
+
+### Fixed
+
+- Ada: Detect a parameter-list `;` separator inside parens so an `if`/`case` expression default value does not break the enclosing `procedure` pair
+- Ada: Skip a qualified-name `Exception` identifier (`Pkg.Sub.Exception`) so it is not added to intermediates as a `block_middle`
+- Ada: Skip a `with`-prefixed `Exception` identifier in type extensions so it is not added to intermediates
+- AppleScript: Skip Unicode whitespace indentation after a `¬` continuation so a compound keyword (`end tell`) is correctly detected
+- AppleScript: Skip single-line comments after `¬` continuation in handler name probe so `on ¬ -- comment\n handler` is recognized
+- AppleScript: Stop a backslash from escaping a newline in pipe identifiers so `|a\<NL>b|` does not span lines
+- Bash: Skip keywords followed by word-fusion characters (`$`, `\`, `]`) so `done$var`/`fi$var`/`done\foo`/`done]` are not treated as block closes
+- Bash: Track subshell `(...)` boundaries in pair matching so a `done` inside `(echo; done)` does not steal an outer `for`'s close
+- Bash: Accept Unicode letters in heredoc terminators so `<<XYΖ` is recognized as a delimiter
+- Bash: Skip the terminator newline between stacked heredocs so a multi-heredoc body region does not include an extra leading newline
+- COBOL: Treat `END-*`/`WHEN`/`ELSE` as a period-less `COPY` boundary so subsequent block pairs are not absorbed into the COPY range
+- COBOL: Skip `block_middle` keywords (`WHEN`, `ELSE`) used as `COPY` copybook names so they are not added to intermediates
+- COBOL: Reject `PERFORM.` (verb-only with period) as a structured `PERFORM` so it does not mispair with a following `END-PERFORM`
+- Crystal: Close a macro template (`{{ }}`, `{% %}`) at its same-line `}}`/`%}` even when a `<<-IDENT` heredoc opener is present so the heredoc body does not swallow downstream code
+- Crystal: Skip context-dependent keywords (`select`, `enum`, `union`, ...) used as a function call (`select(x)`) so they do not break the enclosing block
+- Elixir: Skip keywords with a `~` sigil prefix (`~end`, `~else`) so they are not tokenized as block keywords
+- Erlang: Allow newlines inside paired-delimiter sigils (`~b{...}`, `~r(...)`, ...) so multi-line sigil bodies are treated as a single excluded region
+- Erlang: Skip `fun` references when counting openers in map scope so a map literal containing `fun foo/1 => ...` and `end => ...` does not mispair the outer block
+- Fortran: Skip a middle keyword (`else`, `case`, `rank`, ...) preceded by a dot operator (`.and.`, `.or.`) so it is not added to intermediates
+- Fortran: Treat `end[N] = 5` (coarray image selector) as an array assignment so the `end` identifier is not treated as a block close
+- Fortran: Support long user-defined dot operators (over 7 characters) before `end` so the `end` identifier is not treated as a block close
+- Julia: Recognize BMP-outside Unicode characters as a command-macro prefix so `𝐀\`cmd\`end` correctly absorbs `end` as a suffix
+- Julia: Reject a block keyword (`if`, `for`, ...) as a command-macro prefix so `if\`cmd\`end` does not absorb `end` into the macro
+- Julia: Reject a leading digit as a command-macro prefix so `1\`cmd\`end` does not absorb `end` into the macro
+- Lua: Handle `\<LF><CR>` line continuation in string literals so a Lua 5.4 LF+CR line ending is treated as a continuation
+- Lua: Keep a reserved keyword token after `goto` with no label name so `function f() goto end` is not stripped of its `end`
+- MATLAB: Skip `end` used as a `case`/`otherwise` value so the inner `end` does not close the outer `switch`
+- MATLAB: Reject empty-header block openers (`if;`, `for;`, ...) so they do not consume the outer `function`'s close
+- MATLAB: Reject `end` followed by a binary operator (`end + 1`, `end ...\n * 2`) so the `end` variable use is not treated as a block close
+- MATLAB: Skip `end` followed by struct field access across a `...` line continuation so `end ...\n .field` is not treated as a block close
+- MATLAB: Skip `case`/`otherwise` followed by `=` across a `...` line continuation so the assignment is detected and the keyword is not added to intermediates
+- Octave: Skip `\<NL>` backslash line continuation in block-open keyword validation so `if \<NL> cond ... end` is paired correctly
+- Octave: Skip `...`/`\<NL>` line continuation when validating section keywords (`properties`, `methods`) followed by an operator so they are not opened as a block
+- Octave: Skip `...`/`\<NL>` line continuation when detecting `end(...)` indexing assignment so `end ...\n(1) = 5` is recognized
+- Octave: Skip Unicode horizontal whitespace (NBSP, etc.) when detecting `end (...)` indexing assignment so `end<NBSP>(1) = 5` is recognized
+- Octave: Skip `...`/`\<NL>` line continuation when detecting `arguments(obj)` function call so `arguments ...\n(obj);` is not opened as a block
+- Octave: Skip `...`/`\<NL>` line continuation in typed-close trailing-content check so `endif ...\n` is recognized as a block close
+- Ruby: Treat `%%` as the modulo operator everywhere so `x=%%` does not start an unterminated percent literal that swallows following blocks
+- Ruby: Treat `%=` as a compound modulo assignment so `x=%=` does not start an unterminated percent literal that swallows following blocks
+- Ruby: Treat a line-leading `%%foo` as a degenerate percent literal that does not swallow following blocks
+- Ruby: Filter a stray `end` in expression position (after `(`, `[`, `=`, binary operator, etc.) so `def foo(end)` and `if cond\n x = /pat/ end\n end` do not mispair the outer block
+- Ruby: Accept Unicode identifiers in heredoc terminators so `<<日本語` is recognized as a delimiter
+- Ruby: Recognize `do` as a loop separator when the previous line ends with a comment so `while cond # comment\ndo\n body\nend` is paired correctly
+- Verilog: Handle `\<CRLF>`/`\<CR>` line continuation inside macro arg strings so `` `MACRO("text\<CR><LF>...") `` does not break the arg list
+- Verilog: Skip reserved words used as `case_item` label names (`endcase: x = 1`) so they are not tokenized as block opens/closes
+- Verilog: Skip reserved words used as a cast operand (`(int)endmodule`) so they are not tokenized as block closes
+- Verilog: Skip reserved words inside `#(...)` delay expressions so they are not tokenized as block opens/closes
+- Verilog: Allow newlines between a `` `ifdef `` directive and its macro name so the next line's keyword is not opened as a block
+- Verilog: Skip `case`/`casex`/`casez` followed by a binary operator (`case == x`) so they are not opened as a block
+- VHDL: Treat `'\X'` (character literal containing backslash) as a 4-character literal so `\` does not trigger extended-identifier detection
+- VHDL: Treat a semicolon-terminated previous line as a statement end when validating `for` opener so `wait ... for X;` does not absorb the following independent `for` loop
+- VHDL: Preserve the `is` intermediate for multi-line `package body` headers so it is correctly attached to the surrounding block
+- VHDL: Skip the trailing `when` of a concurrent assertion (`assert ... when condition;`) inside a `case` branch so it is not added to case intermediates
+- VHDL: Reject `end` in mid-expression so a stray `end` does not cascade-pop the enclosing block opener
+
 ## [1.1.54] - 2026-05-23
 
 ### Fixed
@@ -2080,6 +2139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.55]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.54...v1.1.55
 [1.1.54]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.53...v1.1.54
 [1.1.53]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.52...v1.1.53
 [1.1.52]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.51...v1.1.52
