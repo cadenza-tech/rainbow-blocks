@@ -5684,6 +5684,37 @@ fi`;
     });
   });
 
+  suite('Regression: keyword split by backslash-newline line continuation', () => {
+    // Bash collapses `\<newline>` during lexical processing, so `i\<newline>f` is the
+    // `if` keyword. The base parser's regex tokenizer only matches contiguous text,
+    // so BashBlockParser must run a second pass to detect split-keyword forms.
+    test('should detect if split as i\\<newline>f', () => {
+      const source = 'i\\\nf true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect fi split as f\\<newline>i', () => {
+      const source = 'if true; then\n  echo hi\nf\\\ni';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should detect done split as do\\<newline>ne', () => {
+      const source = 'for i in 1 2; do\n  echo $i\ndo\\\nne';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should not detect a split that crosses a non-keyword character', () => {
+      // `if x` where x is split: i\<newline>f x is `if x`, but `i\<newline>fx` is `ifx`
+      // which is not the if keyword. Make sure the second pass doesn't over-match.
+      const source = 'i\\\nfx true; then\n  echo hi\nfi';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: empty case in subshell on one line closes properly', () => {
     // Plain subshell `(case x in esac)` is not an excluded region (unlike $(...), <(...), >(...))
     // so isCasePattern must not mistake the final `esac)` for a POSIX case pattern of the
