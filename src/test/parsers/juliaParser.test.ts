@@ -1702,6 +1702,17 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not treat digit as command macro prefix', () => {
+      // Julia identifiers cannot start with a digit. `1\`cmd\`` is a numeric literal
+      // followed by an unprefixed Cmd literal (no suffix consumption), so the trailing
+      // `end` is NOT swallowed into the excluded region.
+      const source = '1`cmd`end';
+      const regions = parser.getExcludedRegions(source);
+      const cmdRegion = regions.find((r) => source.slice(r.start, r.end).startsWith('`'));
+      assert.ok(cmdRegion, 'expected a backtick command region');
+      assert.strictEqual(source.slice(cmdRegion.start, cmdRegion.end), '`cmd`');
+    });
   });
 
   suite('Coverage: multi-line comment edge', () => {
