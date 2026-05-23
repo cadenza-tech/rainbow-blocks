@@ -499,6 +499,12 @@ export class AdaBlockParser extends BaseBlockParser {
         if (bp >= 0 && source[bp] === ':') {
           continue;
         }
+        // Selected_component (qualified name): the dot makes this 'Exception'
+        // the last segment of an identifier path (e.g., `raise Pkg.Sub.Exception;`),
+        // not a handler-section delimiter.
+        if (bp >= 0 && source[bp] === '.') {
+          continue;
+        }
         // Check for 'raise' or 'new' preceding exception (type reference contexts)
         if (bp >= 0 && /[a-zA-Z_]/.test(source[bp])) {
           let wordStart = bp;
