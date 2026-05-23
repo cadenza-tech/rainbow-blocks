@@ -145,9 +145,11 @@ export function skipNestedJuliaString(source: string, pos: number, blockKeywords
 // Returns true if `source[pos]` (a backtick) is preceded by a valid Julia identifier
 // prefix, meaning the backtick is part of a prefixed command macro call (e.g.
 // `prefix\`cmd\``). Walks backward collecting identifier-continuation chars (ASCII word,
-// Unicode Letter/Number) and rejects when the resulting prefix is a reserved block
-// keyword (reserved words cannot be macro names). Handles BMP-outside characters
-// encoded as surrogate pairs (e.g. 𝐀 U+1D400).
+// Unicode Letter/Number), then validates:
+//   - the prefix starts with a valid identifier-start char (letter or `_`, not a digit
+//     -- Julia identifiers cannot start with a digit); and
+//   - the prefix is not a reserved block keyword (reserved words cannot be macro names).
+// Handles BMP-outside characters encoded as surrogate pairs (e.g. 𝐀 U+1D400).
 export function isPrecededByCommandMacroPrefix(source: string, pos: number, blockKeywords: ReadonlySet<string>): boolean {
   if (pos <= 0) return false;
   // Walk backward collecting identifier-continuation chars.
@@ -175,6 +177,21 @@ export function isPrecededByCommandMacroPrefix(source: string, pos: number, bloc
     break;
   }
   if (prefixStart === pos) return false;
+  // The first char of the prefix must be a valid identifier-start (letter or `_`),
+  // not a digit. Handle BMP-outside letters via surrogate pair lookup.
+  const firstChar = source[prefixStart];
+  let startIsIdentStart = false;
+  if (/[a-zA-Z_]/.test(firstChar)) {
+    startIsIdentStart = true;
+  } else if (firstChar >= '\uD800' && firstChar <= '\uDBFF' && prefixStart + 1 < source.length) {
+    const cp = source.codePointAt(prefixStart);
+    if (cp !== undefined && cp > 0xffff && /\p{L}/u.test(String.fromCodePoint(cp))) {
+      startIsIdentStart = true;
+    }
+  } else if (firstChar.charCodeAt(0) > 127 && /\p{L}/u.test(firstChar)) {
+    startIsIdentStart = true;
+  }
+  if (!startIsIdentStart) return false;
   // Reserved block keywords cannot be macro names.
   const prefix = source.slice(prefixStart, pos);
   if (blockKeywords.has(prefix)) return false;
