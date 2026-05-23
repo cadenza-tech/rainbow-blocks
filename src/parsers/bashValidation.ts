@@ -503,6 +503,26 @@ export function isCasePattern(
     }
   }
 
+  // `esac` is a case-statement closer, never a bare POSIX case pattern value, unless
+  // it appears as `|esac)` (a pipe-separated alternative). For a `(case x in esac)`
+  // the enclosing `(` is the subshell, not a case-pattern opener, so the paren-scope
+  // match below must not declare `esac` a case pattern. The pipe-alternative form
+  // (e.g. `foo|esac)`) is preserved because the `|` sits immediately before `esac`.
+  if (keyword === 'esac') {
+    let prev = position - 1;
+    while (prev >= 0) {
+      if (callbacks.isInExcludedRegion(prev, excludedRegions)) {
+        prev--;
+        continue;
+      }
+      if (source[prev] !== ' ' && source[prev] !== '\t' && source[prev] !== '\n' && source[prev] !== '\r') break;
+      prev--;
+    }
+    if (prev < 0 || source[prev] !== '|') {
+      return false;
+    }
+  }
+
   // Check if inside unmatched parentheses (subshell or POSIX case pattern)
   let parenDepth = 0;
   for (let k = position - 1; k >= 0; k--) {
@@ -564,15 +584,12 @@ export function isCasePattern(
   }
   // After pipe (|) separator in case pattern alternatives (e.g., foo|for), foo|esac))
   // Checked first so `esac` after `|` is treated as a case pattern alternative.
+  // The top-of-function guard already rejects bare `esac` (no `|` before it), so this
+  // pipe handling is the only path that reaches the default check for `esac`.
   if (s >= 0 && source[s] === '|') {
     return true;
   }
 
-  // esac) is almost always case-close + subshell-close, not a case pattern;
-  // the backward scan below would falsely match ;; from the last case arm
-  if (keyword === 'esac') {
-    return false;
-  }
   if (s >= 1 && source[s] === ';' && source[s - 1] === ';') {
     return true;
   }
