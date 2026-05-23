@@ -69,6 +69,22 @@ export function matchVhdlCharacterLiteral(source: string, pos: number): Excluded
   if (innerChar === '\\' && pos + 3 < source.length && source[pos + 3] === "'" && source[pos + 2] !== '\n' && source[pos + 2] !== '\r') {
     return { start: pos, end: pos + 4 };
   }
+  // Tolerant handling for 5-char escape-like literals such as `'\nX'` (`'`, `\`, escape
+  // letter, payload char, `'`). The inner three characters must all be non-newline; the
+  // closing quote must be at pos+4. Without this branch the leading backslash would
+  // start an extended identifier and absorb subsequent keywords until a closing `\`.
+  if (
+    innerChar === '\\' &&
+    pos + 4 < source.length &&
+    source[pos + 4] === "'" &&
+    source[pos + 2] !== '\n' &&
+    source[pos + 2] !== '\r' &&
+    source[pos + 3] !== '\n' &&
+    source[pos + 3] !== '\r' &&
+    source[pos + 3] !== "'"
+  ) {
+    return { start: pos, end: pos + 5 };
+  }
   // Attribute tick: skip the attribute name to avoid matching keywords
   let i = pos + 1;
   while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
