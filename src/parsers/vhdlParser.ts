@@ -1341,6 +1341,30 @@ export class VhdlBlockParser extends BaseBlockParser {
               // uses `end;` instead of the canonical `end generate;`). Without this
               // fallthrough the `end;` would be silently dropped and the surrounding
               // architecture would lose its own end pairing.
+              // If the stack entry directly below the generate is a generate-prefix
+              // keyword (`if`/`for`/`while`/`case`), the bare `end;` is a malformed
+              // shorthand for `end generate;` that should close BOTH the generate and
+              // its control prefix — mirroring the compound-end branch's behavior so
+              // the control prefix is not left orphan.
+              const generateIndex = stack.length - 1;
+              const controlIndex = generateIndex - 1;
+              if (controlIndex >= 0 && GENERATE_PREFIX_KEYWORDS.includes(stack[controlIndex].token.value.toLowerCase())) {
+                const generateBlock = stack.splice(generateIndex, 1)[0];
+                pairs.push({
+                  openKeyword: generateBlock.token,
+                  closeKeyword: token,
+                  intermediates: generateBlock.intermediates,
+                  nestLevel: stack.length
+                });
+                const controlBlock = stack.splice(controlIndex, 1)[0];
+                pairs.push({
+                  openKeyword: controlBlock.token,
+                  closeKeyword: token,
+                  intermediates: controlBlock.intermediates,
+                  nestLevel: stack.length
+                });
+                break;
+              }
             }
             const openBlock = stack.pop();
             if (openBlock) {
