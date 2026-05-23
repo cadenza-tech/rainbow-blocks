@@ -1683,6 +1683,18 @@ end`;
     });
   });
 
+  suite('Command macro prefix detection', () => {
+    test('should recognize BMP-outside Unicode letter as command macro prefix', () => {
+      // 𝐀 (U+1D400, MATHEMATICAL BOLD CAPITAL A) is a valid Julia identifier start char.
+      // 𝐀`cmd`end is a string macro call where `end` is consumed as suffix flags.
+      // The outer `begin ... end` must therefore remain unmatched (no block_close `end`
+      // should be produced inside the prefixed command macro).
+      const source = 'begin\n𝐀`cmd`end\n';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Coverage: multi-line comment edge', () => {
     test('should handle # not followed by = as non-comment', () => {
       // Tests matchMultiLineComment returning null when not #=
