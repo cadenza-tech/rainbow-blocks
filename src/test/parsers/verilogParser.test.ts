@@ -4438,6 +4438,26 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: filter block keywords inside array subscript brackets', () => {
+    // Bug: SystemVerilog reserved words used as identifiers inside `[...]`
+    // (e.g., `arr[case]`, `arr[end]`) are tokenized as block_open/block_close,
+    // producing false BlockPairs against subsequent close keywords.
+    test('should not tokenize case as block_open inside foreach subscript', () => {
+      const source = 'module m;\n  initial foreach (arr[case]) begin\n    x = 1;\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0, '`case` inside `arr[case]` subscript should not be tokenized');
+    });
+
+    test('should not tokenize end as block_close inside array subscript', () => {
+      const source = 'module m;\n  initial begin\n    x = arr[end];\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      // Only the outer `end` (closing initial begin) should be tokenized.
+      assert.strictEqual(endTokens.length, 1, '`end` inside `arr[end]` subscript should not be tokenized');
+    });
+  });
+
   suite('Bug fix: isPrecededByScopeResolution skips comments between :: and keyword', () => {
     // Bug: isPrecededByScopeResolution's whitespace skip only catches space,
     // tab, and newlines — not block/line comments. So `pkg::/* c */begin`
