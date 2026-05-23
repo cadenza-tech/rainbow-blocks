@@ -4,41 +4,17 @@ import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } fr
 import { BaseBlockParser } from './baseParser';
 import { buildCaseInsensitiveKeywordPattern, findLastNonRepeatIndex, findLastOpenerByType } from './parserUtils';
 import type { PascalValidationCallbacks } from './pascalValidation';
-import { buildRecordContextMap, isIfThenElse, isInsideParens, isTypeDeclarationOf, isVariantRecordCase, TYPE_MODIFIERS } from './pascalValidation';
-
-// Keywords that indicate comparison context (= is comparison, not type definition)
-const COMPARISON_CONTEXT_KEYWORDS = new Set([
-  'if',
-  'while',
-  'until',
-  'then',
-  'or',
-  'and',
-  'not',
-  'xor',
-  'else',
-  'for',
-  'in',
-  'is',
-  'as',
-  'div',
-  'mod',
-  'shl',
-  'shr',
-  'try',
-  'begin',
-  'on',
-  'repeat'
-]);
-
-// Statement-context scope keywords: when these appear before `X = class` (across `;`
-// boundaries), the `=` is a comparison expression, not a type definition.
-const STATEMENT_CONTEXT_SCOPE_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm', 'do', 'then', 'else', 'finally', 'except']);
-
-// Declaration-context scope keywords: when these appear before `X = class`, the `=`
-// is a type definition. Used to terminate the cross-`;` scope scan early so we do
-// not over-shoot into a previous statement block.
-const DECLARATION_CONTEXT_SCOPE_KEYWORDS = new Set(['type', 'var', 'const']);
+import {
+  buildRecordContextMap,
+  COMPARISON_CONTEXT_KEYWORDS,
+  DECLARATION_CONTEXT_SCOPE_KEYWORDS,
+  isIfThenElse,
+  isInsideParens,
+  isTypeDeclarationOf,
+  isVariantRecordCase,
+  STATEMENT_CONTEXT_SCOPE_KEYWORDS,
+  TYPE_MODIFIERS
+} from './pascalValidation';
 
 export class PascalBlockParser extends BaseBlockParser {
   // Per-parse map from `case` keyword offsets to whether they sit inside a record block.

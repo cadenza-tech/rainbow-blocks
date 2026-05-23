@@ -12,6 +12,141 @@ export interface PascalValidationCallbacks {
 // 'partial' is the Delphi 2009+ partial-class modifier.
 export const TYPE_MODIFIERS = ['abstract', 'sealed', 'packed', 'partial'];
 
+// Keywords that, when seen scanning backward from `=`, prove the `=` is a comparison,
+// not a type definition. Kept as a string set so both pascalParser.ts (the
+// isValidBlockOpen scan) and pascalValidation.ts (the record-context scan) can use it.
+export const COMPARISON_CONTEXT_KEYWORDS = new Set([
+  'if',
+  'while',
+  'until',
+  'then',
+  'or',
+  'and',
+  'not',
+  'xor',
+  'else',
+  'for',
+  'in',
+  'is',
+  'as',
+  'div',
+  'mod',
+  'shl',
+  'shr',
+  'try',
+  'begin',
+  'on',
+  'repeat'
+]);
+
+// Statement-context scope keywords (cross-`;` scope decides comparison).
+export const STATEMENT_CONTEXT_SCOPE_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm', 'do', 'then', 'else', 'finally', 'except']);
+
+// Declaration-context scope keywords (cross-`;` scope decides type definition).
+export const DECLARATION_CONTEXT_SCOPE_KEYWORDS = new Set(['type', 'var', 'const']);
+
+// Returns true if the `=` that precedes the keyword at `keywordStart` (with optional
+// type modifiers between) is a comparison operator, not a type definition. Implements
+// the same scan as PascalBlockParser.isValidBlockOpen but as a standalone helper so
+// the record-context keyword classifier can reuse the comparison check.
+//
+// Walks backward past whitespace and type modifiers; if the first significant character
+// is not `=` (or it is `:=`), returns false. Otherwise scans backward from the `=` to a
+// `;` or start-of-source, looking for COMPARISON_CONTEXT_KEYWORDS (=> comparison) or
+// DECLARATION_CONTEXT_SCOPE_KEYWORDS (=> declaration). On `;` boundaries the scan
+// continues across them using STATEMENT_CONTEXT_SCOPE_KEYWORDS / DECLARATION_CONTEXT_SCOPE_KEYWORDS
+// to decide the enclosing scope, mirroring the pascalParser scan.
+export function isPrecededByComparisonEquals(
+  source: string,
+  keywordStart: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: PascalValidationCallbacks
+): boolean {
+  // Walk backward over whitespace/excluded regions and type modifiers to find the
+  // significant character. Mirrors the modifier-skipping loop in pascalParser.
+  let i = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
+  let foundModifier = true;
+  while (foundModifier) {
+    foundModifier = false;
+    for (const modifier of TYPE_MODIFIERS) {
+      const len = modifier.length;
+      if (i >= len - 1 && source.slice(i - len + 1, i + 1).toLowerCase() === modifier && (i < len || !/[a-zA-Z0-9_]/.test(source[i - len]))) {
+        i = skipWsExcludedBackward(source, i - len, excludedRegions, callbacks);
+        foundModifier = true;
+        break;
+      }
+    }
+  }
+  // Must be '=' but not ':=' / '>=' / '<=' / '+=' / '-=' / '*=' / '/=' (compound ops).
+  if (!(i >= 0 && source[i] === '=' && (i === 0 || ![':', '>', '<', '+', '-', '*', '/'].includes(source[i - 1])))) {
+    return false;
+  }
+
+  // Scan backward from before the `=` to the statement boundary.
+  let ci = i - 1;
+  let hitSemicolon = false;
+  let hitDeclarationKeyword = false;
+  while (ci >= 0) {
+    if (callbacks.isInExcludedRegion(ci, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(ci, excludedRegions);
+      if (region) {
+        ci = region.start - 1;
+        continue;
+      }
+    }
+    const ch = source[ci];
+    if (ch === ';') {
+      hitSemicolon = true;
+      break;
+    }
+    // ':=' assignment operator: any later `=` is a comparison expression.
+    if (ch === '=' && ci > 0 && source[ci - 1] === ':') {
+      return true;
+    }
+    if (/[a-zA-Z_]/.test(ch)) {
+      const wordEnd = ci;
+      while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
+      const word = source.slice(ci, wordEnd + 1).toLowerCase();
+      if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
+        return true;
+      }
+      if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+        hitDeclarationKeyword = true;
+        break;
+      }
+    }
+    ci--;
+  }
+
+  // Cross-`;` scope scan: if we hit `;` first, the enclosing scope decides.
+  if (hitSemicolon && !hitDeclarationKeyword) {
+    let si = ci - 1;
+    while (si >= 0) {
+      if (callbacks.isInExcludedRegion(si, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(si, excludedRegions);
+        if (region) {
+          si = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[si];
+      if (/[a-zA-Z_]/.test(ch)) {
+        const wordEnd = si;
+        while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
+        const word = source.slice(si, wordEnd + 1).toLowerCase();
+        if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+          return true;
+        }
+        if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+          return false;
+        }
+      }
+      si--;
+    }
+  }
+  return false;
+}
+
 // Checks if a position sits inside unbalanced parentheses (e.g. 'if (x = class)')
 // Stops at ';' (statement terminator) or start of file.
 export function isInsideParens(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: PascalValidationCallbacks): boolean {
@@ -160,7 +295,15 @@ function recordContextKeywordRole(
             eqCheck--;
         }
       }
-      if (eqCheck < 0 || source[eqCheck] !== '=') {
+      if (eqCheck >= 0 && source[eqCheck] === '=') {
+        // `=` precedes class: this could be either a type definition (TFoo = class)
+        // or a comparison expression (if X = class then). Only the former is a block
+        // opener; for the latter the keyword is not a block boundary and must be
+        // 'ignore' so the surrounding record-context scan is not corrupted.
+        if (isPrecededByComparisonEquals(source, keywordStart, excludedRegions, callbacks)) {
+          return 'ignore';
+        }
+      } else {
         // Skip 'class' as method modifier (followed by function, procedure, var, etc.)
         const cj = skipWsExcludedForward(source, keywordStart + 6, excludedRegions, callbacks);
         const afterClass = lowerSource.slice(cj, cj + 12);
