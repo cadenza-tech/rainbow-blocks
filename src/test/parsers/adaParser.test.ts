@@ -2752,6 +2752,16 @@ end if;`;
       assertSingleBlock(pairs, 'package', 'end');
       assertIntermediates(pairs[0], ['is']);
     });
+
+    test('should not leak qualified-name exception as intermediate', () => {
+      // raise Pkg.Sub.Exception: the trailing `Exception` is the last segment of
+      // a selected_component (qualified name) and must not be tracked as a
+      // handler-section intermediate.
+      const source = 'begin\n  raise Pkg.Sub.Exception;\nexception\n  when others => null;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertIntermediates(pairs[0], ['exception', 'when']);
+    });
   });
 
   suite('Regression: compound end split across newlines and comments', () => {
