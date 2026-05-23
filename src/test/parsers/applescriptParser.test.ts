@@ -3399,6 +3399,26 @@ end try`;
     });
   });
 
+  suite('Bug AS-LOW-2: handler probe should skip single-line comments after continuation', () => {
+    test('should recognize on followed by continuation + single-line comment', () => {
+      const source = 'on ¬ -- comment about this handler\n  myHandler()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should recognize to followed by continuation + single-line comment', () => {
+      const source = 'to ¬ -- doc string\n  myHandler()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end');
+    });
+
+    test('should recognize on followed by continuation + single-line comment + indented identifier', () => {
+      const source = 'on ¬ -- comment\n    handlerName()\n  beep\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+  });
+
   suite('Bug AS-LOW-1: matchCompoundKeyword should skip Unicode whitespace indentation after continuation', () => {
     test('should pair end tell when the tell word follows continuation + NBSP indent', () => {
       const NBSP = ' ';
