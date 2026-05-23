@@ -4973,5 +4973,73 @@ end`;
     });
   });
 
+  suite('Regression: end followed by range/logical/bitwise/pair operators outside indexing brackets is not block_close', () => {
+    // Bug: outside indexing brackets, `end` followed by `:`, `&&`, `||`, `&`, `|`, or `=>` is
+    // invalid Julia syntax (the bare keyword `end` is not a value). The parser used to classify
+    // such `end` as block_close because isBinaryOperatorStart did not enumerate these operators,
+    // even though isPrecededByBinaryOperator already accepted them. That mismatch let the inner
+    // `end` eager-close the surrounding block and orphan the outer real `end`. Treat such `end`
+    // as not block_close so the surrounding block can pair with its real closer. `::` (type
+    // assertion) must remain unaffected since `end::` is also invalid bare syntax but the parser
+    // already handles `::end` via isPrecededByBinaryOperator; `end::T` and `end::end` are also
+    // invalid but only the bare `:` (range / Pair start / ternary etc.) is the relevant case here.
+    test('should not treat end:N as block_close inside non-indexing block body', () => {
+      const source = 'function f()\n  end:1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end && x as block_close inside non-indexing block body', () => {
+      const source = 'function f()\n  end && x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end || x as block_close inside non-indexing block body', () => {
+      const source = 'function f()\n  end || x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end & x as block_close inside non-indexing block body', () => {
+      const source = 'function f()\n  end & x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end | x as block_close inside non-indexing block body', () => {
+      const source = 'function f()\n  end | x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should not treat end => x as block_close inside non-indexing block body', () => {
+      const source = 'function f()\n  end => x\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+
+    test('should still treat end inside indexing brackets followed by colon as lastindex', () => {
+      // Sanity check: the new outside-brackets rule must not regress the existing
+      // inside-brackets behavior. `arr[end:5]` is lastindex range, not block_close.
+      const source = 'function f(arr)\n  return arr[end:5]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat end inside indexing brackets followed by => as lastindex Pair', () => {
+      // Sanity check: `arr[end => v]` could appear in Dict construction patterns.
+      const source = 'function f(arr)\n  return Dict(arr[end] => 1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
