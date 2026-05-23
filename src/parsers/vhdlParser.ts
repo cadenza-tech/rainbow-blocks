@@ -234,10 +234,14 @@ export class VhdlBlockParser extends BaseBlockParser {
     // legally be the prefix of an attribute reference (declarative item names).
     // Control-flow keywords (if/case/while/loop/for) start an expression and the
     // apostrophe immediately following is a character literal, never an attribute prefix.
-    // Allow horizontal whitespace (spaces/tabs) between the keyword and the apostrophe.
+    // VHDL is whitespace-insensitive, so allow any whitespace (spaces, tabs, newlines)
+    // between the keyword and the apostrophe.
     if (ATTRIBUTE_PREFIX_KEYWORDS.has(lowerKeyword)) {
       let attrPos = position + keyword.length;
-      while (attrPos < source.length && (source[attrPos] === ' ' || source[attrPos] === '\t')) {
+      while (
+        attrPos < source.length &&
+        (source[attrPos] === ' ' || source[attrPos] === '\t' || source[attrPos] === '\n' || source[attrPos] === '\r')
+      ) {
         attrPos++;
       }
       if (attrPos < source.length && source[attrPos] === "'" && attrPos + 1 < source.length && /[a-zA-Z_]/.test(source[attrPos + 1])) {
