@@ -4443,6 +4443,25 @@ end`;
     });
   });
 
+  suite('Regression: heredoc terminator with trailing whitespace', () => {
+    test('should match terminator line with trailing space/tab characters', () => {
+      // Bug: a heredoc terminator line with trailing whitespace (e.g. `EOF \t`) did not
+      // match the terminator pattern; the heredoc body then extended to source end and
+      // swallowed the surrounding block. Trim trailing whitespace from the line before
+      // comparing to the terminator (anchor-set principle, best-effort parsing).
+      const source = 'def foo\n  x = <<EOF\n  body\nEOF  \t\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should match indented terminator line with trailing whitespace under <<- form', () => {
+      // Bug: `<<-EOF` with `  EOF  ` (indented and trailing space) did not match.
+      const source = 'def foo\n  x = <<-EOF\n  body\n  EOF  \n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Regression: heredoc with indented terminator under no-flag form', () => {
     test('should treat indented terminator as terminator under <<EOF when terminator line matches after trimming trailing whitespace', () => {
       // Bug: under no-flag heredoc form `<<EOF`, an indented terminator line (e.g. `  EOF`)
