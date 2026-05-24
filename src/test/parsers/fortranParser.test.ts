@@ -5852,6 +5852,49 @@ end select`;
     });
   });
 
+  suite('Regression 2026-05-25: compound end tokenization adjacent to unicode letter', () => {
+    test('should not tokenize endif as block_close when followed by unicode letter', () => {
+      // `endif日本語` reads as a single identifier; the compound-end tokenizer must reject
+      // this position via isAdjacentToUnicodeLetter, mirroring the bare-keyword loop.
+      // Without the guard, `endif` is emitted as a phantom block_close and pairs with the
+      // outer `if`, leaving the real block unclosed.
+      const source = `if (.true.) then
+  x = 1
+endif日本語`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not tokenize enddo as block_close when preceded by unicode letter', () => {
+      // `αenddo` reads as a single identifier; the compound-end tokenizer must reject
+      // this position so `enddo` does not phantom-close the surrounding do-block.
+      const source = `do i = 1, 10
+  x = 1
+αenddo`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not tokenize end if as block_close when followed by unicode letter', () => {
+      // `end if日本語` reads as the keyword sequence `end` followed by identifier `if日本語`.
+      // The compound-end `end if` must not be emitted because `if日本語` is a single identifier.
+      const source = `if (.true.) then
+  x = 1
+end if日本語`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still tokenize valid endif at end of source', () => {
+      // Sanity check: a real `endif` with no adjacent unicode letter must still pair.
+      const source = `if (.true.) then
+  x = 1
+endif`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
