@@ -4511,5 +4511,55 @@ end`;
     });
   });
 
+  suite('Regression: char literal with quote/comment/backtick/slash delimiter inside macro template', () => {
+    // Inside a macro template ({% %} or {{ }}), a Crystal char literal of the form
+    // `?<delim>` (e.g. `?#`, `?"`, `?'`, `` ?` ``, `?/`) must be recognized as a
+    // single token. Without that recognition, the macro scanner reads the delim
+    // character as the start of a comment / string / backtick / regex, fails to
+    // find its terminator, and lets the macro body consume the rest of the file —
+    // hiding any following block.
+    test('should not let ?# char literal start a comment that swallows %}', () => {
+      const source = '{% x = ?# %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not let ?" char literal start a string that swallows %}', () => {
+      const source = '{% x = ?" %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test("should not let ?' char literal start a string that swallows %}", () => {
+      const source = "{% x = ?' %}\nif true\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not let ?` char literal start a backtick that swallows %}', () => {
+      const source = '{% x = ?` %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not let ?/ char literal start a regex that swallows %}', () => {
+      const source = '{% x = ?/ %}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?# char literal inside {{ }} macro expression', () => {
+      const source = '{{ x = ?# }}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should handle ?" char literal inside {{ }} macro expression', () => {
+      const source = '{{ x = ?" }}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
