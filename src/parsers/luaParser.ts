@@ -109,7 +109,23 @@ export class LuaBlockParser extends BaseBlockParser {
     }
     if (source[i] === ':') {
       // :: is goto label closing, not method call
-      return !(i >= 1 && source[i - 1] === ':');
+      if (i >= 1 && source[i - 1] === ':') return false;
+      // A genuine method-call colon is preceded by a value-expression (e.g.
+      // `obj:method`). Walk back through any contiguous identifier chars
+      // before `:`; if that run is itself preceded by another `:`, this is
+      // an orphaned label-like sequence (`:abc:`) that does not represent a
+      // method call. Returning false keeps the following keyword in the
+      // token stream so the surrounding block can still pair, satisfying
+      // the "ベストエフォート・パーシング" preference for un-coloured leftovers
+      // over destroyed pairs.
+      let k = i - 1;
+      while (k >= 0 && /[a-zA-Z0-9_]/.test(source[k])) {
+        k--;
+      }
+      if (k >= 0 && source[k] === ':') {
+        return false;
+      }
+      return true;
     }
     return false;
   }
