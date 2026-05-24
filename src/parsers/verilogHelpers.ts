@@ -401,18 +401,57 @@ function findPragmaProtectEnd(source: string, from: number): number {
       while (i < source.length && !/\s/.test(source[i])) i++;
       continue;
     }
-    // Look for a `pragma directive
-    if (ch === '`' && source.slice(i, i + 7) === '`pragma' && (i + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 7]))) {
-      const lineStart = i + 7;
-      let lineEnd = lineStart;
-      while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
-        lineEnd++;
+    // Backtick-prefixed directives. `pragma is checked first; any other
+    // `<word> directive line is skipped wholesale so that a literal
+    // ``pragma protect end`` appearing inside a `define replacement text (e.g.
+    // ``\`define M \`pragma protect end``) or another preprocessor directive
+    // line is not mistaken for the real terminator. Per IEEE 1800-2017 the
+    // preprocessor directives are line-based and only `define honors
+    // backslash-newline continuation.
+    if (ch === '`') {
+      // Look for `pragma protect end (the only positive-match path).
+      if (source.slice(i, i + 7) === '`pragma' && (i + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 7]))) {
+        const lineStart = i + 7;
+        let lineEnd = lineStart;
+        while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+          lineEnd++;
+        }
+        if (isPragmaProtectEnd(source, lineStart, lineEnd)) {
+          return lineEnd;
+        }
+        i = lineEnd;
+        continue;
       }
-      if (isPragmaProtectEnd(source, lineStart, lineEnd)) {
-        return lineEnd;
+      // Any other ``<directive>`` line: skip the whole directive. `define is
+      // handled separately because it supports backslash-newline continuation.
+      if (source.slice(i, i + 7) === '`define' && (i + 7 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 7]))) {
+        const region = matchDefineDirective(source, i);
+        i = region.end;
+        continue;
       }
-      i = lineEnd;
-      continue;
+      // Generic directive / macro reference: skip to end of line. If `<word>`
+      // is followed by `(args)`, the macro arg list is also skipped via
+      // matchMacroArgList. A bare `<word> without args has no embedded body
+      // so end-of-line is sufficient.
+      if (i + 1 < source.length && /[a-zA-Z_]/.test(source[i + 1])) {
+        let j = i + 1;
+        while (j < source.length && /[a-zA-Z0-9_$]/.test(source[j])) j++;
+        // Optional macro arg list: `MY_MACRO(...)
+        let k = j;
+        while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+        if (k < source.length && source[k] === '(') {
+          const argRegion = matchMacroArgList(source, i, k);
+          i = argRegion.end;
+          // Continue to end of line so any trailing trivia is also passed over.
+          while (i < source.length && source[i] !== '\n' && source[i] !== '\r') i++;
+          continue;
+        }
+        // Plain directive (e.g., `undef NAME, `include "..."): skip to end of line.
+        while (j < source.length && source[j] !== '\n' && source[j] !== '\r') j++;
+        i = j;
+        continue;
+      }
+      // Lone backtick (not followed by an identifier) — fall through to i++.
     }
     i++;
   }
