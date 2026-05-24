@@ -262,7 +262,18 @@ export class VhdlBlockParser extends BaseBlockParser {
     // Reject entity_class keywords inside attribute_specification (LRM 7.2):
     //   `attribute X of Y : <package|architecture|configuration|procedure|function|units|...> is <expr>;`
     // The keyword is the entity_class, not a block opener.
-    const entityClassKeywords = new Set(['package', 'architecture', 'configuration', 'procedure', 'function', 'units', 'component', 'entity']);
+    // `view` is a VHDL-2019 entity_class (LRM 6.5.2.2): `attribute X of <name> : view is <expr>;`
+    const entityClassKeywords = new Set([
+      'package',
+      'architecture',
+      'configuration',
+      'procedure',
+      'function',
+      'units',
+      'component',
+      'entity',
+      'view'
+    ]);
     if (entityClassKeywords.has(lowerKeyword) && this.isInAttributeSpecification(source, position, excludedRegions)) {
       return false;
     }
