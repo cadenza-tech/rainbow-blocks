@@ -3221,6 +3221,21 @@ foo() ->
     });
   });
 
+  suite('Regression: triple-dot terminator in -spec declarations', () => {
+    // Bug: findDeclarationEndingPeriod treats every '.' after another '.' as part of a
+    // range operator and skips it. For three consecutive dots (`...`), the second one
+    // is consumed by skip, the third '.' has `source[j-1] === '.'` and is also skipped,
+    // so the declaration is never terminated. The third dot should be treated as the
+    // terminator because the first two dots already formed a range operator pair.
+    test('should treat the third dot as -spec terminator after a range pair', () => {
+      const source = '-spec foo() -> 1...\nbegin ok end';
+      const pairs = parser.parse(source);
+      // The begin/end after the -spec declaration must be detected as a real block.
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: -define body keyword analysis should scale linearly', () => {
     // Bug: isBareReservedWordInDefineBody scans the entire -define body for each block keyword
     // inside, producing O(N^2) cost when -define contains many block keywords.
