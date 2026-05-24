@@ -5051,5 +5051,16 @@ end`;
     });
   });
 
+  suite('Regression: skipJuliaInterpolation/skipNestedJuliaString should not overflow on deeply nested interpolation', () => {
+    test('should handle 4500-level deep string-interpolation nesting without stack overflow', () => {
+      // Pathological input: deeply nested $("$("$( ... )")") triggers mutual recursion
+      // between skipJuliaInterpolation and skipNestedJuliaString. Must terminate without
+      // RangeError: Maximum call stack size exceeded.
+      const depth = 4500;
+      const source = `${'"$('.repeat(depth)}x${')"'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+  });
+
   generateCommonTests(config);
 });
