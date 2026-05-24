@@ -157,28 +157,57 @@ export function hasTopLevelCommaBetween(source: string, start: number, end: numb
 }
 
 // Checks if there's a -> (clause arrow) after catch before the next catch/after/end/;.
-// Tracks block nesting depth so -> inside nested blocks (e.g. fun(X) -> X end) is ignored
+// Tracks block nesting depth so -> inside nested blocks (e.g. fun(X) -> X end) is ignored.
+// Also tracks bracket depth (parens (), brackets [], braces {}, and Erlang binary << >>)
+// so that ';' inside guard sequences (e.g. when is_atom(R); is_list(R)) does not bail out
+// before the top-level '->' is found.
 export function isCatchFollowedByClausePattern(source: string, afterCatch: number, excludedRegions: ExcludedRegion[]): boolean {
   let k = afterCatch;
   let depth = 0;
+  let bracketDepth = 0;
   while (k < source.length) {
     if (isInExcludedRegion(k, excludedRegions)) {
       k++;
       continue;
     }
     const ch = source[k];
-    // Only match -> at top level (not inside nested blocks)
-    if (depth === 0 && ch === '-' && k + 1 < source.length && source[k + 1] === '>') {
+    // Only match -> at top level (not inside nested blocks or brackets)
+    if (depth === 0 && bracketDepth === 0 && ch === '-' && k + 1 < source.length && source[k + 1] === '>') {
       return true;
     }
-    // Hit a structural boundary at top level without finding -> it's an expression prefix
-    if (depth === 0 && (ch === ';' || ch === '.')) return false;
+    // Binary open: << (must check before '<' depth tracking and before checking '->')
+    if (ch === '<' && k + 1 < source.length && source[k + 1] === '<' && !isInExcludedRegion(k + 1, excludedRegions)) {
+      bracketDepth++;
+      k += 2;
+      continue;
+    }
+    // Binary close: >>
+    if (ch === '>' && k + 1 < source.length && source[k + 1] === '>' && !isInExcludedRegion(k + 1, excludedRegions)) {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      k += 2;
+      continue;
+    }
+    // Bracket depth tracking
+    if (ch === '(' || ch === '[' || ch === '{') {
+      bracketDepth++;
+      k++;
+      continue;
+    }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      k++;
+      continue;
+    }
+    // Hit a structural boundary at top level without finding -> it's an expression prefix.
+    // Only '.' is treated as a definitive boundary; ';' can appear as guard separator before
+    // the top-level '->' (e.g. catch X when g1; g2 -> body), so we must keep scanning past ';'.
+    if (depth === 0 && bracketDepth === 0 && ch === '.') return false;
     // Check for structural keywords
     if (/[a-z]/i.test(ch)) {
       let wEnd = k + 1;
       while (wEnd < source.length && /[a-z0-9_]/i.test(source[wEnd])) wEnd++;
       const w = source.slice(k, wEnd);
-      if (depth === 0 && (w === 'catch' || w === 'after' || w === 'end')) return false;
+      if (depth === 0 && bracketDepth === 0 && (w === 'catch' || w === 'after' || w === 'end')) return false;
       // Track block nesting: openers increase depth, end decreases depth
       if (w === 'if' || w === 'case' || w === 'receive' || w === 'try' || w === 'begin' || w === 'fun' || w === 'maybe') {
         depth++;
