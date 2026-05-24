@@ -86,10 +86,35 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   // Reads from the source stored during tokenize. Skips ASCII space/tab, Unicode
   // whitespace, `¬<newline>` line continuations, and block comments `(* ... *)` to
   // match the same whitespace handling used by the handler-declaration probe.
+  // Accepts both bare ASCII identifiers (`foo`, `_x`) and pipe-delimited identifiers
+  // (`|tell|`, `|my handler|`) so that handlers named after reserved words via pipe
+  // quoting (e.g. `on |tell|()`) still resolve to the inner name (`tell`) for the
+  // matchBlocks fallback that pairs them with `end tell`.
   private handlerName(block: OpenBlock): string {
     const source = this._currentSource;
     const i = this.skipHandlerProbeWhitespace(source, block.token.endOffset, this._currentExcludedRegions);
-    if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) return '';
+    if (i >= source.length) return '';
+    // Pipe-delimited identifier: `|name|`. Read up to the next `|` (the pipe
+    // identifier excluded region already consumes the closing `|` at tokenize time,
+    // so scan independently here over the source slice.) Backslash escapes inside
+    // the identifier mirror tryMatchExcludedRegion: `\|` is a literal pipe, but
+    // newlines terminate even an unclosed identifier.
+    if (source[i] === '|') {
+      let end = i + 1;
+      const name: string[] = [];
+      while (end < source.length && source[end] !== '\n' && source[end] !== '\r') {
+        if (source[end] === '\\' && end + 1 < source.length && source[end + 1] !== '\n' && source[end + 1] !== '\r') {
+          name.push(source[end + 1]);
+          end += 2;
+          continue;
+        }
+        if (source[end] === '|') break;
+        name.push(source[end]);
+        end++;
+      }
+      return name.join('').toLowerCase();
+    }
+    if (!/[a-zA-Z_]/.test(source[i])) return '';
     let end = i;
     while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
     return source.slice(i, end).toLowerCase();
