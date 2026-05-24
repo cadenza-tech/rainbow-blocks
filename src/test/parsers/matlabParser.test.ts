@@ -3255,5 +3255,65 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-25: block opener followed by binary operator across ... line continuation', () => {
+    test('should not treat for as block open when + follows across a ... line continuation', () => {
+      // `for ...\n      + 1;` is `for + 1;` split across a ... line continuation — `for` is
+      // used as an operand in a binary expression (invalid MATLAB), not a real block opener.
+      // Without the fix, the followed-binary-operator check ran with the raw post-keyword
+      // position, which still points at the space before `...`, so the check stopped at the
+      // continuation dot and treated `for` as a real block opener. The opener then consumed
+      // the inner `end`, destroying outer function/end pairing.
+      const source = 'function f\n  for ...\n      + 1;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 5, 'function should pair with the outer end (line 5)');
+      assert.strictEqual(ifBlock.closeKeyword.line, 4, 'if should pair with the inner end (line 4)');
+      // `for` must NOT appear as a block opener in any pair.
+      assert.strictEqual(
+        pairs.filter((p) => p.openKeyword.value === 'for').length,
+        0,
+        'for in operand context across a ... line continuation must not be a block opener'
+      );
+    });
+
+    test('should not treat while as block open when * follows across a ... line continuation', () => {
+      // `while ...\n   * 2;` is `while * 2;` — `while` is the left operand of `*`, not a
+      // real block opener. Same root cause: line-continuation-aware position must be used.
+      const source = 'function f\n  while ...\n     * 2;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 5);
+      assert.strictEqual(
+        pairs.filter((p) => p.openKeyword.value === 'while').length,
+        0,
+        'while in operand context across a ... line continuation must not be a block opener'
+      );
+    });
+
+    test('should not treat for as block open when compound assignment += follows across a ... line continuation', () => {
+      // `for ...\n     += 1;` is `for += 1;` — `for` is a compound assignment target, not a
+      // real block opener. The compound-assignment branch also needs the continuation-aware
+      // position to fire.
+      const source = 'function f\n  for ...\n     += 1;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(
+        pairs.filter((p) => p.openKeyword.value === 'for').length,
+        0,
+        'for as compound-assignment target across a ... line continuation must not be a block opener'
+      );
+    });
+
+    test('should still treat for as block open with normal header (sanity check)', () => {
+      // A normal `for i = 1:3` header must still pair correctly.
+      const source = 'function f\n  for i = 1:3\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
