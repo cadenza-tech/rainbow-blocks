@@ -17,6 +17,7 @@ import {
 } from './rubyFamilyHelpers';
 import type { RubyValidationCallbacks } from './rubyValidation';
 import {
+  endsWithContinuationOperator,
   isDotPreceded as isDotPrecededShared,
   isEndlessMethodDef as isEndlessMethodDefShared,
   isLoopDo as isLoopDoShared,
@@ -525,15 +526,19 @@ export class RubyBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if `end` at position is in expression value position on the same physical line:
+  // Checks if `end` at position is in expression value position:
   // immediately preceded (skipping spaces/tabs and excluded regions) by an opening bracket
   // (`(`, `[`, `{`) or a binary operator (`=` not part of `==`/`=~`/`=>`, `,`, `+`, `-`,
   // `*`, `/`, `%`, `<`, `>`, `&`, `|`, `^`, `~`, `!`), or by a hash label colon
   // (`identifier:`, e.g. `{a: end}`). Since `end` is a reserved word and cannot appear
   // in expression position, such occurrences are invalid Ruby — e.g., `def foo(end)`,
-  // `[end]`, `x = /pat/ end`, `x = end`, `{a: end}`. The scan stops at the physical
-  // line start (`\n`, `\r`) or at a `;`, both of which are valid statement separators
-  // after which `end` is legitimate.
+  // `[end]`, `x = /pat/ end`, `x = end`, `{a: end}`. The scan follows Ruby implicit
+  // line continuations: when the preceding physical line ends with an operator that
+  // implies continuation (e.g. `x = a +\n  end`), the scan crosses the newline and
+  // checks the operator instead of treating the newline as a statement separator.
+  // The scan stops at `;` or at a newline that is NOT preceded by a continuation
+  // operator, both of which are valid statement separators after which `end` is
+  // legitimate.
   private isEndInExpressionPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -552,6 +557,22 @@ export class RubyBlockParser extends BaseBlockParser {
       if (ch === ' ' || ch === '\t') {
         i--;
         continue;
+      }
+      // Implicit line continuation: if we hit a newline and the previous physical line
+      // ends with an operator that implies continuation (e.g. `+`, `-`, `=`, ...), the
+      // logical statement continues across the newline. Cross the newline and resume
+      // scanning so `x = a +\n  end` is recognized as expression-position `end`.
+      if (ch === '\n' || ch === '\r') {
+        // Compute the end of the previous physical line (exclusive of the newline)
+        let prevLineEnd = i;
+        if (ch === '\n' && i > 0 && source[i - 1] === '\r') {
+          prevLineEnd = i - 1;
+        }
+        if (endsWithContinuationOperator(source, prevLineEnd, excludedRegions, this.validationCallbacks)) {
+          i = prevLineEnd - 1;
+          continue;
+        }
+        break;
       }
       break;
     }
