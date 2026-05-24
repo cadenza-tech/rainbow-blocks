@@ -331,7 +331,10 @@ export class ErlangBlockParser extends BaseBlockParser {
           j++;
           continue;
         }
-        if (j > 0 && source[j - 1] === '.') {
+        // A '.' immediately preceded by another '.' is the second dot of a range operator (`..`)
+        // unless there is also a '.' at j-2 (i.e. we are looking at the third dot of `...`),
+        // in which case the first two formed the range and this third dot is the terminator.
+        if (j > 0 && source[j - 1] === '.' && (j < 2 || source[j - 2] !== '.')) {
           continue;
         }
         if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
