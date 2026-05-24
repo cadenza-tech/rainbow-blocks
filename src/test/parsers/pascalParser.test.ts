@@ -3606,6 +3606,19 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'end');
     });
+
+    test('should not treat Unicode-prefixed αrecord identifier as record keyword', () => {
+      // `αrecord` is a single Unicode identifier, not the keyword `record`. The
+      // RECORD_CONTEXT_KEYWORD_PATTERN uses ASCII `\b` so it matches `record` inside
+      // `αrecord`. Without an adjacent-Unicode-letter guard inside buildRecordContextMap,
+      // the keyword pushes 'record' onto the stack and corrupts the case..end pair below.
+      const source = `var αrecord: Integer;
+case Y of
+  1: a;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
   });
 
   generateCommonTests(config);
