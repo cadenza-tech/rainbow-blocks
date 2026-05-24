@@ -3648,6 +3648,22 @@ end;`;
       assert.strictEqual(casePairs.length, 1, 'expected exactly one case..end pair');
       assertIntermediates(casePairs[0], ['of', 'else']);
     });
+
+    test('should not treat ..end range operator as block close', () => {
+      // `0..end` uses the `..` range operator to express the upper bound `end` of an
+      // open-ended array slice. The `end` is an expression value, not a block-close
+      // keyword. Without a `..` guard in isValidBlockClose, the inner `end` closes the
+      // surrounding `begin`, and the outer `end;` of the procedure body is left orphan.
+      const source = `begin
+  var a: array[0..end] of Integer;
+end;`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      // The matched close must be the outer `end;`, not the `..end]` token.
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, outerEndOffset, 'begin must pair with the outer end, not the ..end range operator');
+    });
   });
 
   generateCommonTests(config);
