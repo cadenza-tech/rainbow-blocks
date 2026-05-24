@@ -434,8 +434,10 @@ export class RubyBlockParser extends BaseBlockParser {
   }
 
   // Checks if the keyword at position is immediately preceded by a range operator
-  // (.. or ...). Whitespace is permitted between the operator and the keyword (e.g.,
-  // `(1.. end)` would also be invalid Ruby). Skips characters inside excluded regions.
+  // (.. or ...). Whitespace, including newlines (`\n`, `\r`, `\r\n`), is permitted
+  // between the operator and the keyword: `(1..\n  end)` is also invalid Ruby because
+  // `..` causes implicit line continuation and `end` cannot be the RHS of a range.
+  // Skips characters inside excluded regions.
   private isPrecededByRangeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -447,7 +449,7 @@ export class RubyBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t') {
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
         i--;
         continue;
       }
