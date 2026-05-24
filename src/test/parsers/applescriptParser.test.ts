@@ -3549,6 +3549,40 @@ end error`;
     });
   });
 
+  suite('Bug AS-MEDIUM-3: handlerName fallback should accept pipe-delimited identifier', () => {
+    test('should pair on |tell|() handler with end tell via fallback', () => {
+      const source = 'on |tell|()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end tell');
+    });
+
+    test('should pair to |tell|() handler with end tell via fallback', () => {
+      const source = 'to |tell|()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'to', 'end tell');
+    });
+
+    test('should pair on |transaction|() handler with end transaction via fallback', () => {
+      const source = 'on |transaction|()\n  beep\nend transaction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end transaction');
+    });
+
+    test('should pair on |timeout|() handler with end timeout via fallback', () => {
+      const source = 'on |timeout|()\n  beep\nend timeout';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end timeout');
+    });
+
+    test('should not pair on |my handler|() with end tell (handler name does not match)', () => {
+      const source = 'on |my handler|()\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      // Handler name `my handler` (with space) does not match `tell`, so no pair.
+      const onPair = pairs.find((p) => p.openKeyword.value === 'on');
+      assert.strictEqual(onPair, undefined, 'on should not be paired when handler name does not match');
+    });
+  });
+
   suite('Bug AS-MEDIUM-2: if(condition) function-call form should not open a block', () => {
     test('should not treat if(x) as a block open inside a handler body', () => {
       const source = `on run
