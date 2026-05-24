@@ -1401,6 +1401,67 @@ end`;
     });
   });
 
+  suite('Regression: trailing-dot heuristic must reject exponent forms with explicit sign', () => {
+    // Bug: the walk-back loop in isPrecededByDotOrColon only stepped through
+    // [a-zA-Z0-9_.] characters, so `+` and `-` inside an exponent (e.g. `1e+5`)
+    // halted the walk early. For `1e+5.end`, walk-back from the dot saw only
+    // `5` and accepted it as a numeric prefix, so `.end` was not field access
+    // and the inner `end` was treated as a real block close. The outer `end`
+    // was then orphaned and `function` got paired with the wrong `end`.
+    // Fix: when walk-back hits a `+`/`-` whose preceding character is `e`/`E`
+    // (decimal exponent) or `p`/`P` (hex exponent), step over the sign so the
+    // validation regex sees the full numeric context. The regex itself stays
+    // strict (`[0-9]+` or `0[xX][0-9a-fA-F]+`), so prefixes containing `e+`,
+    // `p-`, etc. are correctly rejected as non-numeric.
+    test('should treat 1e+5.end as field access (1e+5. is invalid Lua)', () => {
+      // Lua forbids a fractional part after the exponent (`1e+5.` is invalid),
+      // so `.end` here is field access on whatever `1e+5` denotes textually.
+      // The trailing `end` on the third line must close `function`, not the
+      // dropped `end` inside `1e+5.end` on the second line. line indices are
+      // 0-based, so the third line of source is line 2.
+      const pairs = parser.parse('function f()\n  return 1e+5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat 1e-5.end as field access (negative exponent sign)', () => {
+      const pairs = parser.parse('function f()\n  return 1e-5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat 1E+5.end as field access (uppercase exponent marker)', () => {
+      const pairs = parser.parse('function f()\n  return 1E+5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat 0x1p+5.end as field access (hex exponent with sign)', () => {
+      // Hex exponent uses `p`/`P`; `0x1p+5` is a valid Lua hex float literal,
+      // but the trailing `.end` cannot be a fractional part of the literal
+      // (the exponent has already terminated it). So `.end` is field access.
+      const pairs = parser.parse('function f()\n  return 0x1p+5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat 0x1P-5.end as field access (uppercase hex exponent with negative sign)', () => {
+      const pairs = parser.parse('function f()\n  return 0x1P-5.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should still treat 1.end as trailing-dot numeric literal (no exponent involved)', () => {
+      // Control: no exponent sign, so the fix must not regress the existing
+      // happy path where `1.` is a valid numeric prefix. The inner `end` (on
+      // line 1, 0-indexed) closes `function` here because the dot is treated
+      // as a numeric trailing dot.
+      const pairs = parser.parse('function f()\n  return 1.end\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+  });
+
   suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
     test('should pair for/end inside function/end when goto for precedes do', () => {
       // Lua labels cannot be reserved keywords, so `goto for` is malformed Lua
