@@ -187,13 +187,22 @@ export class JuliaBlockParser extends BaseBlockParser {
 
         case 'block_close': {
           if (this.tentativeCloseOffsets.has(token.startOffset)) {
-            // Eager-close only when the stack has more openers than the eager closes that
-            // remain ahead. In that case this tentative close must terminate one of the
-            // currently-open blocks (e.g. the inner `begin...end + 1` nested in a block whose
-            // own `end` is the only remaining eager close), so close the stack top now.
+            // Eager-close decision for a tentative (operator-followed) close:
+            //   1. `stack.length > remainingEagerCloses`: the remaining eager closes alone
+            //      cannot balance the stack, so this tentative close MUST terminate one of
+            //      the currently-open blocks (e.g. the inner `begin...end + 1` nested in a
+            //      block whose own `end` is the only eager close left).
+            //   2. `stack.length === remainingEagerCloses` AND the stack-top opener sits on
+            //      the same source line as this tentative close: a same-line opener+operator-
+            //      followed close is the natural value-returning reading (`begin x end + 1`),
+            //      not an edit-in-progress stray close like the cross-line `if a\n end!=2\nend`
+            //      pattern. Eager-closing here keeps `begin x end + 1 end` paired correctly
+            //      (inner `end + 1` closes `begin`, trailing `end` becomes the orphan).
             // Otherwise defer: a later eager close will handle the surrounding block, and
             // pass 2 rescues any earlier opener this tentative close legitimately belongs to.
-            if (stack.length > remainingEagerCloses) {
+            const topOpener = stack.length > 0 ? stack[stack.length - 1].token : null;
+            const sameLineEager = topOpener !== null && stack.length === remainingEagerCloses && topOpener.line === token.line;
+            if (stack.length > remainingEagerCloses || sameLineEager) {
               const openBlock = stack.pop();
               if (openBlock) {
                 pairs.push({
