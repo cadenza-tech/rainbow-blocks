@@ -568,6 +568,30 @@ export class VerilogBlockParser extends BaseBlockParser {
     return true;
   }
 
+  // Walks `pos` backward over whitespace and block comments `/* ... */`. Used
+  // inside `isPrecededByDataTypeKeyword` to treat block comments as trivia within
+  // a declarator list (e.g., `reg a /*c*/, /*c*/ endmodule;`). Returns the new
+  // position; `pos` is unchanged if it is not on whitespace or a block comment.
+  private skipBackwardWhitespaceAndBlockComments(source: string, pos: number, excludedRegions?: ExcludedRegion[]): number {
+    let p = pos;
+    while (p >= 0) {
+      const ch = source[p];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        p--;
+        continue;
+      }
+      if (excludedRegions !== undefined && this.isInExcludedRegion(p, excludedRegions)) {
+        const region = this.findExcludedRegionAt(p, excludedRegions);
+        if (region && source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*') {
+          p = region.start - 1;
+          continue;
+        }
+      }
+      break;
+    }
+    return p;
+  }
+
   // Returns true when the immediately preceding word on the same line is a SystemVerilog
   // data-type or qualifier keyword. Used to filter cases like `int function` where the
   // block keyword is being used as a parameter/variable name.
@@ -668,10 +692,13 @@ export class VerilogBlockParser extends BaseBlockParser {
       // `reg a, endmodule;`. The second identifier (`endmodule`) is preceded by
       // `, a, ` — not directly by a data-type keyword. Skip back through the
       // comma and the preceding identifier to find the data-type keyword at
-      // the head of the declaration list.
+      // the head of the declaration list. Block comments are trivia and may
+      // appear before or after the comma (e.g., `reg a /*c*/, /*c*/ endmodule;`);
+      // treating them as adjacency-breaking would falsely tokenize the inner
+      // `endmodule` as a real close keyword.
       if (ch === ',') {
         let m = i - 1;
-        while (m >= 0 && (source[m] === ' ' || source[m] === '\t' || source[m] === '\n' || source[m] === '\r')) m--;
+        m = this.skipBackwardWhitespaceAndBlockComments(source, m, excludedRegions);
         // Skip dimension specifier `[...]` on the previous identifier (e.g., `reg a[7], endmodule;`)
         while (m >= 0 && source[m] === ']') {
           let depth = 1;
@@ -687,7 +714,7 @@ export class VerilogBlockParser extends BaseBlockParser {
           }
           if (m < 0) return false;
           m--;
-          while (m >= 0 && (source[m] === ' ' || source[m] === '\t')) m--;
+          m = this.skipBackwardWhitespaceAndBlockComments(source, m, excludedRegions);
         }
         // The previous element must be an identifier (the previous declared name).
         if (m < 0 || !/[a-zA-Z0-9_]/.test(source[m])) return false;
