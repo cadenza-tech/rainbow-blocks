@@ -127,5 +127,5 @@
     "ovsx": "^0.10.9",
     "typescript": "^5.9.3"
   },
-  "packageManager": "yarn@4.13.0"
+  "packageManager": "yarn@4.15.0"
 }
