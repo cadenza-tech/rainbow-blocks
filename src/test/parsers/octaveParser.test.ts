@@ -2602,5 +2602,25 @@ end`;
     });
   });
 
+  suite('Middle keyword followed by end on same line', () => {
+    test('should pair if/end when else is followed by end on the same line', () => {
+      const source = 'if x\nelse end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair switch/end when case is followed by end on the same line', () => {
+      const source = 'switch x\ncase 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+    });
+
+    test('should pair unwind_protect/end_unwind_protect with line continuation header', () => {
+      const source = 'unwind_protect ...\n  body;\nend_unwind_protect';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unwind_protect', 'end_unwind_protect');
+    });
+  });
+
   generateCommonTests(config);
 });
