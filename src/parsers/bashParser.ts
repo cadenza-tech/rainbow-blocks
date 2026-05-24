@@ -516,7 +516,7 @@ export class BashBlockParser extends BaseBlockParser {
   // Real bash treats `done` and `#tag` as a single word `done#tag` because `#` only starts a comment
   // when preceded by whitespace or a command separator. Similarly for other non-word but non-shell-meta
   // characters like `.`, `:`, `~`, `,`, `@`, `%`, `^`, `!`, `/`. Excludes characters that are
-  // shell metacharacters or already handled (=, [, +) or word-boundary chars (whitespace, ;, |, &, etc).
+  // shell metacharacters or already handled (=, [) or word-boundary chars (whitespace, ;, |, &, etc).
   private isFollowedByHyphen(source: string, position: number, keyword: string): boolean {
     const afterPos = position + keyword.length;
     if (afterPos >= source.length) return false;
@@ -524,12 +524,17 @@ export class BashBlockParser extends BaseBlockParser {
     // Hyphen (existing case)
     if (ch === '-') return true;
     // Other non-word, non-shell-meta chars that fuse with the preceding word in bash
-    // Exclude: shell metacharacters (\s ; | & ( ) { } < > ` " '), word-boundary handled (=, [, +)
+    // Exclude: shell metacharacters (\s ; | & ( ) < > ` " '), word-boundary handled (=, [)
     // and characters already covered by isFollowedByEquals
     // The set: # . : ~ , @ % ^ ! /
     if (ch === '#' || ch === '.' || ch === ':' || ch === '~' || ch === ',' || ch === '@' || ch === '%' || ch === '^' || ch === '!' || ch === '/') {
       return true;
     }
+    // Glob/pattern modifiers `*` and `?` are pathname-expansion characters in bash: they
+    // fuse with the preceding word (e.g. `if*` and `done?glob` expand to filenames, not
+    // reserved words). `+` likewise fuses for plain `done+suffix`; the `+=` augmented-
+    // assignment form is detected by isFollowedByEquals first when relevant.
+    if (ch === '+' || ch === '*' || ch === '?') return true;
     // `]` fuses with the preceding word: `done]` is one POSIX word, not the reserved keyword.
     if (ch === ']') return true;
     // `$` fuses with the preceding word for non-brace expansions: `done$var`, `done$1`, `done$$`,
@@ -963,6 +968,8 @@ export class BashBlockParser extends BaseBlockParser {
       if (ch === '#' || ch === '.' || ch === ':' || ch === '~' || ch === ',' || ch === '@' || ch === '%' || ch === '^' || ch === '!' || ch === '/') {
         return true;
       }
+      // Glob/pattern modifiers (see isFollowedByHyphen for details)
+      if (ch === '+' || ch === '*' || ch === '?') return true;
       if (ch === ']' || ch === '$') return true;
       if (ch === '\\') {
         const next = source[afterPos + 1];
