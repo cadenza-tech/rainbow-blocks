@@ -3264,6 +3264,28 @@ end package;`;
       assertSingleBlock(pairs, 'package', 'end package');
       assertIntermediates(pairs[0], ['is']);
     });
+
+    test('should filter is in null procedure with parameter list spanning more than 5 lines', () => {
+      // The is filter previously used a 5-line backward lookback to detect a
+      // multi-line function/procedure header. When the parameter list pushes the
+      // procedure keyword more than 5 lines away from the closing ')' and 'is',
+      // the lookback missed the procedure header, so the trailing `is null;` would
+      // not be recognized as a null-procedure declaration and its `is` would leak
+      // into the enclosing package's intermediates as a false block_middle.
+      const source = `package p is
+  procedure noop(
+    a : integer;
+    b : integer;
+    c : integer;
+    d : integer;
+    e : integer;
+    f : integer
+    ) is null;
+end package;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'package', 'end package');
+      assertIntermediates(pairs[0], ['is']);
+    });
   });
 
   suite('Regression 2026-05-15: simple end on generate without begin uses LIFO fallback', () => {
