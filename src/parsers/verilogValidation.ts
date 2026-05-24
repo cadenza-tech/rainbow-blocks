@@ -630,6 +630,12 @@ const OPERATOR_TAIL_CHARS = new Set(['=', '<', '>', '!', '+', '-', '*', '/', '%'
 // e.g. `if (x == casez)`. This generalizes the assignment-operator suppression:
 // a case keyword never appears as an operand, so any preceding operator means it
 // is being used as an identifier.
+//
+// Exception: the bare `*` in `always @*` (and the future-deprecated `@ *`) is the
+// Verilog-2001 sensitivity-list wildcard, NOT the multiplication operator. When
+// the preceding `*` is itself preceded by `@` (skipping whitespace and comments),
+// it is a sensitivity wildcard, so the keyword that follows is a real statement
+// (e.g., `always @* case (sel) ...`) and must not be suppressed.
 export function isPrecededByBinaryOperator(
   source: string,
   position: number,
@@ -639,7 +645,31 @@ export function isPrecededByBinaryOperator(
   const opPos = skipBackwardWhitespaceAndComments(source, position - 1, excludedRegions, callbacks);
   if (opPos < 0) return false;
   if (callbacks.isInExcludedRegion(opPos, excludedRegions)) return false;
-  return OPERATOR_TAIL_CHARS.has(source[opPos]);
+  const opChar = source[opPos];
+  if (!OPERATOR_TAIL_CHARS.has(opChar)) return false;
+  // Sensitivity-list wildcard `@*` (Verilog-2001): the `*` is not multiplication.
+  if (opChar === '*' && isSensitivityWildcardStar(source, opPos, excludedRegions, callbacks)) {
+    return false;
+  }
+  return true;
+}
+
+// Returns true when the `*` at `starPos` is the Verilog-2001 sensitivity-list
+// wildcard rather than the multiplication operator. The wildcard appears as `@*`
+// (optionally with whitespace/comments between `@` and `*`): scan backward from
+// `*` skipping whitespace and comments and check whether the previous non-trivia
+// character is `@`. The wildcard form opens an event control header, so a
+// keyword that follows is a real statement, not an operand.
+function isSensitivityWildcardStar(
+  source: string,
+  starPos: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: VerilogValidationCallbacks
+): boolean {
+  const prevPos = skipBackwardWhitespaceAndComments(source, starPos - 1, excludedRegions, callbacks);
+  if (prevPos < 0) return false;
+  if (callbacks.isInExcludedRegion(prevPos, excludedRegions)) return false;
+  return source[prevPos] === '@';
 }
 
 // Returns true when the keyword starting at `position` (length `keywordLength`)
