@@ -3619,6 +3619,20 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'end');
     });
+
+    test('should not treat Unicode-prefixed αif as comparison keyword in backward = scan', () => {
+      // The backward `=` scan inside `isPrecededByComparisonEquals` extracts ASCII words
+      // only, so the preceding token `αif` is read as `if`, which is a comparison-context
+      // keyword. Without a Unicode-letter adjacency guard, the `class` after `αif = class`
+      // is misclassified as 'ignore' (comparison) instead of 'open-block', breaking the
+      // type-class..end pair below.
+      const source = `type αif = class
+  procedure Bar;
+end;`;
+      const pairs = parser.parse(source);
+      const classPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'class');
+      assert.strictEqual(classPairs.length, 1, 'expected exactly one class..end pair');
+    });
   });
 
   generateCommonTests(config);
