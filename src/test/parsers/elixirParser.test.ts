@@ -4968,6 +4968,50 @@ end`;
     });
   });
 
+  suite('Bug: stray block_middle inside parens should not attach to outer opener', () => {
+    // A block_middle keyword (else/rescue/catch/after) appearing inside parens/brackets/braces
+    // is at a deeper bracket depth than the enclosing opener. The base implementation attaches
+    // it to the opener on the stack top regardless of depth, which mis-attributes the stray
+    // middle to the outer block (e.g. the stray `else` in `if true do x = (a + else) end`
+    // would be attached as an intermediate of the outer if). Symmetric with the block_close
+    // bracket-depth guard, the block_middle path must compare depths and skip stray middles.
+    test('should not attach else inside parens as intermediate to outer if', () => {
+      const source = 'if true do\n  x = (a + else)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach rescue inside parens as intermediate to outer try', () => {
+      const source = 'try do\n  x = (a + rescue)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else inside square brackets as intermediate to outer if', () => {
+      const source = 'if true do\n  x = [a, else]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else inside braces as intermediate to outer if', () => {
+      const source = 'if true do\n  x = {a, else}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach real else to if when at the same bracket depth', () => {
+      // Regression guard: legitimate if..else..end at depth 0 must continue to pair.
+      const source = 'if cond do\n  :a\nelse\n  :b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   suite('Bug: character literal followed by keyword should not tokenize keyword', () => {
     test('should not tokenize end after ?# character literal', () => {
       // `?#end`: ?# is a char literal for '#', followed by identifier `end` (not a block close).
