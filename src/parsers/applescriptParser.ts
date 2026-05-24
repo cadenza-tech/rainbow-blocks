@@ -190,9 +190,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // (repeat, try, considering, ignoring are affected; script/on/to are already protected by isAtLogicalLineStart)
     if (keyword === 'repeat' || keyword === 'try' || keyword === 'considering' || keyword === 'ignoring') {
       // Reject function-call form (e.g., `repeat()`, `repeat ()`). Allow
-      // optional whitespace between the keyword and `(`.
+      // optional ASCII or Unicode whitespace between the keyword and `(`.
       let parenScan = position + keyword.length;
-      while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+      while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t' || isUnicodeWhitespace(source[parenScan]))) {
+        parenScan++;
+      }
       if (parenScan < source.length && source[parenScan] === '(') {
         return false;
       }
@@ -206,13 +208,22 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       return true;
     }
 
-    // Reject the `if(...)` function-call form (no whitespace before `(`). The
-    // parenthesized variant `if (cond) then` (with whitespace) is still valid as
-    // a multi-line block opener, so only the tight `if(` shape is rejected here.
-    // Without this guard, `if(x)` would be tokenized as a block opener and steal
-    // an enclosing `end`/`end if`, producing a geometrically crossing pair.
-    if (position + keyword.length < source.length && source[position + keyword.length] === '(') {
-      return false;
+    // Reject the `if(...)` function-call form (no whitespace before `(`, or only
+    // Unicode whitespace). The parenthesized variant `if (cond) then` (with ASCII
+    // space/tab) is still valid as a multi-line block opener, so only the tight
+    // `if(` shape and `if<unicodewhitespace>(` are rejected here. Without this
+    // guard, `if(x)` would be tokenized as a block opener and steal an enclosing
+    // `end`/`end if`, producing a geometrically crossing pair.
+    if (position + keyword.length < source.length) {
+      const nextCh = source[position + keyword.length];
+      if (nextCh === '(') return false;
+      if (isUnicodeWhitespace(nextCh)) {
+        let parenScan = position + keyword.length;
+        while (parenScan < source.length && isUnicodeWhitespace(source[parenScan])) parenScan++;
+        if (parenScan < source.length && source[parenScan] === '(') {
+          return false;
+        }
+      }
     }
 
     // Check if 'if' is inside another if/repeat condition (e.g., 'if if then')
@@ -468,7 +479,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // swallowing the whole `on error` span and discarding the bare `on` opener.
       if (type === 'block_open' || type === 'block_middle') {
         let parenScan = flexMatch;
-        while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+        while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t' || isUnicodeWhitespace(source[parenScan]))) {
+          parenScan++;
+        }
         if (parenScan < source.length && source[parenScan] === '(') {
           if (keyword === 'on error' || keyword === 'else if') {
             return null;
@@ -723,7 +736,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           return { nextPos: endPos };
         }
         let parenScan = endPos;
-        while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+        while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t' || isUnicodeWhitespace(source[parenScan]))) {
+          parenScan++;
+        }
         if (parenScan < source.length && source[parenScan] === '(') {
           return { nextPos: endPos };
         }
@@ -1249,8 +1264,13 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     const name = source.slice(pos, end).toLowerCase();
     if (!RESERVED_HANDLER_NAMES.has(name)) return false;
     // Allow `on tell(...)` / `to tell(...)` (function-style handler invocation).
+    // Skip ASCII or Unicode whitespace between the handler name and `(` so that
+    // `on tell<NBSP>()` and similar Unicode-whitespace forms continue to qualify
+    // as function-style handler declarations.
     let parenScan = end;
-    while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t')) parenScan++;
+    while (parenScan < source.length && (source[parenScan] === ' ' || source[parenScan] === '\t' || isUnicodeWhitespace(source[parenScan]))) {
+      parenScan++;
+    }
     if (parenScan < source.length && source[parenScan] === '(') {
       return false;
     }
