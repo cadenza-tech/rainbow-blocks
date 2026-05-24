@@ -90,6 +90,33 @@ const ATTRIBUTE_PREFIX_KEYWORDS: ReadonlySet<string> = new Set([
 // '()' backward scan, so '[' and '{' are deliberately not tracked.
 const PAREN_OPENERS: ReadonlySet<string> = new Set(['(']);
 
+// Block-opener keywords that should NEVER appear on the RHS of an expression
+// (assignment, comparison, argument list, etc.). Reserved words cannot legally be
+// identifiers in VHDL, but editors regularly encounter in-progress or hand-written
+// code that places one of these reserved words on the RHS (e.g., `if a = view then`).
+// Without rejecting these, the keyword is tokenized as a fresh block_open and absorbs
+// the surrounding control-flow block's intermediates.
+// Control-flow keywords (`if`/`case`/`for`/`while`) are NOT included: they start a
+// new statement and have their own dedicated validators. `record` is handled by
+// isValidRecordOpen (requires preceding `is`) so it is excluded here too.
+const RHS_INVALID_BLOCK_OPENERS: ReadonlySet<string> = new Set([
+  'view',
+  'units',
+  'block',
+  'protected',
+  'context',
+  'process',
+  'loop',
+  'entity',
+  'architecture',
+  'package',
+  'configuration',
+  'function',
+  'procedure',
+  'component',
+  'generate'
+]);
+
 export class VhdlBlockParser extends BaseBlockParser {
   // Override parse to post-adjust nestLevel for blocks inside generate constructs.
   // The base recalculateNestLevels counts every pair whose offset range encloses a body
@@ -259,6 +286,15 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject reserved-word block openers when they appear on the RHS of an expression
+    // (assignment, comparison, argument list, etc.). Without this guard a reserved word
+    // like `view` in `if a = view then` would be tokenized as a fresh block_open and
+    // absorb the surrounding control-flow block's `then`/`begin` intermediate. Apply only
+    // to non-control-flow keywords (control-flow keywords have their own validators).
+    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isInExpressionRhsContext(source, position, excludedRegions)) {
+      return false;
+    }
+
     // Reject entity_class keywords inside attribute_specification (LRM 7.2):
     //   `attribute X of Y : <package|architecture|configuration|procedure|function|units|...> is <expr>;`
     // The keyword is the entity_class, not a block opener.
@@ -325,6 +361,62 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
 
     return true;
+  }
+
+  // Detects whether the keyword at `position` is immediately preceded by an expression
+  // operator (so the keyword is on the RHS of an assignment / comparison / argument list).
+  // Reserved words cannot be identifiers in VHDL, but in-progress / hand-written test
+  // fixtures sometimes place a reserved word on the RHS of an expression (e.g.,
+  // `if a = view then`). Without this guard the reserved word is tokenized as a fresh
+  // `block_open`, absorbing the surrounding control-flow block's intermediates.
+  //
+  // The scan skips whitespace, newlines, and excluded regions (block/line comments),
+  // then inspects the immediately preceding non-whitespace character. The RHS markers are:
+  //   `=` (equality test, end of `:=` / `<=` / `>=` / `/=`)
+  //   `<` (less-than, including the `<` of `<=`)
+  //   `>` (greater-than)
+  //   `,` (separator inside an argument list / aggregate)
+  //   `+` `-` `*` `/` `&` (arithmetic / concatenation)
+  // The `=` of an association arrow `=>` is excluded explicitly: after `=>` the parser
+  // enters a fresh statement (e.g., `when X => process ...`) where reserved-word block
+  // openers ARE legitimate.
+  private isInExpressionRhsContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) return false;
+    const prev = source[i];
+    // `=>` is the association arrow: after `=>` a fresh statement / target begins, where a
+    // reserved-word block opener IS legitimate. The arrow ends with `>`, so when we land on
+    // `>` we look one char back to disambiguate `=>` (NOT RHS) from bare `>` (RHS).
+    if (prev === '>') {
+      if (i > 0 && source[i - 1] === '=') return false;
+      return true;
+    }
+    // `=` may be the rightmost char of `=`, `:=`, `<=`, `>=`, `/=`. Any of those are
+    // RHS operators. (`=>` ends with `>`, not `=`, so it cannot reach this branch.)
+    if (prev === '=') return true;
+    // `<` here is the rightmost char (`<=` would have ended in `=`), so it is a bare
+    // less-than operator — RHS marker.
+    if (prev === '<') return true;
+    // `,` is the argument list / aggregate separator; the others are arithmetic / concat
+    // operators. All imply an expression context.
+    // `/=` (inequality) ends with `=` and is caught above; bare `/` here is division.
+    if (prev === ',' || prev === '+' || prev === '-' || prev === '*' || prev === '/' || prev === '&') return true;
+    return false;
   }
 
   // Validates `record` as a block opener: must be preceded by `is` keyword
