@@ -4540,6 +4540,57 @@ end`;
     });
   });
 
+  suite('Regression: binary operator followed by newline and end', () => {
+    test('should not pair def with stray end after binary plus operator on previous line (a +\\n  end)', () => {
+      // Bug: `end` after a binary operator with a line break between them was tokenized
+      // as block_close because isEndInExpressionPosition stopped scanning at any newline
+      // and treated `end` as the start of a new statement. Ruby's implicit line continuation
+      // rule says a line ending with a binary operator continues onto the next line, so
+      // `x = a +\n  end` is one expression — `end` cannot legally sit there. Follow the
+      // continuation back across the newline so the stray `end` is filtered.
+      const source = 'def m\n  x = a +\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after binary multiplication operator (a *\\n  end)', () => {
+      const source = 'def m\n  x = a *\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after assignment operator (x =\\n  end)', () => {
+      const source = 'def m\n  x =\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after logical && operator on previous line', () => {
+      const source = 'def m\n  x = a &&\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after binary plus operator with CRLF newline', () => {
+      const source = 'def m\r\n  x = a +\r\n  end\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still allow legitimate end at start of new statement (no continuation operator)', () => {
+      // Sanity check: when the previous line does NOT end with a continuation operator,
+      // `end` after a newline is a legitimate statement and should still pair as block_close.
+      const source = 'def m\n  x = a\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Regression: range operator followed by newline and end', () => {
     test('should not pair def with stray end after range operator on previous line ((1..\\n  end))', () => {
       // Bug: `end` after a range operator (`..`) with a line break between them was
