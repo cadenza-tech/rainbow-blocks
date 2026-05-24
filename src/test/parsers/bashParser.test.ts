@@ -1632,6 +1632,55 @@ esac`;
         assert.strictEqual(pair.intermediates[0].value, 'then');
       });
     });
+
+    suite('Keyword fused with +, *, ? modifiers', () => {
+      test('should not treat if in if+ as block open', () => {
+        const pairs = parser.parse('if+ true; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat if in if* as block open', () => {
+        const pairs = parser.parse('if* arg; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat if in if? as block open', () => {
+        const pairs = parser.parse('if? arg; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat done in done+suffix as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done+suffix arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        // Verify the closing `done` is the outer one (line 2), not the fused `done+suffix` (line 1)
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat done in done*glob as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done*glob arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat done in done?glob as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done?glob arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat fi in fi+ as block close', () => {
+        const pairs = parser.parse('if true; then\n  fi+suffix\nfi');
+        assertSingleBlock(pairs, 'if', 'fi');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should still recognize done+=value as variable assignment (not block close)', () => {
+        // Regression guard: existing handling for +=
+        const source = 'for i in 1; do\n  done+=1\n  echo ok\ndone';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'for', 'done');
+      });
+    });
   });
 
   suite('Block middle keyword validation', () => {
