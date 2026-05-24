@@ -3315,5 +3315,81 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-25: skipWhitespaceAndContinuations accepts Unicode horizontal whitespace', () => {
+    test('should not treat if as block open when followed by NBSP (U+00A0) then = (variable assignment)', () => {
+      // `if<NBSP>= 1` should be detected as the variable assignment `if = 1`. Without the
+      // fix the NBSP was not recognised as whitespace, so the assignment-detection loop
+      // stopped at the NBSP and missed the `=`, leaving `if` tokenised as a real block
+      // opener. The opener then consumed the inner `end`, destroying outer pairing.
+      const source = 'function f\n  if = 1\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      // `if = 1` must be rejected as a variable assignment (not a block opener).
+      // Only the inner `if true ... end` and the outer `function ... end` should pair.
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      // Exactly one if-block expected (the inner one), confirming the `if<NBSP>= 1` was rejected.
+      assert.strictEqual(pairs.filter((p) => p.openKeyword.value === 'if').length, 1);
+    });
+
+    test('should not treat for as block open when followed by VT (\\v) then = (variable assignment)', () => {
+      // Same pattern with vertical tab.
+      const source = 'function f\n  for\v= 10\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(pairs.filter((p) => p.openKeyword.value === 'for').length, 0);
+    });
+
+    test('should not treat while as block open when followed by U+2003 (em space) then = (variable assignment)', () => {
+      // Em space (U+2003) between `while` and `=`.
+      const source = 'function f\n  while = 5\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(pairs.filter((p) => p.openKeyword.value === 'while').length, 0);
+    });
+
+    test('should not treat for as block open when followed by NBSP then + (binary operator)', () => {
+      // `for<NBSP>+ 1;` — same root cause: `for` is in operand context. The
+      // followed-binary-operator branch needs Unicode whitespace recognition too.
+      const source = 'function f\n  for + 1;\n  if true\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(pairs.filter((p) => p.openKeyword.value === 'for').length, 0);
+    });
+
+    test('should not treat end as block close when followed by VT then . (struct field access)', () => {
+      // `end<VT>.field` is `end.field` separated by vertical tab — `end` is an identifier
+      // used as the receiver of a struct field access, not a block close. Without the fix
+      // the VT was not recognised as whitespace, so the dot-detection (in isValidBlockClose)
+      // did not see the `.` and the `end` was wrongly tokenised as a block close, consuming
+      // the outer function's end.
+      const VT = String.fromCharCode(0x0b);
+      const source = `function f\n  end${VT}.field\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // Outer end (0-indexed line 2) must be the one paired.
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function should pair with the outer end (line 2 in 0-indexed)');
+    });
+
+    test('should not treat end as block close when followed by NBSP then . (struct field access)', () => {
+      // Same pattern with NBSP between `end` and `.field`.
+      const NBSP = ' ';
+      const source = `function f\n  end${NBSP}.field\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should still treat for as block open when followed by tab + assignment (sanity check)', () => {
+      // Tab is ASCII horizontal whitespace and was already handled. Sanity-check that the
+      // existing behaviour is preserved.
+      const source = 'function f\n  for i\t= 1:3\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = pairs.find((p) => p.openKeyword.value === 'for');
+      assert.ok(forBlock, 'normal for/end with tab-separated header must still pair');
+    });
+  });
+
   generateCommonTests(config);
 });
