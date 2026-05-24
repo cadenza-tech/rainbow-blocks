@@ -895,20 +895,33 @@ export class FortranBlockParser extends BaseBlockParser {
       const pos = match.index;
       if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
         const fullMatch = match[0];
-        // Normalize endType so `block data` / `block  data` / `blockdata` all map to
-        // canonical `block data` for stack lookup.
-        const endType = normalizeFortranEndType(match[1]);
-        // Validate the compound `end <type>` is not followed by =, (...) =, //, or %
-        // (i.e., not a variable / array element / string concat / component access).
-        // Without this check, `end if = 5` would be tokenized as a phantom block_close.
-        if (isValidFortranBlockClose(fullMatch, source, pos)) {
-          compoundEndPositions.set(pos, {
-            keyword: fullMatch, // Preserve original case
-            length: fullMatch.length,
-            endType
-          });
-        } else {
+        // Reject when the compound `end <type>` (or concatenated form like `endif`) is
+        // adjacent to a non-ASCII Unicode identifier continuation character (e.g.,
+        // `endif日本語` reads `endif日本語` as one identifier; `end if日本語` reads
+        // `if日本語` as one identifier). The bare-keyword tokenizer applies the same
+        // check; this pass must mirror it to avoid emitting a phantom block_close
+        // from inside an identifier. We also record the position in
+        // rejectedCompoundEndPositions so the subsequent bare-`end` token at the same
+        // location is suppressed (otherwise `end if日本語` would phantom-close the
+        // parent if-block via the bare `end`).
+        if (this.isAdjacentToUnicodeLetter(source, pos, fullMatch.length)) {
           rejectedCompoundEndPositions.add(pos);
+        } else {
+          // Normalize endType so `block data` / `block  data` / `blockdata` all map to
+          // canonical `block data` for stack lookup.
+          const endType = normalizeFortranEndType(match[1]);
+          // Validate the compound `end <type>` is not followed by =, (...) =, //, or %
+          // (i.e., not a variable / array element / string concat / component access).
+          // Without this check, `end if = 5` would be tokenized as a phantom block_close.
+          if (isValidFortranBlockClose(fullMatch, source, pos)) {
+            compoundEndPositions.set(pos, {
+              keyword: fullMatch, // Preserve original case
+              length: fullMatch.length,
+              endType
+            });
+          } else {
+            rejectedCompoundEndPositions.add(pos);
+          }
         }
       }
       match = COMPOUND_END_PATTERN.exec(source);
@@ -921,22 +934,31 @@ export class FortranBlockParser extends BaseBlockParser {
       const pos = contMatch.index;
       if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions) && !compoundEndPositions.has(pos)) {
         const fullMatch = contMatch[0];
-        const endType = normalizeFortranEndType(contMatch[1]);
-        const normalizedKeyword = `end ${contMatch[1]}`;
-        // Validate the compound `end <type>` (continuation form) is not in expression context.
-        // `isValidFortranBlockClose` uses `position + keyword.length` to scan post-keyword
-        // context (assignment `=`, `//`, `%`, etc). We pass `fullMatch` so the length matches
-        // the actual span in source (including the `&` and newline), otherwise the validator
-        // would land inside the continuation gap and miss trailing `=` / `//` / `%`.
-        if (isValidFortranBlockClose(fullMatch, source, pos)) {
-          // Normalize keyword to "end <type>" for consistent matching in matchBlocks
-          compoundEndPositions.set(pos, {
-            keyword: normalizedKeyword,
-            length: fullMatch.length,
-            endType
-          });
-        } else {
+        // Reject when the continuation-form compound `end <type>` is adjacent to a
+        // non-ASCII Unicode identifier continuation character. Mirrors the bare-keyword
+        // tokenizer to avoid emitting a phantom block_close from inside an identifier.
+        // Record in rejectedCompoundEndPositions so the bare `end` at the same position
+        // is suppressed in the keyword loop (otherwise it would phantom-close the parent).
+        if (this.isAdjacentToUnicodeLetter(source, pos, fullMatch.length)) {
           rejectedCompoundEndPositions.add(pos);
+        } else {
+          const endType = normalizeFortranEndType(contMatch[1]);
+          const normalizedKeyword = `end ${contMatch[1]}`;
+          // Validate the compound `end <type>` (continuation form) is not in expression context.
+          // `isValidFortranBlockClose` uses `position + keyword.length` to scan post-keyword
+          // context (assignment `=`, `//`, `%`, etc). We pass `fullMatch` so the length matches
+          // the actual span in source (including the `&` and newline), otherwise the validator
+          // would land inside the continuation gap and miss trailing `=` / `//` / `%`.
+          if (isValidFortranBlockClose(fullMatch, source, pos)) {
+            // Normalize keyword to "end <type>" for consistent matching in matchBlocks
+            compoundEndPositions.set(pos, {
+              keyword: normalizedKeyword,
+              length: fullMatch.length,
+              endType
+            });
+          } else {
+            rejectedCompoundEndPositions.add(pos);
+          }
         }
       }
       contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
@@ -1164,6 +1186,15 @@ export class FortranBlockParser extends BaseBlockParser {
     // matching 'end' token because \b word boundary doesn't match inside them
     for (const [pos, compound] of compoundEndPositions) {
       if (!processedCompoundPositions.has(pos)) {
+        // Defense in depth: reject when the concatenated compound end (e.g., `endif日本語`)
+        // is adjacent to a non-ASCII Unicode identifier continuation character. The earlier
+        // COMPOUND_END_PATTERN loop already filters such positions before they enter
+        // compoundEndPositions, but mirroring the SELECT_TYPE_GUARD_PATTERN guard here
+        // keeps every injection path uniform and prevents future paths from emitting a
+        // phantom block_close from inside an identifier.
+        if (this.isAdjacentToUnicodeLetter(source, pos, compound.length)) {
+          continue;
+        }
         // Validate concatenated compound end keywords (reject variable assignments like enddo = 10)
         if (!isValidFortranBlockClose(compound.keyword, source, pos)) {
           continue;
