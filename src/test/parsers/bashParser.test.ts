@@ -1681,6 +1681,61 @@ esac`;
         assertSingleBlock(pairs, 'for', 'done');
       });
     });
+
+    suite('Keyword fused with Unicode Symbol and brace characters', () => {
+      test('should not treat if in if😀 (emoji) as block open', () => {
+        const pairs = parser.parse('if😀 true; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat if in if€ (currency) as block open', () => {
+        const pairs = parser.parse('if€ true; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat if in if™ (other symbol) as block open', () => {
+        const pairs = parser.parse('if™ true; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat if in if{ (left brace) as block open', () => {
+        const pairs = parser.parse('if{ true; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
+      test('should not treat done in done😀 (emoji) as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done😀 arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat done in done€ (currency) as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done€ arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat done in done} (right brace) as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done} arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should still recognize if followed by space and { as block open + group', () => {
+        // Regression guard: `if { ... }; then` should still detect `if` keyword and `{ }` group
+        const source = 'if true; then\n  echo ok\nfi';
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'if', 'fi');
+      });
+
+      test('should still pair { } block when separated from keyword by space', () => {
+        // Regression guard: `if true; then { echo ok; }; fi` — `{` and `}` should pair
+        const source = 'if true; then\n  { echo ok; }\nfi';
+        const pairs = parser.parse(source);
+        // Should produce 2 pairs: if/fi and {/}
+        assertBlockCount(pairs, 2);
+      });
+    });
   });
 
   suite('Block middle keyword validation', () => {
