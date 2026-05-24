@@ -385,33 +385,44 @@ const VALUE_KEYWORDS_BEFORE_BRACKET = new Set([
 
 // Determines if a '[' at the given position is an indexing bracket (a[...]) vs array construction ([...])
 export function isIndexingBracket(source: string, bracketPos: number): boolean {
-  let i = bracketPos - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
-    i--;
-  }
-  if (i < 0) return false;
-  const prevChar = source[i];
-  // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing,
-  // unless the identifier is a keyword introducing a value expression (return, yield, throw, ...).
-  if (/[a-zA-Z0-9_]/.test(prevChar)) {
-    let wordStart = i;
-    while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
-      wordStart--;
+  // Iteratively skip past chained '[' (e.g., `a[[[end]]]`). Each outer '[' before
+  // an inner '[' inherits the indexing classification of whatever stands before
+  // the leftmost '[' in the chain. Using a loop instead of recursion avoids stack
+  // overflow on pathological inputs like `'['.repeat(10000) + 'begin\nend'`.
+  let bracketCursor = bracketPos;
+  while (true) {
+    let i = bracketCursor - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
     }
-    const word = source.slice(wordStart, i + 1);
-    // Reject if the candidate word is preceded by a non-identifier character (so it stands as a token).
-    const charBeforeWord = wordStart > 0 ? source[wordStart - 1] : '';
-    if (charBeforeWord !== '.' && VALUE_KEYWORDS_BEFORE_BRACKET.has(word)) {
-      return false;
+    if (i < 0) return false;
+    const prevChar = source[i];
+    // Identifiers, closing brackets/parens/braces, quotes, Unicode -> indexing,
+    // unless the identifier is a keyword introducing a value expression (return, yield, throw, ...).
+    if (/[a-zA-Z0-9_]/.test(prevChar)) {
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.slice(wordStart, i + 1);
+      // Reject if the candidate word is preceded by a non-identifier character (so it stands as a token).
+      const charBeforeWord = wordStart > 0 ? source[wordStart - 1] : '';
+      if (charBeforeWord !== '.' && VALUE_KEYWORDS_BEFORE_BRACKET.has(word)) {
+        return false;
+      }
+      return true;
     }
-    return true;
+    if (/[)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
+    // '[' before '[' means the outer bracket is indexing (e.g., a[[end]])
+    // In this context, end still means lastindex, so treat as indexing. Continue
+    // the loop with the inner '[' to inspect what stands before it.
+    if (prevChar === '[') {
+      bracketCursor = i;
+      continue;
+    }
+    // Everything else (operators, (, =, comma, newline, etc.) -> array construction
+    return false;
   }
-  if (/[)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
-  // '[' before '[' means the outer bracket is indexing (e.g., a[[end]])
-  // In this context, end still means lastindex, so treat as indexing
-  if (prevChar === '[') return isIndexingBracket(source, i);
-  // Everything else (operators, (, =, comma, newline, etc.) -> array construction
-  return false;
 }
 
 // Checks if there's an unmatched block opener between two positions
