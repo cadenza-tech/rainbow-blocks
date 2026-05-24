@@ -5062,5 +5062,35 @@ end`;
     });
   });
 
+  suite('Regression: end followed by extended binary operators inside indexing brackets is lastindex', () => {
+    test('should treat end followed by left-division \\ as lastindex inside indexing brackets', () => {
+      // `arr[if end \ 2 1 else 0 end]` — the inner `end\` is `lastindex \ 2`,
+      // not a block close. The outer `end` (immediately before `]`) must pair with the inner `if`.
+      const source = 'arr[if end \\ 2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // The closing `end` must be the OUTER one (just before `]`), not the inner lastindex.
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test("should treat end followed by transpose ' as lastindex inside indexing brackets", () => {
+      // `arr[if end'==x 1 else 0 end]` — `end'` is `transpose(lastindex)`, then `==x`.
+      // The trailing `end` must pair with the inner `if`.
+      const source = "arr[if end'==x 1 else 0 end]";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end followed by broadcast dot . as lastindex inside indexing brackets', () => {
+      // `arr[if end.+1==2 1 else 0 end]` — `end.+1` is broadcasted add on lastindex.
+      // The trailing `end` must pair with the inner `if`.
+      const source = 'arr[if end.+1==2 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
