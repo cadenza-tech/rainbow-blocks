@@ -5041,5 +5041,15 @@ end`;
     });
   });
 
+  suite('Regression: isIndexingBracket should not overflow on deeply chained brackets', () => {
+    test('should parse 10000 consecutive opening brackets without stack overflow', () => {
+      // Pathological input: thousands of `[` characters trigger recursion in
+      // isIndexingBracket when scanning each `[`. Must terminate without RangeError.
+      const source = `${'['.repeat(10000)}begin\nend`;
+      // Should not throw RangeError: Maximum call stack size exceeded.
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+  });
+
   generateCommonTests(config);
 });
