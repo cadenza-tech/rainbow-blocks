@@ -211,6 +211,22 @@ function skipWsExcludedForward(source: string, start: number, excludedRegions: E
   return i;
 }
 
+// Returns true when the keyword at `keywordStart` is preceded (past whitespace, newlines
+// and excluded regions) by a `.` that is field-access, not a `..` range operator. Used
+// to filter out member-access expressions like `Foo.record`/`Foo.object` so they do not
+// pollute the record-context scan.
+function isPrecededByFieldDotForRecordContext(
+  source: string,
+  keywordStart: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: PascalValidationCallbacks
+): boolean {
+  const i = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
+  if (i < 0 || source[i] !== '.') return false;
+  // Distinguish field access (`Foo.record`) from a range operator (`..record`).
+  return i === 0 || source[i - 1] !== '.';
+}
+
 // The structural role a block keyword plays for record-context tracking.
 //  - 'open-record': record/object — an enclosing block of this kind means "inside a record"
 //  - 'open-block': begin/class/interface/try/asm — a non-record block boundary
@@ -238,6 +254,12 @@ function recordContextKeywordRole(
     case 'asm':
       return 'open-block';
     case 'record':
+      // Skip 'record' used as field access (e.g. `Foo.record`). Without this guard, a
+      // member-access expression spelled `.record` pushes 'record' on the context stack
+      // and the following inner `end` pops it instead of the surrounding case block.
+      if (isPrecededByFieldDotForRecordContext(source, keywordStart, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
       return 'open-record';
     case 'object': {
       // Skip 'object' in method pointer syntax: `procedure of object`
