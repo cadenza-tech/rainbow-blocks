@@ -5092,6 +5092,25 @@ end`;
     });
   });
 
+  suite('Regression: single-line value-returning block end + op end pairs inner', () => {
+    test('should pair begin with inner end in begin x end + 1 end on a single line', () => {
+      // `begin x end + 1 end` reads naturally as `(begin x end) + 1` followed by a stray
+      // `end`. The current heuristic deferred the inner `end + 1` because stack.length
+      // matched remainingEagerCloses, swapping the pairing so `begin` closed with the
+      // trailing `end`. When the opener and the tentative close are on the same line
+      // (no intervening newlines), the value-returning interpretation is the natural
+      // Julia reading, so the inner `end` should close `begin` and the trailing `end`
+      // becomes the orphan.
+      const source = 'begin x end + 1 end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      // Closing `end` of begin should be the first one (the `end + 1`), at offset 10.
+      const innerEndOffset = source.indexOf('end');
+      assert.strictEqual(pairs[0].openKeyword.value, 'begin');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, innerEndOffset);
+    });
+  });
+
   suite('Regression: end followed by typeassert/subtype operators inside indexing brackets is lastindex', () => {
     test('should treat end followed by :: as lastindex inside indexing brackets', () => {
       // `arr[if end::Int 1 else 0 end]` — `end::Int` is a type-asserted lastindex.
