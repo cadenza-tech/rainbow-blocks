@@ -2006,6 +2006,45 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-25: do followed by closing bracket is not block open', () => {
+    test('should not treat do) as do/until block opener', () => {
+      // `do)` is invalid Octave syntax — a `)` cannot legitimately follow `do` in a
+      // do/until header. Treating `do` as a block opener here leaves a spurious `do`
+      // on the stack that breaks outer pairing. With the (rejected) `do)` removed,
+      // function/end is the only block; both `do` and `)` are orphan tokens.
+      const source = 'function f\n  do)\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do) should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do] as do/until block opener', () => {
+      const source = 'function f\n  do]\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do] should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do} as do/until block opener', () => {
+      const source = 'function f\n  do}\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do} should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not treat do followed by whitespace then ) as block opener', () => {
+      // Symmetric with `do (1)` -> function call rejection — `do  )` is similarly invalid.
+      const source = 'function f\n  do  )\nend';
+      const pairs = parser.parse(source);
+      const doPair = pairs.find((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPair, undefined, 'do<spaces>) should not open a do/until block');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression 2026-05-15: do followed by colon is not block open', () => {
     test('should not treat do: as do/until block opener', () => {
       // `do:` is invalid Octave syntax (Octave has no label statements; `:` here
