@@ -3580,6 +3580,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'end');
     });
+
+    test('should not treat Foo.object field access as block opener', () => {
+      // Same logic as `Foo.record`: a member access through `.` must not count as a
+      // block opener for the record-context scan. Otherwise the following `case`/`end`
+      // pair is corrupted by the spurious 'object' on the stack.
+      const source = `X := Foo.object;
+case Y of
+  1: a;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
   });
 
   generateCommonTests(config);
