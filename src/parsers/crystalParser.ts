@@ -640,12 +640,13 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (source[i] === '.' && source[i + 1] !== '.') {
       return true;
     }
-    // Assignment target: a standalone `=`, excluding comparison/hash-rocket operators
-    // (`==`, `===`, `=~`, `=>`). `KEYWORD =` is an assignment to a variable named after
-    // the keyword, so the keyword is not a block opener.
+    // Value usage with `=`-led operator: assignment (`=`), comparison (`==`, `===`,
+    // `=~`), or hash rocket (`=>`). In every case the keyword is the left-hand
+    // operand and is being used as a value, not opening a block. Real opener forms
+    // (`enum Color`, `struct Point`, `lib LibFoo`, ...) are followed by a type name
+    // or newline, never by `=`-led punctuation on the same line.
     if (source[i] === '=') {
-      const next = source[i + 1];
-      return next !== '=' && next !== '~' && next !== '>';
+      return true;
     }
     // Function-call form: `KEYWORD(args)`. Real opener forms never take parens
     // (`enum Color`, `struct Point`, `lib LibFoo`, `macro name`, `annotation A`,
