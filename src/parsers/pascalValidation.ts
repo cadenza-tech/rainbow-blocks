@@ -262,6 +262,13 @@ function recordContextKeywordRole(
       }
       return 'open-record';
     case 'object': {
+      // Skip 'object' used as field access (e.g. `Foo.object`). Without this guard, a
+      // member-access expression spelled `.object` pushes 'record' on the context stack
+      // (object behaves like record for record-context tracking) and corrupts the
+      // surrounding case..end pair.
+      if (isPrecededByFieldDotForRecordContext(source, keywordStart, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
       // Skip 'object' in method pointer syntax: `procedure of object`
       const oi = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
       if (oi >= 1 && lowerSource.slice(oi - 1, oi + 1) === 'of' && (oi - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[oi - 2]))) {
