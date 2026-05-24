@@ -4663,5 +4663,65 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: case keyword after sensitivity list wildcard `@*`', () => {
+    test('should tokenize `case` as block_open after `always @* case (sel)`', () => {
+      // Bug: The `*` in `always @*` is the sensitivity-list wildcard (Verilog-2001),
+      // not the multiplication operator. The case-keyword suppression saw the `*`
+      // preceding `case` and treated it as a binary-operator right-hand side,
+      // dropping the `case` token. As a result `endcase` had no opener, leaving
+      // only the module-endmodule pair instead of module + always + case.
+      const source = `module my_module(input sel, input a, output reg out);
+  always @* case (sel)
+    1'b0: out = a;
+    default: out = 0;
+  endcase
+endmodule`;
+      const tokens = parser.getTokens(source);
+      assert.ok(
+        tokens.some((t) => t.value === 'case'),
+        '`case` after `always @*` must be tokenized as block_open (the `*` is a sensitivity wildcard, not a binary operator)'
+      );
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'module');
+      findBlock(pairs, 'always');
+      findBlock(pairs, 'case');
+    });
+
+    test('should also work for casez/casex/randcase after `@*`', () => {
+      // Sanity: the same wildcard suppression bug applies to every CASE_KEYWORDS
+      // member. Cover them all so a future regression in only one variant is caught.
+      const variants: readonly string[] = ['case', 'casez', 'casex'];
+      for (const kw of variants) {
+        const source = `module m;\n  always @* ${kw} (sel)\n    default: out = 0;\n  endcase\nendmodule`;
+        const tokens = parser.getTokens(source);
+        assert.ok(
+          tokens.some((t) => t.value === kw),
+          `\`${kw}\` after \`@*\` must be tokenized as block_open`
+        );
+        const pairs = parser.parse(source);
+        assert.strictEqual(pairs.length, 3, `expected 3 pairs for ${kw}, got ${pairs.length}`);
+      }
+    });
+
+    test('should still suppress `case` after a real multiplication operator', () => {
+      // Sanity: a multiplication operator (not `@*`) must still suppress case as
+      // an expression operand. e.g., `x = a * case;` is misuse.
+      const source = 'x = a * case;\nendcase';
+      const tokens = parser.getTokens(source);
+      assert.ok(!tokens.some((t) => t.value === 'case'), '`case` after a real `*` must remain suppressed');
+      assertNoBlocks(parser.parse(source));
+    });
+
+    test('should still tokenize case after `@(*)` (parenthesized wildcard)', () => {
+      // Sanity: the parenthesized `@(*)` form already worked. Keep coverage so a
+      // refactor of the wildcard detection does not regress this.
+      const source = 'module m;\n  always @(*) case (sel)\n    default: out = 0;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      findBlock(pairs, 'case');
+    });
+  });
+
   generateCommonTests(config);
 });
