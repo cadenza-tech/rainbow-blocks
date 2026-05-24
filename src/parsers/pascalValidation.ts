@@ -278,6 +278,13 @@ function recordContextKeywordRole(
       if (oi >= 0 && source[oi] === ':') {
         return 'ignore';
       }
+      // `:=` assignment makes the trailing token an expression rather than a type
+      // definition. `X := object;` assigns the value `object` (an identifier in the
+      // RHS); without this guard the `=` part of `:=` makes `object` look like a type
+      // definition and corrupts the record-context stack.
+      if (oi >= 1 && source[oi] === '=' && source[oi - 1] === ':') {
+        return 'ignore';
+      }
       // `=` followed by `object` can be either a type definition (`TFoo = object`) or
       // a comparison expression (`if X = object then`). Without the comparison check
       // the latter is classified as 'open-record' and a following inner `end` pops
