@@ -670,13 +670,21 @@ export class CrystalBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if `end` at position sits in the value position of a ternary expression
-  // (`cond ? value : end`). Such an `end` is immediately preceded by a standalone
-  // ternary colon: a `:` surrounded by whitespace, not part of `::` (scope resolution)
-  // and not a `label:`/symbol colon, with a matching ternary `?` earlier on the same
-  // line. Whitespace and excluded regions are skipped while scanning.
+  // Checks if `end` at position sits in either value position of a ternary
+  // expression: the first value (`cond ? end : a`) or the second value
+  // (`cond ? a : end`). Either form is invalid because `end` is a reserved
+  // word and cannot be a value. The result must not be tokenized as
+  // block_close.
+  //
+  // First-value form: the character immediately before `end` is a `?` that is
+  // the ternary operator (not a char-literal start — char literals are already
+  // excluded regions, so a bare `?` surviving the scan is the ternary).
+  //
+  // Second-value form: the character immediately before `end` is a `:` that is
+  // a standalone ternary colon (whitespace before, not part of `::`, not a
+  // `label:`/symbol colon) with a matching ternary `?` earlier on the same line.
   private isEndInTernaryValuePosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Scan back from `end`, skipping whitespace and excluded regions, to the colon
+    // Scan back from `end`, skipping whitespace and excluded regions
     let i = position - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -693,8 +701,18 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
       break;
     }
-    // The character immediately before `end` must be a colon
-    if (i < 0 || source[i] !== ':') {
+    if (i < 0) {
+      return false;
+    }
+    // First-value form: `end` immediately follows the ternary `?`. A `?` here
+    // is the ternary operator, not a char literal: char literals are excluded
+    // regions (handled by `tryMatchExcludedRegion`) and are skipped above.
+    if (source[i] === '?') {
+      return true;
+    }
+    // Second-value form: `end` immediately follows the ternary `:`. The
+    // character immediately before `end` must be a colon.
+    if (source[i] !== ':') {
       return false;
     }
     // Reject scope resolution `::` (colon adjacent to another colon on either side)
