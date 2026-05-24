@@ -390,7 +390,9 @@ export class ErlangBlockParser extends BaseBlockParser {
     const spans: AttributeSpan[] = [];
     // Match -name( at line start; capture name and opening paren positions.
     // Tolerates leading whitespace, whitespace between '-' and name, and between name and '('.
-    const pattern = /(^|\r\n|\r|\n)([ \t]*)-[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(/g;
+    // Erlang allows Unicode-identifier characters in attribute names, so the pattern matches
+    // \p{L} and \p{N} in addition to ASCII letters/digits/underscore.
+    const pattern = /(^|\r\n|\r|\n)([ \t]*)-[ \t]*([a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}]*)[ \t]*\(/gu;
     for (const match of source.matchAll(pattern)) {
       const dashStart = match.index + match[1].length + match[2].length;
       if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
