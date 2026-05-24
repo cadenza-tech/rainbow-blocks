@@ -4085,5 +4085,115 @@ end case;`;
     });
   });
 
+  suite('Regression 2026-05-25: reserved words in expression RHS must not be block openers', () => {
+    // Reserved words cannot legally be identifiers in VHDL, but editors regularly see
+    // in-progress code or hand-written test fixtures that put a reserved word on the
+    // RHS of an expression (e.g., `if a = view then`). Without this check the reserved
+    // word gets tokenized as a `block_open`, swallowing the following `then` / `loop` /
+    // `is` intermediate from the surrounding control-flow block and breaking pairing.
+    test('should not treat view after = as block opener (VHDL-2019 reserved word)', () => {
+      const source = `architecture a of e is
+begin
+  if a = view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate, not have it absorbed by stray view opener');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in expression RHS should not pair as a block opener');
+    });
+
+    test('should not treat units after = as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if a = units then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat block after = as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if a = block then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat protected after = as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if a = protected then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat context after = as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if a = context then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat process after = as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if a = process then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after := as block opener (variable assignment RHS)', () => {
+      const source = `architecture a of e is
+  signal s : t := view;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in := RHS should not pair as a block opener');
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate, not have it absorbed by stray view opener');
+    });
+
+    test('should not treat view after <= as block opener (signal assignment RHS)', () => {
+      const source = `architecture a of e is
+begin
+  s <= view;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in <= RHS should not pair as a block opener');
+    });
+  });
+
   generateCommonTests(config);
 });
