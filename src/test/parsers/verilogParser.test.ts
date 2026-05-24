@@ -4782,5 +4782,88 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: pragma protect end inside preprocessor directives', () => {
+    test('should ignore `pragma protect end appearing inside a `define body', () => {
+      // Bug: findPragmaProtectEnd scans the source raw, looking for any `\`pragma`
+      // token. When a `\`define` directive's replacement text literally contains
+      // `\`pragma protect end`, the scanner picked that up as the terminator of
+      // the protected region — exposing a fake `module fake; endmodule` that
+      // should have stayed inside the protected (excluded) region.
+      const source = [
+        '`pragma protect begin',
+        '`define MY_MACRO `pragma protect end',
+        'module fake;',
+        'endmodule',
+        'some_garbage',
+        '`pragma protect end',
+        'module real_m;',
+        'endmodule'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      // Only `module real_m; endmodule` is outside the protected region; the
+      // `module fake; endmodule` between begin and end is excluded.
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      assert.strictEqual(pairs[0].openKeyword.line, 6, 'the surviving module pair should be `module real_m`');
+    });
+
+    test('should ignore `pragma protect end on a `define line with line continuation', () => {
+      // Variant: `\`define` with backslash-newline continuation that spreads the
+      // text containing `\`pragma protect end` across multiple lines. The scan
+      // must skip the entire continued directive, not just the first line.
+      const source = [
+        '`pragma protect begin',
+        '`define MULTI_LINE first_part \\',
+        '  `pragma protect end',
+        'module fake;',
+        'endmodule',
+        '`pragma protect end',
+        'module real_m;',
+        'endmodule'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should ignore `pragma protect end on a `undef directive line', () => {
+      // Variant: `\`undef` is a single-line directive. The scanner must skip it
+      // (including any tokens on the same line) so a `\`pragma protect end` on
+      // the same `\`undef` line does not falsely terminate the protected region.
+      // Note: `\`undef \`pragma...` is not a real Verilog usage — this just
+      // exercises the line-skip logic.
+      const source = [
+        '`pragma protect begin',
+        '`undef SOMETHING /* `pragma protect end */',
+        'module fake;',
+        'endmodule',
+        '`pragma protect end',
+        'module real_m;',
+        'endmodule'
+      ].join('\n');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still find the real `pragma protect end after intervening directives', () => {
+      // Sanity: the surviving protect end (after the directive lines) is correctly
+      // located. The excluded region must extend through it (not past it).
+      const source = [
+        '`pragma protect begin',
+        '`define MY_MACRO `pragma protect end',
+        'module fake;',
+        'endmodule',
+        '`pragma protect end',
+        'module real_m;',
+        'endmodule'
+      ].join('\n');
+      const regions = parser.getExcludedRegions(source);
+      const protectRegion = regions.find((r) => r.start === source.indexOf('`pragma protect begin'));
+      assert.ok(protectRegion, 'protect region should be excluded');
+      // The exclusion should extend to the END of the real `pragma protect end line,
+      // not the fake one inside `\`define`.
+      const realEnd = source.indexOf('`pragma protect end\nmodule real_m');
+      assert.strictEqual(protectRegion.end, source.indexOf('\n', realEnd));
+    });
+  });
+
   generateCommonTests(config);
 });
