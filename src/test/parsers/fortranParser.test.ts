@@ -5895,6 +5895,65 @@ endif`;
     });
   });
 
+  suite('Regression 2026-05-25: strict close openers for team/block/enum', () => {
+    test('should not pair bare end with change team block', () => {
+      // Fortran 2018 `change team (t) ... end team` requires the typed close.
+      // A bare `end` must not phantom-close the team block.
+      const source = `change team (t)
+  x = 1
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair bare end with block construct', () => {
+      // Fortran 2008 `block ... end block` requires the typed close.
+      // A bare `end` must not phantom-close the block construct.
+      const source = `block
+  integer :: x
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair bare end with enum block', () => {
+      // Fortran 2003 `enum, bind(c) ... end enum` requires the typed close.
+      // A bare `end` must not phantom-close the enum.
+      const source = `enum, bind(c)
+  enumerator :: a
+end`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair end team with change team', () => {
+      // Sanity check: the typed close `end team` must still pair properly.
+      const source = `change team (t)
+  x = 1
+end team`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'team', 'end team');
+    });
+
+    test('should still pair end block with block construct', () => {
+      // Sanity check: the typed close `end block` must still pair properly.
+      const source = `block
+  integer :: x
+end block`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'block', 'end block');
+    });
+
+    test('should still pair end enum with enum', () => {
+      // Sanity check: the typed close `end enum` must still pair properly.
+      const source = `enum, bind(c)
+  enumerator :: a
+end enum`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end enum');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
