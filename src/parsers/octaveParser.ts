@@ -254,6 +254,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (j < source.length && (source[j] === '(' || source[j] === '[' || source[j] === '{')) {
         return false;
       }
+      // Reject `do)`, `do]`, `do}` — a closing bracket immediately after `do` is
+      // invalid Octave syntax (no matching opener for the bracket). Treating `do`
+      // as a block opener here leaves a spurious `do` on the stack that consumes
+      // a later `until` (or worse, the enclosing block's `end`), breaking outer
+      // pairing. Reject so both `do` and the stray bracket remain orphan tokens
+      // (cost-minimal — no spurious BlockPair is created).
+      if (j < source.length && (source[j] === ')' || source[j] === ']' || source[j] === '}')) {
+        return false;
+      }
       // Reject `do .x` (struct field assignment such as `do.x = 1`) and
       // `do..x` (still field access — `..` is not a valid Octave token, so the
       // parse is `do` then `.` then `.x`): the `.` begins a field access, so
