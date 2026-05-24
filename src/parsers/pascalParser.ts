@@ -25,7 +25,8 @@ export class PascalBlockParser extends BaseBlockParser {
   private get validationCallbacks(): PascalValidationCallbacks {
     return {
       isInExcludedRegion: (pos, regions) => this.isInExcludedRegion(pos, regions),
-      findExcludedRegionAt: (pos, regions) => this.findExcludedRegionAt(pos, regions)
+      findExcludedRegionAt: (pos, regions) => this.findExcludedRegionAt(pos, regions),
+      isAdjacentToUnicodeLetter: (source, startOffset, keywordLength) => this.isAdjacentToUnicodeLetter(source, startOffset, keywordLength)
     };
   }
 

@@ -6,6 +6,7 @@ import type { ExcludedRegion } from '../types';
 export interface PascalValidationCallbacks {
   isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean;
   findExcludedRegionAt: (pos: number, regions: ExcludedRegion[]) => ExcludedRegion | null;
+  isAdjacentToUnicodeLetter: (source: string, startOffset: number, keywordLength: number) => boolean;
 }
 
 // Type modifier keywords that can appear between '=' and class/object/interface
@@ -392,6 +393,12 @@ export function buildRecordContextMap(source: string, excludedRegions: ExcludedR
       continue;
     }
     const keyword = match[1].toLowerCase();
+    // JavaScript `\b` only recognises ASCII word boundaries, so the pattern matches
+    // `record` inside `αrecord` (and similar Unicode-prefixed identifiers). Skip such
+    // matches so they do not pollute the record-context stack.
+    if (callbacks.isAdjacentToUnicodeLetter(source, keywordStart, keyword.length)) {
+      continue;
+    }
 
     if (keyword === 'case') {
       // The record question for this `case`: the nearest non-`case` enclosing block.
