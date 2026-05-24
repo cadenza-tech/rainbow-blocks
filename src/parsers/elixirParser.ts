@@ -426,10 +426,17 @@ export class ElixirBlockParser extends BaseBlockParser {
         case 'block_middle':
           if (stack.length > 0) {
             const top = stack[stack.length - 1];
-            const opener = top.open.token.value;
-            const accepted = MIDDLE_KEYWORDS_BY_OPENER[opener];
-            if (accepted?.has(token.value)) {
-              top.open.intermediates.push(token);
+            // Only attach a middle keyword to the enclosing opener when it sits at the same
+            // bracket depth as that opener. A middle keyword inside parens/brackets/braces is
+            // at a deeper depth than its enclosing block opener (e.g. the stray `else` in
+            // `if true do x = (a + else) end`); attaching it to the outer if would
+            // mis-attribute the keyword. Symmetric with the block_close bracket-depth guard.
+            if (top.bracketDepth === depth) {
+              const opener = top.open.token.value;
+              const accepted = MIDDLE_KEYWORDS_BY_OPENER[opener];
+              if (accepted?.has(token.value)) {
+                top.open.intermediates.push(token);
+              }
             }
           }
           break;
