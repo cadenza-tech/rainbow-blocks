@@ -443,13 +443,21 @@ export class PascalBlockParser extends BaseBlockParser {
 
   // Reject any close keyword (end/until) immediately after `.` (field/property access),
   // `@` (address-of operator like `@end`), `&` (FreePascal escaped-keyword identifier),
-  // `$` (hex-literal prefix like `$end`), or `#` (character-constant prefix like `#end`).
-  // Also reject `until` used as a case-label inside `case ... of`.
+  // `$` (hex-literal prefix like `$end`), `#` (character-constant prefix like `#end`),
+  // or `..` (range operator like `array[0..end]`). Also reject `until` used as a
+  // case-label inside `case ... of`.
   protected isValidBlockClose(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.isPrecededByFieldDot(source, position, excludedRegions)) return false;
     if (position > 0) {
       const prev = source[position - 1];
       if (prev === '@' || prev === '&' || prev === '$' || prev === '#') return false;
+    }
+    // Reject `..end` / `..until`: the `..` range operator (e.g. `array[0..end]`) treats
+    // the following token as an expression value, not a block-close keyword. Without
+    // this guard the inner `end` closes the surrounding `begin`, leaving the outer
+    // procedure-body `end;` orphan.
+    if (position >= 2 && source[position - 1] === '.' && source[position - 2] === '.') {
+      return false;
     }
     // Case label: `case X of until: foo;` / `case X of end: foo;` —
     // the close keyword belongs to the case label expression, not a block close.
