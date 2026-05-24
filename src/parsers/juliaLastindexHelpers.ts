@@ -8,11 +8,10 @@ import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 // Checks whether the character at `pos` is the start of a binary or postfix operator
 // that can follow `end` as lastindex (e.g., `!=`, `==`, `+`, `-`, `<`, `>`, `<=`, `>=`,
 // `:`, `&`, `&&`, `|`, `||`, `=>`, `\` left-division, `'` transpose, `.` broadcast
-// prefix, Unicode operators). The colon case excludes `::` (type assertion) because
-// the parser already classifies `end::` via isPrecededByBinaryOperator on the closing
-// side; here we only care about the bare range/Pair-start `:`. This must stay in sync
-// with isPrecededByBinaryOperator so that `<op>end<op>` is rejected from both sides
-// rather than only the trailing side.
+// prefix, Unicode operators, plus `::` type-assertion and `<:` `>:` subtype/supertype
+// operators which are syntactically valid after lastindex inside indexing brackets).
+// This must stay in sync with isPrecededByBinaryOperator so that `<op>end<op>` is
+// rejected from both sides rather than only the trailing side.
 function isBinaryOperatorStart(source: string, pos: number): boolean {
   const c = source[pos];
   const c2 = pos + 1 < source.length ? source[pos + 1] : '';
@@ -21,8 +20,13 @@ function isBinaryOperatorStart(source: string, pos: number): boolean {
   if (c === '=' && c2 === '>') return true;
   if (c === '<' && c2 === '=') return true;
   if (c === '>' && c2 === '=') return true;
-  if (c === '<' && c2 !== ':') return true;
-  if (c === '>' && c2 !== ':') return true;
+  // `<` (less than) and `<:` (subtype). `<:` would otherwise be rejected because the
+  // parser's outside-indexing rejection path (`isPrecededBySubtypeOperator`) handles it
+  // from the trailing side; but inside indexing brackets `end<:T` is a valid subtype
+  // check on lastindex, so include it here as a "follower" that classifies the prior
+  // `end` as lastindex.
+  if (c === '<') return true;
+  if (c === '>') return true;
   if (c === '+') return true;
   if (c === '-') return true;
   if (c === '*') return true;
@@ -31,7 +35,10 @@ function isBinaryOperatorStart(source: string, pos: number): boolean {
   if (c === '^') return true;
   // Left division operator: `end \ 2` is lastindex left-divided by 2.
   if (c === '\\') return true;
-  if (c === ':' && c2 !== ':') return true;
+  // Both bare `:` (range/Pair start, ternary) and `::` (type assertion) classify the
+  // preceding `end` as lastindex. The trailing-side check (`isPrecededByBinaryOperator`)
+  // also accepts both forms, so this stays symmetrical.
+  if (c === ':') return true;
   if (c === '&') return true;
   if (c === '|') return true;
   // Postfix transpose: `end'` is transpose(lastindex). Treated as an operator so
