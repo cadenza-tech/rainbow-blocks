@@ -4540,6 +4540,48 @@ end`;
     });
   });
 
+  suite('Regression: class <<Foo singleton class should not be parsed as heredoc', () => {
+    test('should treat class <<Foo (space before, no space after) as singleton class, not heredoc', () => {
+      // Bug: `class <<Foo` was misinterpreted as a heredoc opener (`<<Foo` looking for
+      // terminator `Foo`) because the heredoc detection allowed identifier-prefixed
+      // bare heredocs (e.g. `puts <<EOF`). `<<` after `class` (or `module`) starts a
+      // singleton class, never a heredoc — reject heredoc detection so blocks pair
+      // correctly.
+      const source = 'class <<Foo\n  def x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'class', 0);
+      assertNestLevel(pairs, 'def', 1);
+    });
+
+    test('should treat class << Foo (space both sides) as singleton class, not heredoc', () => {
+      const source = 'class << Foo\n  def x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'class', 0);
+      assertNestLevel(pairs, 'def', 1);
+    });
+
+    test('should treat class<<Foo (no space anywhere) as singleton class, not heredoc', () => {
+      const source = 'class<<Foo\n  def x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'class', 0);
+      assertNestLevel(pairs, 'def', 1);
+    });
+
+    test('should treat class <<self as singleton class, not heredoc (with self keyword)', () => {
+      // `class <<self` is the most common form. `self` is a Ruby keyword, so the
+      // existing keyword check already rejects this — confirm it stays correct after
+      // the fix.
+      const source = 'class <<self\n  def x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'class', 0);
+      assertNestLevel(pairs, 'def', 1);
+    });
+  });
+
   suite('Regression: Unicode predicate method with postfix conditional', () => {
     test('should recognize postfix if after Unicode predicate method (メソッド? if cond)', () => {
       // Bug: `メソッド? if condition` was not recognized as a postfix conditional because
