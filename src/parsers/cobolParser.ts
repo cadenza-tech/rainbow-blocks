@@ -279,6 +279,38 @@ export class CobolBlockParser extends BaseBlockParser {
     return this.validOpenPositions.get(lowerKeyword)?.has(position) ?? false;
   }
 
+  // Returns the number of characters at the start of `rest` that form the
+  // decimal (`.<digits>`) and/or scientific (`E[+-]?<digits>`) tail of a
+  // numeric literal whose integer head is `head`. Returns 0 when `head` is
+  // not purely digits or `rest` does not begin with a numeric tail. This lets
+  // PERFORM-validation lookahead skip past `.5` in `PERFORM 5.5 TIMES` so the
+  // TIMES verb that follows it is still picked up by the next-word regex.
+  private skipNumericLiteralTail(head: string, rest: string): number {
+    if (head.length === 0 || !/^[0-9]+$/.test(head)) {
+      return 0;
+    }
+    let i = 0;
+    if (i + 1 < rest.length && rest[i] === '.' && rest.charCodeAt(i + 1) >= 0x30 && rest.charCodeAt(i + 1) <= 0x39) {
+      i++;
+      while (i < rest.length && rest.charCodeAt(i) >= 0x30 && rest.charCodeAt(i) <= 0x39) {
+        i++;
+      }
+    }
+    if (i < rest.length && (rest[i] === 'e' || rest[i] === 'E')) {
+      let j = i + 1;
+      if (j < rest.length && (rest[j] === '+' || rest[j] === '-')) {
+        j++;
+      }
+      if (j < rest.length && rest.charCodeAt(j) >= 0x30 && rest.charCodeAt(j) <= 0x39) {
+        i = j + 1;
+        while (i < rest.length && rest.charCodeAt(i) >= 0x30 && rest.charCodeAt(i) <= 0x39) {
+          i++;
+        }
+      }
+    }
+    return i;
+  }
+
   // Single-pass computation of all valid opener positions for a keyword type
   private computeValidPositions(lowerKeyword: string, source: string, excludedRegions: ExcludedRegion[]): Set<number> {
     const endKeyword = `end-${lowerKeyword}`;
@@ -361,7 +393,14 @@ export class CobolBlockParser extends BaseBlockParser {
             if (word === `end-${lowerKeyword}`) {
               // The next word is the matching END-PERFORM closer, not a paragraph name
             } else if (word !== 'until' && word !== 'varying' && word !== 'with') {
-              const afterNextWord = afterInner.slice(nextWord[0].length);
+              // The `nextWord` regex `[a-zA-Z0-9][a-zA-Z0-9_-]*` stops at the first `.`,
+              // so a decimal numeric literal like `5.5` (or scientific `1.5E+2`) is read
+              // as the integer head only. Skip the literal's decimal (`.<digits>`) and
+              // scientific (`E[+-]?<digits>`) tail so the TIMES verb that follows it is
+              // still picked up by the `secondWord` lookahead. Word-final `-` after a
+              // numeric head (`5-`) is not COBOL syntax for a continued identifier, so
+              // we only skip the numeric tail when the head is purely digits.
+              const afterNextWord = afterInner.slice(nextWord[0].length + this.skipNumericLiteralTail(word, afterInner.slice(nextWord[0].length)));
               // Check for PERFORM <variable> TIMES pattern (accept both alpha and numeric counts).
               // `\s+` (rather than `[ \t]+`) lets the iteration phrase wrap across a newline,
               // because a structured PERFORM may continue on the next line. The `\s+` does NOT
@@ -395,8 +434,11 @@ export class CobolBlockParser extends BaseBlockParser {
                 // Check for PERFORM <para> <count> TIMES pattern (paragraph call with iteration count).
                 // `\s+` mirrors the `secondWord` widening so the TIMES verb is still recognised when
                 // a paragraph-call iteration count and its TIMES verb are split across a newline
-                // (e.g. `PERFORM PARA-A 5\n  TIMES`).
-                const afterSecondWord = afterNextWord.slice(secondWord[0].length);
+                // (e.g. `PERFORM PARA-A 5\n  TIMES`). Apply the same numeric-tail skip as the
+                // first operand so a decimal count like `5.5` does not break the `thirdWord`
+                // lookup and `PERFORM PARA-A 5.5 TIMES` stays rejected as a paragraph call.
+                const secondTailSkip = this.skipNumericLiteralTail(secondWord[1].toLowerCase(), afterNextWord.slice(secondWord[0].length));
+                const afterSecondWord = afterNextWord.slice(secondWord[0].length + secondTailSkip);
                 const thirdWord = afterSecondWord.match(/^\s+([a-zA-Z][a-zA-Z0-9_-]*)/i);
                 if (thirdWord && thirdWord[1].toLowerCase() === 'times') {
                   // PERFORM para <count> TIMES → paragraph call with iteration, reject
