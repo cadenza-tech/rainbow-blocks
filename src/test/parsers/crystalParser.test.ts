@@ -4561,5 +4561,48 @@ end`;
     });
   });
 
+  suite('Regression: receiver-like keyword followed by comparison operator should not open a block', () => {
+    test('should not treat enum == value as a block opener', () => {
+      // `enum == 1` is a comparison; `enum` is a value (e.g. a variable named
+      // `enum`), not a block opener. Treating it as an opener pairs it with the
+      // inner `end`, leaving the outer `def` orphaned.
+      const source = 'def foo\n  if enum == 1\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat enum === value as a block opener', () => {
+      const source = 'def foo\n  if enum === 1\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat select =~ regex as a block opener', () => {
+      const source = 'def foo\n  if select =~ /x/\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat enum => value as a block opener (hash rocket)', () => {
+      const source = 'def foo\n  h = {enum => 1}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still open a real enum block when followed by a name (sanity)', () => {
+      const source = 'enum Color\n  Red\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
