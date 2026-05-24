@@ -226,6 +226,35 @@ end case;`;
       assertSingleBlock(pairs, 'case', 'end case');
     });
 
+    test('should not collect orphan else as intermediate of case block', () => {
+      // Ada LRM 5.4: case has no 'else' arm. A stray 'else' inside a case
+      // body is invalid syntax and must not be pulled into the case pair as
+      // an intermediate (best-effort: orphan tokens stay uncolored).
+      const source = `case X is
+  when 1 => null;
+else
+  null;
+end case;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      const intermediateValues = caseBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('else'), `case intermediates should not include 'else', got: ${intermediateValues.join(', ')}`);
+    });
+
+    test('should not collect orphan elsif as intermediate of case block', () => {
+      // Ada LRM 5.4: case has no 'elsif' arm. An 'elsif' inside a case body
+      // is invalid syntax and must not be tracked as a case intermediate.
+      const source = `case X is
+  when 1 => null;
+elsif Y then
+  null;
+end case;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      const intermediateValues = caseBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('elsif'), `case intermediates should not include 'elsif', got: ${intermediateValues.join(', ')}`);
+    });
+
     test('should parse begin with exception', () => {
       const source = `begin
    Risky_Operation;
