@@ -3633,6 +3633,21 @@ end;`;
       const classPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'class');
       assert.strictEqual(classPairs.length, 1, 'expected exactly one class..end pair');
     });
+
+    test('should not treat Unicode-prefixed αthen as then keyword in isIfThenElse', () => {
+      // The backward scan in `isIfThenElse` extracts ASCII-only word characters, so
+      // `αthen` is read as `then`. Without a Unicode-letter adjacency guard, the `else`
+      // after `case x of 1: αthen` is misclassified as an if-then-else intermediate
+      // and dropped from the case block's intermediates list.
+      const source = `case x of
+  1: αthen
+  else Bar;
+end;`;
+      const pairs = parser.parse(source);
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 1, 'expected exactly one case..end pair');
+      assertIntermediates(casePairs[0], ['of', 'else']);
+    });
   });
 
   generateCommonTests(config);
