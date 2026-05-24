@@ -3200,6 +3200,51 @@ foo() ->
     });
   });
 
+  suite('Regression: -define body keyword analysis should scale linearly', () => {
+    // Bug: isBareReservedWordInDefineBody scans the entire -define body for each block keyword
+    // inside, producing O(N^2) cost when -define contains many block keywords.
+    // After the fix, each -define body is scanned at most once per parse and bare-keyword
+    // queries are O(1) lookups in cached sets.
+    function buildLargeDefineSource(n: number): string {
+      const parts: string[] = ['-define(M, ['];
+      for (let i = 0; i < n; i++) {
+        parts.push(i === 0 ? 'begin x end' : ', begin x end');
+      }
+      parts.push(']).');
+      return parts.join('');
+    }
+
+    test('should parse -define body with 500 begin/end blocks under a generous absolute bound', () => {
+      const source = buildLargeDefineSource(500);
+      parser.parse(source); // warm-up
+      const t0 = Date.now();
+      parser.parse(source);
+      const elapsed = Date.now() - t0;
+      // Pre-fix took ~5700ms (O(N^2)); post-fix is well under 200ms locally.
+      // Leave headroom for coverage instrumentation and CI contention.
+      assert.ok(elapsed < 2000, `parse took ${elapsed}ms (expected < 2000ms after the linear-time fix; was ~5700ms with O(n^2))`);
+    });
+
+    test('should scale roughly linearly between 100 and 400 begin/end blocks inside a -define body', () => {
+      const small = buildLargeDefineSource(100);
+      const big = buildLargeDefineSource(400);
+      parser.parse(small); // warm-up
+      const t1 = Date.now();
+      parser.parse(small);
+      const smallMs = Date.now() - t1;
+      const t2 = Date.now();
+      parser.parse(big);
+      const bigMs = Date.now() - t2;
+      // Linear scaling: 4x source size -> ~4-5x time. Quadratic scaling (pre-fix) would be ~16x.
+      const baseline = Math.max(smallMs, 10);
+      const ratio = bigMs / baseline;
+      assert.ok(
+        ratio < 12,
+        `400-block parse took ${bigMs}ms vs 100-block ${smallMs}ms (ratio ${ratio.toFixed(1)}x; expected < 12x for linear scaling)`
+      );
+    });
+  });
+
   suite('Regression: isCatchFollowedByClausePattern depth tracking for brackets and semicolons', () => {
     // Bug: isCatchFollowedByClausePattern bails out at the first top-level ';' it sees,
     // but does not track nested parens/brackets/braces/binaries. When 'catch' is followed
