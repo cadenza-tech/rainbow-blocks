@@ -524,6 +524,34 @@ endfunction`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'endfunction');
     });
+
+    test('should treat backslash + vertical tab + newline as line continuation', () => {
+      // BACKSLASH_CONTINUATION_PATTERN must accept Unicode horizontal whitespace
+      // (VT/FF/NBSP/U+3000 etc.) between the backslash and newline, mirroring
+      // isHorizontalWhitespace. `if \<VT>\n true \n end` should be parsed as a
+      // single logical `if true end` block.
+      const source = 'if \\\v\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat backslash + form feed + newline as line continuation', () => {
+      const source = 'if \\\f\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat backslash + NBSP + newline as line continuation', () => {
+      const source = 'if \\ \n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat backslash + ideographic space + newline as line continuation', () => {
+      const source = 'if \\　\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Block comment trailing content', () => {
