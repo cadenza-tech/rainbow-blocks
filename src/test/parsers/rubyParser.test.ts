@@ -4540,6 +4540,32 @@ end`;
     });
   });
 
+  suite('Regression: Unicode predicate method with postfix conditional', () => {
+    test('should recognize postfix if after Unicode predicate method (メソッド? if cond)', () => {
+      // Bug: `メソッド? if condition` was not recognized as a postfix conditional because
+      // the regex checking for "[a-zA-Z0-9_][!?]$" only matched ASCII identifiers. The
+      // `if` therefore opened a new block, leaving the outer `def`/`end` unpaired. Expand
+      // the predicate-method detection regex to recognize Unicode identifier-continue
+      // characters before `?`/`!`, so `if`/`unless`/`while`/`until` are correctly treated
+      // as postfix conditionals.
+      const source = 'def foo\n  メソッド? if condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should recognize postfix if after Unicode bang method (メソッド! if cond)', () => {
+      const source = 'def foo\n  メソッド! if condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should recognize postfix unless after Greek letter predicate method (α? unless cond)', () => {
+      const source = 'def foo\n  α? unless condition\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   suite('Regression: Unicode identifier before / division operator', () => {
     test('should treat / after Unicode identifier as division (not regex start)', () => {
       // Bug: `/` after a non-ASCII identifier (e.g., `メソッド / 2`) was treated as a regex
