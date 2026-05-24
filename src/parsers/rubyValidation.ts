@@ -374,8 +374,11 @@ export function isPostfixConditional(
   }
 
   // ! and ? after identifier are method name suffixes (save!, valid?),
-  // not operators - the keyword IS postfix in this case
-  if (/[a-zA-Z0-9_][!?]$/.test(beforeKeyword)) {
+  // not operators - the keyword IS postfix in this case.
+  // Ruby permits non-ASCII characters in method names (e.g. `メソッド?`, `α!`),
+  // so accept Unicode identifier-continue characters (Letter, Mark, Number,
+  // Connector Punctuation) before the trailing ! or ?.
+  if (/[\p{L}\p{M}\p{N}\p{Pc}_][!?]$/u.test(beforeKeyword)) {
     return true;
   }
 
