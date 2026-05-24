@@ -3583,6 +3583,75 @@ end error`;
     });
   });
 
+  suite('Bug AS-LOW-4: Unicode whitespace before paren in keyword(...) function-call form', () => {
+    test('should not detect if<NBSP>() as block opener', () => {
+      const NBSP = ' ';
+      const source = `on run\n  if${NBSP}()\nend run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect repeat<NBSP>() as block opener', () => {
+      const NBSP = ' ';
+      const source = `on run\n  repeat${NBSP}()\nend run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect try<IDEOSPACE>() as block opener', () => {
+      const IDEO = '　';
+      const source = `on run\n  try${IDEO}()\nend run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect considering<NBSP>() as block opener', () => {
+      const NBSP = ' ';
+      const source = `on run\n  considering${NBSP}()\nend run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect ignoring<ZWSP>() as block opener', () => {
+      const ZWSP = '​';
+      const source = `on run\n  ignoring${ZWSP}()\nend run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect with timeout<NBSP>() as block opener (compound)', () => {
+      const NBSP = ' ';
+      const source = `on run\n  with timeout${NBSP}(5)\nend run`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+    });
+
+    test('should not detect on error<NBSP>() as block_middle (compound)', () => {
+      const NBSP = ' ';
+      const source = `try\n  on error${NBSP}()\n  beep\nend try`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not detect else<NBSP>() as block_middle', () => {
+      const NBSP = ' ';
+      const source = `if x then\n  else${NBSP}(x)\nend if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still pair on tell<NBSP>() handler with end tell (reserved word + paren via Unicode whitespace)', () => {
+      const NBSP = ' ';
+      const source = `on tell${NBSP}()\n  beep\nend tell`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword.value, 'end tell');
+    });
+  });
+
   suite('Bug AS-MEDIUM-2: if(condition) function-call form should not open a block', () => {
     test('should not treat if(x) as a block open inside a handler body', () => {
       const source = `on run
