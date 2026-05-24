@@ -710,7 +710,13 @@ export function isIfThenElse(source: string, position: number, excludedRegions: 
       while (i >= 0 && /[a-zA-Z0-9_]/i.test(source[i])) {
         i--;
       }
-      const word = source.slice(i + 1, wordEnd + 1).toLowerCase();
+      const wordStart = i + 1;
+      // Skip Unicode-extended identifiers (e.g. `αthen` reads back to ASCII `then`);
+      // otherwise the surrounding `else` is misclassified as if-then-else and dropped.
+      if (callbacks.isAdjacentToUnicodeLetter(source, wordStart, wordEnd + 1 - wordStart)) {
+        continue;
+      }
+      const word = source.slice(wordStart, wordEnd + 1).toLowerCase();
       if (word === 'end' || word === 'until') {
         depth++;
       } else if (word === 'begin' || word === 'case' || word === 'try' || word === 'repeat' || word === 'record' || word === 'asm') {
