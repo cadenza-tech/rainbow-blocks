@@ -5,6 +5,60 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.57] - 2026-05-25
+
+### Fixed
+
+- Ada: Restrict `else` and `elsif` intermediates to `if` and `select` blocks so they do not attach to `case`/`loop`/`begin`/`declare` openers
+- Ada: Treat Unicode letters as identifier chars in the `select` keyword boundary check so `αselect` is not misread as a `select` keyword
+- AppleScript: Recognize pipe-delimited handler names (`on |tell|()`) in the handler-name fallback so `on |tell|() ... end tell` pairs correctly
+- AppleScript: Skip Unicode horizontal whitespace before `(` in keyword function-call checks so `if<NBSP>()` is treated as a function call
+- Bash: Recognize `{`, `}`, `[`, `]`, `@`, `~`, `^`, `/` as bare heredoc delimiters so `<<{`/`<<@` etc. are detected as heredoc operators
+- Bash: Treat `+`, `*`, `?` as keyword-fusing characters so `if+`, `then*`, `done?` are one-word identifiers, not reserved keywords
+- Bash: Treat `{`/`}` and Unicode Symbol characters (emoji, currency, etc.) as keyword-fusing so `if😀`, `if€`, `if{` are not misread as `if` keyword
+- COBOL: Recognize decimal-literal counts in `PERFORM <literal> TIMES` so `PERFORM 5.5 TIMES ... END-PERFORM` is detected as a block
+- Crystal: Recognize `?<delim>` char literals inside `{% %}` and `{{ }}` macro templates so `?#`/`?"`/`?'`/`` ?` `` do not swallow the macro closer
+- Crystal: Treat receiver-like keywords (`enum`, `select`, `struct`, etc.) followed by `==`/`===`/`=~`/`=>` as value expressions, not block openers
+- Crystal: Reject `end` immediately after the `?` of a ternary expression (`cond ? end : a`) as a block close
+- Elixir: Reject stray `block_middle` tokens (`else`/`rescue`/`catch`/`after`) inside parentheses so they do not attach to outer block openers as intermediates
+- Erlang: Track bracket depth and ignore guard-sequence semicolons in `catch` clause detection so `try X catch 1; 2 -> ok end` pairs correctly
+- Erlang: Cache `-define` body analysis to avoid quadratic keyword scanning so large `-define` bodies no longer freeze the parser (was `O(N²)`)
+- Erlang: Recognize Unicode attribute names so `-définé(begin, end).` does not falsely pair internal `begin`/`end`
+- Erlang: Detect triple-dot terminator in `-spec` declarations so `-spec foo() -> 1...` correctly ends the declaration at the third dot
+- Fortran: Skip compound end keywords adjacent to a Unicode letter so `endif日本語` is not misread as `endif` block close
+- Fortran: Require typed close (`end team`/`end block`/`end enum`) for `change team`/`block`/`enum` constructs so bare `end` does not falsely pair them
+- Julia: Prevent stack overflow on chained brackets (`[[[[...`) in `isIndexingBracket` by converting tail recursion to iteration
+- Julia: Prevent stack overflow on deeply nested string interpolation (`"$("$( ... )")"`) by replacing mutual recursion with an iterative engine
+- Julia: Recognize `\`, `'`, `.+`, and Unicode operators as `lastindex` followers so `end \ 2`, `end'`, `end .+ 1`, `end ∈ S` do not steal the outer block's `end`
+- Julia: Recognize `::`, `<:`, `>:` as `lastindex` followers inside indexing brackets so `arr[end::Int]` does not misclassify `end` as a block close
+- Julia: Pair single-line value-returning blocks with their inner `end` so `begin x end + 1` is parsed as a block-with-trailing-stray-end
+- Lua: Recognize exponent signs in the trailing-dot heuristic so `1e+5.end` is treated as field access on an invalid prefix, not a numeric literal
+- Lua: Skip orphan colon-bounded label-like sequences (`:abc:keyword`) in method-call detection so the keyword still pairs as a block opener
+- MATLAB: Detect a binary operator across `...` line continuations so `for ...<NL> + 1` rejects `for` as a block opener
+- MATLAB: Accept Unicode horizontal whitespace in `skipWhitespaceAndContinuations` so `if<NBSP>= 5`/`end<VT>.field` are recognized correctly
+- MATLAB / Octave: Pair `if`/`switch`/`try`/`unwind_protect` blocks when a middle keyword (`else`/`case`/`catch`/`unwind_protect_cleanup`) is followed by `end` on the same line
+- Octave: Recognize Unicode horizontal whitespace in backslash line continuation so `if \<NBSP><NL>` is treated as a continuation
+- Octave: Accept Unicode horizontal whitespace around block comment delimiters so `%{<NBSP>` and `%}<NBSP>` are recognized
+- Octave: Reject `do)`/`do]`/`do}` as a block opener so the enclosing `function`/`end` pair survives
+- Pascal: Skip field-access dot before `record` keyword so `X := Foo.record;` does not corrupt the record context map and break subsequent `case`/`end` pairs
+- Pascal: Skip field-access dot before `object` keyword so `X := Foo.object;` does not corrupt the record context map
+- Pascal: Treat `object` after `:=` as an expression value, not a type definition, so subsequent `case`/`end` pairs are preserved
+- Pascal: Skip Unicode-prefixed identifiers in the record-context scan so `αrecord` is not misread as the `record` keyword
+- Pascal: Treat Unicode-extended identifiers as keyword boundary in the backward `=` scan so `type αif = class ... end;` pairs correctly
+- Pascal: Treat Unicode-extended identifiers as keyword boundary in `isIfThenElse` so `case x of 1: αthen else b; end;` keeps `else` as an intermediate
+- Pascal: Skip `end` and `until` after `..` range operator so `array[0..end]` does not close an outer block
+- Ruby: Treat `/` after a Unicode identifier as division (not regex start) so `x = メソッド / 2` is parsed correctly
+- Ruby: Recognize Unicode predicate methods (`メソッド?`/`メソッド!`) in postfix conditional detection so `メソッド? if cond` is treated as a postfix `if`
+- Ruby: Treat `class <<expr` (space before `<<`, no space after) as a singleton class, not a heredoc, so `class <<Foo ... end` pairs correctly
+- Ruby: Skip newlines when detecting the range operator before `end` so `(1..\n  end)` does not close an outer block
+- Ruby: Follow implicit line continuation when detecting `end` in expression position so `a +\n  end` does not close an outer block
+- Verilog/SystemVerilog: Skip `case` suppression for sensitivity wildcard `@*` so `always @* case (sel) ... endcase` is paired
+- Verilog/SystemVerilog: Skip block comments between declarator commas so `reg a /*c*/, /*c*/ endmodule;` suppresses the inner identifier
+- Verilog/SystemVerilog: Skip preprocessor directive lines when scanning for `` `pragma protect end `` so a literal occurrence inside `` `define `` does not falsely terminate the protected region
+- VHDL: Recognize `view` as a VHDL-2019 entity_class in attribute specification so `attribute keep of bus_view : view is true;` does not trigger a stray `view` block opener
+- VHDL: Detect multi-line subprogram `is` filter via paren walk so `procedure noop(...) is null;` spanning more than 5 header lines correctly filters the `is` keyword
+- VHDL: Reject reserved words (`view`/`units`/`block`/`loop`/`record`/`protected`/`context`/`process`/`entity` etc.) in expression RHS context so they are not promoted to block openers
+
 ## [1.1.56] - 2026-05-24
 
 ### Fixed
@@ -2203,6 +2257,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.57]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.56...v1.1.57
 [1.1.56]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.55...v1.1.56
 [1.1.55]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.54...v1.1.55
 [1.1.54]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.53...v1.1.54
