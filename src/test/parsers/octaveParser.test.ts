@@ -570,6 +570,23 @@ endif`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'endif');
     });
+
+    test('should treat %{ with only trailing NBSP as block comment opener', () => {
+      // Trailing Unicode horizontal whitespace (NBSP / ideographic space etc.) after `%{`
+      // should be treated like ASCII spaces — the opener still opens a block comment that
+      // hides the inner `if`/`end`, so the outer `if`/`end` is the only block.
+      const source = '%{ \nif inside\nend\n%}\nif outer\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.line, 4, '%{<NBSP> should hide the inner if/end');
+    });
+
+    test('should treat #{ with only trailing ideographic space as block comment opener', () => {
+      const source = '#{\u3000\nfor i = 1:10\nend\n#}\nif outer\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.line, 4, '#{<U+3000> should hide the inner for/end');
+    });
   });
 
   suite('Digit transpose vs string', () => {
@@ -911,6 +928,21 @@ end_unwind_protect`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should close %{ block comment when %} has trailing NBSP before newline', () => {
+      // Trailing whitespace check should accept Unicode horizontal whitespace (NBSP / U+3000
+      // / VT etc.), mirroring isHorizontalWhitespace. Treating %}<NBSP>\n as having trailing
+      // content keeps the block comment open and consumes the subsequent `if` / `end`.
+      const source = '%{\nbody\n%} \nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close %{ block comment when %} has trailing ideographic space before newline', () => {
+      const source = '%{\nbody\n%}\u3000\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Coverage: #} with trailing whitespace before newline', () => {
@@ -923,6 +955,19 @@ end_unwind_protect`;
 
     test('should close #{ block comment when #} has trailing tab before newline', () => {
       const source = '#{\ncomment\n#}\t\nfor i = 1:5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should close #{ block comment when #} has trailing NBSP before newline', () => {
+      // Same Unicode-whitespace acceptance as %} above.
+      const source = '#{\nbody\n#}\u00a0\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should close #{ block comment when #} has trailing ideographic space before newline', () => {
+      const source = '#{\nbody\n#}\u3000\nfor i = 1:5\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
     });
