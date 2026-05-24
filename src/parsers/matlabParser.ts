@@ -516,15 +516,17 @@ export class MatlabBlockParser extends BaseBlockParser {
     return isAtLineStartForSectionKeyword(source, position);
   }
 
-  // Advances past spaces/tabs and `...` line continuations starting at `from`,
-  // returning the offset of the first significant character. A `...` continuation
-  // is recorded as an excluded region whose `start` is the first `.` and whose `end`
-  // is the line terminator; this skips the whole region plus the trailing newline so
-  // that, e.g., `properties ...\n= 5` is seen as `properties = 5`.
+  // Advances past horizontal whitespace and `...` line continuations starting at `from`,
+  // returning the offset of the first significant character. Horizontal whitespace covers
+  // ASCII space/tab as well as `\v`, `\f`, and Unicode whitespace (NBSP, em space, etc.)
+  // via `isHorizontalWhitespace`, mirroring the broader whitespace handling used elsewhere
+  // in the parser. A `...` continuation is recorded as an excluded region whose `start` is
+  // the first `.` and whose `end` is the line terminator; this skips the whole region plus
+  // the trailing newline so that, e.g., `properties ...\n= 5` is seen as `properties = 5`.
   private skipWhitespaceAndContinuations(source: string, from: number, excludedRegions: ExcludedRegion[]): number {
     let i = from;
     while (i < source.length) {
-      if (source[i] === ' ' || source[i] === '\t') {
+      if (isHorizontalWhitespace(source[i])) {
         i++;
         continue;
       }
