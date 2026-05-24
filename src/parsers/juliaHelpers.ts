@@ -104,42 +104,7 @@ export function skipPrefixedStringInInterpolation(source: string, pos: number, h
 // `blockKeywords` is forwarded to nested `$()` interpolation handling so backtick
 // macro prefix detection knows which prefixes are reserved.
 export function skipNestedJuliaString(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
-  // Check for triple-quoted string
-  if (source.slice(pos, pos + 3) === '"""') {
-    let i = pos + 3;
-    while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        i = skipJuliaInterpolation(source, i + 2, blockKeywords);
-        continue;
-      }
-      if (source.slice(i, i + 3) === '"""') {
-        return i + 3;
-      }
-      i++;
-    }
-    return i;
-  }
-  // Regular double-quoted string
-  let i = pos + 1;
-  while (i < source.length) {
-    if (source[i] === '\\' && i + 1 < source.length) {
-      i += 2;
-      continue;
-    }
-    if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-      i = skipJuliaInterpolation(source, i + 2, blockKeywords);
-      continue;
-    }
-    if (source[i] === '"') {
-      return i + 1;
-    }
-    i++;
-  }
-  return i;
+  return runInterpolationEngine(source, blockKeywords, makeStringFrame(source, pos));
 }
 
 // Returns true if `source[pos]` (a backtick) is preceded by a valid Julia identifier
@@ -202,120 +167,211 @@ export function isPrecededByCommandMacroPrefix(source: string, pos: number, bloc
 // `blockKeywords` is the full set of block-related reserved words; prefixes matching
 // these are rejected (reserved words cannot be macro names).
 export function skipBacktickString(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
+  return runInterpolationEngine(source, blockKeywords, makeBacktickFrame(source, pos, blockKeywords));
+}
+
+// Skips $() interpolation block, tracking paren depth. `blockKeywords` is forwarded
+// to backtick scanning so command macro prefix detection can reject reserved words.
+export function skipJuliaInterpolation(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
+  return runInterpolationEngine(source, blockKeywords, makeInterpFrame(pos, pos));
+}
+
+// Iterative engine shared by skipJuliaInterpolation, skipNestedJuliaString, and
+// skipBacktickString. Tracks contexts on an explicit stack to avoid mutual recursion,
+// which would overflow on deeply nested inputs like `"$("$( ... )")"` thousands of
+// levels deep. Frames map 1:1 to a single scanner step (`runFrame`). When a frame
+// finds a child construct (`$(...)`, nested `"..."`, backtick command), it pauses
+// itself (saving its updated `i`), pushes a child frame, and the loop resumes with
+// the child. When a frame completes, the next iteration resumes the saved parent.
+type InterpFrame =
+  | { kind: 'interp'; i: number; startPos: number; depth: number }
+  | { kind: 'string'; i: number; triple: boolean }
+  | { kind: 'backtick'; i: number; triple: boolean; isPrefixed: boolean };
+
+// Result of a single scanner step. `done` carries the end position to return to
+// the parent frame (or to the caller, if this is the root frame). `child` carries
+// a new frame to push and run before resuming this frame.
+type FrameStep = { done: number } | { child: InterpFrame };
+
+function makeInterpFrame(pos: number, startPos: number): InterpFrame {
+  return { kind: 'interp', i: pos, startPos, depth: 1 };
+}
+
+function makeStringFrame(source: string, pos: number): InterpFrame {
+  const triple = source.slice(pos, pos + 3) === '"""';
+  return { kind: 'string', i: triple ? pos + 3 : pos + 1, triple };
+}
+
+function makeBacktickFrame(source: string, pos: number, blockKeywords: ReadonlySet<string>): InterpFrame {
+  const triple = source.slice(pos, pos + 3) === '```';
   const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, blockKeywords);
-  // Check for triple backtick
-  if (source.slice(pos, pos + 3) === '```') {
-    let i = pos + 3;
-    while (i < source.length) {
-      if (source[i] === '\\' && i + 1 < source.length) {
-        i += 2;
-        continue;
-      }
-      if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-        i = skipJuliaInterpolation(source, i + 2, blockKeywords);
-        continue;
-      }
-      if (source.slice(i, i + 3) === '```') {
-        let end = i + 3;
-        if (isPrefixed) {
-          while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
-        }
-        return end;
-      }
-      i++;
-    }
-    return i;
-  }
-  // Single backtick
-  let i = pos + 1;
-  while (i < source.length) {
-    if (source[i] === '\\' && i + 1 < source.length) {
+  return { kind: 'backtick', i: triple ? pos + 3 : pos + 1, triple, isPrefixed };
+}
+
+// Skips a `#= ... =#` block comment, returning the position right after `=#`. The
+// caller guarantees `source[start..start+2] === '#='`. Used by the interpolation
+// frame so multi-line comments inside `$()` don't leak into stack-pushed sub-frames.
+function skipNestedBlockComment(source: string, start: number): number {
+  let i = start + 2;
+  let commentDepth = 1;
+  while (i < source.length && commentDepth > 0) {
+    if (source.slice(i, i + 2) === '#=') {
+      commentDepth++;
       i += 2;
       continue;
     }
-    if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
-      i = skipJuliaInterpolation(source, i + 2, blockKeywords);
+    if (source.slice(i, i + 2) === '=#') {
+      commentDepth--;
+      i += 2;
       continue;
-    }
-    if (source[i] === '`') {
-      let end = i + 1;
-      if (isPrefixed) {
-        while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
-      }
-      return end;
     }
     i++;
   }
   return i;
 }
 
-// Skips $() interpolation block, tracking paren depth. `blockKeywords` is forwarded
-// to backtick scanning so command macro prefix detection can reject reserved words.
-export function skipJuliaInterpolation(source: string, pos: number, blockKeywords: ReadonlySet<string>): number {
-  let depth = 1;
-  let i = pos;
-  while (i < source.length && depth > 0) {
-    // Handle #= multi-line comments inside interpolation
-    if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '=') {
+// Advances the given frame by one logical step. Returns either a completion
+// (`{ done: endPos }`) or a child frame to push (`{ child: ... }`). The frame is
+// mutated in-place so resumption picks up where it paused; this keeps the stack
+// representation small (no copy on push).
+function runFrame(source: string, blockKeywords: ReadonlySet<string>, frame: InterpFrame): FrameStep {
+  if (frame.kind === 'interp') {
+    let i = frame.i;
+    while (i < source.length && frame.depth > 0) {
+      // Handle #= multi-line comments inside interpolation
+      if (source[i] === '#' && i + 1 < source.length && source[i + 1] === '=') {
+        i = skipNestedBlockComment(source, i);
+        continue;
+      }
+      // Handle # line comments inside interpolation
+      if (source[i] === '#') {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
+      // Handle char literals inside interpolation (e.g. ')')
+      if (source[i] === "'" && !isTransposeOperator(source, i)) {
+        i = skipCharLiteral(source, i);
+        continue;
+      }
+      // Handle backtick command strings inside interpolation
+      if (source[i] === '`') {
+        frame.i = i;
+        return { child: makeBacktickFrame(source, i, blockKeywords) };
+      }
+      if (source[i] === '(') {
+        frame.depth++;
+        i++;
+        continue;
+      }
+      if (source[i] === ')') {
+        frame.depth--;
+        i++;
+        continue;
+      }
+      if (source[i] === '"') {
+        // Check for prefixed string (string macro like r"...", raw"...", etc.)
+        // Prefixed strings have no interpolation support, so they are skipped inline
+        // (no stack frame needed — the helper is itself iterative).
+        if (i > frame.startPos) {
+          let prefixStart = i - 1;
+          while (prefixStart >= frame.startPos && /[a-zA-Z0-9_]/.test(source[prefixStart])) {
+            prefixStart--;
+          }
+          prefixStart++;
+          if (prefixStart < i && /[a-zA-Z_]/.test(source[prefixStart])) {
+            const prefixText = source.slice(prefixStart, i);
+            i = skipPrefixedStringInInterpolation(source, i, prefixText === 'b');
+            continue;
+          }
+        }
+        frame.i = i;
+        return { child: makeStringFrame(source, i) };
+      }
+      i++;
+    }
+    return { done: i };
+  }
+
+  if (frame.kind === 'string') {
+    let i = frame.i;
+    while (i < source.length) {
+      if (source[i] === '\\' && i + 1 < source.length) {
+        i += 2;
+        continue;
+      }
+      if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
+        frame.i = i + 2;
+        return { child: makeInterpFrame(i + 2, i + 2) };
+      }
+      if (frame.triple) {
+        if (source.slice(i, i + 3) === '"""') {
+          return { done: i + 3 };
+        }
+      } else if (source[i] === '"') {
+        return { done: i + 1 };
+      }
+      i++;
+    }
+    return { done: i };
+  }
+
+  // backtick frame
+  let i = frame.i;
+  while (i < source.length) {
+    if (source[i] === '\\' && i + 1 < source.length) {
       i += 2;
-      let commentDepth = 1;
-      while (i < source.length && commentDepth > 0) {
-        if (source.slice(i, i + 2) === '#=') {
-          commentDepth++;
-          i += 2;
-          continue;
+      continue;
+    }
+    if (source[i] === '$' && i + 1 < source.length && source[i + 1] === '(') {
+      frame.i = i + 2;
+      return { child: makeInterpFrame(i + 2, i + 2) };
+    }
+    if (frame.triple) {
+      if (source.slice(i, i + 3) === '```') {
+        let end = i + 3;
+        if (frame.isPrefixed) {
+          while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
         }
-        if (source.slice(i, i + 2) === '=#') {
-          commentDepth--;
-          i += 2;
-          continue;
-        }
-        i++;
+        return { done: end };
       }
-      continue;
-    }
-    // Handle # line comments inside interpolation
-    if (source[i] === '#') {
-      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
-        i++;
+    } else if (source[i] === '`') {
+      let end = i + 1;
+      if (frame.isPrefixed) {
+        while (end < source.length && /[a-zA-Z0-9_]/.test(source[end])) end++;
       }
-      continue;
-    }
-    // Handle char literals inside interpolation (e.g. ')')
-    if (source[i] === "'" && !isTransposeOperator(source, i)) {
-      i = skipCharLiteral(source, i);
-      continue;
-    }
-    // Handle backtick command strings inside interpolation
-    if (source[i] === '`') {
-      i = skipBacktickString(source, i, blockKeywords);
-      continue;
-    }
-    if (source[i] === '(') {
-      depth++;
-    } else if (source[i] === ')') {
-      depth--;
-    } else if (source[i] === '"') {
-      // Check for prefixed string (string macro like r"...", raw"...", etc.)
-      // Prefixed strings have no interpolation support
-      if (i > pos) {
-        let prefixStart = i - 1;
-        while (prefixStart >= pos && /[a-zA-Z0-9_]/.test(source[prefixStart])) {
-          prefixStart--;
-        }
-        prefixStart++;
-        if (prefixStart < i && /[a-zA-Z_]/.test(source[prefixStart])) {
-          const prefixText = source.slice(prefixStart, i);
-          i = skipPrefixedStringInInterpolation(source, i, prefixText === 'b');
-          continue;
-        }
-      }
-      i = skipNestedJuliaString(source, i, blockKeywords);
-      continue;
+      return { done: end };
     }
     i++;
   }
-  return i;
+  return { done: i };
+}
+
+// Drives the frame stack to completion. Repeatedly steps the top frame: on
+// completion, pops and forwards the end position to the new top; on child push,
+// stacks the child without touching the parent's saved cursor. Returns the final
+// end position of the root frame.
+function runInterpolationEngine(source: string, blockKeywords: ReadonlySet<string>, root: InterpFrame): number {
+  const stack: InterpFrame[] = [root];
+  let lastDone = root.i;
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1];
+    const step = runFrame(source, blockKeywords, top);
+    if ('done' in step) {
+      lastDone = step.done;
+      stack.pop();
+      // Hand the child's end position back to the new top frame so it resumes
+      // scanning after the child construct. For the root frame, this becomes the
+      // function's return value.
+      if (stack.length > 0) {
+        stack[stack.length - 1].i = step.done;
+      }
+      continue;
+    }
+    stack.push(step.child);
+  }
+  return lastDone;
 }
 
 // Checks if colon at position starts a symbol (not ternary or type annotation)
