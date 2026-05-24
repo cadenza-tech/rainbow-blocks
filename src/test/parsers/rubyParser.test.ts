@@ -4540,6 +4540,35 @@ end`;
     });
   });
 
+  suite('Regression: range operator followed by newline and end', () => {
+    test('should not pair def with stray end after range operator on previous line ((1..\\n  end))', () => {
+      // Bug: `end` after a range operator (`..`) with a line break between them was
+      // tokenized as block_close because isPrecededByRangeOperator only skipped spaces
+      // and tabs, not newlines. `end` is a reserved word and cannot be the RHS of a
+      // range expression, so this is invalid Ruby. Per cost-minimization, skip newlines
+      // (`\n`, `\r`, `\r\n`) while scanning back so the stray `end` is filtered.
+      const source = 'def m\n  arr = (1..\n  end)\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The real outer `end` (last occurrence) should be the close.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after range operator with CRLF newline', () => {
+      const source = 'def m\r\n  arr = (1..\r\n  end)\r\n  body\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after triple-dot range operator (1...\\n  end)', () => {
+      const source = 'def m\n  arr = (1...\n  end)\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: class <<Foo singleton class should not be parsed as heredoc', () => {
     test('should treat class <<Foo (space before, no space after) as singleton class, not heredoc', () => {
       // Bug: `class <<Foo` was misinterpreted as a heredoc opener (`<<Foo` looking for
