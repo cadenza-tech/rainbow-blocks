@@ -842,11 +842,13 @@ export class AdaBlockParser extends BaseBlockParser {
             prevPos--;
           }
         }
+        // The `select` reserved keyword must occupy the six characters ending
+        // at `prevPos` with Ada word boundaries on both sides. `isAdaWordAt`
+        // is Unicode-aware (Ada LRM 2.3): a non-ASCII letter such as α
+        // counts as an identifier character, so identifiers ending in
+        // `select` (e.g. `αselect`) are not mistaken for the reserved word.
         const selectStart = prevPos - 5;
-        const atSelectKeyword =
-          prevPos >= 5 &&
-          source.slice(selectStart, prevPos + 1).toLowerCase() === 'select' &&
-          (selectStart === 0 || !/[a-zA-Z0-9_]/.test(source[selectStart - 1]));
+        const atSelectKeyword = prevPos >= 5 && isAdaWordAt(source, selectStart, 'select');
         if (prevPos >= 0 && (source[prevPos] === ';' || atSelectKeyword)) {
           // 'or' follows a statement or 'select' keyword (select block context), keep both as intermediates
         } else if (isOrElseShortCircuit(source, orToken.endOffset, token.startOffset, (pos) => this.isInExcludedRegion(pos, excludedRegions))) {
@@ -880,11 +882,12 @@ export class AdaBlockParser extends BaseBlockParser {
               prevPos--;
             }
           }
+          // Unicode-aware boundary via `isAdaWordAt` (see matching note in
+          // the `or else` branch above): identifiers ending in `select`
+          // after a non-ASCII letter must not be confused with the
+          // `select` reserved keyword.
           const selectStart = prevPos - 5;
-          const atSelectKeyword =
-            prevPos >= 5 &&
-            source.slice(selectStart, prevPos + 1).toLowerCase() === 'select' &&
-            (selectStart === 0 || !/[a-zA-Z0-9_]/.test(source[selectStart - 1]));
+          const atSelectKeyword = prevPos >= 5 && isAdaWordAt(source, selectStart, 'select');
           // A select alternative body may be incomplete (no trailing `;`) while
           // the source is being edited. In that case the `or` still delimits a
           // select alternative when it begins its own line and is not part of
