@@ -3038,6 +3038,16 @@ end package;`;
       const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
       assert.strictEqual(beginCount, 1, 'architecture should have one begin intermediate');
     });
+
+    test('should not consume begin into attribute spec view keyword (VHDL-2019 entity_class)', () => {
+      const source =
+        'architecture a of e is\n  attribute keep of bus_view : view is true;\nbegin\n  process is\n  begin\n    null;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const intermediateValues = archPair.intermediates.map((i) => i.value.toLowerCase());
+      assert.deepStrictEqual(intermediateValues, ['is', 'begin'], 'architecture intermediates should be [is, begin]');
+    });
   });
 
   suite('Regression: context_declaration vs context_reference', () => {
