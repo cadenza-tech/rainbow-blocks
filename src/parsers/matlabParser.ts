@@ -657,8 +657,10 @@ export class MatlabBlockParser extends BaseBlockParser {
       // compound assignment (`for + 1;`, `while * 2`, `for += 1`, `if -= 1`). Such forms
       // use the reserved word as an operand or an assignment target, not a block opener;
       // treating them as block_open destroys outer block pairing. Symmetric to the
-      // preceding-operator check above.
-      if (this.isFollowedByBinaryOperator(source, position + keyword.length, keyword)) {
+      // preceding-operator check above. `assignFrom` is already past any `...` line
+      // continuations, so `for ...\n  + 1;` is detected as the same operand form as the
+      // same-line `for + 1;`.
+      if (this.isFollowedByBinaryOperator(source, assignFrom, keyword)) {
         return false;
       }
     }
