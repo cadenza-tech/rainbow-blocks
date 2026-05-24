@@ -266,8 +266,24 @@ export class MatlabBlockParser extends BaseBlockParser {
       if (MatlabBlockParser.BLOCK_OPENERS_TAKING_LINE_HEADER.has(leading)) {
         return false;
       }
+      // Middle keywords (else/elseif/case/otherwise/catch) introduce a new statement
+      // within their enclosing block. When `end` appears on the same logical line as
+      // a leading middle keyword (e.g. `else end`), it is the legitimate block close
+      // for the enclosing block, not a value continuation.
+      if (this.getMiddleKeywordsAsLineLeaders().has(leading)) {
+        return false;
+      }
     }
     return true;
+  }
+
+  // Middle keywords that may appear as the leading identifier of a logical line followed
+  // by `end` on the same line (e.g. `else end`, `catch end`). Octave extends this set
+  // via getMiddleKeywordsAsLineLeaders() to add `unwind_protect_cleanup`.
+  protected static readonly MIDDLE_KEYWORDS_AS_LINE_LEADERS: ReadonlySet<string> = new Set(['else', 'elseif', 'case', 'otherwise', 'catch']);
+
+  protected getMiddleKeywordsAsLineLeaders(): ReadonlySet<string> {
+    return MatlabBlockParser.MIDDLE_KEYWORDS_AS_LINE_LEADERS;
   }
 
   // Block openers whose header may legitimately span a `...` line continuation and
@@ -285,7 +301,9 @@ export class MatlabBlockParser extends BaseBlockParser {
     'properties',
     'events',
     'enumeration',
-    'arguments'
+    'arguments',
+    // Octave-specific opener. Harmless on MATLAB (which does not use the keyword).
+    'unwind_protect'
   ]);
 
   // Header keywords that take an expression on the same logical line. When `end`

@@ -3235,5 +3235,25 @@ end`;
     });
   });
 
+  suite('Middle keyword followed by end on same line', () => {
+    test('should pair if/end when else is followed by end on the same line', () => {
+      const source = 'if x\nelse end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair switch/end when case is followed by end on the same line', () => {
+      const source = 'switch x\ncase 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+    });
+
+    test('should pair try/end when catch is followed by end on the same line', () => {
+      const source = 'try\ncatch end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
