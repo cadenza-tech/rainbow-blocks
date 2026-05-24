@@ -764,6 +764,120 @@ export class VhdlBlockParser extends BaseBlockParser {
     return result;
   }
 
+  // Detects a multi-line function/procedure header: `function/procedure <name> (... params ...) [return T] is`
+  // where the parameter list spans more lines than the 5-line lookback used for type/subtype detection.
+  // From `position` (the `is` offset), scans backward past whitespace, comments, an optional
+  // `return <type>` clause, and the matching parenthesized parameter list. If the prefix before
+  // the parameter list starts with `function` or `procedure` (after skipping the subprogram name
+  // and optional designator characters), returns true. Returns false when no `(` is found, parens
+  // are unbalanced, or the prefix is not a subprogram declaration. The scan honors excluded regions
+  // (block/line comments and string literals) so paren counting is not fooled by literal `(` / `)`.
+  private isPrecededByMultiLineSubprogramHeader(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Walk back from `position - 1` skipping whitespace, newlines, and excluded regions
+    // until we hit a non-whitespace character.
+    const skipBackwardWs = (start: number): number => {
+      let i = start;
+      while (i >= 0) {
+        if (this.isInExcludedRegion(i, excludedRegions)) {
+          const region = this.findExcludedRegionAt(i, excludedRegions);
+          if (region) {
+            i = region.start - 1;
+            continue;
+          }
+        }
+        const ch = source[i];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+          i--;
+          continue;
+        }
+        break;
+      }
+      return i;
+    };
+
+    let i = skipBackwardWs(position - 1);
+    if (i < 0) return false;
+
+    // Skip an optional `return <type>` clause: walk back through an identifier (the type),
+    // then whitespace, then look for `return`. The type can be a selected name with `.`,
+    // so allow `.` and `[a-zA-Z0-9_]` characters.
+    const ident = /[a-zA-Z0-9_.]/;
+    if (ident.test(source[i])) {
+      const identStartExclusive = (() => {
+        let j = i;
+        while (j >= 0 && ident.test(source[j])) j--;
+        return j;
+      })();
+      const word = source.slice(identStartExclusive + 1, i + 1).toLowerCase();
+      i = identStartExclusive;
+      // `return` itself preceding the `is` (no explicit return type) is unusual but treat as
+      // matched and continue to the `)` check.
+      if (word !== 'return') {
+        const beforeType = skipBackwardWs(i);
+        if (beforeType < 5) return false;
+        const returnSlice = source.slice(beforeType - 5, beforeType + 1).toLowerCase();
+        const isReturnWord =
+          returnSlice === 'return' &&
+          (beforeType - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[beforeType - 6])) &&
+          (beforeType + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[beforeType + 1]));
+        if (!isReturnWord) return false;
+        i = beforeType - 6;
+      }
+      i = skipBackwardWs(i);
+    }
+
+    // Expect `)` (end of parameter list) at position `i`.
+    if (i < 0 || source[i] !== ')') return false;
+    if (this.isInExcludedRegion(i, excludedRegions)) return false;
+    // Walk back matching parens. Each `)` increments depth, each `(` decrements.
+    let depth = 1;
+    i--;
+    while (i >= 0 && depth > 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ')') depth++;
+      else if (ch === '(') depth--;
+      i--;
+    }
+    if (depth !== 0) return false;
+    // i now points to the char just before the matching `(`.
+    i = skipBackwardWs(i);
+    if (i < 0) return false;
+
+    // Skip the subprogram designator: an identifier or operator-symbol (a quoted string
+    // like `"="`). For an identifier walk back through `[a-zA-Z0-9_]`. For a quoted
+    // designator the closing `"` is already in an excluded region, so skipBackwardWs
+    // would have moved past it; check the char at i directly. If we land on either,
+    // continue scanning back.
+    if (ident.test(source[i])) {
+      while (i >= 0 && ident.test(source[i])) i--;
+    } else if (source[i] !== '"') {
+      return false;
+    }
+    // For an operator-symbol designator (`"="` etc.), skipBackwardWs has already
+    // jumped before the quoted region (it is an excluded region), so no extra step is needed.
+    i = skipBackwardWs(i);
+    if (i < 3) return false;
+
+    // Check for `function` (8 chars) or `procedure` (9 chars) ending at i.
+    // The keyword's last char is at position i.
+    for (const kw of ['function', 'procedure']) {
+      const len = kw.length;
+      if (i - len + 1 < 0) continue;
+      const slice = source.slice(i - len + 1, i + 1).toLowerCase();
+      if (slice === kw && (i - len < 0 || !/[a-zA-Z0-9_]/.test(source[i - len]))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Checks whether the inclusive source range [lineStart, lineEnd] contains a
   // standalone `is` keyword (case-insensitive, word-bounded) outside excluded regions.
   // Used to detect that a block-opener header line already has its own `is`.
@@ -955,6 +1069,16 @@ export class VhdlBlockParser extends BaseBlockParser {
         // first statement, NOT a declaration form — applying the filter would drop the legitimate
         // block intermediate.
         let isSubprogramHeaderIs = /^(function|procedure)\b/.test(stmtBefore);
+        // Detect multi-line subprogram header (LRM 4.2): `procedure/function <name> (...) [return T] is`
+        // where the parameter list pushes the header more than 5 lines above the closing `is`.
+        // The 5-line lookback below is intentionally narrow for type/subtype/attribute detection
+        // (BUG4), so for subprogram detection we do a separate paren-aware backward walk that
+        // is unbounded by line count. This enables the `is null;` / `is (expr);` / `is new ...`
+        // filters to apply to long-parameter subprograms without changing the type/subtype
+        // 5-line behavior.
+        if (!isSubprogramHeaderIs && this.isPrecededByMultiLineSubprogramHeader(source, startOffset, excludedRegions)) {
+          isSubprogramHeaderIs = true;
+        }
         if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore) || /^\w+\s*$/.test(stmtBefore)) {
           let skipThisIs = false;
           let scanPos = lineStart - 1;
