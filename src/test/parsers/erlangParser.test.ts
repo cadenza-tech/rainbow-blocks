@@ -3200,5 +3200,40 @@ foo() ->
     });
   });
 
+  suite('Regression: isCatchFollowedByClausePattern depth tracking for brackets and semicolons', () => {
+    // Bug: isCatchFollowedByClausePattern bails out at the first top-level ';' it sees,
+    // but does not track nested parens/brackets/braces/binaries. When 'catch' is followed
+    // by a guard sequence with ';' at depth > 0 (e.g. 'when is_atom(R); is_list(R)'),
+    // the forward scan must skip past the ';' inside the guard before deciding whether
+    // a top-level '->' arrow exists.
+    test('should treat catch as intermediate when followed by guard with semicolon inside parens', () => {
+      const source = 'f() -> try foo() catch error:R when is_atom(R); is_list(R) -> R end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should treat catch as intermediate when guard has semicolon inside brackets', () => {
+      const source = 'f() -> try foo() catch error:R when lists:member(R, [a; b]) -> R end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should treat catch as intermediate when guard has semicolon inside braces', () => {
+      const source = 'f() -> try foo() catch error:R when R =:= {a; b} -> R end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should treat catch as intermediate when guard has semicolon inside binary', () => {
+      const source = 'f() -> try foo() catch error:R when R =:= <<1; 2>> -> R end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+  });
+
   generateCommonTests(config);
 });
