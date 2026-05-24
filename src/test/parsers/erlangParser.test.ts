@@ -3200,6 +3200,27 @@ foo() ->
     });
   });
 
+  suite('Regression: Unicode attribute names in buildAttributeSpans', () => {
+    // Bug: buildAttributeSpans uses the ASCII-only pattern [a-zA-Z_][a-zA-Z0-9_]* for
+    // attribute names, so Unicode-named attributes like -définé(...) are not recognized.
+    // Keywords inside their arguments are then incorrectly tokenized as block keywords.
+    test('should filter keywords inside Unicode-named attribute arguments', () => {
+      const source = '-définé(begin, end).\nbegin ok end';
+      const pairs = parser.parse(source);
+      // Only the real begin/end after the attribute should be paired; the begin/end
+      // inside the attribute args must be filtered.
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should filter keywords inside attribute named with non-Latin script', () => {
+      const source = '-アトリビュート(begin, end).\nbegin ok end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: -define body keyword analysis should scale linearly', () => {
     // Bug: isBareReservedWordInDefineBody scans the entire -define body for each block keyword
     // inside, producing O(N^2) cost when -define contains many block keywords.
