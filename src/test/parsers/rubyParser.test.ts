@@ -4540,5 +4540,32 @@ end`;
     });
   });
 
+  suite('Regression: Unicode identifier before / division operator', () => {
+    test('should treat / after Unicode identifier as division (not regex start)', () => {
+      // Bug: `/` after a non-ASCII identifier (e.g., `メソッド / 2`) was treated as a regex
+      // literal opener because DIVISION_PRECEDERS_PATTERN only matched ASCII identifier
+      // characters. The regex literal then swallowed the closing `end`, leaving the
+      // outer `def` unpaired. Recognize Unicode identifier-continue characters as
+      // division-preceders so `/` stays division and `def`/`end` pair correctly.
+      const source = 'def m\n  x = メソッド / 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after Greek letter identifier as division (not regex start)', () => {
+      const source = 'def m\n  x = α / 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat / after surrogate-pair identifier as division (not regex start)', () => {
+      // Codepoints outside BMP (e.g., mathematical bold letters) use surrogate pairs in
+      // UTF-16. Ensure such trailing identifier characters also trigger division detection.
+      const source = 'def m\n  x = \u{1D400} / 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
