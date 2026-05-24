@@ -3802,6 +3802,70 @@ fi`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'fi');
     });
+
+    test('should match heredoc with brace delimiter', () => {
+      const source = `cat <<{
+for i in 1; do echo hi; done
+{
+if true; then echo ok; fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with at-sign delimiter', () => {
+      const source = `cat <<@END
+for i in 1; do echo hi; done
+@END
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with caret delimiter', () => {
+      const source = `cat <<^MARK
+for i in 1; do echo hi; done
+^MARK
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with tilde delimiter', () => {
+      const source = `cat <<~END
+for i in 1; do echo hi; done
+~END
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with slash delimiter', () => {
+      const source = `cat <</END
+for i in 1; do echo hi; done
+/END
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should match heredoc with bracket delimiter', () => {
+      const source = `cat <<[END
+for i in 1; do echo hi; done
+[END
+if true; then
+  echo ok
+fi`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
   });
 
   // Bug 5: >>( incorrectly treated as process substitution
