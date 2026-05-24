@@ -18,8 +18,31 @@ const PAIRED_DELIMITERS: Readonly<Record<string, string>> = {
   '<': '>'
 };
 
-// Characters that indicate the preceding / is division, not regex
-const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$]/;
+// Characters that indicate the preceding / is division, not regex.
+// Includes Unicode identifier-continue (Letter, Mark, Number, Connector Punctuation)
+// so non-ASCII identifiers (e.g. `メソッド / 2`, `α / 2`) trigger division detection
+// instead of being treated as regex starts. Surrogate-pair codepoints (e.g. mathematical
+// bold letters) are handled by the explicit codepoint check in isDivisionPreceder below.
+const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$\p{L}\p{M}\p{N}\p{Pc}]/u;
+
+// Unicode identifier-continue character class for surrogate-pair codepoint checks.
+const UNICODE_IDENT_CONTINUE_PATTERN = /[\p{L}\p{M}\p{N}\p{Pc}]/u;
+
+// Returns true when the character at index `pos` is a division-preceder. Handles
+// surrogate pairs: when `source[pos]` is a low surrogate (U+DC00-U+DFFF) and is
+// preceded by a high surrogate, combine the pair into a codepoint and test the
+// codepoint against the Unicode identifier-continue class.
+function isDivisionPreceder(source: string, pos: number): boolean {
+  const ch = source[pos];
+  if (DIVISION_PRECEDERS_PATTERN.test(ch)) return true;
+  if (pos >= 1 && ch >= '\uDC00' && ch <= '\uDFFF') {
+    const cp = source.codePointAt(pos - 1);
+    if (cp !== undefined && cp > 0xffff) {
+      return UNICODE_IDENT_CONTINUE_PATTERN.test(String.fromCodePoint(cp));
+    }
+  }
+  return false;
+}
 
 // Closing bracket characters (reserved as paired-delimiter closers, never valid as openers)
 const CLOSE_BRACKET_CHARS: ReadonlySet<string> = new Set([')', ']', '}', '>']);
@@ -104,7 +127,7 @@ export function isRegexStart(
   }
 
   // After these characters, / is likely division
-  if (!DIVISION_PRECEDERS_PATTERN.test(source[i])) {
+  if (!isDivisionPreceder(source, i)) {
     // If preceded by $, it's a special global variable ($~, $&, $+, etc.), / is division
     if (i > 0 && source[i - 1] === '$') {
       return false;
