@@ -3165,5 +3165,44 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-25: PERFORM decimal-literal TIMES is a structured block', () => {
+    // Bug: `PERFORM 5.5 TIMES ... END-PERFORM` was misclassified as a paragraph
+    // call and the END-PERFORM left orphan. The `nextWord` regex used in
+    // computeValidPositions to peek at the operand after PERFORM stops at the
+    // first `.`, so `5.5` was read as `5` and the trailing `.5 TIMES` lookahead
+    // failed to find the TIMES verb. Per cost-minimisation, when the operand is
+    // a numeric literal we must skip its decimal (`.digits`) and scientific
+    // (`E[+-]?digits`) tail before scanning for the TIMES verb, so the
+    // structured PERFORM is recognised and the END-PERFORM is paired.
+    test('should pair PERFORM with END-PERFORM when the count is a decimal literal', () => {
+      const source = 'PERFORM 5.5 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should pair PERFORM with END-PERFORM when the count is a decimal literal starting with zero', () => {
+      const source = 'PERFORM 0.5 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should pair PERFORM with END-PERFORM when the count is a scientific-notation literal', () => {
+      const source = 'PERFORM 1.5E2 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should pair PERFORM with END-PERFORM when the count is a signed-exponent scientific literal', () => {
+      const source = 'PERFORM 1.5E+2 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+    test('should reject PERFORM paragraph decimal-count TIMES as block', () => {
+      // Guard: `PERFORM PARA-A 5.5 TIMES` is still a paragraph call with an
+      // iteration count, so the END-PERFORM must remain orphan and the IF/PERFORM
+      // stay rejected (same behaviour as `PERFORM PARA-A 5 TIMES`).
+      const source = 'PERFORM PARA-A 5.5 TIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
