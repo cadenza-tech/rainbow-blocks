@@ -79,10 +79,26 @@ export class LuaBlockParser extends BaseBlockParser {
       // validation regex disallows `.` in the swept range, so numbers that
       // already contain a decimal point (e.g., `3.14.end`, `1.5e2.end`) are
       // rejected because adding another `.` would be invalid Lua syntax.
+      // We also step over an exponent sign (`+`/`-`) when its preceding char
+      // is an exponent marker (`e`/`E` for decimal, `p`/`P` for hex) AND the
+      // marker itself is preceded by a hex digit, so the validation regex
+      // sees the full prefix (e.g. `1e+5`, `0x1p+5`). Without this, walk-back
+      // stops at `+`/`-`, captures only the trailing digits, and falsely
+      // accepts them as a numeric prefix even though Lua syntax forbids a
+      // fractional part after the exponent.
       if (i >= 1 && /[0-9a-fA-F]/.test(source[i - 1])) {
         let k = i - 1;
-        while (k > 0 && /[a-zA-Z0-9_.]/.test(source[k - 1])) {
-          k--;
+        while (k > 0) {
+          const prev = source[k - 1];
+          if (/[a-zA-Z0-9_.]/.test(prev)) {
+            k--;
+            continue;
+          }
+          if ((prev === '+' || prev === '-') && k >= 2 && /[eEpP]/.test(source[k - 2]) && /[0-9a-fA-F]/.test(source[k - 3] ?? '')) {
+            k -= 2;
+            continue;
+          }
+          break;
         }
         if (LUA_NUMBER_TRAILING_DOT_PREFIX.test(source.slice(k, i))) {
           // Numeric literal — could be decimal (1.) or hex (0x1A.).
