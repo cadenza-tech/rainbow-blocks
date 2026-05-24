@@ -1447,8 +1447,13 @@ export class FortranBlockParser extends BaseBlockParser {
           // If no compound match found, only fallback for simple 'end' (not compound end keywords)
           // Skip blocks that require their own typed close keyword (e.g., select/where/forall):
           // a bare `end` should never close a select/where/forall — the typed close must follow.
+          // Fortran spec requires the typed close for:
+          //   - `select` / `where` / `forall` / `critical` / `associate`
+          //   - `change team` (Fortran 2018) — must close with `end team`
+          //   - `block` construct (Fortran 2008) — must close with `end block`
+          //   - `enum` (Fortran 2003) — must close with `end enum`
           if (matchIndex < 0 && !compoundMatch && stack.length > 0) {
-            const STRICT_CLOSE_OPENERS = new Set(['select', 'where', 'forall', 'critical', 'associate']);
+            const STRICT_CLOSE_OPENERS = new Set(['select', 'where', 'forall', 'critical', 'associate', 'team', 'block', 'enum']);
             if (!STRICT_CLOSE_OPENERS.has(stack[stack.length - 1].token.value.toLowerCase())) {
               matchIndex = stack.length - 1;
             }
