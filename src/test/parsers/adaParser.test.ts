@@ -2169,6 +2169,43 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-25: select keyword boundary must be Unicode-aware', () => {
+    test('should not treat boolean or after Unicode-prefixed select identifier as a select intermediate', () => {
+      // `αselect` is a single Ada identifier (Greek alpha is a word
+      // character per Ada LRM 2.3). The boundary check before the bare-or
+      // filter must recognise `α` as a word char so the trailing 6 chars
+      // `select` are not mistaken for the `select` reserved keyword.
+      // Without Unicode-awareness the ASCII-only boundary regex treats
+      // `α` as non-word and the bare `or` inside `αselect or Y;` is
+      // wrongly retained as a select alternative intermediate.
+      const source = 'select\n  X := αselect or Y;\n  null;\nor B;\nend select;';
+      const pairs = parser.parse(source);
+      const selectBlock = findBlock(pairs, 'select');
+      const orCount = selectBlock.intermediates.filter((t) => t.value.toLowerCase() === 'or').length;
+      assert.strictEqual(orCount, 1, `select should have exactly one or intermediate (the trailing alternative), got ${orCount}`);
+    });
+
+    test('should not treat or-else after Unicode-prefixed select identifier as a select alternative pair', () => {
+      // Same scenario for the `or else` short-circuit branch: the
+      // ASCII-only boundary check falsely identifies the last 6 chars of
+      // `αselect` as the `select` keyword and prevents the short-circuit
+      // collapse, leaving `or` and `else` as intermediates of the
+      // surrounding if.
+      const source = 'if X = αselect or else Y then\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const intermediateValues = ifBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(
+        !intermediateValues.includes('or'),
+        `if intermediates should not include 'or' (collapsed by or-else short-circuit), got: ${intermediateValues.join(', ')}`
+      );
+      assert.ok(
+        !intermediateValues.includes('else'),
+        `if intermediates should not include 'else' (collapsed by or-else short-circuit), got: ${intermediateValues.join(', ')}`
+      );
+    });
+  });
+
   suite('Branch coverage: findExcludedRegionAt null fallback and isOrElseShortCircuit comment', () => {
     // Lines 514-522: backward scan from 'then' crossing excluded regions (comments)
     // The loop at lines 515-521 calls isInExcludedRegion then findExcludedRegionAt.
