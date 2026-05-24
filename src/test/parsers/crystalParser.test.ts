@@ -4604,5 +4604,26 @@ end`;
     });
   });
 
+  suite('Regression: end immediately after ternary ? should not be tokenized as block_close', () => {
+    test('should not pair def with end in ternary first-value position', () => {
+      // `cond ? end : a` puts `end` in the value position immediately after `?`.
+      // `end` is a reserved word and cannot be a value, so it must not be
+      // tokenized as block_close. The outer `def` must pair with the trailing
+      // `end` on the last line, not the in-ternary one.
+      const source = 'def foo\n  x = cond ? end : a\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with end after ? with whitespace', () => {
+      // Whitespace between `?` and `end` does not change the analysis.
+      const source = 'def foo\n  x = cond ?  end : a\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
