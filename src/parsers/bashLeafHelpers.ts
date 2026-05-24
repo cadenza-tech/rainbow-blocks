@@ -48,9 +48,12 @@ export function matchesWord(source: string, pos: number, word: string): boolean 
 // allowed by real bash plus any Unicode letter or number (so `<<XYΖ`, `<<終`,
 // `<<EOFвыход` are accepted just like ASCII identifiers). The leading-character
 // pattern omits `-` so a stray `-` doesn't open the bare word (it would be parsed
-// as the `<<-` strip-tabs operator already consumed by `opMatch`).
-const HEREDOC_DELIM_BARE_FIRST = /[\p{L}\p{N}_.+:%,=!*?]/u;
-const HEREDOC_DELIM_BARE_REST = /[\p{L}\p{N}_\-.+:%,=!*?]/u;
+// as the `<<-` strip-tabs operator already consumed by `opMatch`). Includes the
+// extra non-meta punctuation `{ } [ ] @ ~ ^ /` that real bash also accepts as part
+// of an unquoted word (so `<<{`, `<<@END`, `<<^MARK`, `<<~END`, `<</END`, `<<[END`
+// are recognised as heredoc operators).
+const HEREDOC_DELIM_BARE_FIRST = /[\p{L}\p{N}_.+:%,=!*?{}[\]@~^/]/u;
+const HEREDOC_DELIM_BARE_REST = /[\p{L}\p{N}_\-.+:%,=!*?{}[\]@~^/]/u;
 // Backslash-escaped character continuation: anything except whitespace, quotes,
 // or backslash terminates the run. Unicode-letter aware via negation only.
 const HEREDOC_DELIM_BACKSLASH_TERMINATOR = /[\s'"\\]/;
