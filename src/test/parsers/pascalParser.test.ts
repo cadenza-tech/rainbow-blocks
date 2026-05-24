@@ -3566,5 +3566,21 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-25: recordContextMap corruption', () => {
+    test('should not treat Foo.record field access as block opener', () => {
+      // `Foo.record` is a field access (the identifier `record` reached via `.`),
+      // not a record block opener. Without a field-access dot guard inside
+      // buildRecordContextMap, the keyword pushes 'record' onto the stack, and the
+      // following inner `end` pops it instead of the case block, so the standalone
+      // `case` is misclassified as a variant case and no case..end pair is produced.
+      const source = `X := Foo.record;
+case Y of
+  1: a;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
