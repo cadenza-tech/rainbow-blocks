@@ -5,9 +5,10 @@ import type { JuliaHelperCallbacks } from './juliaHelpers';
 import { isIndexingBracket, isTransposeOperator } from './juliaHelpers';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
-// Checks whether the character at `pos` is the start of a binary operator that can
-// follow `end` as lastindex (e.g., `!=`, `==`, `+`, `-`, `<`, `>`, `<=`, `>=`, `:`,
-// `&`, `&&`, `|`, `||`, `=>`). The colon case excludes `::` (type assertion) because
+// Checks whether the character at `pos` is the start of a binary or postfix operator
+// that can follow `end` as lastindex (e.g., `!=`, `==`, `+`, `-`, `<`, `>`, `<=`, `>=`,
+// `:`, `&`, `&&`, `|`, `||`, `=>`, `\` left-division, `'` transpose, `.` broadcast
+// prefix, Unicode operators). The colon case excludes `::` (type assertion) because
 // the parser already classifies `end::` via isPrecededByBinaryOperator on the closing
 // side; here we only care about the bare range/Pair-start `:`. This must stay in sync
 // with isPrecededByBinaryOperator so that `<op>end<op>` is rejected from both sides
@@ -28,9 +29,23 @@ function isBinaryOperatorStart(source: string, pos: number): boolean {
   if (c === '/') return true;
   if (c === '%') return true;
   if (c === '^') return true;
+  // Left division operator: `end \ 2` is lastindex left-divided by 2.
+  if (c === '\\') return true;
   if (c === ':' && c2 !== ':') return true;
   if (c === '&') return true;
   if (c === '|') return true;
+  // Postfix transpose: `end'` is transpose(lastindex). Treated as an operator so
+  // `arr[end' == x]` recognizes the inner `end` as lastindex rather than a block close.
+  if (c === "'") return true;
+  // Broadcast operator prefix: `end .+ 1`, `end .== x`. `.` followed by an ASCII
+  // operator character (or `=`) is a broadcasted operator. `end` cannot have field
+  // access (it's a numeric lastindex value inside indexing brackets), so `.` here
+  // is always a broadcast prefix.
+  if (c === '.' && c2 !== '' && /[!%&*+\-/<=>?\\^|~]/.test(c2)) return true;
+  // Unicode operators (math symbols outside the ASCII range), e.g., × U+00D7, ÷
+  // U+00F7. Identifiers are excluded via the keyword-boundary check upstream, so a
+  // non-ASCII char reaching here is an operator.
+  if (c !== undefined && c.charCodeAt(0) > 127 && !/[\p{L}\p{N}]/u.test(c)) return true;
   return false;
 }
 
