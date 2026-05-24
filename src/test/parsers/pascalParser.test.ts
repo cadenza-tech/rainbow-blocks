@@ -3592,6 +3592,20 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'end');
     });
+
+    test('should not treat := object as open-record context', () => {
+      // `X := object;` is an assignment whose right-hand-side mentions `object` (as an
+      // identifier or expression value). The `=` reached by scanning backward from
+      // `object` belongs to the assignment operator `:=`, not a type definition `=`.
+      // Without an assignment-operator guard, the keyword is classified as 'open-record'
+      // and the surrounding case..end pair is broken.
+      const source = `X := object;
+case Y of
+  1: a;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
   });
 
   generateCommonTests(config);
