@@ -39,13 +39,37 @@ function macroCloserOnSameLine(source: string, heredocOpenerPos: number, closer:
   return false;
 }
 
+// Checks whether `source[i]` is the delimiter character of a `?<delim>` char
+// literal (e.g. the `#` in `?#`, the `"` in `?"`, the `/` in `?/`). When true,
+// the macro scanner must NOT treat `<delim>` as the start of a comment, string,
+// backtick, or regex — otherwise the scanner reads to a non-existent terminator
+// and the macro body engulfs the rest of the file. Mirrors the char-literal
+// recognition in tryMatchExcludedRegion (crystalParser.ts): the `?` at `i-1`
+// must be preceded by a non-identifier, non-receiver character (or be the very
+// first char of the macro body, since `{%`/`{{` themselves are not identifier
+// continuations).
+function isMacroCharLiteralBody(source: string, i: number, bodyStart: number): boolean {
+  if (i < bodyStart + 1) return false;
+  if (source[i - 1] !== '?') return false;
+  if (i - 1 === bodyStart) return true;
+  return !/[a-zA-Z0-9_)\]}$@]/.test(source[i - 2]);
+}
+
 // Matches macro template {% %} or {{ }}, handling strings and comments inside
 export function matchMacroTemplate(source: string, pos: number): ExcludedRegion | null {
   // {% ... %}
   if (source.slice(pos, pos + 2) === '{%') {
-    let i = pos + 2;
+    const bodyStart = pos + 2;
+    let i = bodyStart;
     while (i < source.length) {
       const char = source[i];
+      // Skip char literals `?<delim>` so the delimiter is not misread as the
+      // start of a comment / string / backtick / regex. Must come before the
+      // `#`/`"`/`'`/`` ` ``/`/` branches below.
+      if (isMacroCharLiteralBody(source, i, bodyStart)) {
+        i++;
+        continue;
+      }
       // Skip comments inside macro template
       if (char === '#') {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
@@ -73,7 +97,7 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         }
       }
       // Skip regex literals (/.../) when at expression start position
-      if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
+      if (char === '/' && isMacroRegexStart(source, i, bodyStart)) {
         i = skipRegexLiteral(source, i);
         continue;
       }
@@ -95,11 +119,19 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
 
   // {{ ... }} (but not {{% which is { followed by {% ... %})
   if (source.slice(pos, pos + 2) === '{{' && (pos + 2 >= source.length || source[pos + 2] !== '%')) {
-    let i = pos + 2;
+    const bodyStart = pos + 2;
+    let i = bodyStart;
     let depth = 1;
     let singleBraceDepth = 0;
     while (i < source.length && depth > 0) {
       const char = source[i];
+      // Skip char literals `?<delim>` so the delimiter is not misread as the
+      // start of a comment / string / backtick / regex. Must come before the
+      // `#`/`"`/`'`/`` ` ``/`/` branches below.
+      if (isMacroCharLiteralBody(source, i, bodyStart)) {
+        i++;
+        continue;
+      }
       // Skip comments inside macro template
       if (char === '#') {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
@@ -127,7 +159,7 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         }
       }
       // Skip regex literals (/.../) when at expression start position
-      if (char === '/' && isMacroRegexStart(source, i, pos + 2)) {
+      if (char === '/' && isMacroRegexStart(source, i, bodyStart)) {
         i = skipRegexLiteral(source, i);
         continue;
       }
