@@ -129,6 +129,25 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
       // word is not a Ruby keyword (method call: puts <<EOF, but not 1 <<if)
       // After identifier/number with NO space (shift pattern: x<<y), reject unless flag
       if (!/[)\]}]/.test(source[i])) {
+        // Special case: `class << expr` is a singleton class opener (defines methods
+        // on a single object's singleton class). The `<<` here is the singleton-class
+        // operator, never a heredoc opener, regardless of spacing around `<<` (the
+        // following identifier may be a Ruby keyword like `self`, a class name, or an
+        // arbitrary expression). Reject heredoc detection so `class`/`end` pair correctly.
+        // `module << expr` is not valid Ruby, but apply the same rule defensively so a
+        // mistyped `module <<X` does not swallow surrounding blocks.
+        let identStart = i;
+        while (identStart > 0 && /[a-zA-Z0-9_]/.test(source[identStart - 1])) {
+          identStart--;
+        }
+        const precedingIdent = source.slice(identStart, i + 1);
+        if (precedingIdent === 'class' || precedingIdent === 'module') {
+          // Ensure the preceding identifier is a standalone keyword (not `myclass`,
+          // `subclass`, etc.). The character before it must not be an identifier char.
+          if (identStart === 0 || !/[a-zA-Z0-9_]/.test(source[identStart - 1])) {
+            return null;
+          }
+        }
         const afterLtLt = source.slice(pos + 2);
         const isFlaggedHeredoc = /^[~-]/.test(afterLtLt);
         // Check if the following word is a Ruby keyword (shift operator, not heredoc).
