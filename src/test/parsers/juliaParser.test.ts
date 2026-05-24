@@ -5092,5 +5092,34 @@ end`;
     });
   });
 
+  suite('Regression: end followed by typeassert/subtype operators inside indexing brackets is lastindex', () => {
+    test('should treat end followed by :: as lastindex inside indexing brackets', () => {
+      // `arr[if end::Int 1 else 0 end]` — `end::Int` is a type-asserted lastindex.
+      // The trailing `end` must pair with the inner `if`.
+      const source = 'arr[if end::Int 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end followed by <: as lastindex inside indexing brackets', () => {
+      // `arr[if end<:Int 1 else 0 end]` — `end<:Int` would be a subtype check on lastindex.
+      // The trailing `end` must pair with the inner `if`.
+      const source = 'arr[if end<:Int 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end followed by >: as lastindex inside indexing brackets', () => {
+      // `arr[if end>:Int 1 else 0 end]` — `end>:Int` would be a supertype check on lastindex.
+      // The trailing `end` must pair with the inner `if`.
+      const source = 'arr[if end>:Int 1 else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
