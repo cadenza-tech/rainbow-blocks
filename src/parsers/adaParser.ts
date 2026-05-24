@@ -1171,6 +1171,20 @@ export class AdaBlockParser extends BaseBlockParser {
               if (topOpener === 'if' || topOpener === 'select') {
                 stack[stack.length - 1].intermediates.push(token);
               }
+            } else if (middleKw === 'elsif') {
+              // Ada LRM 5.3: 'elsif' is only valid inside if-statements.
+              // A stray 'elsif' inside case/select/loop/etc. is invalid
+              // syntax; drop it (best-effort: leave orphans uncolored).
+              if (topOpener === 'if') {
+                stack[stack.length - 1].intermediates.push(token);
+              }
+            } else if (middleKw === 'else') {
+              // Ada LRM 5.3 / 9.7: 'else' is valid for if-statements and
+              // for select (terminate/else alternative). It is not a case
+              // arm (LRM 5.4) or loop intermediate, so reject those here.
+              if (topOpener === 'if' || topOpener === 'select') {
+                stack[stack.length - 1].intermediates.push(token);
+              }
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
