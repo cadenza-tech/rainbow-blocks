@@ -1462,6 +1462,57 @@ end`;
     });
   });
 
+  suite('Regression: isPrecededByDotOrColon must reject leading colon for malformed label-like sequences', () => {
+    // Bug: when a keyword was preceded (after whitespace) by a single `:` whose
+    // own predecessor was an identifier, isPrecededByDotOrColon stopped at the
+    // `:` and reported "method call colon" — dropping the keyword that follows.
+    // For source like `:abc:\nif true then\nend`, the walk-back from `if`
+    // skipped whitespace, landed on the second `:`, saw `c` before it (not
+    // `:`), and falsely classified `if` as a method-call target. The `if` was
+    // dropped from the token stream so the `if/end` pair never formed.
+    // Fix: when a single `:` is found, walk back through any contiguous
+    // identifier characters. If the run is bounded by another `:`, the
+    // construct is an orphaned label-like sequence (`:abc:`) — not a method
+    // call — and we must NOT drop the following keyword.
+    test('should pair if/end when keyword is preceded by malformed :abc: label-like sequence', () => {
+      const pairs = parser.parse(':abc:\nif true then\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should pair function/end when keyword is preceded by malformed :name: at file start', () => {
+      const pairs = parser.parse(':name:\nfunction f()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should pair if/end when malformed :abc: is on the same line', () => {
+      const pairs = parser.parse(':abc: if true then end');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair if/end when malformed :lbl: follows a semicolon', () => {
+      const pairs = parser.parse('print(1); :lbl:\nif true then\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still reject genuine method call obj:end', () => {
+      // Control: a real method-call colon (preceded by an identifier that is
+      // NOT preceded by another `:`) must still drop the keyword. Here
+      // `obj:end()` is a method call so the `end` keyword inside is not a
+      // real block close.
+      const pairs = parser.parse('function f()\n  obj:end()\nend');
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still reject genuine method call obj:do at file start', () => {
+      // Control: existing behaviour for `obj:do` is preserved (no blocks).
+      // `obj` walked back lands at file-start with no preceding `:`, so the
+      // colon is classified as a method-call colon and `do` is dropped.
+      const pairs = parser.parse('obj:do\nend');
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: isDoPartOfLoop outer scan must skip goto-target keywords', () => {
     test('should pair for/end inside function/end when goto for precedes do', () => {
       // Lua labels cannot be reserved keywords, so `goto for` is malformed Lua
