@@ -381,16 +381,21 @@ export class PascalBlockParser extends BaseBlockParser {
       if (/[a-zA-Z_]/.test(ch)) {
         const wordEnd = ci;
         while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
-        const word = source.slice(ci, wordEnd + 1).toLowerCase();
-        if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
-          return false;
-        }
-        // A `type`/`var`/`const` scope keyword before the `=` (within the same
-        // statement, no `;` crossed yet) confirms a declaration context. The `=`
-        // is a type definition, so stop scanning and skip the cross-`;` scan.
-        if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
-          hitDeclarationKeyword = true;
-          break;
+        // The ASCII word `ci..wordEnd` may be the tail of a larger Unicode identifier
+        // (e.g. `αif` reads back to ASCII `if`). Skip such Unicode-extended identifiers
+        // so they are not misclassified as comparison/declaration keywords.
+        if (!this.isAdjacentToUnicodeLetter(source, ci, wordEnd + 1 - ci)) {
+          const word = source.slice(ci, wordEnd + 1).toLowerCase();
+          if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
+            return false;
+          }
+          // A `type`/`var`/`const` scope keyword before the `=` (within the same
+          // statement, no `;` crossed yet) confirms a declaration context. The `=`
+          // is a type definition, so stop scanning and skip the cross-`;` scan.
+          if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+            hitDeclarationKeyword = true;
+            break;
+          }
         }
       }
       ci--;
@@ -417,12 +422,16 @@ export class PascalBlockParser extends BaseBlockParser {
         if (/[a-zA-Z_]/.test(ch)) {
           const wordEnd = si;
           while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
-          const word = source.slice(si, wordEnd + 1).toLowerCase();
-          if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
-            return false;
-          }
-          if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
-            break;
+          // Same Unicode-adjacency guard as the inner scan; without it, `αbegin` etc.
+          // would resolve to ASCII `begin` and force the wrong scope decision.
+          if (!this.isAdjacentToUnicodeLetter(source, si, wordEnd + 1 - si)) {
+            const word = source.slice(si, wordEnd + 1).toLowerCase();
+            if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+              return false;
+            }
+            if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+              break;
+            }
           }
         }
         si--;

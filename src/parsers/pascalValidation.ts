@@ -107,13 +107,18 @@ export function isPrecededByComparisonEquals(
     if (/[a-zA-Z_]/.test(ch)) {
       const wordEnd = ci;
       while (ci > 0 && /[a-zA-Z0-9_]/.test(source[ci - 1])) ci--;
-      const word = source.slice(ci, wordEnd + 1).toLowerCase();
-      if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
-        return true;
-      }
-      if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
-        hitDeclarationKeyword = true;
-        break;
+      // The ASCII word `ci..wordEnd` may be the tail of a larger Unicode identifier
+      // (e.g. `αif` reads back to ASCII `if`). Skip such Unicode-extended identifiers
+      // so they are not misclassified as comparison/declaration keywords.
+      if (!callbacks.isAdjacentToUnicodeLetter(source, ci, wordEnd + 1 - ci)) {
+        const word = source.slice(ci, wordEnd + 1).toLowerCase();
+        if (COMPARISON_CONTEXT_KEYWORDS.has(word)) {
+          return true;
+        }
+        if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+          hitDeclarationKeyword = true;
+          break;
+        }
       }
     }
     ci--;
@@ -134,12 +139,16 @@ export function isPrecededByComparisonEquals(
       if (/[a-zA-Z_]/.test(ch)) {
         const wordEnd = si;
         while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
-        const word = source.slice(si, wordEnd + 1).toLowerCase();
-        if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
-          return true;
-        }
-        if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
-          return false;
+        // Same Unicode-adjacency guard as the inner scan; without it, `αbegin` etc.
+        // would resolve to ASCII `begin` and force the wrong scope decision.
+        if (!callbacks.isAdjacentToUnicodeLetter(source, si, wordEnd + 1 - si)) {
+          const word = source.slice(si, wordEnd + 1).toLowerCase();
+          if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+            return true;
+          }
+          if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+            return false;
+          }
         }
       }
       si--;
