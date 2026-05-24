@@ -42,6 +42,15 @@ interface AttributeSpan {
   bodyCommaPos: number;
 }
 
+// Cached analysis of a -define macro body for bare-reserved-word lookups.
+// The body is scanned once per parse and results are reused for every keyword query.
+interface DefineBodyAnalysis {
+  // Offsets of keywords that participate in a matched open/close pair (real blocks).
+  realOffsets: Set<number>;
+  // Offsets of openers that remained unclosed on the stack (still real openers).
+  unclosedOpeners: Set<number>;
+}
+
 // Pre-scanned span of a -spec/-type/-callback/-opaque declaration without a `(`,
 // such as `-spec foo() -> ok.` (terminated by a top-level period).
 interface SpecLineSpan {
@@ -66,6 +75,9 @@ export class ErlangBlockParser extends BaseBlockParser {
   // Sorted by dashStart; binary search yields O(log n) per-token lookups.
   private attributeSpans: AttributeSpan[] = [];
   private specLineSpans: SpecLineSpan[] = [];
+  // Lazily-populated per-parse cache of -define body analyses, keyed by AttributeSpan reference.
+  // Built on first lookup and reused for every subsequent query against the same -define body.
+  private defineBodyAnalyses: Map<AttributeSpan, DefineBodyAnalysis> = new Map();
 
   private get erlangHelperCallbacks(): ErlangHelperCallbacks {
     return {
@@ -453,6 +465,7 @@ export class ErlangBlockParser extends BaseBlockParser {
     // (which calls isInSpecContext) per token.
     this.attributeSpans = this.buildAttributeSpans(source, excludedRegions);
     this.specLineSpans = this.buildSpecLineSpans(source, excludedRegions);
+    this.defineBodyAnalyses = new Map();
 
     const tokens = super.tokenize(source, excludedRegions);
     const result = tokens.filter((token) => {
@@ -1159,14 +1172,36 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   // Returns true if the block keyword at `pos` is a bare reserved word inside the body of
   // `-define` macro `span`, rather than part of a real block (fun(...)/begin.../end).
-  // The macro body is scanned once: openers whose next significant character is a separator
-  // (',' or a closing bracket) are bare; `fun` not followed by '(' is a reference; `end`
-  // with no matching opener on the stack is bare. A keyword that participates in a matched
-  // open/close pair is a real block element and is not filtered.
+  // Backed by a per-parse cache built by `analyzeDefineBody`: each -define body is scanned
+  // once and bare-keyword queries become O(1) Set lookups, so total cost stays O(body size).
   private isBareReservedWordInDefineBody(source: string, pos: number, span: AttributeSpan, excludedRegions: ExcludedRegion[]): boolean {
     if (span.bodyCommaPos < 0) {
       return false;
     }
+    const analysis = this.getDefineBodyAnalysis(source, span, excludedRegions);
+    // The keyword at `pos` is a real block element only if it took part in a matched pair
+    // or remains on the opener stack (an unclosed but real opener).
+    return !analysis.realOffsets.has(pos) && !analysis.unclosedOpeners.has(pos);
+  }
+
+  // Returns the cached analysis for `span`, building it on first request.
+  // The body is scanned once: openers whose next significant character is a separator
+  // (',' or a closing bracket) are bare; `fun` not followed by '(' is a reference; `end`
+  // with no matching opener on the stack is bare. A keyword that participates in a matched
+  // open/close pair is a real block element.
+  private getDefineBodyAnalysis(source: string, span: AttributeSpan, excludedRegions: ExcludedRegion[]): DefineBodyAnalysis {
+    const cached = this.defineBodyAnalyses.get(span);
+    if (cached) {
+      return cached;
+    }
+    const analysis = this.analyzeDefineBody(source, span, excludedRegions);
+    this.defineBodyAnalyses.set(span, analysis);
+    return analysis;
+  }
+
+  // Single-pass scan of `span`'s body that classifies every block keyword as either a
+  // real block participant (paired or still on the opener stack) or a bare reserved word.
+  private analyzeDefineBody(source: string, span: AttributeSpan, excludedRegions: ExcludedRegion[]): DefineBodyAnalysis {
     const bodyStart = span.bodyCommaPos + 1;
     const bodyEnd = Math.min(span.endParen, source.length);
     // Stack of real opener offsets; matched openers/closers and stack contents are real blocks.
@@ -1221,9 +1256,7 @@ export class ErlangBlockParser extends BaseBlockParser {
       }
       i++;
     }
-    // The keyword at `pos` is a real block element only if it took part in a matched pair
-    // or remains on the opener stack (an unclosed but real opener).
-    return !realOffsets.has(pos) && !openerStack.includes(pos);
+    return { realOffsets, unclosedOpeners: new Set(openerStack) };
   }
 
   // Binary-search for the attribute span enclosing `position` (openParen < position < endParen).
