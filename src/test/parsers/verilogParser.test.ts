@@ -4723,5 +4723,64 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: comma-separated declaration with intervening block comments', () => {
+    test('should skip block comments before and after `,` when chaining declarator list', () => {
+      // Bug: `isPrecededByDataTypeKeyword` skipped only whitespace before/after a
+      // `,` in a declarator list. So in `reg a /*c*/, /*c*/ endmodule;` the inner
+      // `endmodule` (used as an identifier) was not recognized as a continuation
+      // of the `reg a, endmodule` chain and was tokenized as a real block_close.
+      // It then had no opener so the BlockPair set is still 1 (module/endmodule),
+      // but the spurious token is observable and would mispair if other openers
+      // appeared in the declarator list.
+      const source = `module m;
+  reg a /*c*/, /*c*/ endmodule;
+endmodule`;
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(
+        endmoduleTokens.length,
+        1,
+        '`endmodule` inside a declarator list with block comments must not be tokenized as a real close keyword'
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should skip block comment before `,` only (no comment after)', () => {
+      // Variant: only a leading block comment between identifier and comma.
+      const source = `module m;
+  reg a /*c*/, endmodule;
+endmodule`;
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1);
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should skip block comment chain in declarator list (multi-level)', () => {
+      // Variant: block comment, then declarator, then another block comment.
+      const source = `module m;
+  reg a /*c1*/ /*c2*/, /*c3*/ /*c4*/ endmodule;
+endmodule`;
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1);
+      assertSingleBlock(parser.parse(source), 'module', 'endmodule');
+    });
+
+    test('should still suppress without intervening block comments (baseline)', () => {
+      // Sanity: the basic `reg a, endmodule;` form must continue to suppress the
+      // inner `endmodule` (this case already worked before the fix).
+      const source = `module m;
+  reg a, endmodule;
+endmodule`;
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1);
+      assertSingleBlock(parser.parse(source), 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
