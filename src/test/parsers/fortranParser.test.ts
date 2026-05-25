@@ -6104,11 +6104,13 @@ end associate`;
       // Before the fix, isValidBlockOpen sliced the source to EOF and ran
       // collapseContinuationLines over the whole suffix for every opener, making parsing
       // O(N^2) in the file size. On these 40000 lines the pre-fix parser took ~48s; the
-      // bounded-slice fix (findLogicalLineEnd) brings it to ~2s. The 10s mocha timeout
+      // bounded-slice fix (findLogicalLineEnd) brings it to ~2s. The 20s mocha timeout
       // reliably fails the O(N^2) version (which times out) while passing the fixed
       // version with a wide margin, staying robust against per-machine and GC timing
-      // jitter that a tight ratio threshold cannot.
-      this.timeout(10000);
+      // jitter that a tight ratio threshold cannot. The cap is set to 20s (not 10s) so
+      // the test also passes under c8 instrumentation in `yarn test:coverage`, which
+      // amplifies per-iteration cost.
+      this.timeout(20000);
       const source = makeDoBlocks(20000);
       const pairs = parser.parse(source);
       assert.strictEqual(pairs.length, 20000);
