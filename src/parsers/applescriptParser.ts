@@ -914,6 +914,17 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
       const region = this.findExcludedRegionAt(i, excludedRegions);
       if (region) {
+        // The opening character of the region tells us what kind of region it is.
+        // Value-producing literals (double-quoted/smart-quoted strings, pipe-delimited
+        // identifiers, chevron `«…»` references) act as expression terminators: a
+        // following tell/if/repeat is the right operand of an implicit concatenation,
+        // not a new block opener. Line comments (`--`) and block comments (`(*`) are
+        // not value expressions, so they must keep transparently skipping backward to
+        // find the actual preceding token.
+        const opener = source[region.start];
+        if (opener === '"' || opener === '“' || opener === '|' || opener === '«') {
+          return true;
+        }
         i = region.start - 1;
         continue;
       }
