@@ -1129,6 +1129,18 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject any block_close keyword that sits inside a closed `(...)` pair.
+    // Mirrors the isValidBlockOpen check: reserved close keywords cannot
+    // legitimately appear inside parenthesized expressions (function calls,
+    // cast operands, assert arguments, etc.). Tokenizing them would
+    // prematurely close the enclosing block (e.g., `int'(end)` would close an
+    // outer begin), so they are suppressed when inside a closed `(...)` context.
+    // The check is bounded to a properly closed paren so unclosed parens
+    // (incomplete typing) do not suppress every following close keyword.
+    if (isInsideParens(position, this.getParenIndex(source, excludedRegions))) {
+      return false;
+    }
+
     // Inside a case statement, reject any block_close keyword used as a case_item
     // label NAME (e.g., `case (s) endcase: x = 1;`). The case_item label is an
     // identifier expression and reserved words cannot legitimately be identifiers.
