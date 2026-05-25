@@ -22,6 +22,22 @@ export function isEndlessMethodDef(source: string, start: number, excludedRegion
         i++;
         continue;
       }
+      // Backslash line continuation: `\<LF>`, `\<CR>`, or `\<CR><LF>` joins the next
+      // physical line into the current logical statement. Required so that
+      // `def \<NL>name = value` is still recognised as a Ruby 3.0+ endless method def.
+      if (ch === '\\' && i + 1 < source.length) {
+        const next = source[i + 1];
+        if (next === '\n') {
+          i += 2;
+          continue;
+        }
+        if (next === '\r') {
+          // Step past \r and an optional following \n (CRLF)
+          i += 2;
+          if (i < source.length && source[i] === '\n') i++;
+          continue;
+        }
+      }
       if (callbacks.isInExcludedRegion(i, excludedRegions)) {
         const region = callbacks.findExcludedRegionAt(i, excludedRegions);
         if (region) {
