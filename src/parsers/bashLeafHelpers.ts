@@ -56,9 +56,6 @@ export function matchesWord(source: string, pos: number, word: string): boolean 
 // delimiter word (e.g. `<<EO$F` matches the literal terminator `EO$F`, not `EO`).
 const HEREDOC_DELIM_BARE_FIRST = /[\p{L}\p{N}_.+:%,=!*?{}[\]@~^/$]/u;
 const HEREDOC_DELIM_BARE_REST = /[\p{L}\p{N}_\-.+:%,=!*?{}[\]@~^/$]/u;
-// Backslash-escaped character continuation: anything except whitespace, quotes,
-// or backslash terminates the run. Unicode-letter aware via negation only.
-const HEREDOC_DELIM_BACKSLASH_TERMINATOR = /[\s'"\\]/;
 
 // Parses a heredoc operator (<<, <<-) and extracts the delimiter.
 // Real bash supports concatenating multiple delimiter parts like <<"EOF"'TAIL' or
@@ -88,13 +85,6 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
       continue;
     }
     if (ch === '\\' && i + 1 < source.length) {
-      // \\ is an escaped backslash: terminator gets a literal backslash, then continue parsing
-      if (source[i + 1] === '\\') {
-        terminator += '\\';
-        i += 2;
-        matched = true;
-        continue;
-      }
       // \<newline> is a line continuation: skip both and continue parsing on the next line
       if (source[i + 1] === '\n') {
         i += 2;
@@ -105,15 +95,15 @@ export function parseHeredocOperator(source: string, pos: number): { stripTabs: 
         i += source[i + 2] === '\n' ? 3 : 2;
         continue;
       }
-      const startWord = i + 1;
-      let end = startWord;
-      while (end < source.length && !HEREDOC_DELIM_BACKSLASH_TERMINATOR.test(source[end])) end++;
-      if (end === startWord) {
-        if (!matched) return null;
-        break;
-      }
-      terminator += source.slice(startWord, end);
-      i = end;
+      // Any other character (including whitespace, quotes, $, #, etc.) becomes
+      // a single literal delimiter character. Real bash treats `\` as quoting
+      // exactly one character, so `<<\ ` makes a space the literal terminator,
+      // `<<\"EOF` produces the literal terminator `"EOF`, and `<<\\EOF` (two
+      // source backslashes) produces `\EOF`. After consuming the escaped char
+      // the loop returns to the dispatch so subsequent characters are matched
+      // by the regular bare-word / quoted-part / nested-escape rules.
+      terminator += source[i + 1];
+      i += 2;
       matched = true;
       continue;
     }
