@@ -3281,6 +3281,19 @@ foo() ->
     });
   });
 
+  suite('Regression: bare end in -record type annotation should not pair with outer begin', () => {
+    test('should pair outer begin with outer end when -record type annotation contains bare end', () => {
+      const source = 'begin\n  -record(s, {f :: end}),\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // Verify the outer end is paired (not the bare end inside record type annotation)
+      const beginEndPair = pairs[0];
+      assert.strictEqual(beginEndPair.openKeyword.startOffset, 0);
+      // The outer end should be at the end of the source
+      assert.strictEqual(beginEndPair.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: isCatchFollowedByClausePattern depth tracking for brackets and semicolons', () => {
     // Bug: isCatchFollowedByClausePattern bails out at the first top-level ';' it sees,
     // but does not track nested parens/brackets/braces/binaries. When 'catch' is followed
