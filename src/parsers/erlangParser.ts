@@ -327,17 +327,41 @@ export class ErlangBlockParser extends BaseBlockParser {
     for (let j = start; j < source.length; j++) {
       // Period: declaration terminator
       if (source[j] === '.' && !this.isInExcludedRegion(j, excludedRegions)) {
+        // A '.' between two digits is a float-literal decimal point, not a terminator
+        // (and not part of a range run): `1.0`, `3.14`, etc.
+        if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
+          continue;
+        }
         if (j + 1 < source.length && source[j + 1] === '.') {
+          // Scan the full run of consecutive dots starting at j. In `....` the run is
+          // entered at the first dot; we need to know the run length to decide whether
+          // a third dot inside the run terminates the declaration.
+          let runEnd = j;
+          while (runEnd < source.length && source[runEnd] === '.' && !this.isInExcludedRegion(runEnd, excludedRegions)) {
+            runEnd++;
+          }
+          const runLen = runEnd - j;
+          // A run length of exactly 3 forms `..` (range) + `.` (terminator). The same
+          // rule applies to any longer run (4+, e.g. `....`): the first two dots are a
+          // range and the third dot terminates; any remaining dots are stray characters
+          // skipped past with the run. A length-2 run is a pure range operator and
+          // contributes no terminator.
+          if (runLen >= 3) {
+            return j + 2;
+          }
+          // Length-2 range: jump j past the second dot. The next for-loop iteration
+          // increments j again, so the third character of source after the range is
+          // examined on the next pass.
           j++;
           continue;
         }
-        // A '.' immediately preceded by another '.' is the second dot of a range operator (`..`)
-        // unless there is also a '.' at j-2 (i.e. we are looking at the third dot of `...`),
-        // in which case the first two formed the range and this third dot is the terminator.
-        if (j > 0 && source[j - 1] === '.' && (j < 2 || source[j - 2] !== '.')) {
-          continue;
-        }
-        if (j > 0 && j + 1 < source.length && /[0-9]/.test(source[j - 1]) && /[0-9]/.test(source[j + 1])) {
+        // No following `.`: either a stand-alone period or the second dot of a `..`
+        // range whose first dot was already consumed by the runLen>=3 / range branch.
+        // A '.' immediately preceded by another '.' is part of a range operator and
+        // must not terminate. (The run-scanning branch above ensures that the third
+        // dot of `...` does terminate even though its preceding dot would otherwise
+        // trigger this rule, by short-circuiting before we ever reach this branch.)
+        if (j > 0 && source[j - 1] === '.') {
           continue;
         }
         return j;
