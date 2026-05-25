@@ -6609,5 +6609,29 @@ fi`;
     });
   });
 
+  suite('Regression: heredoc delimiter contains $', () => {
+    test('should treat $ in unquoted heredoc delimiter as literal terminator character', () => {
+      // Real bash does NOT expand parameters in the heredoc delimiter word:
+      // `<<EO$F` makes the literal terminator `EO$F`, not `EO`. Without
+      // treating `$` as a delimiter character, the terminator was truncated to
+      // `EO` and the body extended past the real `EO$F` line, swallowing the
+      // following if/then/fi block.
+      const source = 'cat <<EO$F\nbody\nEO$F\nif true; then echo; fi\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should accept $ as the first character of a heredoc delimiter', () => {
+      // `<<$X` is unusual but legal: bash uses the literal word `$X` as the
+      // terminator. The leading `$` must be accepted by the first-character
+      // class so the heredoc body is excluded. Without the fix, the `if`/`fi`
+      // sitting at line start inside the body leak out and pair up as a
+      // spurious extra block alongside the real for/done.
+      const source = 'cat <<$X\nif true; then\necho ok\nfi\n$X\nfor i in 1; do echo; done\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
   generateCommonTests(config);
 });
