@@ -27,7 +27,6 @@ import {
   buildCaseInsensitiveKeywordPattern,
   findLastOpenerByType,
   findLastOpenerForLoop,
-  findLineStart,
   getTokenTypeCaseInsensitive,
   mergeCompoundEndTokens
 } from './parserUtils';
@@ -337,6 +336,41 @@ export class AdaBlockParser extends BaseBlockParser {
     return { start: pos, end };
   }
 
+  // Override to record Ada LRM 2.2 line terminators (LF, CR, NEL U+0085,
+  // LS U+2028, PS U+2029) as line breaks. The default baseParser
+  // implementation only records `\n` and bare `\r`, so Token line/column
+  // metadata is wrong when the source uses Unicode line endings.
+  protected buildNewlinePositions(source: string): number[] {
+    const positions: number[] = [];
+    for (let i = 0; i < source.length; i++) {
+      const code = source.charCodeAt(i);
+      if (code === 0x000a) {
+        positions.push(i);
+      } else if (code === 0x000d && (i + 1 >= source.length || source.charCodeAt(i + 1) !== 0x000a)) {
+        // CR-only line ending (not part of CRLF)
+        positions.push(i);
+      } else if (code === 0x0085 || code === 0x2028 || code === 0x2029) {
+        positions.push(i);
+      }
+    }
+    return positions;
+  }
+
+  // Ada-aware version of parserUtils.findLineStart. The shared helper only
+  // recognizes `\n`/`\r`, so a source separated by NEL/LS/PS is treated as
+  // one giant line. The type-decl `is` filter and other line-relative checks
+  // rely on this routine, so it must recognize the full Ada LRM 2.2 line
+  // terminator set (LF, CR, NEL U+0085, LS U+2028, PS U+2029).
+  private findLineStart(source: string, pos: number): number {
+    for (let i = pos - 1; i >= 0; i--) {
+      const code = source.charCodeAt(i);
+      if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) {
+        return i + 1;
+      }
+    }
+    return 0;
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Find all compound end keywords and their positions
@@ -561,19 +595,19 @@ export class AdaBlockParser extends BaseBlockParser {
       // Skip 'is' in type/subtype declarations (type T is ... / subtype S is ...)
       // Also handles multi-line: type T\n  is range 1..100;
       if (type === 'block_middle' && keyword.toLowerCase() === 'is') {
-        const lineStart = findLineStart(source, startOffset);
+        const lineStart = this.findLineStart(source, startOffset);
         const lineBefore = source.slice(lineStart, startOffset).toLowerCase().trimStart();
         let isTypeDeclLine = /^(type|subtype)\b/.test(lineBefore);
         // When the line starts with 'type', check if 'protected' or 'task' precedes it
         // on a previous line (e.g., "protected\ntype Foo is" should be a block, not a type decl)
         if (isTypeDeclLine && /^type\b/.test(lineBefore)) {
           let scanPos = lineStart - 1;
-          while (scanPos >= 0 && (source[scanPos] === ' ' || source[scanPos] === '\t' || source[scanPos] === '\n' || source[scanPos] === '\r')) {
+          while (scanPos >= 0 && isAdaWhitespace(source[scanPos])) {
             scanPos--;
           }
           if (scanPos >= 0) {
             const prevEnd = scanPos + 1;
-            const prevLineStart = findLineStart(source, prevEnd);
+            const prevLineStart = this.findLineStart(source, prevEnd);
             const prevToken = this.stripExcludedRegions(source, prevLineStart, prevEnd, excludedRegions).toLowerCase().trimEnd();
             if (/\b(?:protected|task)$/.test(prevToken)) {
               isTypeDeclLine = false;
@@ -604,12 +638,12 @@ export class AdaBlockParser extends BaseBlockParser {
               // When 'type' is at the start of the line, check previous lines
               if (beforeType.length === 0) {
                 let sp = lineStart - 1;
-                while (sp >= 0 && (source[sp] === ' ' || source[sp] === '\t' || source[sp] === '\n' || source[sp] === '\r')) {
+                while (sp >= 0 && isAdaWhitespace(source[sp])) {
                   sp--;
                 }
                 if (sp >= 0) {
                   const pe = sp + 1;
-                  const ps = findLineStart(source, pe);
+                  const ps = this.findLineStart(source, pe);
                   const pt = this.stripExcludedRegions(source, ps, pe, excludedRegions).toLowerCase().trimEnd();
                   if (/\b(?:protected|task)$/.test(pt)) continue;
                 }
@@ -686,7 +720,7 @@ export class AdaBlockParser extends BaseBlockParser {
           // Positive means we're inside a parenthesized group scanning backward
           let scanParenDepth = hasUnmatchedCloseParen ? -lineParenDepth : 0;
           while (scanPos >= 0) {
-            const prevStart = findLineStart(source, scanPos);
+            const prevStart = this.findLineStart(source, scanPos);
             const prevLine = source
               .slice(prevStart, scanPos + 1)
               .toLowerCase()
@@ -728,15 +762,12 @@ export class AdaBlockParser extends BaseBlockParser {
                 // (e.g., "protected\ntype Foo\nis" should be a block, not a type decl)
                 if (/^type\b/.test(prevLine)) {
                   let checkPos = prevStart - 1;
-                  while (
-                    checkPos >= 0 &&
-                    (source[checkPos] === ' ' || source[checkPos] === '\t' || source[checkPos] === '\n' || source[checkPos] === '\r')
-                  ) {
+                  while (checkPos >= 0 && isAdaWhitespace(source[checkPos])) {
                     checkPos--;
                   }
                   if (checkPos >= 0) {
                     const checkEnd = checkPos + 1;
-                    const checkLineStart = findLineStart(source, checkEnd);
+                    const checkLineStart = this.findLineStart(source, checkEnd);
                     const checkToken = this.stripExcludedRegions(source, checkLineStart, checkEnd, excludedRegions).toLowerCase().trimEnd();
                     if (/\b(?:protected|task)$/.test(checkToken)) {
                       scanPos = prevStart - 1;
