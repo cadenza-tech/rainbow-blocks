@@ -1629,6 +1629,96 @@ end`;
     });
   });
 
+  // Bug: isPrecededByDotOrColon's walk-back treated ALL excluded regions as
+  // opaque walls (returning false). But comments are whitespace-equivalent
+  // per Lua spec — a `.` followed by a comment followed by a keyword IS
+  // field access on that keyword. With the bug, `t. --[[c]]end` saw `end`
+  // as a real keyword (not field access), so the inner `end` was paired
+  // with the enclosing `function` and the outer `end` was orphaned.
+  // Fix: in isPrecededByDotOrColon's walk-back, transparently skip past
+  // comment regions (jump to region.start - 1 and continue). String/long
+  // string/goto label/shebang regions remain opaque walls (they are NOT
+  // whitespace and a `.` on their far side does not bind through them).
+  // The string/long string/label cases are pinned by the suite above.
+  suite('Regression: comments must be transparent (not opaque walls) in walk-back', () => {
+    test('should treat t.--[[c]]end as field access (multi-line comment is whitespace) (バグ2)', () => {
+      // The inner `end` inside `t. --[[c]]end` must be recognised as field
+      // access on the dot (the comment is whitespace-equivalent). Therefore
+      // only the OUTER `end` (line 2) closes `function`, not the inner one.
+      const source = 'function f()\n  t. --[[c]]end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'function must close on outer end (line 2), not inner end');
+    });
+
+    test('should treat t. <single-line comment> end as field access (バグ2)', () => {
+      // Single-line comment is also whitespace per Lua spec, so the
+      // following `end` (after a newline) is field access via the dot.
+      // The outer `end` on line 3 closes `function`.
+      const source = 'function f()\n  t. -- comment\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function must close on outer end (line 3), not the inner end');
+    });
+
+    test('should treat t.--[[c]]then as field access (multi-line comment is whitespace)', () => {
+      // The `then` inside `t.--[[c]]then` must be filtered out as field
+      // access. With no `then` intermediate, `if` has no opener-shape and
+      // walks unmatched; therefore no `if/end` pair exists. The orphan
+      // `end` then leaves zero pairs.
+      const source = 'if t.--[[c]]then\nend';
+      const pairs = parser.parse(source);
+      // `then` is field-accessed, so `if` lacks its intermediate. Whether
+      // the if/end pair still forms is irrelevant; the key assertion is
+      // that no `then` intermediate is attached.
+      if (pairs.length > 0) {
+        const ifPair = findBlock(pairs, 'if');
+        assertIntermediates(ifPair, []);
+      }
+    });
+
+    test('should treat t:--[[c]]end as method call (colon, multi-line comment)', () => {
+      // Same shape but with `:` (method call) instead of `.` (field access).
+      // Comment must still be transparent; inner `end` is a method-name token.
+      const source = 'function f()\n  t:--[[c]]end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should still treat string between . and keyword as opaque wall (control)', () => {
+      // Regression guard: strings must remain opaque walls. `t."str"then`
+      // attaches `then` to `if` (not as field access through the string).
+      const pairs = parser.parse('if t. "str" then\n  a()\nelse\n  b()\nend');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+
+    test('should still treat goto label between . and keyword as opaque wall (control)', () => {
+      // Regression guard: goto labels must remain opaque walls.
+      const pairs = parser.parse('if t.\n::lbl::\nthen a() end');
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should treat long-string-comment --[==[c]==]end as field access', () => {
+      // Long-bracket comment with equal signs is also a comment region and
+      // must be transparent in walk-back.
+      const source = 'function f()\n  t. --[==[c]==]end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+
+    test('should treat multiple comments between . and end as transparent', () => {
+      // Chained comments: walk-back must skip across more than one region.
+      const source = 'function f()\n  t. --[[a]] --[[b]] end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
+  });
+
   suite('Regression: isDoPartOfLoop must not be super-quadratic for loops mixed with standalone do', () => {
     // Bug: isDoPartOfLoop's forward scan was O(N^2)-O(N^3) for files mixing
     // loops with standalone `do` blocks. Each standalone `do` belongs to no
