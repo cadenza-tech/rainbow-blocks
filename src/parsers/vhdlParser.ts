@@ -695,61 +695,57 @@ export class VhdlBlockParser extends BaseBlockParser {
       ...this.keywords.blockMiddle.map((k) => k.toLowerCase())
     ]);
 
-    for (const [endStart, info] of compoundEndPositions) {
-      let i = endStart + info.length;
-      // Skip whitespace and excluded regions (comments) up to the trailing word.
-      while (i < source.length) {
-        if (this.isInExcludedRegion(i, excludedRegions)) {
-          const region = this.findExcludedRegionAt(i, excludedRegions);
+    // Skip whitespace and excluded regions (comments) starting at `p`. Returns the
+    // first non-whitespace/non-comment offset (may be source.length).
+    const skipGap = (p: number): number => {
+      let q = p;
+      while (q < source.length) {
+        if (this.isInExcludedRegion(q, excludedRegions)) {
+          const region = this.findExcludedRegionAt(q, excludedRegions);
           if (region) {
-            i = region.end;
+            q = region.end;
             continue;
           }
         }
-        const ch = source[i];
+        const ch = source[q];
         if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-          i++;
+          q++;
           continue;
         }
         break;
       }
-      if (i >= source.length) continue;
-      // Already at `;` or another terminator: no label.
-      if (source[i] === ';') continue;
+      return q;
+    };
+
+    for (const [endStart, info] of compoundEndPositions) {
+      let i = skipGap(endStart + info.length);
+      // Already at `;` or EOF: no label.
+      if (i >= source.length || source[i] === ';') continue;
       // Must be an identifier start.
       if (!/[a-zA-Z_]/.test(source[i])) continue;
-      const wordStart = i;
-      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
-      const word = source.slice(wordStart, i).toLowerCase();
-      // Skip whitespace/comments after the candidate word, expecting `;`.
-      // If anything else (another word, operator, etc.) appears we conservatively
-      // do not record a skip — the syntax is ambiguous and we prefer the existing
-      // behavior over silently dropping tokens.
-      let j = i;
-      while (j < source.length) {
-        if (this.isInExcludedRegion(j, excludedRegions)) {
-          const region = this.findExcludedRegionAt(j, excludedRegions);
-          if (region) {
-            j = region.end;
-            continue;
-          }
-        }
-        const ch = source[j];
-        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-          j++;
-          continue;
-        }
-        break;
+      // Walk any contiguous run of reserved-word labels. VHDL grammar allows at most
+      // one trailing label after a compound end, but editor-in-progress code can place
+      // multiple reserved words there (e.g. `end process loop case;`). All of them must
+      // be suppressed; otherwise the later words leak as block_open tokens and may
+      // false-pair with a downstream `end <kw>`. The contiguous run is terminated by
+      // `;` / EOF (record the candidates) or by a non-reserved word / non-identifier
+      // (the syntax becomes ambiguous; conservatively drop the candidates).
+      const candidates: { wordStart: number; reserved: boolean }[] = [];
+      while (i < source.length) {
+        if (!/[a-zA-Z_]/.test(source[i])) break;
+        const wordStart = i;
+        while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) i++;
+        const word = source.slice(wordStart, i).toLowerCase();
+        candidates.push({ wordStart, reserved: reservedWords.has(word) });
+        i = skipGap(i);
       }
-      // The trailing reserved-word label must NOT be tokenized as a fresh block_open,
-      // regardless of what follows it. The most common form is `end <kw> <label>;`, but
-      // EOF or a bare newline (no `;`) are also valid label terminators in malformed
-      // editor-in-progress code. If anything other than EOF / whitespace / `;` follows
-      // the label, the syntax is ambiguous and we conservatively leave the existing
-      // behavior alone.
-      if (j < source.length && source[j] !== ';') continue;
-      if (reservedWords.has(word)) {
-        skipPositions.add(wordStart);
+      // The trailing run must end at `;` / EOF. Anything else means the labels are
+      // followed by real code — leave them alone.
+      if (i < source.length && source[i] !== ';') continue;
+      for (const candidate of candidates) {
+        if (candidate.reserved) {
+          skipPositions.add(candidate.wordStart);
+        }
       }
     }
     return skipPositions;
