@@ -6028,6 +6028,29 @@ end select`;
     });
   });
 
+  suite('Regression 2026-05-25: fixed-form col-6 continuation `+then` for if-header', () => {
+    test('should recognize `if (a)\\n     +then` as block-if with fixed-form continuation marker before then', () => {
+      // Fixed-form Fortran: `if (a)` ends line 1, then line 2 has 5 spaces and a `+` in
+      // column 6 (the fixed-form continuation marker), followed immediately by `then`.
+      // The backward scan from `then` to `)` must skip the col-6 `+` marker just like
+      // it skips whitespace/&/newlines. Without this, the scan sees `+` as executable
+      // content and treats the line as a single-line if (no block produced).
+      const source = '      if (a)\n     +then\n          x = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should recognize fixed-form continuation with `$` marker before then', () => {
+      // Same as above but with a different continuation marker. The general fixed-form
+      // rule allows any non-blank non-letter non-0 non-comment char (commonly `+`, `$`,
+      // `&`, `.`, `*` etc). Digits like `1` produce a word-boundary issue with the
+      // following `then` identifier and are not covered here.
+      const source = '      if (a)\n     $then\n          x = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
