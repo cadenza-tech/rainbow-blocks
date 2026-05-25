@@ -4234,5 +4234,74 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: deeply nested generate begin/end body nestLevel', () => {
+    // adjustGenerateBodyNestLevels subtracts an over-count for sibling generates and for
+    // control-prefix keywords that share a generate's close offset. In deeply nested
+    // generate constructs (3+ levels) the subtraction over-fires: the body ends up BELOW
+    // the innermost containing generate. Visually this paints the body in a less-nested
+    // color than the inner if/generate that wrap it. The body must be at least as deep
+    // as the innermost generate that contains it.
+    test('should give begin body nestLevel >= innermost containing generate (3-level nest)', () => {
+      const source = `architecture rtl of t is
+begin
+  outer: for i in 0 to 3 generate
+    middle: if c generate
+      inner: for j in 0 to 3 generate
+      begin
+        null;
+      end;
+      end generate;
+    end generate;
+  end generate;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      // Find the innermost generate that contains the body (smallest enclosing range).
+      const innerGen = pairs
+        .filter(
+          (p) =>
+            p.openKeyword.value.toLowerCase() === 'generate' &&
+            p.openKeyword.startOffset < beginPair.openKeyword.startOffset &&
+            p.closeKeyword.startOffset >= beginPair.closeKeyword.startOffset
+        )
+        .sort((a, b) => b.openKeyword.startOffset - a.openKeyword.startOffset)[0];
+      assert.ok(innerGen, 'should find innermost generate that contains the body');
+      assert.ok(
+        beginPair.nestLevel >= innerGen.nestLevel,
+        `body nestLevel (${beginPair.nestLevel}) should be >= innermost generate nestLevel (${innerGen.nestLevel})`
+      );
+    });
+
+    test('should give begin body nestLevel >= innermost containing generate (2-level nest)', () => {
+      const source = `architecture rtl of t is
+begin
+  outer: for i in 0 to 3 generate
+    inner: if c generate
+    begin
+      null;
+    end;
+    end generate;
+  end generate;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      const innerGen = pairs
+        .filter(
+          (p) =>
+            p.openKeyword.value.toLowerCase() === 'generate' &&
+            p.openKeyword.startOffset < beginPair.openKeyword.startOffset &&
+            p.closeKeyword.startOffset >= beginPair.closeKeyword.startOffset
+        )
+        .sort((a, b) => b.openKeyword.startOffset - a.openKeyword.startOffset)[0];
+      assert.ok(innerGen, 'should find innermost generate that contains the body');
+      assert.ok(
+        beginPair.nestLevel >= innerGen.nestLevel,
+        `body nestLevel (${beginPair.nestLevel}) should be >= innermost generate nestLevel (${innerGen.nestLevel})`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
