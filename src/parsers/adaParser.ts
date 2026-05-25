@@ -433,7 +433,10 @@ export class AdaBlockParser extends BaseBlockParser {
           // a newline, the type keyword belongs to a separate construct and
           // must remain an independent token.
           const separator = fullMatch.slice(3, fullMatch.length - match[1].length);
-          const separatorHasNewline = /[\r\n]/.test(separator);
+          // Ada LRM 2.2 line terminator set: LF, CR, NEL (U+0085), LS (U+2028),
+          // PS (U+2029). JS `\s` and `[\r\n]` do not cover NEL/LS/PS, so the
+          // class must enumerate them explicitly.
+          const separatorHasNewline = /[\r\n\u0085\u2028\u2029]/.test(separator);
           if (separatorHasNewline) {
             match = COMPOUND_END_PATTERN.exec(source);
             continue;
