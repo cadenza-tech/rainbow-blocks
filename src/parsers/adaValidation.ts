@@ -251,6 +251,14 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   // Scan forward past the identifier (and dots, whitespace, newlines, comments)
   // looking for 'use' keyword or attribute tick "'"
   let i = skipAdaWhitespaceAndComments(source, position + 3);
+  // Reject `for (` immediately: no valid Ada `for ... loop` header or
+  // `for ... use ...` representation clause begins with an open paren after
+  // `for`. Without this guard, a stray `for (T : Integer) use 32;` lingers
+  // on the stack as a pseudo loop opener and prevents BEGIN_CONTEXT merging
+  // of the enclosing subprogram body.
+  if (i < source.length && source[i] === '(') {
+    return false;
+  }
   // Expect an identifier
   if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) {
     return true;
