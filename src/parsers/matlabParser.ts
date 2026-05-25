@@ -757,12 +757,43 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Defensive: if unmatched, fall back to NOT treating as a function call so legacy
     // behaviour is preserved on malformed input.
     if (depth !== 0) return false;
-    const inner = source.slice(j + 1, k).trim();
+    // Strip excluded regions that live INSIDE the parens (especially `...`/`\` line
+    // continuations, which span the marker through the trailing newline) before testing
+    // the inner content against ARGUMENTS_ATTRIBUTES_PATTERN. Without this, a continuation
+    // marker like `Input ...\n` would leave literal `...` characters inside the slice,
+    // causing the attribute regex to fail and `arguments(Input ...\n)` to be misclassified
+    // as a function call. Each excluded region is replaced with a single space so that
+    // identifier boundaries (e.g. `Input ...` → `Input `) are preserved.
+    const inner = this.stripExcludedRegionsAsSpace(source, j + 1, k, excludedRegions).trim();
     // Step 3: empty parens — treat as function call (MATLAB attribute lists are never empty).
     if (inner.length === 0) return true;
     // Step 4: only the recognised attribute pattern remains a real block opener; otherwise
     // it's a function call.
     return !MatlabBlockParser.ARGUMENTS_ATTRIBUTES_PATTERN.test(inner);
+  }
+
+  // Returns the substring source[start, end) with any excluded regions in that range
+  // replaced by a single space. Preserves character positions only loosely (regions of
+  // arbitrary length become 1 char), but identifier boundaries are kept so regex-style
+  // matching against the result is reliable. Used by isMatlabArgumentsFunctionCall to
+  // drop `...`/`\` line-continuation markers before pattern-matching the attribute list.
+  private stripExcludedRegionsAsSpace(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): string {
+    let result = '';
+    let i = start;
+    while (i < end) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && region.start >= start && region.start < end) {
+        if (i < region.start) {
+          result += source.slice(i, region.start);
+        }
+        result += ' ';
+        i = region.end;
+        continue;
+      }
+      result += source[i];
+      i++;
+    }
+    return result;
   }
 
   // Filter out block_middle keywords that are struct field access (s.else, s . case),
