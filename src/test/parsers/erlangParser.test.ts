@@ -3281,6 +3281,21 @@ foo() ->
     });
   });
 
+  suite('Regression: bare reserved words inside binary <<...>> in -define body', () => {
+    test('should not pair bare reserved words inside binary in -define with outer block', () => {
+      // The bare `begin`/`end` inside the binary in the -define body are reserved-word
+      // references, not real block delimiters. They must not pair with the outer
+      // begin/end block.
+      const source = '-define(M, <<begin, end>>).\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The outer begin (at source.indexOf('begin', '-define'.length)) must pair with the outer end.
+      const outerBeginOffset = source.indexOf('begin', source.indexOf(').'));
+      assert.strictEqual(pairs[0].openKeyword.startOffset, outerBeginOffset);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: -spec with form-feed/vertical-tab leading whitespace', () => {
     test('should recognize -spec preceded by form feed as a spec declaration', () => {
       // Form-feed and vertical-tab are valid Erlang whitespace. A -spec line that
