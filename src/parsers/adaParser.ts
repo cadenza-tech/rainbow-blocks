@@ -507,7 +507,11 @@ export class AdaBlockParser extends BaseBlockParser {
               continue;
             }
           }
-          if (source[bp] === ' ' || source[bp] === '\t' || source[bp] === '\n' || source[bp] === '\r') {
+          // Ada whitespace covers ASCII space/tab/CR/LF/VT/FF plus NEL,
+          // NBSP, LS/PS and the Zs category (LRM 2.1). The backward scan
+          // must accept all of them so NBSP-separated forms like
+          // `X :<NBSP>exception;` are treated as a variable declaration.
+          if (isAdaWhitespace(source[bp])) {
             bp--;
             continue;
           }
