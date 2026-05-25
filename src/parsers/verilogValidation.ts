@@ -540,6 +540,16 @@ export function isInsideParens(position: number, parenIndex: BracketIndex): bool
 // case_item (whose label name may be a reserved word).
 const CASE_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez', 'randcase']);
 
+// Statement-block openers that introduce a NESTED scope inside a case_item body
+// but do not change the case-context for label-name analysis. A case_item body
+// is `statement_or_null`, which can be a `seq_block` (`begin ... end`) or
+// `par_block` (`fork ... join*`). When scanning backward for the enclosing
+// block opener, an unclosed `begin`/`fork` at depth 0 means we are inside the
+// case_item body and the case header is still further back, so we must
+// continue past it transparently rather than treating it as the enclosing
+// opener. (Closed `begin`/`end` pairs balance via depth counting as usual.)
+const TRANSPARENT_OPENERS_FOR_CASE_SCAN: ReadonlySet<string> = new Set(['begin', 'fork']);
+
 // Scans backward from `fromPos` to find the nearest enclosing unclosed block
 // opener and returns true when it is a case-statement (case/casex/casez/randcase).
 // Each block-close keyword increments a depth counter; each block-open keyword
@@ -547,6 +557,13 @@ const CASE_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez
 // opener. Reserved-word keywords used as label names are rare enough that the
 // approximate scan is acceptable; an incorrect result only falls back to the
 // existing label-colon suppression behavior.
+//
+// Statement-block openers (`begin`/`fork`) that are unclosed at depth 0 are
+// transparently scanned past so a case header further back can still be found
+// as the enclosing context. Without this, code like
+// `case (s) 1: begin case: x = 1; end endcase` would not recognise the inner
+// `case:` as a case_item-position label-name misuse and the spurious inner
+// `case` would consume the outer `endcase`.
 export function isEnclosingBlockCase(
   source: string,
   fromPos: number,
@@ -581,9 +598,17 @@ export function isEnclosingBlockCase(
         depth++;
       } else if (openSet.has(word)) {
         if (depth === 0) {
-          return CASE_OPEN_KEYWORDS.has(word);
+          // Statement-block openers (`begin`/`fork`) at depth 0 are case_item
+          // body boundaries, not the enclosing opener. Scan past them
+          // transparently (no depth change) so a case header further back is
+          // found as the enclosing context. Other openers (case/casex/casez/
+          // randcase or any non-case opener) terminate the scan as before.
+          if (!TRANSPARENT_OPENERS_FOR_CASE_SCAN.has(word)) {
+            return CASE_OPEN_KEYWORDS.has(word);
+          }
+        } else {
+          depth--;
         }
-        depth--;
       }
     }
     i = wordStart;
