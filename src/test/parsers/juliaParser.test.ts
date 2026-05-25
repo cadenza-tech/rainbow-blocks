@@ -5111,6 +5111,42 @@ end`;
     });
   });
 
+  suite('Regression: trailing generator preceded by symbol or prefixed string literal (Bug 1)', () => {
+    test('should treat for as trailing generator when preceded by symbol literal', () => {
+      // `(:s, :t for i in 1:3)` is a generator expression yielding `(:s, :t)` tuples.
+      // The `for` follows the value expression `:t` (a Symbol literal), so it must be
+      // recognized as a trailing generator, NOT a block-form for. As a result the only
+      // block pair should be the outer `let ... end`.
+      const source = 'let\n  result = (:s, :t for i in 1:3)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+
+    test('should treat for as trailing generator when preceded by prefixed string literal', () => {
+      // `(r"foo", r"bar" for i in 1:3)` — `r"bar"` is a string macro call (Regex). The
+      // `for` follows this value-bearing expression, so it is a trailing generator.
+      const source = 'let\n  result = (r"foo", r"bar" for i in 1:3)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+
+    test('should treat for as trailing generator when preceded by command literal', () => {
+      // `(`ls`, `pwd` for i in 1:3)` — `` `pwd` `` is a Cmd literal value. The `for`
+      // follows this value, so it is a trailing generator inside the parens.
+      const source = 'let\n  result = (`ls`, `pwd` for i in 1:3)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+
+    test('should treat for as trailing generator when preceded by char literal', () => {
+      // `(?a, ?b for i in 1:3)` is invalid Julia, but `('a', 'b' for i in 1:3)` is a
+      // valid generator yielding chars; the `for` follows the value `'b'`.
+      const source = "let\n  result = ('a', 'b' for i in 1:3)\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+  });
+
   suite('Regression: end followed by typeassert/subtype operators inside indexing brackets is lastindex', () => {
     test('should treat end followed by :: as lastindex inside indexing brackets', () => {
       // `arr[if end::Int 1 else 0 end]` — `end::Int` is a type-asserted lastindex.
