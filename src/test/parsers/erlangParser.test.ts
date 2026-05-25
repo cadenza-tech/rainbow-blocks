@@ -3281,6 +3281,38 @@ foo() ->
     });
   });
 
+  suite('Regression: -spec with form-feed/vertical-tab leading whitespace', () => {
+    test('should recognize -spec preceded by form feed as a spec declaration', () => {
+      // Form-feed and vertical-tab are valid Erlang whitespace. A -spec line that
+      // begins with such characters must still be recognized as a spec declaration so
+      // that block keywords inside the type expression are not paired with outside
+      // blocks. Before the fix, `begin atom() end` inside the spec was treated as a
+      // real block opener because the spec line was not detected.
+      const source = '\f-spec foo() -> begin atom() end.\nbar() -> ok.';
+      const pairs = parser.parse(source);
+      // The `begin`/`end` inside the spec must not be paired as a block.
+      assertNoBlocks(pairs);
+    });
+
+    test('should recognize -spec preceded by vertical tab as a spec declaration', () => {
+      const source = '\v-spec foo() -> begin atom() end.\nbar() -> ok.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should recognize -record preceded by form feed and skip its keyword arguments', () => {
+      // The same leading-whitespace tolerance must apply to module attribute spans
+      // (-record, -define, -module, etc.) so that keywords inside their parentheses
+      // are still filtered. The bare `end` inside the -record argument list must not
+      // pair with the outer `begin`; the outer `end` at the source end must.
+      const source = 'begin\n\f-record(s, {f, end}),\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The outer `end` (at source.length - 3) must close the begin block.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: four consecutive dots should terminate -spec at third dot', () => {
     test('should terminate -spec at third dot in four-dot run', () => {
       // `....` is range + terminator + stray; the third dot ends the spec so the
