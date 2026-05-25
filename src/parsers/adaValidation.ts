@@ -92,16 +92,21 @@ export function isValidSubprogramOpen(
   excludedRegions: ExcludedRegion[],
   callbacks: AdaValidationCallbacks
 ): boolean {
-  // Check for 'access' keyword before, skipping whitespace and comments
+  // Check for 'access' keyword before, skipping intra-line whitespace and
+  // comments. Per Ada LRM 2.1, intra-line whitespace covers ASCII space/tab,
+  // NBSP (U+00A0) and the Zs category; line terminators (LF, CR, NEL, LS, PS)
+  // break the scan so that cross-line cases like `access\nprocedure` are not
+  // confused with same-line access prefixes.
   let scanPos = position - 1;
   while (scanPos >= 0) {
     const ch = source[scanPos];
-    if (ch === ' ' || ch === '\t') {
+    const code = ch.charCodeAt(0);
+    if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) {
+      break;
+    }
+    if (isAdaIntraLineWhitespace(ch)) {
       scanPos--;
       continue;
-    }
-    if (ch === '\n' || ch === '\r') {
-      break;
     }
     if (callbacks.isInExcludedRegion(scanPos, excludedRegions)) {
       scanPos--;
