@@ -860,9 +860,49 @@ export class MatlabBlockParser extends BaseBlockParser {
         if (this.isUsedAsRhsIdentifier(source, token.startOffset, token.value, excludedRegions)) {
           return false;
         }
+        // Reject block_middle keywords immediately followed by a strictly-binary operator
+        // (`case * 5`, `case < 5`, `else / x`, `catch == 1`, etc.). Such operators can
+        // never begin an expression, so the keyword is being used as the LEFT operand of
+        // an invalid expression rather than as a real intermediate. The unary-capable
+        // operators `+`, `-`, `~`, `!` are deliberately left alone because `case +1` and
+        // `case -5` are valid MATLAB (unary on a numeric literal). Symmetric with the
+        // block_open and block_close binary-operator checks elsewhere in the parser.
+        if (this.isFollowedByStrictBinaryOperator(source, middleAssignFrom)) {
+          return false;
+        }
       }
       return true;
     });
+  }
+
+  // Returns true when `afterPos` (already past horizontal whitespace and `...`/`\` line
+  // continuations) points at a strictly-binary operator that cannot legitimately start an
+  // expression: `*`, `/`, `^`, `\`, `<`, `>`, `&`, `|`, `:`, `==`, `~=`, `!=`, `<=`, `>=`.
+  // Also matches element-wise binary forms `.*`, `./`, `.^`, `.\` (but NOT `.*=` etc.,
+  // those are compound assignments handled elsewhere). Used by tokenize() to filter out
+  // block_middle keywords that sit in left-operand position (e.g. `case * 5`). Comparable
+  // to isFollowedByBinaryOperator but does NOT match `+`/`-`/`~`/`!` which are unary-capable
+  // and therefore legal as the first character of a `case` value expression.
+  private isFollowedByStrictBinaryOperator(source: string, afterPos: number): boolean {
+    if (afterPos >= source.length) return false;
+    const ch = source[afterPos];
+    const next = afterPos + 1 < source.length ? source[afterPos + 1] : '';
+    // Strictly-binary operators that can never start an expression.
+    if (ch === '*' || ch === '/' || ch === '^' || ch === '\\' || ch === '<' || ch === '>' || ch === '&' || ch === '|' || ch === ':') {
+      return true;
+    }
+    // Comparison operators built on `=`/`~`/`!`: `==`, `~=`, `!=`. The single `=` form
+    // (variable assignment) is already filtered by isFollowedBySimpleAssignment, so it
+    // does not need a separate branch here.
+    if (ch === '=' && next === '=') return true;
+    if ((ch === '~' || ch === '!') && next === '=') return true;
+    // Element-wise binary operators (`.*`, `./`, `.^`, `.\`) — but NOT compound
+    // assignments (`.*=`), which are handled by isFollowedByCompoundAssignment.
+    if (ch === '.' && (next === '*' || next === '/' || next === '^' || next === '\\')) {
+      const third = afterPos + 2 < source.length ? source[afterPos + 2] : '';
+      if (third !== '=') return true;
+    }
+    return false;
   }
 
   // Validates intermediate keywords against their opener type
