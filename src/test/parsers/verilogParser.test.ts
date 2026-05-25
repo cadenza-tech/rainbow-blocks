@@ -4865,5 +4865,63 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: reserved word as entity name after declaration keyword', () => {
+    test('should suppress begin used as module name (module begin;)', () => {
+      // Bug: `module begin;` uses `begin` as the module name (an invalid
+      // identifier because it is a reserved word). The inner `begin` was
+      // tokenized as a real block_open and paired with a following `end`,
+      // producing a spurious BlockPair. The only legitimate pair is the
+      // outer module/endmodule.
+      const source = 'module begin;\n  reg x;\nend\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should suppress begin used as function name (function begin();)', () => {
+      // Bug: `function begin();` uses `begin` as the function name. The
+      // inner `begin` was tokenized as a real block_open which had no
+      // matching `end` and could mispair with later closes.
+      const source = 'function begin();\nendfunction';
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0, '`begin` as function name must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    test('should suppress case used as task name (task case();)', () => {
+      const source = 'task case();\nendtask';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0, '`case` as task name must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'task', 'endtask');
+    });
+
+    test('should suppress reserved word as class name (class begin;)', () => {
+      const source = 'class begin;\nendclass';
+      const tokens = parser.getTokens(source);
+      const beginTokens = tokens.filter((t) => t.value === 'begin');
+      assert.strictEqual(beginTokens.length, 0, '`begin` as class name must not be tokenized');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should still allow function with explicit return type (function int f();)', () => {
+      // Sanity: `function int f();` must still produce a single function pair;
+      // the existing data-type-keyword suppression must not over-trigger.
+      const source = 'function int f();\nendfunction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    test('should still allow normal module declaration (module foo;)', () => {
+      // Sanity: a non-reserved-word identifier as module name must work normally.
+      const source = 'module foo;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
