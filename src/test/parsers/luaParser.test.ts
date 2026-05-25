@@ -487,6 +487,56 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
     });
 
+    test('should count LF+CR as a single newline per Lua 5.3+ spec (バグ1)', () => {
+      // Lua 5.3+ spec (Lexical Conventions): "A line break can be represented
+      // by `\n` (LF), `\r` (CR), `\n\r` (LF+CR), or `\r\n` (CR+LF)." All four
+      // forms count as a SINGLE newline for line numbering purposes.
+      // Bug: BaseBlockParser.buildNewlinePositions only paired `\r\n`; an
+      // `\n\r` (LF+CR) sequence pushed BOTH `\n` and `\r` as separate newlines,
+      // so `end` after `then\n\r` was reported on line 2 instead of line 1.
+      // Fix: override buildNewlinePositions in LuaParser to also collapse
+      // `\n\r` into a single newline (does not change pair structure, only
+      // the reported line numbers).
+      const source = 'if true then\n\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'if must be on line 0');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1, 'end after LF+CR must be on line 1, not 2');
+    });
+
+    test('should count plain LF as a single newline (control for LF+CR fix)', () => {
+      // Control: existing LF behaviour must not regress after the LF+CR fix.
+      const source = 'if true then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+
+    test('should count plain CR as a single newline (control for LF+CR fix)', () => {
+      // Control: existing CR-only behaviour must not regress.
+      const source = 'if true then\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+
+    test('should count CRLF as a single newline (control for LF+CR fix)', () => {
+      // Control: existing CRLF pairing must not regress.
+      const source = 'if true then\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1);
+    });
+
+    test('should still count two LFs as two newlines after the LF+CR fix', () => {
+      // The LF+CR fix must NOT collapse two consecutive `\n` chars: each
+      // standalone LF is its own line break. `then\n\nend` puts `end` on line 2.
+      const source = 'if true then\n\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'two LFs must remain two newlines');
+    });
+
     test('should handle nested long strings with different levels', () => {
       const source = `x = [==[
   if true then
