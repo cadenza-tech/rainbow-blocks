@@ -607,6 +607,24 @@ end`;
       const outerEndOffset = source.lastIndexOf('end');
       assert.strictEqual(recordPair.closeKeyword?.startOffset, outerEndOffset, 'record should close with outer end');
     });
+
+    test('should treat case [...] of in record as variant case (preserving outer record pair)', () => {
+      // `case [TKind] of` uses a bracketed tag form (malformed but reasonably
+      // interpreted as a variant case header). Without treating `[...]` as a tag,
+      // the case is classified as a standalone block opener and steals the only
+      // available `end`, leaving the surrounding record orphan. Cost-minimization
+      // (VS Code Bracket Pair Colorization "anchor set" / Tree-sitter error cost):
+      // preferring record→end gives a sensible result with one orphan (case).
+      const source = `TRec = record
+    case [TKind] of
+      0: (X: Integer);
+  end`;
+      const pairs = parser.parse(source);
+      const recordPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.ok(recordPair, 'record pair should exist');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(recordPair.closeKeyword?.startOffset, outerEndOffset, 'record should close with outer end');
+    });
   });
 
   suite('Class reference type', () => {
