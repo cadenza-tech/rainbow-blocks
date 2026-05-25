@@ -1330,7 +1330,12 @@ export class VhdlBlockParser extends BaseBlockParser {
           stmtText += source[si];
         }
         const stmtBefore = stmtText.toLowerCase().trimStart();
-        if (/^(type|subtype|alias|attribute|file|group)\b/.test(stmtBefore)) {
+        // VHDL declaration keywords that can introduce statements containing a stray `is`
+        // in editor-in-progress code (e.g. `signal x is integer;`). The grammar does not
+        // permit `is` here, but the keyword should not leak into the enclosing block's
+        // intermediates. `shared variable` is handled by the optional `shared\s+` prefix
+        // before `variable`.
+        if (/^(?:type|subtype|alias|attribute|file|group|signal|variable|constant|shared\s+variable)\b/.test(stmtBefore)) {
           continue;
         }
         // Check previous lines for type/subtype declaration (multi-line case)
