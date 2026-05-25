@@ -425,13 +425,20 @@ export class CobolBlockParser extends BaseBlockParser {
               // numeric head (`5-`) is not COBOL syntax for a continued identifier, so
               // we only skip the numeric tail when the head is purely digits.
               const afterNextWord = afterInner.slice(nextWord[0].length + this.skipNumericLiteralTail(word, afterInner.slice(nextWord[0].length)));
+              // Strip `*>` and `>>` comment runs (each to end of its line) before
+              // looking for the iteration verb so an inline comment between the
+              // count operand and TIMES (`PERFORM 5 *> comment\nTIMES`) does not
+              // hide TIMES from the `secondWord` lookahead. `.` does not match
+              // newline so each replace targets a single comment line at a time;
+              // the global flag handles multiple consecutive comment lines.
+              const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/g, '');
               // Check for PERFORM <variable> TIMES pattern (accept both alpha and numeric counts).
               // `\s+` (rather than `[ \t]+`) lets the iteration phrase wrap across a newline,
               // because a structured PERFORM may continue on the next line. The `\s+` does NOT
               // match a `.` so a period preceding the would-be second word still ends the
               // statement and leaves the regex empty (the same as before), preserving the
               // `PERFORM <name>.` paragraph-call rejection path.
-              const secondWord = afterNextWord.match(/^\s+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
+              const secondWord = afterNextWordNoComment.match(/^\s+([a-zA-Z0-9][a-zA-Z0-9_-]*)/i);
               // PERFORM TEST BEFORE/AFTER ... is a structured form (WITH is optional per COBOL standard)
               if (word === 'test' && secondWord) {
                 const sw = secondWord[1].toLowerCase();
@@ -461,8 +468,10 @@ export class CobolBlockParser extends BaseBlockParser {
                 // (e.g. `PERFORM PARA-A 5\n  TIMES`). Apply the same numeric-tail skip as the
                 // first operand so a decimal count like `5.5` does not break the `thirdWord`
                 // lookup and `PERFORM PARA-A 5.5 TIMES` stays rejected as a paragraph call.
-                const secondTailSkip = this.skipNumericLiteralTail(secondWord[1].toLowerCase(), afterNextWord.slice(secondWord[0].length));
-                const afterSecondWord = afterNextWord.slice(secondWord[0].length + secondTailSkip);
+                // Mirror the `*>` / `>>` comment strip from above so a comment line between
+                // the count operand and TIMES does not hide the verb from the thirdWord lookahead.
+                const secondTailSkip = this.skipNumericLiteralTail(secondWord[1].toLowerCase(), afterNextWordNoComment.slice(secondWord[0].length));
+                const afterSecondWord = afterNextWordNoComment.slice(secondWord[0].length + secondTailSkip);
                 const thirdWord = afterSecondWord.match(/^\s+([a-zA-Z][a-zA-Z0-9_-]*)/i);
                 if (thirdWord && thirdWord[1].toLowerCase() === 'times') {
                   // PERFORM para <count> TIMES → paragraph call with iteration, reject
