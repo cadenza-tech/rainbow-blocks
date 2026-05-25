@@ -3957,6 +3957,22 @@ end if;`;
     });
   });
 
+  suite('Regression: exception backward-scan filter recognizes Unicode whitespace', () => {
+    test('should filter exception as type when colon and exception are separated by NBSP', () => {
+      // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The exception
+      // type-filter in tokenize must skip Ada whitespace (not just ASCII
+      // space/tab/CR/LF) when scanning backward for the preceding `:`,
+      // otherwise `X :<NBSP>exception;` is mis-classified as a handler-section
+      // intermediate instead of a variable declaration.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `package P is\n  X :${nbsp}exception;\nend P;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!middleValues.includes('exception'), `exception must not be tracked as intermediate, got ${JSON.stringify(middleValues)}`);
+    });
+  });
+
   suite('Regression: isValidRecordOpen null detection recognizes Unicode whitespace', () => {
     test('should suppress record when null and record are separated by NBSP', () => {
       // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The null-record
