@@ -154,10 +154,17 @@ export class VhdlBlockParser extends BaseBlockParser {
   // same `end generate` token. recalculateNestLevels uses shared closeKeyword + last
   // block_middle intermediate to recognize siblings, so the generates themselves are
   // siblings of each other (correct). However, ordinary blocks nested inside each branch
-  // (synthetic begin/end body pairs, or process/case/loop/if/nested-generate blocks)
-  // close at their own separate `end;`/`end <type>;` tokens, so the shared-close
-  // exclusion does not fire and prior sibling generates are counted as parents. This
-  // method walks each such inner pair and subtracts the sibling-generate over-count.
+  // (process/case/loop/if/nested-generate) close at their own separate `end;`/`end <type>;`
+  // tokens, so the shared-close exclusion does not fire and prior sibling generates are
+  // counted as parents. This method walks each such inner pair and subtracts the
+  // sibling-generate over-count.
+  //
+  // Synthetic begin/end body pairs (openKeyword === 'begin', the alternative-label_end form)
+  // are handled separately by anchoring their nestLevel to the innermost containing
+  // generate. The body IS the body of that generate, so its level should match the
+  // generate's own level (just like the control-prefix/generate siblings match each other).
+  // This avoids over-subtraction in deeply nested generate constructs where every layer
+  // contributes both a control-prefix and a generate sibling pair.
   private adjustGenerateBodyNestLevels(pairs: BlockPair[]): void {
     for (const body of pairs) {
       // Skip the generate pairs themselves (their sibling relation is handled by the
@@ -172,39 +179,28 @@ export class VhdlBlockParser extends BaseBlockParser {
           other.closeKeyword.startOffset >= body.closeKeyword.startOffset
       );
       if (containingGenerates.length === 0) continue;
-      // Group generates that share the same closeKeyword (they're an elsif/else-generate chain)
+      // Synthetic begin/end body: anchor nestLevel to the innermost containing generate.
+      // The body and the generate form one construct (the body IS the generate's body),
+      // so the body's nestLevel must match the generate's nestLevel.
+      if (body.openKeyword.value.toLowerCase() === 'begin') {
+        const innermost = containingGenerates.reduce((best, candidate) =>
+          candidate.openKeyword.startOffset > best.openKeyword.startOffset ? candidate : best
+        );
+        body.nestLevel = innermost.nestLevel;
+        continue;
+      }
+      // For ordinary nested blocks (process/case/loop/if/nested-generate): group generates
+      // that share the same closeKeyword (they're an elsif/else-generate chain). For each
+      // chain (closeOffsetCounts > 1), there's only ONE direct parent generate; the other
+      // (count - 1) generates are siblings that the base recalculation incorrectly counted.
       const closeOffsetCounts = new Map<number, number>();
       for (const gen of containingGenerates) {
         const off = gen.closeKeyword.startOffset;
         closeOffsetCounts.set(off, (closeOffsetCounts.get(off) ?? 0) + 1);
       }
-      // For each chain (closeOffsetCounts > 1), there's only ONE direct parent generate
-      // (the one whose body actually contains the body pair). The other (count - 1)
-      // generates are siblings that the base recalculation incorrectly counted.
       let overCount = 0;
       for (const count of closeOffsetCounts.values()) {
         if (count > 1) overCount += count - 1;
-      }
-      // A synthetic generate body (begin/end injected for the optional alternative-label
-      // form, openKeyword === 'begin') is the inner scope of a single generate construct.
-      // For an `if/for/while ... generate` construct the control keyword and the generate
-      // close at the SAME `end generate`, so they form one construct and must contribute a
-      // single nesting level to the body. The base recalculation counts BOTH as parents, so
-      // subtract every control-prefix that shares a containing generate's close offset. This
-      // correction targets only synthetic begin bodies: a real block (process/nested
-      // generate/loop) that genuinely sits inside the construct keeps the construct as one
-      // full level above it.
-      if (body.openKeyword.value.toLowerCase() === 'begin') {
-        const generateCloseOffsets = new Set(containingGenerates.map((gen) => gen.closeKeyword.startOffset));
-        for (const other of pairs) {
-          if (other === body) continue;
-          if (!GENERATE_PREFIX_KEYWORDS.includes(other.openKeyword.value.toLowerCase())) continue;
-          if (other.openKeyword.startOffset >= body.openKeyword.startOffset) continue;
-          if (other.closeKeyword.startOffset < body.closeKeyword.startOffset) continue;
-          if (generateCloseOffsets.has(other.closeKeyword.startOffset)) {
-            overCount++;
-          }
-        }
       }
       body.nestLevel = Math.max(0, body.nestLevel - overCount);
     }
