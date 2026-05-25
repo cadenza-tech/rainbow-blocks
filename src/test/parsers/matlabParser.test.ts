@@ -3391,5 +3391,60 @@ end`;
     });
   });
 
+  suite('Regression: section keyword used as function call inside non-classdef-direct scope', () => {
+    test('should not treat properties(obj) inside classdef methods as section block', () => {
+      // Inside `classdef A / methods / ...`, a `properties()` call (line-start function call
+      // shape) must NOT be paired as a section block. The closest enclosing block is `methods`,
+      // not `classdef`, so `properties` at this depth is a function call. Treating it as a
+      // section opener consumes the inner `end` and leaves classdef orphan.
+      const source = 'classdef A\n  methods\n    properties()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classdef = pairs.find((p) => p.openKeyword.value === 'classdef');
+      const methods = pairs.find((p) => p.openKeyword.value === 'methods');
+      assert.ok(classdef, 'classdef must pair with its end');
+      assert.ok(methods, 'methods must pair with its end');
+    });
+
+    test('should not treat properties(obj) inside function inside methods as section block', () => {
+      // Realistic scenario: `classdef / methods / function f(obj) / properties(obj) / end / end / end`.
+      // The `properties(obj)` is a reflection helper call inside `function`, NOT a section
+      // block. The closest enclosing block is `function`, so it must be treated as a call.
+      const source = 'classdef A\n  methods\n    function f(obj)\n      properties(obj)\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const classdef = pairs.find((p) => p.openKeyword.value === 'classdef');
+      const methods = pairs.find((p) => p.openKeyword.value === 'methods');
+      const func = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.ok(classdef, 'classdef must pair with its end');
+      assert.ok(methods, 'methods must pair with its end');
+      assert.ok(func, 'function must pair with its end');
+    });
+
+    test('should not treat methods(obj) inside another methods section as section block', () => {
+      // Closest enclosing block is `methods`, so the inner `methods(obj)` call must be
+      // a function call, not a section opener.
+      const source = 'classdef A\n  methods\n    methods(obj)\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classdef = pairs.find((p) => p.openKeyword.value === 'classdef');
+      const methodsBlocks = pairs.filter((p) => p.openKeyword.value === 'methods');
+      assert.ok(classdef, 'classdef must pair with its end');
+      assert.strictEqual(methodsBlocks.length, 1, 'only the outer methods must be a section block');
+    });
+
+    test('should still treat properties(...) directly inside classdef as section block (sanity check)', () => {
+      // When `properties` is directly inside `classdef` (closest enclosing block is classdef),
+      // it remains a valid section opener (with or without an attribute parenthesised list).
+      const source = 'classdef A\n  properties (Access = public)\n    x = 5;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classdef = pairs.find((p) => p.openKeyword.value === 'classdef');
+      const props = pairs.find((p) => p.openKeyword.value === 'properties');
+      assert.ok(classdef, 'classdef must pair with its end');
+      assert.ok(props, 'properties must pair with its end as a section block');
+    });
+  });
+
   generateCommonTests(config);
 });
