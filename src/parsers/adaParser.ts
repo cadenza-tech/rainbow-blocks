@@ -52,6 +52,13 @@ const COMPOUND_END_TYPES = [
 // Keywords that can precede 'begin' and are closed together with it
 const BEGIN_CONTEXT_KEYWORDS = ['declare', 'procedure', 'function', 'task', 'protected', 'package', 'entry'];
 
+// Keywords that, when immediately preceding the identifier `exception`,
+// indicate that `Exception` denotes a type-mark rather than a handler-section
+// intermediate. Covers raise-statement, derived type, record extension /
+// aspect specification, subtype/type declaration, access type, array
+// component type, and function result type contexts.
+const EXCEPTION_TYPE_MARK_CONTEXTS = new Set(['raise', 'new', 'with', 'is', 'access', 'of', 'return']);
+
 // Character class (regex source, without the enclosing brackets) for the
 // separators allowed between 'end' and the type keyword of a compound end.
 // Covers Ada LRM 2.1 format_effector (HT, VT, FF, CR, LF, NEL) and the Unicode
@@ -526,16 +533,23 @@ export class AdaBlockParser extends BaseBlockParser {
         if (bp >= 0 && source[bp] === '.') {
           continue;
         }
-        // Check for 'raise', 'new', or 'with' preceding exception (type
-        // reference contexts: raise-statement, derived type, record extension /
-        // aspect specification).
+        // Check for keywords preceding exception that indicate type-mark
+        // contexts (the identifier `Exception` denotes a type rather than a
+        // handler-section delimiter):
+        //   - raise:   raise-statement (`raise Exception;`)
+        //   - new:     derived type (`type T is new Exception;`)
+        //   - with:    record extension / aspect specification
+        //   - is:      subtype/type declaration (`subtype S is Exception;`)
+        //   - access:  access type (`type T is access Exception;`)
+        //   - of:      array component type (`type T is array(...) of Exception;`)
+        //   - return:  function result type (`function F return Exception is`)
         if (bp >= 0 && /[a-zA-Z_]/.test(source[bp])) {
           let wordStart = bp;
           while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
             wordStart--;
           }
           const prevWord = source.slice(wordStart, bp + 1).toLowerCase();
-          if (prevWord === 'raise' || prevWord === 'new' || prevWord === 'with') {
+          if (EXCEPTION_TYPE_MARK_CONTEXTS.has(prevWord)) {
             continue;
           }
         }
