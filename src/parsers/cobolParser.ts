@@ -2,7 +2,14 @@
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
-import { getVisualColumn, isFixedFormatCommentLine, isInExpressionContext, isPrecedingWordDataNameVerb, matchCobolString } from './cobolFixedFormat';
+import {
+  getVisualColumn,
+  isFixedFormatCommentLine,
+  isInExpressionContext,
+  isPrecedingWordDataNameVerb,
+  isPrecedingWordDataNameVerbSameLine,
+  matchCobolString
+} from './cobolFixedFormat';
 import type { CobolHelperCallbacks } from './cobolHelpers';
 import { isInCopyStatement as isInCopyStatementHelper, isInPseudoTextContext, matchExecBlock, matchPseudoText } from './cobolHelpers';
 import { buildPeriodPositions, findBlockVerbAfterCopybook, getPseudoTextStarts } from './cobolPseudoText';
@@ -339,6 +346,23 @@ export class CobolBlockParser extends BaseBlockParser {
       if (this.isInCopyStatement(source, pos, excludedRegions)) {
         continue;
       }
+      // Skip keywords used as data names on the SAME line as the preceding
+      // verb — operands of MOVE/ADD/SET/... whose value happens to spell a
+      // reserved word (`MOVE IF TO X`, `MOVE END-IF TO Y`). tokenize() drops
+      // these from the token stream; this pre-pass must drop them too,
+      // otherwise the inner `IF` (or `END-IF`) is pushed onto the opener/closer
+      // stack here and pairs with the real END-IF (or real IF), leaving the
+      // real opener / closer orphan. Block openers / closers always begin a
+      // new statement, so the same-line variant is correct — a DATA_NAME_VERB
+      // dangling at the end of the previous line cannot turn a next-line block
+      // keyword into an operand (`PERFORM DISPLAY\nEND-PERFORM` must keep the
+      // END-PERFORM token even though DISPLAY is in DATA_NAME_VERBS). The
+      // general `isInExpressionContext` check (`=`, relational words, ...) is
+      // intentionally NOT applied here — current de-facto behaviour treats
+      // expression-position reserved words like `==IF` as the real block opener.
+      if (this.isPrecedingWordDataNameVerbSameLine(source, pos)) {
+        continue;
+      }
       // Skip hyphenated identifiers
       if (pos > 0 && source[pos - 1] === '-') {
         continue;
@@ -649,13 +673,30 @@ export class CobolBlockParser extends BaseBlockParser {
       });
     }
 
-    // Filter WHEN/ELSE used as data names (e.g., MOVE ELSE TO Y, ADD WHEN TO Y, COMPUTE Y = X + ELSE).
+    // Filter block keywords used as data names. WHEN/ELSE (middle) keep the
+    // original cross-line / expression-context filter — a same- or prior-line
+    // data-name verb suppresses them, and so do expression-position operators.
+    // IF/PERFORM/... (open) and END-IF/END-PERFORM/... (close) use a stricter
+    // same-line variant: a block keyword always begins a new statement, so a
+    // DATA_NAME_VERB on the previous line cannot turn it into an operand
+    // (`PERFORM DISPLAY\nEND-PERFORM` must keep END-PERFORM even though DISPLAY
+    // is in DATA_NAME_VERBS), and an expression operator dangling before it is
+    // not enough to demote it (current de-facto behaviour treats
+    // expression-position reserved words like `==IF` as the real block opener).
+    // The same-line operand filter still suppresses the inner `IF` of
+    // `MOVE IF TO X` and the inner `END-IF` of `MOVE END-IF TO Y`, which was
+    // the actual reported bug.
     return tokens.filter((token) => {
-      if (token.type !== 'block_middle') return true;
-      const lower = token.value.toLowerCase();
-      if (lower !== 'when' && lower !== 'else') return true;
-      if (this.isPrecedingWordDataNameVerb(source, token.startOffset)) return false;
-      if (this.isInExpressionContext(source, token.startOffset, excludedRegions)) return false;
+      if (token.type === 'block_middle') {
+        const lower = token.value.toLowerCase();
+        if (lower !== 'when' && lower !== 'else') return true;
+        if (this.isPrecedingWordDataNameVerb(source, token.startOffset)) return false;
+        if (this.isInExpressionContext(source, token.startOffset, excludedRegions)) return false;
+        return true;
+      }
+      if (token.type === 'block_open' || token.type === 'block_close') {
+        if (this.isPrecedingWordDataNameVerbSameLine(source, token.startOffset)) return false;
+      }
       return true;
     });
   }
@@ -663,6 +704,12 @@ export class CobolBlockParser extends BaseBlockParser {
   // Returns true when WHEN/ELSE is used as a data name (operand of a COBOL data-name verb)
   private isPrecedingWordDataNameVerb(source: string, position: number): boolean {
     return isPrecedingWordDataNameVerb(source, position, this.helperCallbacks);
+  }
+
+  // Same-line variant for block_open / block_close tokens. See
+  // isPrecedingWordDataNameVerbSameLine in cobolFixedFormat.ts for the rationale.
+  private isPrecedingWordDataNameVerbSameLine(source: string, position: number): boolean {
+    return isPrecedingWordDataNameVerbSameLine(source, position, this.helperCallbacks);
   }
 
   // Returns true when the keyword is preceded by an expression-context character

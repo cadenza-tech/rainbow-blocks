@@ -395,6 +395,41 @@ export function isInExpressionContext(source: string, position: number, excluded
 // literal, or other non-operand character is encountered. String literals are treated as
 // a non-data-name source operand (e.g., DISPLAY "yes"\nELSE leaves ELSE as an IF
 // intermediate, not a data name) — the same is true of any quoted source operand.
+// Same-line-only variant of isPrecedingWordDataNameVerb. Returns true when the
+// keyword at `position` is preceded — on the same physical line — by a chain of
+// data-name operands terminating in a DATA_NAME_VERB. Differs from the general
+// helper in that it never crosses a newline: a block-opening keyword (IF,
+// PERFORM, ...) or block-closing keyword (END-IF, END-PERFORM, ...) always
+// begins a new statement, so a DATA_NAME_VERB on the previous line cannot make
+// it an operand. Used by cobolParser to filter block_open / block_close tokens
+// that spell a reserved word inside a same-line `MOVE IF TO X` / `MOVE END-IF
+// TO Y` operand list, without over-filtering legitimate block keywords that
+// merely happen to follow a verb across a newline (`PERFORM DISPLAY\nEND-PERFORM`).
+export function isPrecedingWordDataNameVerbSameLine(source: string, position: number, callbacks: CobolHelperCallbacks): boolean {
+  const keywordLineStart = findLineStart(source, position);
+  let pos = position;
+  for (let step = 0; step < 32; step++) {
+    const i = skipBackwardWhitespaceAndComments(source, pos - 1, callbacks);
+    if (i < 0) return false;
+    if (findLineStart(source, i) !== keywordLineStart) return false;
+    let wordEndIndex = i;
+    if (source[wordEndIndex] === ',' || source[wordEndIndex] === ';') {
+      const next = skipBackwardWhitespaceAndComments(source, wordEndIndex - 1, callbacks);
+      if (next < 0) return false;
+      if (findLineStart(source, next) !== keywordLineStart) return false;
+      wordEndIndex = next;
+    }
+    if (!/[a-zA-Z0-9_-]/.test(source[wordEndIndex])) return false;
+    let wordStart = wordEndIndex;
+    while (wordStart > 0 && /[a-zA-Z0-9_-]/.test(source[wordStart - 1])) wordStart--;
+    if (findLineStart(source, wordStart) !== keywordLineStart) return false;
+    const word = source.slice(wordStart, wordEndIndex + 1).toUpperCase();
+    if (DATA_NAME_VERBS.has(word)) return true;
+    pos = wordStart;
+  }
+  return false;
+}
+
 export function isPrecedingWordDataNameVerb(source: string, position: number, callbacks: CobolHelperCallbacks): boolean {
   const keywordLineStart = findLineStart(source, position);
   let pos = position;
