@@ -62,6 +62,13 @@ const COMPOUND_END_PATTERN = new RegExp(
 // Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
+// Block openers that introduce a declaration body (not a control-flow / statement body).
+// Control-flow intermediates (`else`/`elsif`/`then`) belong to `if` / `when else` constructs
+// inside an EXPRESSION; they must not be absorbed as an intermediate of a declaration block
+// like `record` or `units` when the body's contents include a conditional expression in a
+// field default (e.g., `x : integer when y => 1 else 0;` inside a `record`).
+const DECLARATION_BLOCK_OPENERS: ReadonlySet<string> = new Set(['record', 'units']);
+
 // Block-opener keywords whose immediate identifier-like token can legally be the prefix
 // of an attribute reference (LRM §16.3). These keywords name a declarative item
 // (entity/architecture/package/etc.) whose attribute can be referenced as
@@ -1610,14 +1617,21 @@ export class VhdlBlockParser extends BaseBlockParser {
         case 'block_middle':
           if (stack.length > 0) {
             const topOpener = stack[stack.length - 1].token.value.toLowerCase();
+            const middleKw = token.value.toLowerCase();
             // 'when' is only valid as intermediate for 'case' blocks
             // In case-generate, stack is [case, generate] - attach when to case
-            if (token.value.toLowerCase() === 'when') {
+            if (middleKw === 'when') {
               if (topOpener === 'case') {
                 stack[stack.length - 1].intermediates.push(token);
               } else if (topOpener === 'generate' && stack.length >= 2 && stack[stack.length - 2].token.value.toLowerCase() === 'case') {
                 stack[stack.length - 2].intermediates.push(token);
               }
+            } else if ((middleKw === 'else' || middleKw === 'elsif' || middleKw === 'then') && DECLARATION_BLOCK_OPENERS.has(topOpener)) {
+              // Control-flow intermediates (`else`/`elsif`/`then`) belong to `if` / `when /
+              // else` constructs. They never apply to declaration blocks such as `record` or
+              // `units`. A conditional expression inside a field default (e.g.,
+              // `x : integer when y => 1 else 0;` inside a `record`) would otherwise be
+              // absorbed as the record's intermediate. Drop the token instead.
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
