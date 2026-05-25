@@ -3391,6 +3391,49 @@ end`;
     });
   });
 
+  suite('Regression: block_middle keyword followed by strictly-binary operator is not intermediate', () => {
+    test('should not register case as intermediate when followed by * operator', () => {
+      // `case * 5` is invalid MATLAB: `case` requires a value expression, and `*` cannot start
+      // an expression (only unary `+`/`-`/`~`/`!` may, and `*` is not in that set). Treating
+      // `case` here as an intermediate corrupts the switch arm structure.
+      const source = 'switch x\n  case * 5\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case * 5 must not be registered as an intermediate');
+    });
+
+    test('should not register case as intermediate when followed by / operator', () => {
+      const source = 'switch x\n  case / 5\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case / 5 must not be registered as an intermediate');
+    });
+
+    test('should not register case as intermediate when followed by < operator', () => {
+      const source = 'switch x\n  case < 5\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case < 5 must not be registered as an intermediate');
+    });
+
+    test('should still register case as intermediate when followed by unary + (sanity)', () => {
+      // `case +1` is valid MATLAB (`+` is unary on a numeric literal). It must remain
+      // recognised as an intermediate.
+      const source = 'switch x\n  case +1\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'case +1 must remain a valid intermediate');
+      assert.strictEqual(pairs[0].intermediates[0].value, 'case');
+    });
+
+    test('should still register case as intermediate when followed by unary - (sanity)', () => {
+      const source = 'switch x\n  case -5\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'case -5 must remain a valid intermediate');
+    });
+  });
+
   suite('Regression: arguments(...) attribute list spans ... line continuation', () => {
     test('should treat arguments(Input ...\\n) as block opener when attribute spans line continuation', () => {
       // The attribute parenthesised list `(Input ...\n)` legitimately spans a `...` line
