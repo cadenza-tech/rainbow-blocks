@@ -546,14 +546,22 @@ function findBlockVerbAfterCopy(source: string, copyEnd: number, limit: number, 
       const upper = source.slice(wordStart, i).toUpperCase();
       // Word 0 is normally the copybook name itself — never a statement boundary.
       // Exception: a bare COPY (with no copybook name typed yet) followed directly
-      // by a block-opening verb is best treated as a COPY with no operand, with the
-      // verb starting a new statement. Otherwise the verb (and its END-* close) are
-      // swallowed as the copybook name and the enclosing block pair disappears.
-      // Only trigger when the next significant token is neither `.` (statement
-      // terminator, which makes the verb a legitimate copybook name like `COPY IF.`)
-      // nor `OF`/`IN` (library qualifier, which begins `COPY name OF lib`).
+      // by any statement-boundary verb is best treated as a COPY with no operand,
+      // with the verb starting a new statement. Include block-opening, non-block,
+      // block-closing, and middle verbs — all four classes end a period-less COPY
+      // when they begin word 0. Otherwise an END-IF / ELSE / WHEN / MOVE etc. at
+      // word 0 is swallowed as the copybook name and the enclosing block pair or
+      // intermediate disappears. Only trigger when the next significant token is
+      // neither `.` (statement terminator, which makes the verb a legitimate
+      // copybook name like `COPY IF.`) nor `OF`/`IN` (library qualifier, which
+      // begins `COPY name OF lib`).
       if (wordIndex === 0) {
-        if (COPY_TERMINATING_VERBS.has(upper) && !isCopybookNameContextRaw(source, i)) {
+        const isBoundaryVerb =
+          COPY_TERMINATING_VERBS.has(upper) ||
+          COPY_TERMINATING_NONBLOCK_VERBS.has(upper) ||
+          COPY_TERMINATING_CLOSE_VERBS.has(upper) ||
+          COPY_TERMINATING_MIDDLE_VERBS.has(upper);
+        if (isBoundaryVerb && !isCopybookNameContextRaw(source, i)) {
           return wordStart;
         }
         wordIndex++;

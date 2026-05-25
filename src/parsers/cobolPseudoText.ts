@@ -116,14 +116,24 @@ export function findBlockVerbAfterCopybook(
     const upper = match[0].toUpperCase();
     // Word 0 is normally the copybook name itself — never a statement boundary.
     // Exception: a bare COPY (with no copybook name typed yet) followed directly
-    // by a block-opening verb is best treated as a COPY with no operand, with the
-    // verb starting a new statement. Otherwise the verb (and its END-* close) are
-    // swallowed as the copybook name and the enclosing block pair disappears.
-    // Only trigger when the next significant token is neither `.` (statement
-    // terminator, which makes the verb a legitimate copybook name like `COPY IF.`)
-    // nor `OF`/`IN` (library qualifier, which begins `COPY name OF lib`).
+    // by any statement-boundary verb is best treated as a COPY with no operand,
+    // with the verb starting a new statement. Otherwise the verb (and its END-*
+    // close, ELSE/WHEN intermediate, or non-block verb such as MOVE/SET) are
+    // swallowed as the copybook name and the enclosing block pair or
+    // intermediate disappears. Include block-opening (IF/PERFORM/...), non-block
+    // (MOVE/SET/...), block-closing (END-IF/END-PERFORM/...), and middle
+    // (ELSE/WHEN) verbs — all four classes end a period-less COPY when they
+    // begin word 0. Only trigger when the next significant token is neither `.`
+    // (statement terminator, which makes the verb a legitimate copybook name
+    // like `COPY IF.`) nor `OF`/`IN` (library qualifier, which begins
+    // `COPY name OF lib`).
     if (wordIndex === 0) {
-      if (blockOpen.some((kw) => kw === upper.toLowerCase()) && !isCopybookNameContext(source, wordPos + match[0].length)) {
+      const isBoundaryVerb =
+        blockOpen.some((kw) => kw === upper.toLowerCase()) ||
+        COPY_TERMINATING_NONBLOCK_VERBS.has(upper) ||
+        COPY_TERMINATING_CLOSE_VERBS.has(upper) ||
+        COPY_TERMINATING_MIDDLE_VERBS.has(upper);
+      if (isBoundaryVerb && !isCopybookNameContext(source, wordPos + match[0].length)) {
         return wordPos;
       }
       wordIndex++;
@@ -349,7 +359,23 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
         // the COPY ended at OF/IN with no library and the verb starts the next
         // statement.
         if (copyWordsSeen === 0) {
-          copyWordsSeen = 1;
+          // A bare COPY (no copybook name yet) directly followed by a statement
+          // verb (block-open/non-block/close/middle) is best treated as a COPY
+          // with no operand — the verb begins the next statement. Mirrors the
+          // word-0 handling in findBlockVerbAfterCopybook / findBlockVerbAfterCopy
+          // so the pseudo-text classifier also stops treating the rest of the
+          // statement as part of this COPY (otherwise REPLACING further down the
+          // source would still be classified as part of the dropped COPY).
+          if (
+            COPY_TERMINATING_VERBS.has(word) ||
+            COPY_TERMINATING_NONBLOCK_VERBS.has(word) ||
+            COPY_TERMINATING_CLOSE_VERBS.has(word) ||
+            COPY_TERMINATING_MIDDLE_VERBS.has(word)
+          ) {
+            sawCopy = false;
+          } else {
+            copyWordsSeen = 1;
+          }
         } else if (expectCopyLibrary) {
           expectCopyLibrary = false;
           if (
