@@ -29,14 +29,17 @@ const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
   program: ['extern']
 };
 
-// Validates 'wait': rejects `wait fork;` statement (SystemVerilog statement that
-// blocks until all forked processes complete; not a control-keyword that opens a
-// begin block). The `wait` keyword in `wait fork;` must NOT trigger CONTROL_KEYWORD
-// chain consumption, otherwise it falsely pairs with a subsequent `end`.
-// Returns true when this `wait` should be treated as a valid block-opener (i.e.,
-// it is NOT the `wait fork;` form), false when it should be rejected.
+// Validates 'wait': rejects the `wait fork` statement family (SystemVerilog
+// statement that blocks until all forked processes complete; LRM §9.7.1).
+// `wait fork` is a complete statement that always terminates with `;` and never
+// takes a body — invalid forms like `wait fork begin ... end` would otherwise
+// chain-consume the trailing `end` and falsely close an outer control keyword.
+// The `wait` keyword in any `wait fork ...` form must NOT trigger
+// CONTROL_KEYWORD chain consumption.
+// Returns true when this `wait` should be treated as a valid block-opener
+// (i.e., it is NOT followed by `fork`), false when it should be rejected.
 export function isValidWaitOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-  // Scan forward past 'wait' to detect `fork ;` form.
+  // Scan forward past 'wait' to check if the next non-trivia token is `fork`.
   let i = position + 4; // length of 'wait'
   while (i < source.length) {
     const ch = source[i];
@@ -63,29 +66,14 @@ export function isValidWaitOpen(source: string, position: number, excludedRegion
   // Check 'fork' as the next token
   if (source.slice(i, i + 4) !== 'fork') return true;
   const afterFork = i + 4;
+  // `forkfoo` etc are different identifiers; only a real `fork` keyword with a
+  // word boundary after it counts as the `wait fork` form.
   if (afterFork < source.length && /[a-zA-Z0-9_$]/.test(source[afterFork])) return true;
-  // Skip whitespace/comments after 'fork'
-  let j = afterFork;
-  while (j < source.length) {
-    const ch = source[j];
-    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-      j++;
-      continue;
-    }
-    let inExcluded = false;
-    for (const region of excludedRegions) {
-      if (j >= region.start && j < region.end) {
-        j = region.end;
-        inExcluded = true;
-        break;
-      }
-    }
-    if (inExcluded) continue;
-    break;
-  }
-  // `wait fork;` is the rejected form
-  if (j < source.length && source[j] === ';') return false;
-  return true;
+  // `wait fork` is the rejected form regardless of what follows (`;` is the
+  // valid form, anything else — `begin`, `end`, identifiers — is invalid
+  // syntax). In all cases `wait` is part of the `wait fork` statement and
+  // must not be tokenized as a control-keyword block opener.
+  return false;
 }
 
 // Validates 'fork': rejects 'disable fork' and 'wait fork' statements
