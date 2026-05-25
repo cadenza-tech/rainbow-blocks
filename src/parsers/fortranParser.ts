@@ -1137,9 +1137,12 @@ export class FortranBlockParser extends BaseBlockParser {
             const textBetween = source.slice(current.endOffset, blockDataMergedTokens[ti + 1].startOffset);
             // Same line: else if / else where
             const isSameLine = /^[ \t]+$/.test(textBetween);
-            // Continuation line: else &[optional comment]\n[optional comment lines][optional &] if/where
+            // Continuation line: else &[optional comment]\n[optional comment lines or blank lines][optional &] if/where
+            // The inner alternation `(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)?` is optional (`?`)
+            // so blank lines are accepted in the continuation gap, mirroring
+            // CONTINUATION_COMPOUND_END_PATTERN.
             const isContinuation =
-              /^[ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)(?:\r\n|\r|\n))*[ \t]*&?[ \t]*$/.test(
+              /^[ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)?(?:\r\n|\r|\n))*[ \t]*&?[ \t]*$/.test(
                 textBetween
               );
             if (isSameLine || isContinuation) {

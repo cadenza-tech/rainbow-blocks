@@ -965,9 +965,12 @@ export function matchElseWhere(source: string, afterElse: number, excludedRegion
       return { whereStart, end: whereStart + sameLineMatch[2].length };
     }
   }
-  // Continuation: &[optional comment]\n[optional comment lines][optional &] where
+  // Continuation: &[optional comment]\n[optional comment lines or blank lines][optional &] where
+  // The inner alternation `(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)?` is optional (`?`)
+  // so blank lines are accepted in the continuation gap, mirroring
+  // CONTINUATION_COMPOUND_END_PATTERN.
   const contMatch = afterElseText.match(
-    /^([ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)(?:\r\n|\r|\n))*[ \t]*&?[ \t]*)(where)\b/i
+    /^([ \t]*&[ \t]*(?:![^\r\n]*)?(?:\r\n|\r|\n)(?:[ \t]*(?:![^\r\n]*|&[ \t]*(?:![^\r\n]*)?)?(?:\r\n|\r|\n))*[ \t]*&?[ \t]*)(where)\b/i
   );
   if (contMatch) {
     const whereStart = afterElse + contMatch[1].length;
