@@ -3957,6 +3957,43 @@ end if;`;
     });
   });
 
+  suite('Regression: compound end separator recognizes Unicode line terminators', () => {
+    test('should reject end<NEL>if as compound when NEL is a line terminator', () => {
+      // Per Ada LRM 2.2, U+0085 (NEL) is a line terminator. When `end` and the
+      // type keyword are separated by a line terminator and the lookahead does
+      // not reach a terminating `;`, the type keyword belongs to an independent
+      // construct (e.g., a new statement on the next line). The separator
+      // newline-detection regex must include NEL/LS/PS, otherwise a stray
+      // `end<NEL>if` swallows the next `if` as a compound designator.
+      const nel = String.fromCharCode(0x85);
+      const source = `if A then\n  if B then null;\nend${nel}if\nif Cond then null; end if;`;
+      const pairs = parser.parse(source);
+      // Expect the inner `if B` to be closed by simple `end` (NEL splits
+      // `end` and `if`), and the second `if Cond` to be closed by `end if`.
+      const innerIf = pairs.find((p) => p.openKeyword.startOffset === 12);
+      assert.ok(innerIf, 'inner if B should be paired');
+      assert.strictEqual(innerIf.closeKeyword.value.toLowerCase(), 'end');
+    });
+
+    test('should reject end<LS>if as compound when LS is a line terminator', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `if A then\n  if B then null;\nend${ls}if\nif Cond then null; end if;`;
+      const pairs = parser.parse(source);
+      const innerIf = pairs.find((p) => p.openKeyword.startOffset === 12);
+      assert.ok(innerIf, 'inner if B should be paired');
+      assert.strictEqual(innerIf.closeKeyword.value.toLowerCase(), 'end');
+    });
+
+    test('should reject end<PS>if as compound when PS is a line terminator', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `if A then\n  if B then null;\nend${ps}if\nif Cond then null; end if;`;
+      const pairs = parser.parse(source);
+      const innerIf = pairs.find((p) => p.openKeyword.startOffset === 12);
+      assert.ok(innerIf, 'inner if B should be paired');
+      assert.strictEqual(innerIf.closeKeyword.value.toLowerCase(), 'end');
+    });
+  });
+
   suite('Regression: matchAdaString recognizes Unicode line terminators', () => {
     test('should terminate string at U+0085 (NEL) so trailing if/end if pair is detected', () => {
       // Ada strings cannot span multiple lines per LRM 2.6. The Ada parser
