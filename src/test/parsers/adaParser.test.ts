@@ -3957,6 +3957,25 @@ end if;`;
     });
   });
 
+  suite('Regression: isValidForOpen rejects for followed by open paren', () => {
+    test('should not treat for ( as block opener', () => {
+      // `for (T : Integer) use 32;` is invalid Ada syntax (representation
+      // clauses do not take a parenthesized argument), but the parser must
+      // not mis-classify it as a `for ... loop` block opener. Otherwise the
+      // `for` lingers on the stack and prevents BEGIN_CONTEXT merging of
+      // the enclosing procedure body (procedure ... begin ... end) since
+      // begin's contextIndex no longer points at procedure.
+      const source = 'procedure P is\n  for (T : Integer) use 32;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      // Expect the procedure/begin context merging to succeed: a single pair
+      // with procedure as opener.
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value.toLowerCase() === 'procedure'),
+        'procedure block must be paired (BEGIN_CONTEXT merging) when for ( is not consumed'
+      );
+    });
+  });
+
   suite('Regression: isExtendedReturn recognizes Unicode whitespace around := and do', () => {
     test('should reject extended return when := and do are separated by NBSP (malformed)', () => {
       // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The backward
