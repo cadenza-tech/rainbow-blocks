@@ -3204,5 +3204,54 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-25: bare COPY before END-* or block-middle keyword does not swallow the keyword', () => {
+    // Bug: `IF X\nCOPY\nEND-IF` (a COPY statement with no copybook name typed yet)
+    // treated the following END-IF as the copybook name, so the END-IF was filtered
+    // out by isInCopyStatement. The same problem applied to a bare COPY directly
+    // followed by an ELSE / WHEN intermediate. Per cost-minimization, when word 0 of
+    // a period-less COPY is itself a block-closing END-* keyword, an ELSE/WHEN
+    // intermediate, or any other COBOL statement verb that ends a COPY, the COPY
+    // has no operand and the keyword begins a new statement — recognise the
+    // surrounding pair / intermediate instead of dropping it.
+    test('should pair IF with END-IF when a bare COPY precedes END-IF', () => {
+      const source = 'IF X\nCOPY\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+    test('should register ELSE as IF intermediate when a bare COPY precedes ELSE', () => {
+      const source = 'IF X\n  DISPLAY A\nCOPY\nELSE\n  DISPLAY B\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
+    test('should register WHEN as EVALUATE intermediate when a bare COPY precedes WHEN', () => {
+      const source = 'EVALUATE X\n  WHEN 1\nCOPY\nWHEN 2\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assertIntermediates(pairs[0], ['WHEN', 'WHEN']);
+    });
+    test('should still treat END-IF as the copybook name when followed by a period', () => {
+      // Guard: `COPY END-IF.` is a legitimate copybook name that happens to spell
+      // a reserved-word closing keyword, terminated by the period. The END-IF
+      // must NOT be tokenised as a block closer.
+      const source = 'COPY END-IF.\nDISPLAY OK';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.some((t) => t.value.toUpperCase() === 'END-IF'),
+        false
+      );
+    });
+    test('should still treat ELSE as the copybook name when followed by a period', () => {
+      // Guard: `COPY ELSE.` is a legitimate copybook name. ELSE must NOT be
+      // tokenised as a middle keyword.
+      const source = 'COPY ELSE.\nDISPLAY OK';
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.some((t) => t.value.toUpperCase() === 'ELSE'),
+        false
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
