@@ -367,6 +367,29 @@ export class ErlangBlockParser extends BaseBlockParser {
             return j;
           }
         }
+        // Next function head with quoted atom name: 'name'(...) at column 0.
+        // Erlang allows quoted atoms as function names (e.g. 'My Function'() -> ok.),
+        // and a -spec without a trailing period must end before the next quoted-atom
+        // function definition just like an unquoted one.
+        if (next < source.length && source[next] === "'") {
+          let m = next + 1;
+          while (m < source.length && source[m] !== "'" && source[m] !== '\n' && source[m] !== '\r') {
+            if (source[m] === '\\' && m + 1 < source.length) {
+              m += 2;
+              continue;
+            }
+            m++;
+          }
+          if (m < source.length && source[m] === "'") {
+            m++;
+            while (m < source.length && (source[m] === ' ' || source[m] === '\t')) {
+              m++;
+            }
+            if (m < source.length && source[m] === '(') {
+              return j;
+            }
+          }
+        }
       }
     }
     return source.length;
