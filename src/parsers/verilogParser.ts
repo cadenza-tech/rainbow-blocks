@@ -240,6 +240,9 @@ const CASE_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez', 'r
 // because the immediately preceding word is the data type, not the introducer.
 // `function` is included because `function begin();` uses `begin` as the
 // function identifier with implicit return type (LRM A.2.6).
+// `extends` and `implements` are also included: per LRM §8.13/§8.26 they take
+// a class/interface-class identifier (or a list of them for `implements`), so
+// a reserved-word identifier in that position is a misused entity name.
 const ENTITY_NAME_INTRODUCERS: ReadonlySet<string> = new Set([
   'module',
   'macromodule',
@@ -256,7 +259,9 @@ const ENTITY_NAME_INTRODUCERS: ReadonlySet<string> = new Set([
   'config',
   'property',
   'sequence',
-  'randsequence'
+  'randsequence',
+  'extends',
+  'implements'
 ]);
 
 export class VerilogBlockParser extends BaseBlockParser {
