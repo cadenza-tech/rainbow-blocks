@@ -870,6 +870,18 @@ export class MatlabBlockParser extends BaseBlockParser {
         if (this.isFollowedByStrictBinaryOperator(source, middleAssignFrom)) {
           return false;
         }
+        // Reject `case` with an empty header (`case<NL>`, `case;`, `case,`, `case %...`).
+        // `case` requires a value expression; an empty header is invalid MATLAB and
+        // registering such a `case` as an intermediate corrupts the switch arm structure.
+        // `otherwise` is deliberately exempt — it legitimately takes no header (it is the
+        // default branch). `else`/`catch` are also exempt for the same reason (no header
+        // expression required). `elseif` requires a condition but the existing
+        // isPrecededByValueTokenOnSameLine and binary-operator checks already catch its
+        // operand-context misuses; an empty-header `elseif` is a less critical malformation
+        // (it falls through harmlessly) and we leave it untouched to keep this change minimal.
+        if (token.value.toLowerCase() === 'case' && this.isFollowedByEmptyHeader(source, middleAssignFrom)) {
+          return false;
+        }
       }
       return true;
     });
