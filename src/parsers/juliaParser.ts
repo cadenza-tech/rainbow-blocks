@@ -16,7 +16,12 @@ import {
 } from './juliaBracketHelpers';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
 import { isPrecededByCommandMacroPrefix, isSymbolStart, isTransposeOperator, skipJuliaInterpolation } from './juliaHelpers';
-import { isFollowedByBinaryOperator, isPrecededByBinaryOperator, isPrecededBySubtypeOperator } from './juliaLastindexHelpers';
+import {
+  isFollowedByBinaryOperator,
+  isFollowedByPostfixIndexMarker,
+  isPrecededByBinaryOperator,
+  isPrecededBySubtypeOperator
+} from './juliaLastindexHelpers';
 
 export class JuliaBlockParser extends BaseBlockParser {
   // Bracket index cached per source string. Built lazily on the first bracket-context
@@ -365,6 +370,14 @@ export class JuliaBlockParser extends BaseBlockParser {
     // block_close so the surrounding real `end` can pair with its opener correctly.
     // Newlines terminate the scan: `A\n end` is not the same case (separate lines).
     if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
+      return false;
+    }
+    // `end` immediately followed by a postfix index marker (`?`, `(`, `[`, `,`, or
+    // `.<letter>` field access) is being used as a value (lastindex-style). Outside
+    // indexing brackets this is invalid Julia syntax, but treating it as block_close
+    // would mis-pair the surrounding block's real `end`. See isFollowedByPostfixIndexMarker
+    // for the broadcast-vs-field-access distinction (`.+` stays a block-close marker).
+    if (isFollowedByPostfixIndexMarker(source, position)) {
       return false;
     }
     // Note: `end` followed by a binary operator outside indexing brackets is NOT rejected

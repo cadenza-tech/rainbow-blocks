@@ -66,6 +66,41 @@ export function isFollowedByBinaryOperator(source: string, position: number): bo
   return isBinaryOperatorStart(source, i);
 }
 
+// Checks if the `end` at `position` is immediately followed (no whitespace) by a postfix
+// marker that signals `end` is being used as a value (lastindex-style): `?` (ternary
+// condition), `(` (call), `[` (indexing), or `.<letter>` (field access). These appear in
+// expressions like `end?(x):(y)`, `end(x)`, `end[x]`, `end.foo`. Outside indexing brackets
+// these are invalid Julia syntax, but classifying `end` as block_close in such contexts
+// would mis-pair the surrounding block's real `end`.
+//
+// Note 1: `.<op>` (broadcast operator like `.+`, `.==`, `.<`) is intentionally excluded so
+// that value-returning blocks like `begin x end .+ 1` still close `begin` with the inner
+// `end`. The broadcast-vs-field-access distinction mirrors isBinaryOperatorStart's `.`
+// handling.
+//
+// Note 2: `,` (tuple/argument separator) is intentionally NOT treated as a postfix marker
+// here. In a call site like `f(begin 1 end, if ... end)`, the inner `end,` is a legitimate
+// block close terminating the `begin` argument. The pathological `function f() end, more
+// end` form is left as-is rather than rejecting `,` globally, because rejecting `,` would
+// break the common valid `end,` pattern in calls and tuples (cost minimization: 1 invalid
+// pattern preserved vs. many valid patterns broken).
+export function isFollowedByPostfixIndexMarker(source: string, position: number): boolean {
+  const i = position + 3;
+  if (i >= source.length) return false;
+  const c = source[i];
+  if (c === '?' || c === '(' || c === '[') return true;
+  if (c === '.') {
+    const c2 = i + 1 < source.length ? source[i + 1] : '';
+    if (c2 === '') return false;
+    // ASCII letter or underscore -> field access (`end.foo`); reject `end` as block_close.
+    if (/[a-zA-Z_]/.test(c2)) return true;
+    // Unicode letter -> field access (`end.α`); reject.
+    if (c2.charCodeAt(0) > 127 && /\p{L}/u.test(c2)) return true;
+    return false;
+  }
+  return false;
+}
+
 // Checks if `end` at `position` is preceded by `<:` or `>:` (subtype/supertype operator).
 // Skips intervening tabs/spaces (and excluded regions like comments) but stops at newlines
 // or any other token. Used to reject `end` as a block_close in `where T<:end` and similar
