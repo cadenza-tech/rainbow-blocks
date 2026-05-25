@@ -3281,6 +3281,17 @@ foo() ->
     });
   });
 
+  suite('Regression: four consecutive dots should terminate -spec at third dot', () => {
+    test('should terminate -spec at third dot in four-dot run', () => {
+      // `....` is range + terminator + stray; the third dot ends the spec so the
+      // following begin/end is a real block, not absorbed into spec context.
+      const source = '-spec foo() -> 1....\nbegin ok end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: unterminated -spec followed by quoted atom function head', () => {
     test('should detect quoted atom function head as -spec boundary', () => {
       // -spec without terminating '.' followed by quoted atom function head ('foo'() ->)
