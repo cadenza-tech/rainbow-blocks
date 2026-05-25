@@ -4256,6 +4256,36 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: isInExpressionRhsContext must not scan across unterminated strings', () => {
+    // When isInExpressionRhsContext scans backward from a reserved-word block opener and
+    // jumps past an excluded region, it must NOT cross a string literal that is unterminated
+    // (terminates at a newline because the closing `"` is missing). Such a region signals
+    // editor-in-progress code where the user likely intended subsequent lines to be real
+    // statements / block openers. Crossing the unterminated region let `:=` further back
+    // wrongly classify `entity` as RHS-context and silently drop the entity block.
+    test('should not treat entity after unterminated string as RHS-context', () => {
+      const source = 'signal x : string := "abc\nentity e is\nend entity;';
+      const pairs = parser.parse(source);
+      const entityPair = findBlock(pairs, 'entity');
+      assert.strictEqual(
+        entityPair.closeKeyword.value.toLowerCase(),
+        'end entity',
+        'entity should pair with end entity despite unterminated preceding string'
+      );
+    });
+
+    test('should not treat process after unterminated string as RHS-context', () => {
+      const source = 'architecture a of e is\nbegin\n  s <= "abc\n  process\n  begin\n    null;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const processPair = findBlock(pairs, 'process');
+      assert.strictEqual(
+        processPair.closeKeyword.value.toLowerCase(),
+        'end process',
+        'process should pair with end process despite unterminated preceding string'
+      );
+    });
+  });
+
   suite('Regression 2026-05-25: multiple trailing reserved-word labels after compound end', () => {
     // VHDL grammar allows at most one label after a compound `end <type>`. Editing-in-progress
     // code can contain malformed `end process loop case;` shapes where TWO reserved words
