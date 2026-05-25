@@ -3957,6 +3957,33 @@ end if;`;
     });
   });
 
+  suite('Regression: isValidSubprogramOpen access detection recognizes Unicode whitespace', () => {
+    test('should suppress procedure when access and procedure are separated by NBSP', () => {
+      // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The
+      // access-prefix detection in isValidSubprogramOpen must accept it like
+      // ASCII space, otherwise `access<NBSP>procedure F is ...` is mis-classified
+      // as a procedure body opener and produces a spurious procedure / end pair.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `type T is access${nbsp}procedure F is\nbegin\n  null;\nend;`;
+      const pairs = parser.parse(source);
+      // procedure is part of an access type; it must not become a block opener.
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'procedure'),
+        'procedure must not be treated as a block opener when prefixed by access<NBSP>'
+      );
+    });
+
+    test('should suppress function when access and function are separated by NBSP', () => {
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `type T is access${nbsp}function F return Integer is\nbegin\n  return 0;\nend;`;
+      const pairs = parser.parse(source);
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'function'),
+        'function must not be treated as a block opener when prefixed by access<NBSP>'
+      );
+    });
+  });
+
   suite('Regression: matchSingleLineComment recognizes Unicode line terminators', () => {
     test('should terminate single-line comment at U+0085 (NEL)', () => {
       // Per Ada LRM 2.2, comments extend to the end of the line, which ends at
