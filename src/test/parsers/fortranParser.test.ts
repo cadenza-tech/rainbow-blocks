@@ -5954,6 +5954,46 @@ end enum`;
     });
   });
 
+  suite('Regression 2026-05-25: else continuation with blank line in between', () => {
+    test('should merge `else &\\n\\n if` (blank line between continuation) into else if intermediate', () => {
+      // Free-form Fortran allows blank lines in a `&` continuation gap.
+      // The `else &\n\n if` form must be treated as a single `else if` intermediate,
+      // not as two separate tokens that would create spurious blocks. Mirrors
+      // CONTINUATION_COMPOUND_END_PATTERN which already permits blank lines via the
+      // optional `?` quantifier on the inner alternation group.
+      const source = `if (a) then
+  x = 1
+else &
+
+if (b) then
+  y = 1
+end if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // Find the merged else-if intermediate (token value contains both 'else' and 'if')
+      const pair = pairs[0];
+      const elseIfInter = pair.intermediates.find((t) => /else[\s\S]*\bif\b/i.test(t.value));
+      assert.ok(elseIfInter, `Expected a merged else-if intermediate; got: ${pair.intermediates.map((t) => t.value).join(' | ')}`);
+    });
+
+    test('should merge `else &\\n\\n where` (blank line between continuation) into else where intermediate', () => {
+      // Same as above but for the `where` family. matchElseWhere must also accept
+      // a blank line in the continuation gap.
+      const source = `where (a > 0)
+  b = 1
+else &
+
+where (a < 0)
+  b = -1
+end where`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+      const pair = pairs[0];
+      const elseWhereInter = pair.intermediates.find((t) => /else[\s\S]*\bwhere\b/i.test(t.value));
+      assert.ok(elseWhereInter, `Expected a merged else-where intermediate; got: ${pair.intermediates.map((t) => t.value).join(' | ')}`);
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
