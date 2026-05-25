@@ -5212,6 +5212,34 @@ end`;
     });
   });
 
+  suite('Regression: end preceded by Unicode binary operator is rejected as block close (Bug 3)', () => {
+    test('should not treat end as block close when preceded by × (Unicode times)', () => {
+      // `a×end` is `a × end`; the trailing `end` is invalid syntax (end isn't a value
+      // outside indexing brackets), so the inner `end` must not be classified as
+      // block_close. The trailing real `end` must pair with the surrounding function.
+      const source = 'function f()\n  x = a×end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when preceded by ÷ (Unicode division)', () => {
+      // `a÷end` mirrors `a/end` — the inner `end` must not be classified as block_close.
+      const source = 'function f()\n  x = a÷end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when preceded by ± (Unicode plus-minus)', () => {
+      // `a±end` mirrors `a+end` / `a-end` — invalid; inner `end` must not be block_close.
+      const source = 'function f()\n  x = a±end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: end followed by typeassert/subtype operators inside indexing brackets is lastindex', () => {
     test('should treat end followed by :: as lastindex inside indexing brackets', () => {
       // `arr[if end::Int 1 else 0 end]` — `end::Int` is a type-asserted lastindex.
