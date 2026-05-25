@@ -817,7 +817,25 @@ export class VhdlBlockParser extends BaseBlockParser {
       let trailingTypeStart = typeStart;
       if (firstWord === 'package' || firstWord === 'protected' || firstWord === 'postponed') {
         let j = i;
-        while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+        // Skip spaces/tabs and single-line block comments (mirroring the gap rule
+        // between `end` and the first type word). A newline anywhere in the gap
+        // disqualifies the form, keeping consistency with the same-line-only rule.
+        while (j < source.length) {
+          const ch = source[j];
+          if (ch === ' ' || ch === '\t') {
+            j++;
+            continue;
+          }
+          if (ch === '/' && j + 1 < source.length && source[j + 1] === '*') {
+            const region = this.findExcludedRegionAt(j, excludedRegions);
+            if (!region) break;
+            const regionText = source.slice(region.start, region.end);
+            if (regionText.includes('\n') || regionText.includes('\r')) break;
+            j = region.end;
+            continue;
+          }
+          break;
+        }
         const secondStart = j;
         while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
         const secondWord = source.slice(secondStart, j).toLowerCase();
