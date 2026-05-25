@@ -587,6 +587,26 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'record', 'end');
     });
+
+    test('should treat nested standalone case inside variant field list as standalone, not variant', () => {
+      // The inner `case X of 1: foo end` is a standalone case (its first arm `1:` is
+      // followed by an identifier `foo`, not a `(`). Even though it sits inside the
+      // variant field list parens `(...)`, the structural test (presence of an `end`,
+      // first label not followed by `(`) marks it as standalone. Previously the
+      // tagless-variant pattern `case X of` matched here too, so the inner case was
+      // dropped from tokenization while the inner `end` was kept, causing the outer
+      // record to pair with the inner `end` instead of the outer `end`.
+      const source = `record
+    case W of
+      0: ( case X of 1: foo end );
+  end`;
+      const pairs = parser.parse(source);
+      const recordPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.ok(recordPair, 'record pair should exist');
+      // The record's `end` must be the OUTER `end` (the last occurrence in the source).
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(recordPair.closeKeyword?.startOffset, outerEndOffset, 'record should close with outer end');
+    });
   });
 
   suite('Class reference type', () => {
