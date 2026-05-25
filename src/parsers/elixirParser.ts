@@ -348,7 +348,15 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Scan backward for a preceding block keyword on the current statement
+    // Scan backward for a preceding block keyword on the current statement. Track local
+    // paren/bracket/brace depth: `)`/`]`/`}` push +1, `(`/`[`/`{` pop -1. When we hit a
+    // newline at local depth >= 0, the effective paren depth at that point may still be
+    // positive because of an unmatched `(` further left (i.e., `position` is inside a
+    // parenthesised expression like `if (\ncond) do`). In that case we must keep scanning
+    // back across the newline; only stop when the source-relative depth is 0 (or negative)
+    // which means the newline is a real statement boundary.
+    let startDepth = -1; // computed lazily on first newline encounter
+    let localDelta = 0;
     let j = position - 1;
     while (j >= 0) {
       if (this.isInExcludedRegion(j, excludedRegions)) {
@@ -359,7 +367,20 @@ export class ElixirBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[j];
-      if (ch === ';' || ch === '\n' || ch === '\r') break;
+      if (ch === ';') break;
+      if (ch === '\n' || ch === '\r') {
+        if (startDepth < 0) {
+          startDepth = this.computeBracketDepthAt(source, position, excludedRegions);
+        }
+        if (startDepth + localDelta <= 0) break;
+        j--;
+        continue;
+      }
+      if (ch === ')' || ch === ']' || ch === '}') {
+        localDelta++;
+      } else if (ch === '(' || ch === '[' || ch === '{') {
+        localDelta--;
+      }
       if (/[a-zA-Z_]/.test(ch)) {
         let wordStart = j;
         while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) wordStart--;
@@ -373,6 +394,30 @@ export class ElixirBlockParser extends BaseBlockParser {
       j--;
     }
     return false;
+  }
+
+  // Computes the bracket depth at `position` by scanning forward from source start,
+  // counting unmatched `(`/`[`/`{` (each +1) minus `)`/`]`/`}` (each -1). Excluded
+  // regions are skipped. Used to decide whether a newline encountered during a backward
+  // scan is a statement boundary or just whitespace inside an open bracket pair.
+  private computeBracketDepthAt(source: string, position: number, excludedRegions: ExcludedRegion[]): number {
+    let depth = 0;
+    let p = 0;
+    while (p < position) {
+      const region = this.findExcludedRegionAt(p, excludedRegions);
+      if (region) {
+        p = Math.min(region.end, position);
+        continue;
+      }
+      const ch = source[p];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if ((ch === ')' || ch === ']' || ch === '}') && depth > 0) {
+        depth--;
+      }
+      p++;
+    }
+    return depth;
   }
 
   // Matches blocks with the default LIFO algorithm, but only attaches a block_middle token
@@ -1164,6 +1209,9 @@ export class ElixirBlockParser extends BaseBlockParser {
         }
       }
       // Followed by inline comment or newline: skip comments and newlines, then check for `do`
+      // or a closing bracket/comma. A closing bracket means the keyword is the last element
+      // of a parenthesised expression that spans multiple lines (e.g. `if (\n  cond\n) do`);
+      // cond is a value just as in the same-line `if (cond) do` case.
       if (c === '\n' || c === '\r' || c === '#') {
         let k = j;
         while (k < source.length) {
@@ -1181,6 +1229,12 @@ export class ElixirBlockParser extends BaseBlockParser {
         if (source.slice(k, k + 2) === 'do') {
           const afterDo = source[k + 2];
           if (afterDo === undefined || /[\s,;:#]/.test(afterDo)) {
+            return finish(true);
+          }
+        }
+        if (k < source.length) {
+          const ck = source[k];
+          if (ck === ')' || ck === ']' || ck === '}' || ck === ',') {
             return finish(true);
           }
         }
