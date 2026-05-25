@@ -3391,6 +3391,45 @@ end`;
     });
   });
 
+  suite('Regression: arguments(...) attribute list spans ... line continuation', () => {
+    test('should treat arguments(Input ...\\n) as block opener when attribute spans line continuation', () => {
+      // The attribute parenthesised list `(Input ...\n)` legitimately spans a `...` line
+      // continuation. The previous implementation didn't strip the continuation region
+      // before checking the attribute pattern, so `Input ...` failed the
+      // ARGUMENTS_ATTRIBUTES_PATTERN regex and the line was classified as a function call.
+      // The real `arguments` block then went unrecognised and the inner `end` was wrongly
+      // paired with the outer `function`.
+      const source = 'function f(x)\n  arguments(Input ...\n  )\n    x double\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const func = pairs.find((p) => p.openKeyword.value === 'function');
+      const args = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(func, 'function must pair with its end');
+      assert.ok(args, 'arguments must pair with its end');
+    });
+
+    test('should treat arguments(...\\n Input) as block opener with attribute on the next line', () => {
+      // Symmetric form: continuation BEFORE the attribute keyword. Both forms must be
+      // recognised as valid attribute lists.
+      const source = 'function f(x)\n  arguments( ...\n    Input)\n    x double\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const func = pairs.find((p) => p.openKeyword.value === 'function');
+      const args = pairs.find((p) => p.openKeyword.value === 'arguments');
+      assert.ok(func, 'function must pair with its end');
+      assert.ok(args, 'arguments must pair with its end');
+    });
+
+    test('should still treat arguments(obj) as function call across line continuation (sanity)', () => {
+      // `arguments(obj ...\n)` is STILL a function call because `obj` is not a recognised
+      // attribute keyword (Input/Output/Repeating). The continuation must not be stripped
+      // in a way that causes false acceptance.
+      const source = 'function showArgs(obj)\n  arguments(obj ...\n  )\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: section keyword used as function call inside non-classdef-direct scope', () => {
     test('should not treat properties(obj) inside classdef methods as section block', () => {
       // Inside `classdef A / methods / ...`, a `properties()` call (line-start function call
