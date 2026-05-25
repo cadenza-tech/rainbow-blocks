@@ -3957,6 +3957,24 @@ end if;`;
     });
   });
 
+  suite('Regression: isValidRecordOpen null detection recognizes Unicode whitespace', () => {
+    test('should suppress record when null and record are separated by NBSP', () => {
+      // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The null-record
+      // detection in isValidRecordOpen must accept it like ASCII space; otherwise
+      // `type T is null<NBSP>record;` is mis-classified as a record block opener
+      // and steals the closing end record from another genuine record block.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `type T is null${nbsp}record;`;
+      const parserInstance = parser;
+      const tokens = parserInstance.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value.toLowerCase()),
+        [],
+        'record must not be tokenized as a block opener when preceded by null<NBSP>'
+      );
+    });
+  });
+
   suite('Regression: isValidSubprogramOpen access detection recognizes Unicode whitespace', () => {
     test('should suppress procedure when access and procedure are separated by NBSP', () => {
       // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The
