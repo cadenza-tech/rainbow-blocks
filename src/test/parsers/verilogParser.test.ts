@@ -5112,5 +5112,71 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: case_item label-name detection traverses through nested begin/fork', () => {
+    test('should suppress case used as label name inside begin within case_item body', () => {
+      // Bug: `case (s) 1: begin case: x = 1; end endcase` puts `case:` inside
+      // a begin/end which is the case_item body. The inner `case` is a misused
+      // reserved-word label name, but isEnclosingBlockCase saw `begin` as the
+      // enclosing opener (it stopped at the first depth-0 opener) and returned
+      // false, so the inner `case` was tokenized as a real block_open. The
+      // outer case/endcase pair was then broken because the inner `case`
+      // consumed the `endcase`.
+      // Fix: begin/fork are statement-block boundaries inside a case_item
+      // body; the scan must traverse past them to find the case header.
+      const source = 'case (s)\n  1: begin\n    case: x = 1;\n  end\nendcase';
+      const tokens = parser.getTokens(source);
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 1, 'only the outer `case` should be tokenized; the inner `case:` is a misused label name');
+      const pairs = parser.parse(source);
+      // Expect: outer case/endcase pair survives, inner begin/end pair stands.
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case' && p.closeKeyword?.value === 'endcase');
+      assert.ok(casePair, 'outer case/endcase pair must survive the inner label-name misuse');
+    });
+
+    test('should suppress case used as label inside fork within case_item body', () => {
+      // Same bug, par_block variant: fork/join is also a case_item body form.
+      const source = 'case (s)\n  1: fork\n    case: x = 1;\n  join\nendcase';
+      const tokens = parser.getTokens(source);
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 1, 'only the outer `case` should be tokenized');
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case' && p.closeKeyword?.value === 'endcase');
+      assert.ok(casePair, 'outer case/endcase pair must survive the inner label-name misuse inside fork');
+    });
+
+    test('should suppress case used as label inside nested begin within case_item body', () => {
+      // Two levels of begin/end inside the case_item body. Both begins are at
+      // depth 0 of the case scan (the inner begin/end pair balances, the outer
+      // begin is unclosed in the scan view) and both must be skipped
+      // transparently to find the case header.
+      const source = 'case (s)\n  1: begin\n    begin\n      case: x = 1;\n    end\n  end\nendcase';
+      const tokens = parser.getTokens(source);
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 1, 'only the outer `case` should be tokenized');
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case' && p.closeKeyword?.value === 'endcase');
+      assert.ok(casePair, 'outer case/endcase pair must survive nested begin/end inside case_item');
+    });
+
+    test('should still treat begin: name outside case as a named block (sanity)', () => {
+      // Sanity: when there is NO enclosing case, `begin : <name>` is the
+      // standard named-block form, and the leading `begin` is the real opener.
+      // The transparency rule only fires when scanning finds a case header.
+      const pairs = parser.parse('begin : foo\n  x = 1;\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should NOT suppress case-like keyword inside non-case enclosing block (sanity)', () => {
+      // Sanity: if there is no case ancestor at all, the inner `case:` is not
+      // suppressed (the existing behaviour). The scan walks back through
+      // begin/fork transparently but eventually reaches the source start and
+      // returns false (no case found).
+      const source = 'module m;\n  initial begin\n    case: x = 1;\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 1, '`case` is tokenized when there is no enclosing case header');
+    });
+  });
+
   generateCommonTests(config);
 });
