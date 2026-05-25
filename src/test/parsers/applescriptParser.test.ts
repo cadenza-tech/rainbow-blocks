@@ -3692,5 +3692,82 @@ end if`;
     });
   });
 
+  suite('Regression: excluded region terminators (string/pipe/chevron) before mid-line tell/if/repeat', () => {
+    // A completed string/pipe/chevron region directly precedes a mid-line tell/if/repeat.
+    // The closing delimiter of that region terminates the preceding expression, so the
+    // following keyword is the right operand of an implicit concatenation rather than a
+    // new block opener. The outer block at offset 0 must still pair with its end keyword.
+
+    test('should reject mid-line tell after a closed double-quoted string', () => {
+      const source = 'tell app\n  "stray" tell\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+
+    test('should reject mid-line tell after a closed chevron region', () => {
+      const source = 'tell app\n  «x» tell\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+
+    test('should reject mid-line tell after a closed pipe-delimited identifier', () => {
+      const source = 'tell app\n  |x| tell\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+
+    test('should reject mid-line if after a closed double-quoted string', () => {
+      const source = 'if x then\n  "stray" if then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer if at offset 0 should be paired');
+    });
+
+    test('should reject mid-line repeat after a closed chevron region', () => {
+      const source = 'repeat 3 times\n  «x» repeat 2 times\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer repeat at offset 0 should be paired');
+    });
+
+    test('should reject mid-line repeat after a closed pipe-delimited identifier', () => {
+      const source = 'repeat 3 times\n  |x| repeat 2 times\n  beep\nend repeat';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer repeat at offset 0 should be paired');
+    });
+
+    test('should still pair head tell when set x to "end" tell appears mid-line (existing behaviour)', () => {
+      // Existing protective behaviour: even after a closed string literal `"end"`, the
+      // mid-line `tell` is the right operand, so head `tell` keeps pairing with `end tell`.
+      const source = 'tell app\n  set x to "end" tell\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'head tell at offset 0 should be paired');
+    });
+
+    test('should keep single-line comment from acting as expression terminator', () => {
+      // `-- comment` is a line comment, NOT a closing delimiter of a value expression.
+      // The fix must NOT make line comments terminate the preceding expression, so a
+      // tell on its own logical line after the comment still keeps the outer pairing.
+      const source = 'tell app\n  -- comment\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+
+    test('should keep block comment from acting as expression terminator for the next line', () => {
+      // `(* ... *)` is a block comment, also NOT a value expression. After it, the head
+      // tell on its own line must remain pairable.
+      const source = 'tell app\n  (* note *)\n  beep\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer tell at offset 0 should be paired');
+    });
+  });
+
   generateCommonTests(config);
 });
