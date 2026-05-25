@@ -17,7 +17,8 @@ export function isAdaWhitespace(ch: string): boolean {
 }
 
 // Matches an Ada double-quoted string with "" escape sequences
-// Ada strings cannot span multiple lines
+// Ada strings cannot span multiple lines (LRM 2.6). Line terminators are
+// the LRM 2.2 set: LF, CR, NEL (U+0085), LS (U+2028), PS (U+2029).
 export function matchAdaString(source: string, pos: number): ExcludedRegion {
   let i = pos + 1;
   while (i < source.length) {
@@ -30,7 +31,8 @@ export function matchAdaString(source: string, pos: number): ExcludedRegion {
       return { start: pos, end: i + 1 };
     }
     // String cannot span multiple lines in Ada
-    if (source[i] === '\n' || source[i] === '\r') {
+    const code = source.charCodeAt(i);
+    if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) {
       return { start: pos, end: i };
     }
     i++;
