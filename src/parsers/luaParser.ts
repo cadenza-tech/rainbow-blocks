@@ -52,10 +52,13 @@ export class LuaBlockParser extends BaseBlockParser {
   // Checks if keyword is preceded by '.' or ':' (table field/method access)
   // But not '..' (concatenation) or '::' (goto label syntax)
   // Skips only whitespace (including newlines) between operator and keyword.
-  // Excluded regions (strings, long strings, comments, goto labels, shebang)
-  // act as opaque walls: a `.` or `:` on the far side of an excluded region
-  // is NOT field/method access on the keyword that follows the region, so we
-  // stop the walk-back at the region boundary and return false.
+  // Excluded regions are split into two classes during walk-back:
+  // - Comments (single-line `--` and long-bracket `--[[ ]]`) are whitespace-
+  //   equivalent per Lua spec, so they are TRANSPARENT: walk-back jumps past
+  //   them and keeps scanning the characters on the far side.
+  // - Strings, long strings, goto labels, and shebang lines are NOT
+  //   whitespace; they act as opaque walls so a `.` or `:` on the far side
+  //   does NOT bind through the region. Walk-back stops and returns false.
   private isPrecededByDotOrColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -63,8 +66,15 @@ export class LuaBlockParser extends BaseBlockParser {
         i--;
         continue;
       }
-      if (this.isInExcludedRegion(i, excludedRegions)) {
-        // Excluded region is an opaque wall: do not look through it.
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region !== null) {
+        if (this.isCommentRegion(source, region)) {
+          // Comments are whitespace-equivalent: jump past the region and
+          // continue walking back.
+          i = region.start - 1;
+          continue;
+        }
+        // String/long string/goto label/shebang: opaque wall, do not look through.
         return false;
       }
       break;
@@ -128,6 +138,13 @@ export class LuaBlockParser extends BaseBlockParser {
       return true;
     }
     return false;
+  }
+
+  // Returns true when the given excluded region is a Lua comment (single-line
+  // `--...` or long-bracket `--[[...]]`/`--[==[...]==]`). Both start with `--`.
+  // String/long string/goto label/shebang regions do not start with `--`.
+  private isCommentRegion(source: string, region: ExcludedRegion): boolean {
+    return source[region.start] === '-' && source[region.start + 1] === '-';
   }
 
   // Builds (and caches) the filtered for/while position list for the source.
