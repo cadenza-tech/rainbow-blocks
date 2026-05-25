@@ -4923,5 +4923,67 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: block_open keyword inside parens must not open a block', () => {
+    test('should suppress case keyword inside case header parens (casez (case))', () => {
+      // Bug: `casez (case)` has `case` used as an identifier inside the case
+      // header parens. The inner `case` was tokenized as a real block_open
+      // and consumed the `endcase`, leaving the outer `casez` orphaned.
+      // Expected: only the outer casez/endcase pair.
+      const source = 'casez (case)\n  default: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'casez', 'endcase');
+    });
+
+    test('should suppress case keyword inside function call parens (func(case))', () => {
+      // Bug: `func(case)` has `case` as an identifier-like argument inside a
+      // function call. The inner `case` was tokenized as a real block_open
+      // and falsely paired with the trailing `endcase`.
+      const source = 'wire x = func(case);\nendcase';
+      const tokens = parser.getTokens(source);
+      const caseTokens = tokens.filter((t) => t.value === 'case');
+      assert.strictEqual(caseTokens.length, 0, '`case` inside func() must not be tokenized');
+      const pairs = parser.parse(source);
+      // The inner `case` is suppressed; the trailing `endcase` is orphan.
+      assertNoBlocks(pairs);
+    });
+
+    test('should suppress sequence keyword inside assert call parens (assert(sequence))', () => {
+      // Bug: `assert(sequence)` uses `sequence` as an identifier-like
+      // argument. The inner `sequence` was tokenized as a real block_open
+      // and would leave the outer block orphaned.
+      const source = 'sequence s1;\n  assert(sequence);\nendsequence';
+      const tokens = parser.getTokens(source);
+      const sequenceOpenTokens = tokens.filter((t) => t.value === 'sequence' && t.type === 'block_open');
+      assert.strictEqual(sequenceOpenTokens.length, 1, 'only the outer `sequence` should be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'sequence', 'endsequence');
+    });
+
+    test('should still pair case statement with case keyword outside parens (case (expr))', () => {
+      // Sanity: the `case` keyword itself sits BEFORE the paren, so the
+      // suppression must not affect the normal case statement form.
+      const source = 'case (sel)\n  0: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should still pair interface class declaration (interface class C;)', () => {
+      // Sanity: the SV-2012 `interface class` form must not be affected.
+      // `class` is preceded by `interface` (a non-paren context), and the
+      // upstream isFollowedByWord rejects the `interface` keyword itself, so
+      // `class` is the real opener of the block.
+      const source = 'interface class C;\nendclass';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should still suppress interface inside port list (regression for old interface-only check)', () => {
+      // Sanity: the legacy `module test(interface bus);` suppression of
+      // `interface` inside parens must continue to work.
+      const tokens = parser.getTokens('module test(interface bus);\nendmodule');
+      assert.ok(!tokens.some((t) => t.value === 'interface'), 'interface inside a closed port list must stay suppressed');
+    });
+  });
+
   generateCommonTests(config);
 });
