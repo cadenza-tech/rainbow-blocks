@@ -51,9 +51,11 @@ export function matchesWord(source: string, pos: number, word: string): boolean 
 // as the `<<-` strip-tabs operator already consumed by `opMatch`). Includes the
 // extra non-meta punctuation `{ } [ ] @ ~ ^ /` that real bash also accepts as part
 // of an unquoted word (so `<<{`, `<<@END`, `<<^MARK`, `<<~END`, `<</END`, `<<[END`
-// are recognised as heredoc operators).
-const HEREDOC_DELIM_BARE_FIRST = /[\p{L}\p{N}_.+:%,=!*?{}[\]@~^/]/u;
-const HEREDOC_DELIM_BARE_REST = /[\p{L}\p{N}_\-.+:%,=!*?{}[\]@~^/]/u;
+// are recognised as heredoc operators). `$` is treated as a literal delimiter
+// character because real bash never performs parameter expansion on the heredoc
+// delimiter word (e.g. `<<EO$F` matches the literal terminator `EO$F`, not `EO`).
+const HEREDOC_DELIM_BARE_FIRST = /[\p{L}\p{N}_.+:%,=!*?{}[\]@~^/$]/u;
+const HEREDOC_DELIM_BARE_REST = /[\p{L}\p{N}_\-.+:%,=!*?{}[\]@~^/$]/u;
 // Backslash-escaped character continuation: anything except whitespace, quotes,
 // or backslash terminates the run. Unicode-letter aware via negation only.
 const HEREDOC_DELIM_BACKSLASH_TERMINATOR = /[\s'"\\]/;
