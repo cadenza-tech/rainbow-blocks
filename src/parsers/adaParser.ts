@@ -269,8 +269,11 @@ export class AdaBlockParser extends BaseBlockParser {
                 continue;
               }
             }
-            const c = source[pb];
-            if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+            // Ada whitespace (LRM 2.1) covers ASCII space/tab/CR/LF/VT/FF,
+            // NEL/NBSP, the Zs category, and LS/PS. Recognize all of them so
+            // `:=<NBSP>do` is detected as the malformed assignment-then-body
+            // form just like `:= do` with an ASCII space.
+            if (isAdaWhitespace(source[pb])) {
               pb--;
               continue;
             }
@@ -287,7 +290,7 @@ export class AdaBlockParser extends BaseBlockParser {
             return false;
           }
           let pf = i + 2;
-          while (pf < source.length && (source[pf] === ' ' || source[pf] === '\t' || source[pf] === '\n' || source[pf] === '\r')) pf++;
+          while (pf < source.length && isAdaWhitespace(source[pf])) pf++;
           if (pf < source.length && source[pf] === ';') {
             return false;
           }
