@@ -4625,5 +4625,123 @@ end`;
     });
   });
 
+  suite('Regression: receiver-like keyword in binary operator / separator / compound assignment context should not open a block', () => {
+    test('should not treat enum followed by , as a block opener inside hash literal', () => {
+      // Inside `{default: enum, prop: 1}`, `enum` is used as an identifier value (hash
+      // entry default), separated from the next entry by `,`. Treating it as a block
+      // opener pairs it with the outer `end`, hiding the surrounding class/end.
+      const source = 'class C\n  CONSTANT = {default: enum, prop: 1}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should not treat struct followed by < as a block opener (less-than comparison)', () => {
+      // `struct < 5` is a comparison where `struct` is a value (e.g., a variable).
+      // Treating it as a block opener pairs it with the inner `end`, leaving the
+      // outer def/end orphaned or mis-paired.
+      const source = 'def foo\n  if struct < 5\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat select += as a block opener (compound assignment)', () => {
+      // `select += 5` is a compound assignment on a variable named `select`.
+      // Treating `select` as a block opener pairs it with the inner `end`,
+      // leaving the outer `def` orphaned.
+      const source = 'def foo\n  select += 5\n  if y\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat enum > value as a block opener (greater-than comparison)', () => {
+      const source = 'def foo\n  if enum > 5\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat enum + value as a block opener (binary plus)', () => {
+      const source = 'def foo\n  x = enum + 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum - value as a block opener (binary minus)', () => {
+      const source = 'def foo\n  x = enum - 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum * value as a block opener (binary times)', () => {
+      const source = 'def foo\n  x = enum * 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum % value as a block opener (binary modulo)', () => {
+      const source = 'def foo\n  x = enum % 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum followed by ) as a block opener (expression end in parens)', () => {
+      const source = 'def foo\n  x = (enum)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum followed by } as a block opener (expression end in hash)', () => {
+      const source = 'def foo\n  x = {a: enum}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum followed by ] as a block opener (expression end in array)', () => {
+      const source = 'def foo\n  x = [enum]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat struct ? as a block opener (ternary condition)', () => {
+      const source = 'def foo\n  x = struct ? 1 : 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat select -= as a block opener (compound minus)', () => {
+      const source = 'def foo\n  select -= 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat select *= as a block opener (compound times)', () => {
+      const source = 'def foo\n  select *= 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat select %= as a block opener (compound modulo)', () => {
+      const source = 'def foo\n  select %= 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still open a real enum block when followed by a name (sanity)', () => {
+      // The new binary-operator/separator suppression must not break real opener forms.
+      const source = 'enum Color\n  Red\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
