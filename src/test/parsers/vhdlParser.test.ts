@@ -4256,6 +4256,31 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: control-flow intermediates inside declaration blocks (record/units)', () => {
+    // `record` and `units` are declaration blocks; their bodies contain field declarations
+    // (e.g., `x : integer when y => 1 else 0;`). The conditional-expression `else` / `then`
+    // / `elsif` keywords inside such a field default must NOT be absorbed as intermediates
+    // of the enclosing `record` / `units` opener — they belong to the inline conditional
+    // expression. Without this filter, `record` ends up with a spurious `else` intermediate.
+    test('should not absorb else in field default conditional expression as record intermediate', () => {
+      const source = 'package my_pkg is\n  type t is record\n    x : integer when y => 1 else 0;\n  end record;\nend package;';
+      const pairs = parser.parse(source);
+      const recordPair = findBlock(pairs, 'record');
+      const elseIntermediate = recordPair.intermediates.find((t) => t.value.toLowerCase() === 'else');
+      assert.ok(!elseIntermediate, 'record should not have else from a field default conditional expression as an intermediate');
+    });
+
+    test('should not absorb then/elsif/else in field default as record intermediate', () => {
+      const source = 'package p is\n  type t is record\n    x : integer when a then 1 elsif b then 2 else 0;\n  end record;\nend package;';
+      const pairs = parser.parse(source);
+      const recordPair = findBlock(pairs, 'record');
+      for (const kw of ['then', 'elsif', 'else']) {
+        const im = recordPair.intermediates.find((t) => t.value.toLowerCase() === kw);
+        assert.ok(!im, `record should not have ${kw} from a field default conditional expression as an intermediate`);
+      }
+    });
+  });
+
   suite('Regression 2026-05-25: architecture/configuration of <reserved_word>', () => {
     // `architecture <id> of <reserved_word> is ...` and `configuration <id> of <reserved_word>
     // is ...` should treat the reserved word as the entity reference, NOT as a fresh block
