@@ -177,7 +177,11 @@ export class FortranBlockParser extends BaseBlockParser {
       if (!/^[ \t]*\(/.test(afterTeam)) {
         return false;
       }
-      if (/^[ \t]*\([ \t]*\)/.test(afterTeam)) {
+      // Reject empty parens including the cross-line form `change team (\n)`. The
+      // `hasEmptyParenthesizedCondition` helper treats newlines as whitespace inside the
+      // parens (unlike the same-line `[ \t]*` regex), so it catches both `team ()` and
+      // `team (\n)`.
+      if (hasEmptyParenthesizedCondition(source, position + keyword.length)) {
         return false;
       }
     }
@@ -230,7 +234,8 @@ export class FortranBlockParser extends BaseBlockParser {
 
     // 'submodule' must be followed by `(parent)` clause (Fortran 2008+).
     // Plain `submodule name` without parens is invalid. Also reject empty parens
-    // `submodule () name` since the parent clause requires at least one identifier.
+    // `submodule () name` (or the cross-line `submodule (\n) name`) since the parent
+    // clause requires at least one identifier.
     if (lowerKeyword === 'submodule') {
       const afterSubStart = position + keyword.length;
       let afterSub = source.slice(afterSubStart, findLogicalLineEnd(source, afterSubStart));
@@ -238,18 +243,22 @@ export class FortranBlockParser extends BaseBlockParser {
       if (!/^[ \t]*\(/.test(afterSub)) {
         return false;
       }
-      if (/^[ \t]*\([ \t]*\)/.test(afterSub)) {
+      // Reject empty parens including the cross-line form `submodule (\n) name`. The
+      // `hasEmptyParenthesizedCondition` helper treats newlines as whitespace inside the
+      // parens (unlike the same-line `[ \t]*` regex), so it catches both `submodule ()`
+      // and `submodule (\n)`.
+      if (hasEmptyParenthesizedCondition(source, position + keyword.length)) {
         return false;
       }
     }
 
     // 'associate' requires at least one association `(name => selector)`. Reject empty parens
-    // `associate ()`, consistent with the empty-paren rejection for select case/where/forall/submodule.
+    // `associate ()` (or the cross-line `associate (\n)`), consistent with the empty-paren
+    // rejection for select case/where/forall/submodule.
     if (lowerKeyword === 'associate') {
-      const afterAssocStart = position + keyword.length;
-      let afterAssoc = source.slice(afterAssocStart, findLogicalLineEnd(source, afterAssocStart));
-      afterAssoc = collapseContinuationLines(afterAssoc);
-      if (/^[ \t]*\([ \t]*\)/.test(afterAssoc)) {
+      // `hasEmptyParenthesizedCondition` handles both same-line and cross-line empty parens
+      // uniformly (newlines inside the parens are treated as whitespace).
+      if (hasEmptyParenthesizedCondition(source, position + keyword.length)) {
         return false;
       }
     }
