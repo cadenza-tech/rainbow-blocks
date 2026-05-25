@@ -4256,6 +4256,48 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: is filter for signal/variable/constant declaration', () => {
+    // The is-filter whitelist (`type|subtype|alias|attribute|file|group`) is the set of
+    // declarations that may legally contain an `is`. Editor-in-progress code occasionally
+    // contains malformed `signal x is integer;` (where the user meant `:` instead of `is`)
+    // — the stray `is` then leaks into the enclosing package's intermediates and breaks
+    // its pairing display. Add signal/variable/constant to the whitelist so the stray `is`
+    // is silently dropped instead.
+    test('should not leak signal x is integer into package intermediates', () => {
+      const source = 'package my_pkg is\n  signal x is integer;\nend package;';
+      const pairs = parser.parse(source);
+      const pkgBlock = findBlock(pairs, 'package');
+      // Only the header `is` should be in the package's intermediates, not the stray `is`
+      // from the malformed signal declaration.
+      const isCount = pkgBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, `package should have only 1 is intermediate (the header is), got ${isCount}`);
+    });
+
+    test('should not leak variable y is integer into package intermediates', () => {
+      const source = 'package my_pkg is\n  variable y is integer;\nend package;';
+      const pairs = parser.parse(source);
+      const pkgBlock = findBlock(pairs, 'package');
+      const isCount = pkgBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, `package should have only 1 is intermediate, got ${isCount}`);
+    });
+
+    test('should not leak constant c is 1 into package intermediates', () => {
+      const source = 'package my_pkg is\n  constant c is 1;\nend package;';
+      const pairs = parser.parse(source);
+      const pkgBlock = findBlock(pairs, 'package');
+      const isCount = pkgBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, `package should have only 1 is intermediate, got ${isCount}`);
+    });
+
+    test('should not leak shared variable y is integer into package intermediates', () => {
+      const source = 'package my_pkg is\n  shared variable y is integer;\nend package;';
+      const pairs = parser.parse(source);
+      const pkgBlock = findBlock(pairs, 'package');
+      const isCount = pkgBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is').length;
+      assert.strictEqual(isCount, 1, `package should have only 1 is intermediate, got ${isCount}`);
+    });
+  });
+
   suite('Regression 2026-05-25: control-flow intermediates inside declaration blocks (record/units)', () => {
     // `record` and `units` are declaration blocks; their bodies contain field declarations
     // (e.g., `x : integer when y => 1 else 0;`). The conditional-expression `else` / `then`
