@@ -313,6 +313,20 @@ export class AdaBlockParser extends BaseBlockParser {
     return null;
   }
 
+  // Override to recognize Ada LRM 2.2 line terminators (LF, CR, NEL U+0085,
+  // LS U+2028, PS U+2029). The default baseParser implementation only stops
+  // at `\n` and `\r`, so a `-- comment<NEL>` would swallow the rest of the
+  // file even though Ada considers NEL the end of the comment line.
+  protected matchSingleLineComment(source: string, pos: number): ExcludedRegion {
+    let end = pos;
+    while (end < source.length) {
+      const code = source.charCodeAt(end);
+      if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) break;
+      end++;
+    }
+    return { start: pos, end };
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Find all compound end keywords and their positions
