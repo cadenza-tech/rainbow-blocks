@@ -74,6 +74,43 @@ function skipWhitespaceAndContinuationBackward(source: string, pos: number): { p
   return { pos: p, crossedContinuation: crossed };
 }
 
+// Steps backward across a single \<newline> sequence (LF, CRLF, or CR) that
+// escapes the newline. Returns the position before the backslash, or `pos`
+// itself if no continuation is present at `pos`.
+function skipBackslashNewlineBackward(source: string, pos: number): number {
+  let p = pos;
+  while (p >= 0 && (source[p] === '\n' || source[p] === '\r')) {
+    let bs = p - 1;
+    if (source[p] === '\n' && bs >= 0 && source[bs] === '\r') bs--;
+    if (bs < 0 || source[bs] !== '\\') break;
+    // Count consecutive backslashes; an odd count means the final \ escapes the newline
+    let count = 0;
+    let scan = bs;
+    while (scan >= 0 && source[scan] === '\\') {
+      count++;
+      scan--;
+    }
+    if (count % 2 !== 1) break;
+    p = bs - 1;
+  }
+  return p;
+}
+
+// Matches `word` backward ending at position `pos` (inclusive), transparently
+// stepping over any `\<newline>` line continuations embedded inside the word.
+// Real bash strips backslash-newline pairs during lexing, so `t\<NL>ime` is
+// lexically identical to `time` and must be recognised here as a `time` prefix.
+// Returns the start position of the matched word, or -1 when there is no match.
+function matchWordBackwardThroughContinuations(source: string, pos: number, word: string): number {
+  let scan = pos;
+  for (let wi = word.length - 1; wi >= 0; wi--) {
+    scan = skipBackslashNewlineBackward(source, scan);
+    if (scan < 0 || source[scan] !== word[wi]) return -1;
+    scan--;
+  }
+  return scan + 1;
+}
+
 // Check if a keyword is at shell command position (start of a simple command)
 // `time` prefixes and `VAR=value` assignment prefixes shift the check to the
 // preceding word. That used to be done with tail recursion, which overflowed the
@@ -334,8 +371,12 @@ export function isAtCommandPosition(
       if (ts !== beforeFlags && !crossedContinuation && (ts < 0 || (source[ts + 1] !== ' ' && source[ts + 1] !== '\t'))) {
         ts = -1;
       }
-      if (ts >= 3 && source.slice(ts - 3, ts + 1) === 'time') {
-        const tStart = ts - 3;
+      // Match `time` backward, transparently traversing `\<newline>` line
+      // continuations embedded inside the word so that `t\<NL>ime`, `ti\<NL>me`,
+      // and `tim\<NL>e` are all recognised as the `time` keyword exactly like
+      // real bash treats them after lexer-level line-continuation removal.
+      const tStart = matchWordBackwardThroughContinuations(source, ts, 'time');
+      if (tStart >= 0) {
         if (tStart === 0 || !/[a-zA-Z0-9_]/.test(source[tStart - 1])) {
           // Re-evaluate from `time` itself so command starters like `!`, `then`,
           // `do`, `else`, `elif`, `coproc`, and another `time` propagate command
