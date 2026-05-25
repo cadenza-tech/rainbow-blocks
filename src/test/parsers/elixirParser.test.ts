@@ -5039,6 +5039,46 @@ end`;
     });
   });
 
+  suite('Bug: parenthesized condition with newline should still pair if/end', () => {
+    // When a block keyword's parenthesized condition spans multiple lines (e.g.
+    // `if (\ncond) do ... end`), the inner identifier `cond` was being detected as a
+    // value for the preceding `if` by isValueForPrecedingBlockKeyword because the
+    // backward scan stopped at the newline. But inside an open paren, the newline is
+    // not a statement terminator: the `if` is still the outer keyword owning the `do`,
+    // and `cond` is just a parenthesized condition value. The bracket-depth guard in
+    // matchBlocks then prevented `end@depth=0` from pairing with `if@depth=0` because
+    // the inner mis-detected block_open caused the stack imbalance.
+    test('should pair if/end when condition has leading newline in parens', () => {
+      const source = 'if (\ncond) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair if/end when condition has trailing newline in parens', () => {
+      const source = 'if (cond\n) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair if/end when paren condition spans multiple lines with cond keyword', () => {
+      const source = 'if (\n  cond\n) do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair case/end with multi-line parenthesized value', () => {
+      const source = 'case (\n  cond\n) do\n  :ok -> 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should pair if/end when paren condition has CRLF newline', () => {
+      const source = 'if (\r\ncond) do\r\n  body\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Bug: isFnParensFollowedByDo should skip newlines and comments', () => {
     test('should reject fn(x) followed by newline then do', () => {
       // `if fn(x)\ndo ... end` — `fn(x) do` form is invalid Elixir; fn should not pair
