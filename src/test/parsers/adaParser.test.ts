@@ -3957,6 +3957,27 @@ end if;`;
     });
   });
 
+  suite('Regression: isExtendedReturn recognizes Unicode whitespace around := and do', () => {
+    test('should reject extended return when := and do are separated by NBSP (malformed)', () => {
+      // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The backward
+      // scan from `do` to detect the malformed `:= do` form (no expression
+      // between assignment and body separator) must recognize NBSP; otherwise
+      // `:= <NBSP> do` is misclassified as a valid extended return.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `function F return Integer is\nbegin\n  return R : Integer :=${nbsp}do\n    null;\n  end return;\nend F;`;
+      const pairs = parser.parse(source);
+      assert.ok(!pairs.some((p) => p.openKeyword.value.toLowerCase() === 'return'), 'malformed `:= <NBSP> do` extended return must not be paired');
+    });
+
+    test('should reject extended return when do and ; are separated by NBSP (malformed)', () => {
+      // `do<NBSP>;` is also malformed (no body between do and semicolon).
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `function F return Integer is\nbegin\n  return R : Integer := 0 do${nbsp};\n  end return;\nend F;`;
+      const pairs = parser.parse(source);
+      assert.ok(!pairs.some((p) => p.openKeyword.value.toLowerCase() === 'return'), 'malformed `do<NBSP>;` extended return must not be paired');
+    });
+  });
+
   suite('Regression: exception filter recognizes type-mark contexts', () => {
     test('should filter exception when preceded by is (subtype declaration)', () => {
       const source = 'package P is\n  subtype S is Exception;\nend P;';
