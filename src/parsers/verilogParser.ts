@@ -958,6 +958,21 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject any block_open keyword that sits inside a closed `(...)` pair.
+    // SystemVerilog reserves these words and they cannot legitimately appear as
+    // identifier-like operands inside parenthesized expressions (function calls,
+    // cast expressions, case-header expressions, assert/assume arguments, etc.).
+    // Tokenizing them would generate spurious BlockPairs against later close
+    // keywords, breaking the outer block. The check is bounded to a properly
+    // closed `(...)` so unclosed parens (incomplete typing) do not suppress
+    // every following keyword in the file. The case-statement's own header
+    // `case (expr)` is unaffected because the `case` keyword sits BEFORE the
+    // paren, not inside it; only the contents of the parens are suppressed.
+    // Replaces the legacy `interface`-only paren check (`module test(interface bus)`).
+    if (isInsideParens(position, this.getParenIndex(source, excludedRegions))) {
+      return false;
+    }
+
     // Reject case-statement keywords misused as identifiers on the right-hand side
     // of an operator. A case keyword can only appear at statement position and
     // never as an expression operand, so a preceding operator means it is being
@@ -1056,11 +1071,6 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Reject `function` in covergroup `with function sample(...)` syntax (LRM §19.8.1):
     // it is a covergroup option specifier, not a function declaration.
     if (keyword === 'function' && this.isCovergroupWithFunctionSample(source, position, excludedRegions)) {
-      return false;
-    }
-
-    // Reject interface used as port type inside parenthesized port list
-    if (keyword === 'interface' && isInsideParens(position, this.getParenIndex(source, excludedRegions))) {
       return false;
     }
 
