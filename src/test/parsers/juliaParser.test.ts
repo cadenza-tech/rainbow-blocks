@@ -5212,6 +5212,60 @@ end`;
     });
   });
 
+  suite('Regression: non-block reserved words rejected as string macro prefix (Bug 4)', () => {
+    test('should not treat where"..." as string macro (where is a reserved word)', () => {
+      // `where"y"begin\nend` — `where` is a Julia reserved word and cannot be a string
+      // macro name. The `"y"` should be a separate string literal, and the trailing
+      // `begin\nend` should pair as a block.
+      const source = 'where"y"begin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat import"..." as string macro (import is a reserved word)', () => {
+      const source = 'import"y"begin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat in"..." as string macro (in is a reserved word)', () => {
+      const source = 'in"y"begin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat using"..." as string macro (using is a reserved word)', () => {
+      const source = 'using"y"begin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat where`...` as command macro (where is a reserved word)', () => {
+      const source = 'where`y`begin\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still treat r"..." as string macro (r is a valid identifier, not reserved)', () => {
+      // Sanity check: this MUST still work after the fix — `r"y"` is a valid Regex macro.
+      // Julia consumes identifier suffix chars (`r"pattern"flags`), so `r"y"begin` is the
+      // single macro expression `@r_str("y", "begin")`, and the trailing `end` is orphan
+      // (this matches the pre-fix behavior and reflects how Julia actually parses it).
+      const source = 'r"y"begin\nend\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      // Only the function...end should pair; the begin from r"y"begin is consumed as suffix.
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat custom"..." as string macro (custom is a valid identifier)', () => {
+      // Same as the r"..." case: `custom"y"begin` is `@custom_str("y", "begin")`, so the
+      // trailing `end` remains orphan and only the explicit function..end pairs.
+      const source = 'custom"y"begin\nend\nfunction f()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   suite('Regression: end preceded by Unicode binary operator is rejected as block close (Bug 3)', () => {
     test('should not treat end as block close when preceded by × (Unicode times)', () => {
       // `a×end` is `a × end`; the trailing `end` is invalid syntax (end isn't a value
