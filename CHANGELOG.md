@@ -5,6 +5,79 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.58] - 2026-05-26
+
+### Fixed
+
+- Ada: Recognize Unicode line terminators string literals
+- Ada: Recognize Unicode line terminators compound end separator check
+- Ada: Recognize Unicode line terminators single-line comments
+- Ada: Recognize NBSP between access and subprogram keyword
+- Ada: Recognize NBSP between null and record null record detection
+- Ada: Recognize Unicode whitespace exception backward-scan filter
+- Ada: Recognize is/access/of/return contexts exception type-mark filter
+- Ada: Recognize Unicode whitespace isExtendedReturn malformed-form checks
+- Ada: Reject for followed by open paren for-block validation
+- Ada: Recognize Unicode line terminators line/column tracking and findLineStart
+- AppleScript: Treat closed strings, pipe identifiers and chevron regions as expression terminators
+- Bash: Recognize $ as literal character in heredoc delimiter
+- Bash: Treat backslash-escaped character as single literal in heredoc delimiter
+- Bash: Recognize time prefix split by backslash-newline
+- COBOL: Recognize END-* and ELSE/WHEN after bare COPY
+- COBOL: Skip reserved-word identifiers in same-line MOVE/ADD operands
+- COBOL: Skip inline comments between PERFORM count and TIMES
+- Crystal: Suppress receiver-like keywords in binary operator and compound assignment contexts
+- Crystal: Treat / after method-like keywords (puts/print/raise) as division when separated by space
+- Crystal: Close {{ }} macro template at first valid }} when singleBraceDepth is 2 and source has }}}
+- Elixir: Continue backward keyword scan across newlines inside open parens
+- Elixir: Reject middle keywords as binary operator RHS operands
+- Erlang: Filter bare reserved words in -record type annotations
+- Erlang: Detect quoted atom function head as -spec boundary
+- Erlang: Treat third dot as -spec terminator in four-or-more dot runs
+- Erlang: Recognize form-feed and vertical-tab as attribute leading whitespace
+- Erlang: Filter bare reserved words inside binary literals in -define body
+- Fortran: Allow blank lines in else continuation gap for else if/where
+- Fortran: Allow continuation between is and paren in select-type guards
+- Fortran: Skip fixed-form col-6 continuation marker in if-then backward scan
+- Fortran: Reject cross-line empty parens in change team/submodule/associate openers
+- Julia: Recognize symbol and prefixed string literals as value expressions before trailing generator
+- Julia: Reject end as block close when followed by postfix index marker
+- Julia: Reject end preceded by Unicode binary operator as block close
+- Julia: Reject non-block reserved words as string and command macro prefix
+- Julia: Skip excluded regions when scanning for binary operator after end
+- Lua: Count LF+CR as single newline per Lua 5.3+ spec
+- Lua: Treat comments as transparent (not opaque walls) in walk-back
+- MATLAB: Treat section keywords as function calls when not directly inside classdef
+- MATLAB: Strip line continuations inside arguments attribute parens
+- MATLAB: Reject case/else/elseif/otherwise/catch followed by strict binary operator
+- MATLAB: Reject case with empty header (case<NL>, case;) as intermediate
+- Octave: Handle line continuation in arguments attribute list
+- Octave: Allow typed close with trailing identifier as block close
+- Pascal: Skip parameter list and return type when scanning of object
+- Pascal: Reject duplicate else and of intermediates in case blocks
+- Pascal: Use structural check for tagless variant case record
+- Pascal: Recognize bracketed tag in variant case detection
+- Ruby: Reject keyword operator RHS end (or/and/return/etc.)
+- Ruby: Reject end after ternary question mark
+- Ruby: Skip backslash line continuation in endless method def detection
+- Ruby: Treat backslash inside comment as plain text in def detection
+- Verilog: Suppress reserved word used as entity name after declaration keyword
+- Verilog: Suppress block_open keyword inside parentheses
+- Verilog: Suppress block_close keyword inside parentheses
+- Verilog: Reject wait fork as control-keyword block opener
+- Verilog: Suppress primitive/checker/sequence/property/config after extern
+- Verilog: Traverse through begin/fork when detecting enclosing case for label-name
+- Verilog: Suppress reserved word used as entity identifier after extends/implements
+- VHDL: Handle comment-separated compound end with comments around trailing word
+- VHDL: Anchor synthetic begin body nestLevel to innermost generate
+- VHDL: Accept EOF and whitespace as trailing label terminator
+- VHDL: Suppress all reserved-word labels in a run after compound end
+- VHDL: Stop RHS context scan at unterminated strings
+- VHDL: Reject reserved words after type indication colon
+- VHDL: Reject reserved words in architecture/configuration of clause
+- VHDL: Skip control-flow intermediates inside declaration blocks
+- VHDL: Skip stray is in signal/variable/constant declarations
+
 ## [1.1.57] - 2026-05-25
 
 ### Fixed
@@ -2257,6 +2330,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.58]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.57...v1.1.58
 [1.1.57]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.56...v1.1.57
 [1.1.56]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.55...v1.1.56
 [1.1.55]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.54...v1.1.55
