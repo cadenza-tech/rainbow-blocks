@@ -4802,5 +4802,20 @@ end`;
     });
   });
 
+  suite('Regression: end in ternary then-value position after ? should not pair', () => {
+    // Bug: `cond ? <then-value> : <else-value>` is a ternary expression. The slot
+    // immediately after `?` (the then-value) must be an expression, so a literal `end`
+    // there is invalid. isEndInExpressionPosition did not include `?` in the operator
+    // list, so the stray `end` was tokenized and mis-paired (e.g., `x = a ? end : b`
+    // inside `def m ... end` left the `end` swallowed and orphaned `def`). After the fix,
+    // the inner stray `end` is filtered out and `def` pairs with the outer `end` on line 2.
+    test('should drop end immediately after ternary question mark', () => {
+      const source = 'def m\n  x = a ? end : b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
