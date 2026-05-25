@@ -232,6 +232,33 @@ const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set(['localparam', 'parame
 // of an assignment (e.g., `x = case;`) indicates it is misused as an identifier.
 const CASE_KEYWORDS: ReadonlySet<string> = new Set(['case', 'casex', 'casez', 'randcase']);
 
+// Block-introducer keywords that take an entity identifier name immediately
+// after them (`module <name>;`, `class <name>;`, `task <name>();`, ...). When
+// one of these is the immediately preceding word, the current block-keyword
+// identifier is being misused as the entity name. The data-type-prefixed
+// forms (`function int begin;`) are already handled by DATA_TYPE_KEYWORDS
+// because the immediately preceding word is the data type, not the introducer.
+// `function` is included because `function begin();` uses `begin` as the
+// function identifier with implicit return type (LRM A.2.6).
+const ENTITY_NAME_INTRODUCERS: ReadonlySet<string> = new Set([
+  'module',
+  'macromodule',
+  'function',
+  'task',
+  'class',
+  'interface',
+  'program',
+  'package',
+  'primitive',
+  'checker',
+  'clocking',
+  'covergroup',
+  'config',
+  'property',
+  'sequence',
+  'randsequence'
+]);
+
 export class VerilogBlockParser extends BaseBlockParser {
   // Brace index cached per source string. Built lazily on the first `{}`
   // context check of a tokenize pass and reused for every subsequent keyword in
@@ -760,6 +787,24 @@ export class VerilogBlockParser extends BaseBlockParser {
     // The data-type-prefixed form (`localparam int endmodule;`) is already covered
     // by the data-type branch above because the immediately preceding word is `int`.
     if (DECLARATION_KEYWORDS.has(word)) return true;
+    // Entity-name-introducer keywords (module/function/task/class/interface/...)
+    // take an entity identifier name immediately after them. When the current
+    // keyword is preceded by such an introducer, it is being misused as the
+    // entity name (e.g., `module begin;`, `function begin();`, `class begin;`).
+    // The data-type-prefixed form (`function int begin();`) is already covered
+    // by the data-type branch above because the immediately preceding word is
+    // the data type, not the introducer.
+    //
+    // Exception: `interface class <name>;` (SV-2012 interface class declaration,
+    // LRM §8.26): `interface` qualifies the `class` opener rather than being a
+    // standalone interface introducer. The `interface` keyword itself is rejected
+    // upstream by isFollowedByWord(... 'class') so the real opener of the block
+    // is the `class` token; suppressing it here would break the interface-class
+    // pair.
+    if (ENTITY_NAME_INTRODUCERS.has(word)) {
+      if (word === 'interface' && keyword === 'class') return false;
+      return true;
+    }
     // Method qualifiers (static/automatic/const/...) only suppress when the following
     // keyword is NOT one of the legitimate qualified block openers.
     if (METHOD_QUALIFIER_KEYWORDS.has(word) && keyword !== undefined && !METHOD_QUALIFIER_TARGETS.has(keyword)) {
