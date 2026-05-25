@@ -189,7 +189,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // reaching here that is followed by an operator is an outside-brackets block terminator.
     this.tentativeCloseOffsets = new Set<number>();
     for (const token of filtered) {
-      if (token.type === 'block_close' && this.isFollowedByBinaryOperator(source, token.startOffset)) {
+      if (token.type === 'block_close' && this.isFollowedByBinaryOperator(source, token.startOffset, excludedRegions)) {
         this.tentativeCloseOffsets.add(token.startOffset);
       }
     }
@@ -400,7 +400,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // `end+1`, `end<5`) is lastindex, even when there are unmatched block openers
     // between `[` and the `end`. These appear in expressions inside block bodies
     // (e.g., `arr[if end!=2 1 else 0 end]` where `end!=2` is the if's condition).
-    if (this.isFollowedByBinaryOperator(source, position) && this.isInsideAnyIndexingBracket(source, position, excludedRegions)) {
+    if (this.isFollowedByBinaryOperator(source, position, excludedRegions) && this.isInsideAnyIndexingBracket(source, position, excludedRegions)) {
       return false;
     }
     // Inside array construction `[...]` (not indexing), an `end` without a matching
@@ -463,8 +463,8 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   // Checks if the `end` at position is followed by a binary operator
-  private isFollowedByBinaryOperator(source: string, position: number): boolean {
-    return isFollowedByBinaryOperator(source, position);
+  private isFollowedByBinaryOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    return isFollowedByBinaryOperator(source, position, excludedRegions);
   }
 
   // Checks if position is inside any indexing bracket (a[...]) at any depth

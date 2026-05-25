@@ -56,11 +56,28 @@ function isBinaryOperatorStart(source: string, pos: number): boolean {
   return false;
 }
 
-// Checks if the `end` at `position` is followed by a binary operator (after optional whitespace).
-export function isFollowedByBinaryOperator(source: string, position: number): boolean {
+// Checks if the `end` at `position` is followed by a binary operator (after optional
+// whitespace and excluded regions like block comments `#= ... =#`). The excluded-region
+// skip lets `arr[if end #= cmt =# != 2; ...; end]` correctly classify the inner `end`
+// as `lastindex != 2` rather than as a block close. Newlines are NOT skipped: a binary
+// operator on a later line does not bind to `end` on this line (so `end # cmt\n + 1`
+// stops at the newline). Single-line comments inherently stop at the newline because
+// their excluded region ends there, so they also do not let the scan cross lines.
+export function isFollowedByBinaryOperator(source: string, position: number, excludedRegions: ExcludedRegion[] = []): boolean {
   let i = position + 3;
-  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
-    i++;
+  while (i < source.length) {
+    if (source[i] === ' ' || source[i] === '\t') {
+      i++;
+      continue;
+    }
+    if (isInExcludedRegion(i, excludedRegions)) {
+      const region = findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+    }
+    break;
   }
   if (i >= source.length) return false;
   return isBinaryOperatorStart(source, i);
@@ -290,9 +307,23 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
         if (!callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
           if (before !== '.' && bracketDepth === 0) {
             // Check if `end` is followed by a binary operator (lastindex expression).
-            // Skip whitespace after `end` to find the next non-whitespace char.
+            // Skip whitespace and excluded regions (block comments) after `end` to find
+            // the next non-whitespace, non-comment char.
             let k = i + 3;
-            while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+            while (k < source.length) {
+              if (source[k] === ' ' || source[k] === '\t') {
+                k++;
+                continue;
+              }
+              if (isInExcludedRegion(k, excludedRegions)) {
+                const region = findExcludedRegionAt(k, excludedRegions);
+                if (region) {
+                  k = region.end;
+                  continue;
+                }
+              }
+              break;
+            }
             const isLastindex = k < source.length && isBinaryOperatorStart(source, k);
             if (!isLastindex && depth > 0) depth--;
           }
@@ -356,8 +387,23 @@ export function allUnmatchedOpenersAreFilteredBegins(
         if (!callbacks.isAdjacentToUnicodeLetter(source, i, 3)) {
           if (bracketDepth === 0) {
             // Skip `end<binary-op>` (lastindex expression like `end!=2`, `end+1`).
+            // Skip whitespace and excluded regions (block comments) after `end` to find
+            // the next non-whitespace, non-comment char (matches isFollowedByBinaryOperator).
             let k = i + 3;
-            while (k < source.length && (source[k] === ' ' || source[k] === '\t')) k++;
+            while (k < source.length) {
+              if (source[k] === ' ' || source[k] === '\t') {
+                k++;
+                continue;
+              }
+              if (isInExcludedRegion(k, excludedRegions)) {
+                const region = findExcludedRegionAt(k, excludedRegions);
+                if (region) {
+                  k = region.end;
+                  continue;
+                }
+              }
+              break;
+            }
             const isLastindex = k < source.length && isBinaryOperatorStart(source, k);
             if (isLastindex) {
               i += 2;
