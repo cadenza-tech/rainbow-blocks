@@ -5178,5 +5178,39 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: reserved word after extends keyword must not open a block', () => {
+    test('should suppress case keyword after class extends (class C extends case;)', () => {
+      // Bug: `class C extends case;` uses `case` as the parent class identifier,
+      // which is invalid because `case` is a reserved word. The parser
+      // tokenized `case` as a real block_open and the trailing `endcase` (also
+      // invalid out of context) paired with it, producing a spurious
+      // case/endcase pair alongside the legitimate class/endclass pair.
+      const source = 'class C extends case;\nendclass\nendcase';
+      const tokens = parser.getTokens(source);
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 0, '`case` after `extends` must not be tokenized as block_open');
+      const pairs = parser.parse(source);
+      // Only the class/endclass pair should remain; the stray `endcase` is orphan.
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should suppress begin keyword after extends (class C extends begin;)', () => {
+      const source = 'class C extends begin;\nendclass';
+      const tokens = parser.getTokens(source);
+      const beginOpenTokens = tokens.filter((t) => t.value === 'begin' && t.type === 'block_open');
+      assert.strictEqual(beginOpenTokens.length, 0, '`begin` after `extends` must not be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+
+    test('should still pair class extends with a normal identifier (class C extends Base;)', () => {
+      // Sanity: when the extends target is a normal identifier, the class/
+      // endclass pair must work as before.
+      const source = 'class C extends Base;\nendclass';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'endclass');
+    });
+  });
+
   generateCommonTests(config);
 });
