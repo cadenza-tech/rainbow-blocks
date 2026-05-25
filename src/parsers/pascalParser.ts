@@ -1178,6 +1178,15 @@ export class PascalBlockParser extends BaseBlockParser {
               const hasElse = existing.some((t) => t.value.toLowerCase() === 'else');
               if (hasFinally || hasElse) break;
             }
+            // case block: reject duplicate 'else' and duplicate 'of'. A `case` has
+            // exactly one `of` (immediately after the selector) and at most one `else`
+            // clause; additional occurrences are malformed and would otherwise pollute
+            // the intermediates list (mirrors the try-except-else-else rejection above).
+            if (topValue === 'case' && (middleValue === 'else' || middleValue === 'of')) {
+              const existing = stack[stack.length - 1].intermediates;
+              const hasDuplicate = existing.some((t) => t.value.toLowerCase() === middleValue);
+              if (hasDuplicate) break;
+            }
             stack[stack.length - 1].intermediates.push(token);
           }
           break;
