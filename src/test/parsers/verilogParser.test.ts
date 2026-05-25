@@ -4985,5 +4985,45 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: block_close keyword inside parens must not close a block', () => {
+    test("should suppress end keyword inside cast expression parens (int'(end))", () => {
+      // Bug: SystemVerilog cast expression `int'(end)` uses `end` as an
+      // identifier-like operand. The inner `end` was tokenized as a real
+      // block_close and prematurely terminated the enclosing begin block,
+      // leaving a stray `end` to mispair with later openers.
+      const source = "always begin\n  x = int'(end);\nend\nendmodule";
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end');
+      assert.strictEqual(endTokens.length, 1, 'only the outer `end` should be tokenized; the cast operand must be suppressed');
+      const pairs = parser.parse(source);
+      // The outer begin/end pair must close correctly with the trailing `end`,
+      // not the spurious inner one.
+      const beginPair = pairs.find((p) => p.openKeyword.value === 'begin');
+      assert.ok(beginPair, 'outer begin/end pair should exist');
+      assert.strictEqual(beginPair.closeKeyword?.value, 'end');
+    });
+
+    test('should suppress endmodule keyword inside function call parens (f(endmodule))', () => {
+      // Same suppression applies to block_close keywords. Without it, the
+      // `endmodule` inside the call would be tokenized and pair with the
+      // outer module, breaking the outer block.
+      const source = 'module m;\n  initial begin\n    x = f(endmodule);\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const endmoduleTokens = tokens.filter((t) => t.value === 'endmodule');
+      assert.strictEqual(endmoduleTokens.length, 1, 'only the real `endmodule` should be tokenized');
+      const pairs = parser.parse(source);
+      const modulePair = pairs.find((p) => p.openKeyword.value === 'module' && p.closeKeyword?.value === 'endmodule');
+      assert.ok(modulePair, 'module/endmodule pair should still close correctly');
+    });
+
+    test('should still pair endcase keyword outside parens (case (sel) ... endcase)', () => {
+      // Sanity: the `endcase` keyword sits outside any parens, so the
+      // suppression must not affect normal case-statement termination.
+      const source = 'case (sel)\n  0: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+  });
+
   generateCommonTests(config);
 });
