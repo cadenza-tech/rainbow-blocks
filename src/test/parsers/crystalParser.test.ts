@@ -4800,5 +4800,18 @@ end`;
     });
   });
 
+  suite('Regression: {{ }} macro template with }}} should close template when singleBraceDepth >= 2', () => {
+    test('should close {{ }} template at first valid }} when singleBraceDepth is 2 and source has }}}', () => {
+      // `{{ { x { }}}` — inner `{ x {` raises singleBraceDepth to 2, then `}}}`
+      // arrives. The macro should close at the inner `}}`, treating the first `}`
+      // as an inner-brace close (sBD-=1) and the trailing `}}` as the template
+      // closer. Without this fix, the macro extends to EOF and swallows the
+      // following `if true\nend`.
+      const source = '{{ { x { }}}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
