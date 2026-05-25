@@ -6051,6 +6051,44 @@ end select`;
     });
   });
 
+  suite('Regression 2026-05-25: cross-line empty parens for change team/submodule/associate', () => {
+    test('should reject `change team (\\n)` with empty parens spanning a line break', () => {
+      // `change team (...)` requires a non-empty team-value expression. Empty parens
+      // spanning a line break (`change team (\n)`) is just as invalid as `change team ()`.
+      // The empty-paren detection must consider newlines as whitespace inside the parens,
+      // not only same-line whitespace. Without this, the opener is accepted and `end team`
+      // produces a spurious pair around the no-content team body.
+      const source = `change team (
+)
+  x = 1
+end team`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject `submodule (\\n) name` with empty parent-clause spanning a line break', () => {
+      // `submodule (parent) name` requires a non-empty parent-clause. Empty parens
+      // spanning a line break must be rejected, just like same-line empty parens.
+      const source = `submodule (
+) child
+  integer :: x
+end submodule`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should reject `associate (\\n)` with empty association-list spanning a line break', () => {
+      // `associate (name => selector, ...)` requires at least one association.
+      // Empty parens spanning a line break must be rejected, just like `associate ()`.
+      const source = `associate (
+)
+  x = 1
+end associate`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
