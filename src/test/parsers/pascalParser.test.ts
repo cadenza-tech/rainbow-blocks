@@ -529,6 +529,36 @@ end;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'object', 'end');
     });
+
+    test('should not treat of in procedure(...) of object as case intermediate', () => {
+      // `procedure(...) of object` is a method-pointer type. Without skipping the
+      // parameter list `(...)` when scanning back from `of`, isTypeDeclarationOf lands
+      // on `)` (not `procedure`) and returns false, so the `of` is added to the case
+      // block's intermediates as a duplicate of the legitimate case-of.
+      const source = `case Action of
+  1: Callback := procedure(Sender: TObject) of object;
+  2: DoSomething;
+end`;
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(casePair, 'case-end pair should exist');
+      assertIntermediates(casePair, ['of']);
+    });
+
+    test('should not treat of in function(...): T of object as case intermediate', () => {
+      // `function(...): T of object` is a function method-pointer type. Without skipping
+      // the parameter list `(...)` and the return type `: T` when scanning back from
+      // `of`, isTypeDeclarationOf lands on the return type identifier and returns false,
+      // so the `of` is added to the case block's intermediates as a duplicate.
+      const source = `case Action of
+  1: Callback := function(Sender: TObject): Integer of object;
+  2: DoSomething;
+end`;
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(casePair, 'case-end pair should exist');
+      assertIntermediates(casePair, ['of']);
+    });
   });
 
   suite('Variant record case', () => {
