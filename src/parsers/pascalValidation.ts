@@ -500,6 +500,10 @@ export function isVariantRecordCase(
   //    numeric-tag-with-no-name variant. Only inside a record, so a parenthesized
   //    selector expression of a standalone `case` is never reached here.
   //  - a numeric literal (digits, `$hex`, `#charcode`) used as a (malformed) tag
+  //  - a bracketed group `[...]`: malformed but treat as a tag form so the inner
+  //    `(field: type)` is still recognized as a variant field list. Without this,
+  //    the case becomes a standalone block opener and steals the surrounding
+  //    record's `end`, leaving the record orphan.
   let k: number;
   if (/[a-zA-Z_]/i.test(source[j])) {
     k = j;
@@ -508,6 +512,22 @@ export function isVariantRecordCase(
     }
   } else if (source[j] === '(') {
     k = skipParenGroup(source, j, excludedRegions, callbacks);
+  } else if (source[j] === '[') {
+    // Skip the balanced bracket group, mirroring skipParenGroup for `[...]`.
+    let depth = 1;
+    k = j + 1;
+    while (k < source.length && depth > 0) {
+      if (callbacks.isInExcludedRegion(k, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(k, excludedRegions);
+        if (region) {
+          k = region.end;
+          continue;
+        }
+      }
+      if (source[k] === '[') depth++;
+      else if (source[k] === ']') depth--;
+      k++;
+    }
   } else if (/[0-9$#]/.test(source[j])) {
     k = j;
     while (k < source.length && /[\w$#]/i.test(source[k])) {
