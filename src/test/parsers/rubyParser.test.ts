@@ -4817,5 +4817,31 @@ end`;
     });
   });
 
+  suite('Regression: endless method definition with backslash continuation', () => {
+    // Bug: `def \<NL>name = value` is equivalent to `def name = value` (a Ruby 3.0+ endless
+    // method definition with backslash line continuation between `def` and the method name).
+    // isEndlessMethodDef's skipWs only skipped spaces/tabs and excluded regions, so the
+    // backslash + newline broke the scan and the def was treated as a normal block opener,
+    // incorrectly pairing with the surrounding `end` and leaving the outer block unpaired.
+    test('should detect endless method def across backslash-LF continuation', () => {
+      const source = 'class X\n  def \\\n  foo = 1\nend';
+      const pairs = parser.parse(source);
+      // `class` pairs with `end`; the endless `def \<NL>foo = 1` is filtered (no pair)
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should detect endless method def across backslash-CRLF continuation', () => {
+      const source = 'class X\r\n  def \\\r\n  foo = 1\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should detect endless method def across backslash-CR continuation', () => {
+      const source = 'class X\r  def \\\r  foo = 1\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
