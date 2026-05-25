@@ -602,7 +602,11 @@ export class FortranBlockParser extends BaseBlockParser {
         (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
         (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
       ) {
-        // Verify no executable content between closing ')' and 'then'
+        // Verify no executable content between closing ')' and 'then'.
+        // Also skip a fixed-form column-6 continuation marker (e.g. `+`, `1`) that lives in
+        // column 6 of a physical line and whose columns 1-5 are blank or numeric. Without
+        // this, `if (a)\n     +then` is misread as having executable `+` between `)` and
+        // `then`, forcing a single-line if interpretation and dropping the block.
         let hasContentBeforeThen = false;
         for (let bi = i - 1; bi >= position + keyword.length; bi--) {
           const btRegion = this.findExcludedRegionAt(bi, excludedRegions);
@@ -613,6 +617,10 @@ export class FortranBlockParser extends BaseBlockParser {
           if (source[bi] === ' ' || source[bi] === '\t' || source[bi] === '&') continue;
           if (source[bi] === ')') break;
           if (source[bi] === '\n' || source[bi] === '\r') continue;
+          // Skip fixed-form col-6 continuation marker: the char at column 6 of a physical
+          // line where columns 1-5 are blank/numeric and the marker is non-blank, non-letter,
+          // non-0, non-comment. This is the same rule as fixedFormContinuationContentStart.
+          if (this.isFixedFormContinuationMarkerAt(source, bi)) continue;
           hasContentBeforeThen = true;
           break;
         }
@@ -750,6 +758,43 @@ export class FortranBlockParser extends BaseBlockParser {
       return -1;
     }
     return col6 + 1;
+  }
+
+  // Returns true if `pos` is column 6 of a physical line whose columns 1-5 are blank or numeric
+  // and whose column 6 holds a valid fixed-form continuation marker (non-blank, non-letter,
+  // non-0, non-comment). Mirrors the rule used by fixedFormContinuationContentStart so the
+  // backward scan in `hasContentBeforeThen` can recognize and skip a col-6 marker that
+  // continues an if-header onto the next physical line.
+  private isFixedFormContinuationMarkerAt(source: string, pos: number): boolean {
+    // Find the start of the physical line containing `pos`.
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    // Must be exactly column 6 (0-indexed 5).
+    if (pos - lineStart !== 5) {
+      return false;
+    }
+    // Columns 1-5 must be blank or a numeric label (spaces/digits only).
+    for (let c = lineStart; c < pos; c++) {
+      const ch = source[c];
+      if (ch !== ' ' && !(ch >= '0' && ch <= '9')) {
+        return false;
+      }
+    }
+    // Comment marker in column 1 disqualifies the line.
+    const col1 = source[lineStart];
+    if (col1 === 'C' || col1 === 'c' || col1 === '*' || col1 === '!') {
+      return false;
+    }
+    const marker = source[pos];
+    if (marker === ' ' || marker === '\t' || marker === '\n' || marker === '\r' || marker === '0' || marker === '!') {
+      return false;
+    }
+    if ((marker >= 'a' && marker <= 'z') || (marker >= 'A' && marker <= 'Z')) {
+      return false;
+    }
+    return true;
   }
 
   protected isValidBlockClose(keyword: string, source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
