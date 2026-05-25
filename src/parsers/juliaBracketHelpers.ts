@@ -29,9 +29,13 @@ function isPrecededByValueExpression(source: string, position: number, excludedR
     if (isInExcludedRegion(i, excludedRegions)) {
       const region = findExcludedRegionAt(i, excludedRegions);
       if (region) {
-        // Strings and char literals are value expressions
+        // Any non-comment excluded region is a value-bearing expression: strings (`"..."`,
+        // `"""..."""`), command literals (`` `...` ``, ``` ```...``` ```), char literals
+        // (`'x'`), symbols (`:name`), and prefixed string macros (`r"..."`, `raw"..."`,
+        // `b"..."`, custom string macros). Comments (`#` line, `#=` block) are not value
+        // expressions — skip them and keep scanning backward.
         const startCh = source[region.start];
-        if (startCh === '"' || startCh === '`' || startCh === "'") {
+        if (startCh !== '#') {
           return true;
         }
         i = region.start - 1;
