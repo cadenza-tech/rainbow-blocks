@@ -3204,6 +3204,52 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-25: IF/END-IF used as data names inside MOVE/ADD are not tokenized as block keywords', () => {
+    // Bug: `IF Y\n  MOVE IF TO X\nEND-IF` — the inner `IF` operand of MOVE is
+    // tokenized as a block-open keyword (because the WHEN/ELSE filter in
+    // tokenize() only ran on block_middle), pushing a phantom IF onto the
+    // opener stack. The trailing END-IF then matches the phantom and the real
+    // IF becomes orphan. Same for `MOVE END-IF TO Y` — the inner `END-IF`
+    // operand of MOVE is tokenized as a block-close keyword, prematurely
+    // closing the real IF. Per cost-minimization, reserved-word identifiers
+    // used as operands of a data-name verb (MOVE/ADD/SUBTRACT/SET/...) must
+    // not contribute to block detection regardless of whether they spell an
+    // opener, closer, or middle keyword.
+    test('should pair real IF with real END-IF when MOVE IF appears inside the body', () => {
+      // The real IF is at line 0, col 0; the inner `IF` operand of MOVE is at
+      // line 1, col 7. Without the fix the inner IF was tokenized as a block
+      // opener and the real END-IF paired with it, leaving the real IF orphan.
+      const source = 'IF Y\n  MOVE IF TO X\n  DISPLAY OK\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].openKeyword.line, 0, 'real IF must be at line 0, not the inner MOVE-IF operand');
+      assert.strictEqual(pairs[0].openKeyword.column, 0);
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.filter((t) => t.value.toUpperCase() === 'IF').length,
+        1,
+        'inner MOVE-IF operand must not be tokenized as a block-open keyword'
+      );
+    });
+    test('should pair real IF with real END-IF when MOVE END-IF appears inside the body', () => {
+      // The real END-IF is at line 3, col 0; the inner `END-IF` operand of MOVE
+      // is at line 1, col 7. Without the fix the inner END-IF was tokenized as
+      // a block closer and prematurely closed the real IF, leaving the real
+      // END-IF orphan.
+      const source = 'IF X\n  MOVE END-IF TO Y\n  DISPLAY OK\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'real END-IF must be at line 3, not the inner MOVE-END-IF operand');
+      assert.strictEqual(pairs[0].closeKeyword.column, 0);
+      const tokens = parser.getTokens(source);
+      assert.strictEqual(
+        tokens.filter((t) => t.value.toUpperCase() === 'END-IF').length,
+        1,
+        'inner MOVE-END-IF operand must not be tokenized as a block-close keyword'
+      );
+    });
+  });
+
   suite('Regression 2026-05-25: bare COPY before END-* or block-middle keyword does not swallow the keyword', () => {
     // Bug: `IF X\nCOPY\nEND-IF` (a COPY statement with no copybook name typed yet)
     // treated the following END-IF as the copybook name, so the END-IF was filtered
