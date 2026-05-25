@@ -4843,5 +4843,22 @@ end`;
     });
   });
 
+  suite('Regression: comment ending with backslash should not be line continuation', () => {
+    // Bug: isAfterDefKeyword scanned back across `\<NL>` as line continuation without
+    // checking whether the backslash was inside an excluded region. A comment that ends
+    // with `\` (e.g., `# def \`) is just text, not a continuation marker — but the scan
+    // crossed it, found `def` inside the comment, and incorrectly filtered the next-line
+    // keyword as a method name. As a result, the inner `end` after the comment was
+    // dropped and the outer block paired with the wrong `end`.
+    test('should not treat backslash inside comment as line continuation when scanning before end', () => {
+      const source = 'class X\n  # def \\\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+      // The matched close must be the `end` after the comment (line 2), not the trailing
+      // `end` on line 3 which has no opener.
+      assertTokenPosition(pairs[0].closeKeyword, 2, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
