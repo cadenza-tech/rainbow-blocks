@@ -776,6 +776,79 @@ export function isTypeDeclarationOf(
     }
     skipWsAndComments();
   }
+  // `function(...): T of object`: skip the return-type identifier and the ':' before
+  // the parameter list. The `of` after a function-pointer return type must be detected
+  // as a type-declaration `of`, not a case-statement intermediate. Only triggers when
+  // the `:` is preceded by `)` (function return type pattern). Without the preceding-`)`
+  // guard, this would wrongly skip past `array` in `var A: array of Integer`.
+  if (i >= 0 && /[a-zA-Z_]/i.test(source[i])) {
+    let savedI = i;
+    while (savedI >= 0 && /[a-zA-Z0-9_]/i.test(source[savedI])) savedI--;
+    // Skip whitespace/comments between identifier and ':'
+    let probeI = savedI;
+    while (probeI >= 0 && (source[probeI] === ' ' || source[probeI] === '\t' || source[probeI] === '\n' || source[probeI] === '\r')) {
+      probeI--;
+    }
+    while (probeI >= 0 && callbacks.isInExcludedRegion(probeI, excludedRegions)) {
+      const region = callbacks.findExcludedRegionAt(probeI, excludedRegions);
+      if (region) {
+        probeI = region.start - 1;
+      } else {
+        probeI--;
+      }
+      while (probeI >= 0 && (source[probeI] === ' ' || source[probeI] === '\t' || source[probeI] === '\n' || source[probeI] === '\r')) {
+        probeI--;
+      }
+    }
+    // `:` (but not `:=`) followed by `)` means we just skipped a function return type
+    if (probeI >= 0 && source[probeI] === ':' && (probeI === 0 || source[probeI - 1] !== ':')) {
+      // Look before `:` to verify it is preceded by `)` (function return type pattern).
+      let beforeColon = probeI - 1;
+      while (
+        beforeColon >= 0 &&
+        (source[beforeColon] === ' ' || source[beforeColon] === '\t' || source[beforeColon] === '\n' || source[beforeColon] === '\r')
+      ) {
+        beforeColon--;
+      }
+      while (beforeColon >= 0 && callbacks.isInExcludedRegion(beforeColon, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(beforeColon, excludedRegions);
+        if (region) {
+          beforeColon = region.start - 1;
+        } else {
+          beforeColon--;
+        }
+        while (
+          beforeColon >= 0 &&
+          (source[beforeColon] === ' ' || source[beforeColon] === '\t' || source[beforeColon] === '\n' || source[beforeColon] === '\r')
+        ) {
+          beforeColon--;
+        }
+      }
+      if (beforeColon >= 0 && source[beforeColon] === ')') {
+        i = probeI - 1;
+        skipWsAndComments();
+      }
+    }
+  }
+  // `procedure(...) of object` / `function(...): T of object`: skip the parameter list.
+  // After skipping `)...(`, the keyword `procedure`/`function` is recognized below.
+  if (i >= 0 && source[i] === ')') {
+    let depth = 1;
+    i--;
+    while (i >= 0 && depth > 0) {
+      if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+        const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      if (source[i] === ')') depth++;
+      else if (source[i] === '(') depth--;
+      i--;
+    }
+    skipWsAndComments();
+  }
   if (i < 0 || !/[a-zA-Z]/i.test(source[i])) return false;
   let wordEnd = i;
   while (i >= 0 && /[a-zA-Z0-9_]/i.test(source[i])) {
