@@ -741,7 +741,13 @@ export class VhdlBlockParser extends BaseBlockParser {
         }
         break;
       }
-      if (j >= source.length || source[j] !== ';') continue;
+      // The trailing reserved-word label must NOT be tokenized as a fresh block_open,
+      // regardless of what follows it. The most common form is `end <kw> <label>;`, but
+      // EOF or a bare newline (no `;`) are also valid label terminators in malformed
+      // editor-in-progress code. If anything other than EOF / whitespace / `;` follows
+      // the label, the syntax is ambiguous and we conservatively leave the existing
+      // behavior alone.
+      if (j < source.length && source[j] !== ';') continue;
       if (reservedWords.has(word)) {
         skipPositions.add(wordStart);
       }
