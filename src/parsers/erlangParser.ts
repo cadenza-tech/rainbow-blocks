@@ -1144,9 +1144,12 @@ export class ErlangBlockParser extends BaseBlockParser {
     // attribute-name-specific rules using the precomputed attribute name.
     const attrName = span.name;
     // For -record, unmatched braces contain real expressions (but keywords inside
-    // nested function calls inside the brace are still filtered).
+    // nested function calls inside the brace are still filtered). However, bare
+    // reserved words appearing in `::` type annotations (e.g. {f :: end}) must
+    // still be filtered: they are reserved-word references in type expressions,
+    // not real block delimiters.
     if (attrName === 'record' && insideUnmatchedBrace && !insideNestedCall) {
-      return false;
+      return this.isBareReservedWordInRecordBody(source, pos, span, excludedRegions);
     }
     // For -define, the body (after the first top-level ',') contains real expressions
     // outside nested function calls. Tuple braces ({...}), list brackets ([...]) and
@@ -1186,6 +1189,21 @@ export class ErlangBlockParser extends BaseBlockParser {
     const analysis = this.getDefineBodyAnalysis(source, span, excludedRegions);
     // The keyword at `pos` is a real block element only if it took part in a matched pair
     // or remains on the opener stack (an unclosed but real opener).
+    return !analysis.realOffsets.has(pos) && !analysis.unclosedOpeners.has(pos);
+  }
+
+  // Returns true if the block keyword at `pos` is a bare reserved word inside the body of
+  // `-record` declaration `span`, rather than part of a real block (fun(...)/begin.../end).
+  // Reuses the same body-analysis machinery as -define: each record body is scanned once
+  // and bare-keyword queries become O(1) Set lookups.
+  // Without this check, bare reserved words appearing in `::` type annotations
+  // (e.g. -record(s, {f :: end})) would be treated as real block delimiters and pair
+  // with surrounding begin/end blocks.
+  private isBareReservedWordInRecordBody(source: string, pos: number, span: AttributeSpan, excludedRegions: ExcludedRegion[]): boolean {
+    if (span.bodyCommaPos < 0) {
+      return false;
+    }
+    const analysis = this.getDefineBodyAnalysis(source, span, excludedRegions);
     return !analysis.realOffsets.has(pos) && !analysis.unclosedOpeners.has(pos);
   }
 
