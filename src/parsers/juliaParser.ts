@@ -23,6 +23,58 @@ import {
   isPrecededBySubtypeOperator
 } from './juliaLastindexHelpers';
 
+// Julia reserved words that cannot be string or command macro names. The full reserved
+// word list includes block keywords (`if`, `function`, ...) plus non-block reserved words
+// (`where`, `import`, `in`, `return`, ...). When any of these precedes a `"..."` or
+// `` `...` ``, the parser must NOT treat the construct as a string/command macro call,
+// because Julia disallows reserved words as macro names. The set is intentionally global
+// (not derived per parser instance) so it can be shared across multiple parse passes
+// without recomputation.
+const JULIA_RESERVED_WORDS: ReadonlySet<string> = new Set<string>([
+  // Block keywords (also tracked separately in `keywords.blockOpen/blockClose/blockMiddle`).
+  'if',
+  'else',
+  'elseif',
+  'end',
+  'function',
+  'for',
+  'while',
+  'struct',
+  'begin',
+  'try',
+  'catch',
+  'finally',
+  'let',
+  'module',
+  'baremodule',
+  'macro',
+  'quote',
+  'do',
+  'abstract',
+  'primitive',
+  // Non-block reserved words that cannot be macro names but are NOT block keywords.
+  'where',
+  'import',
+  'using',
+  'export',
+  'public',
+  'in',
+  'isa',
+  'return',
+  'throw',
+  'break',
+  'continue',
+  'global',
+  'local',
+  'const',
+  'true',
+  'false',
+  'nothing',
+  'missing',
+  'type',
+  'mutable'
+]);
+
 export class JuliaBlockParser extends BaseBlockParser {
   // Bracket index cached per source string. Built lazily on the first bracket-context
   // check of a tokenize pass and reused for every subsequent keyword in the same
@@ -633,9 +685,12 @@ export class JuliaBlockParser extends BaseBlockParser {
         break;
       }
       if (prefixEnd < source.length && source[prefixEnd] === '"') {
-        // Don't match block keywords as string macro prefixes
+        // Don't match Julia reserved words (block keywords plus other reserved words like
+        // `where`, `import`, `in`, ...) as string macro prefixes. Julia rejects reserved
+        // words as macro names, so the construct must be parsed as two separate tokens
+        // (the reserved word followed by a string literal), not as a macro call.
         const prefix = source.slice(pos, prefixEnd);
-        if (this.isBlockKeyword(prefix)) {
+        if (JULIA_RESERVED_WORDS.has(prefix)) {
           return null;
         }
         const prefixLength = prefixEnd - pos;
@@ -655,11 +710,6 @@ export class JuliaBlockParser extends BaseBlockParser {
     }
 
     return null;
-  }
-
-  // Checks if a word is a block keyword
-  private isBlockKeyword(word: string): boolean {
-    return this.keywords.blockOpen.includes(word) || this.keywords.blockClose.includes(word) || this.keywords.blockMiddle.includes(word);
   }
 
   // Matches prefixed triple-quoted string (no interpolation, raw content except b"...")
@@ -797,15 +847,13 @@ export class JuliaBlockParser extends BaseBlockParser {
     return { start: pos, end: i };
   }
 
-  // Set of reserved block keywords. Cannot be used as string/command macro names, so a
-  // backtick immediately following one is an unprefixed Cmd literal, not a macro call.
-  // Built lazily once per parser instance from `this.keywords` and shared across parses.
-  private blockKeywordSet: ReadonlySet<string> | null = null;
-  private getBlockKeywordSet(): ReadonlySet<string> {
-    if (this.blockKeywordSet === null) {
-      this.blockKeywordSet = new Set<string>([...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle]);
-    }
-    return this.blockKeywordSet;
+  // Returns the full Julia reserved-word set. Reserved words cannot be string/command
+  // macro names, so a backtick or quote immediately following one is an unprefixed Cmd /
+  // String literal, not a macro call. Includes block keywords (`if`, `function`, ...)
+  // plus non-block reserved words (`where`, `import`, `in`, `return`, ...). Defined as
+  // a module-level constant `JULIA_RESERVED_WORDS` (see top of file).
+  private getReservedWordSet(): ReadonlySet<string> {
+    return JULIA_RESERVED_WORDS;
   }
 
   // Matches triple backtick command string: ``` ... ```
@@ -814,7 +862,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // A backtick command is "prefixed" if preceded by a valid identifier that is not a
     // reserved block keyword. See isPrecededByCommandMacroPrefix for surrogate-pair
     // handling (BMP-outside chars).
-    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getBlockKeywordSet());
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getReservedWordSet());
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -864,7 +912,7 @@ export class JuliaBlockParser extends BaseBlockParser {
   }
 
   private skipJuliaInterpolation(source: string, pos: number): number {
-    return skipJuliaInterpolation(source, pos, this.getBlockKeywordSet());
+    return skipJuliaInterpolation(source, pos, this.getReservedWordSet());
   }
 
   // Matches command string (backtick)
@@ -873,7 +921,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // A backtick command is "prefixed" if preceded by a valid identifier that is not a
     // reserved block keyword. See isPrecededByCommandMacroPrefix for surrogate-pair
     // handling (BMP-outside chars).
-    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getBlockKeywordSet());
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getReservedWordSet());
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {

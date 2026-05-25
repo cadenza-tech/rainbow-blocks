@@ -113,9 +113,13 @@ export function skipNestedJuliaString(source: string, pos: number, blockKeywords
 // Unicode Letter/Number), then validates:
 //   - the prefix starts with a valid identifier-start char (letter or `_`, not a digit
 //     -- Julia identifiers cannot start with a digit); and
-//   - the prefix is not a reserved block keyword (reserved words cannot be macro names).
+//   - the prefix is not a Julia reserved word (block keywords and non-block reserved
+//     words like `where`, `import`, `in`, etc. — none of these can be macro names).
 // Handles BMP-outside characters encoded as surrogate pairs (e.g. 𝐀 U+1D400).
-export function isPrecededByCommandMacroPrefix(source: string, pos: number, blockKeywords: ReadonlySet<string>): boolean {
+// `reservedWords` is the full Julia reserved-word set (see JULIA_RESERVED_WORDS in
+// juliaParser.ts). The parameter is named generically because the helper itself only
+// needs to do `reservedWords.has(prefix)`.
+export function isPrecededByCommandMacroPrefix(source: string, pos: number, reservedWords: ReadonlySet<string>): boolean {
   if (pos <= 0) return false;
   // Walk backward collecting identifier-continuation chars.
   let prefixStart = pos;
@@ -157,9 +161,9 @@ export function isPrecededByCommandMacroPrefix(source: string, pos: number, bloc
     startIsIdentStart = true;
   }
   if (!startIsIdentStart) return false;
-  // Reserved block keywords cannot be macro names.
+  // Julia reserved words cannot be macro names.
   const prefix = source.slice(prefixStart, pos);
-  if (blockKeywords.has(prefix)) return false;
+  if (reservedWords.has(prefix)) return false;
   return true;
 }
 
