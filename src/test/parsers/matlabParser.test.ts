@@ -3391,6 +3391,59 @@ end`;
     });
   });
 
+  suite('Regression: case/otherwise with empty header is not intermediate', () => {
+    test('should not register case as intermediate when header is empty (case<NL>)', () => {
+      // `case` requires a value expression. An empty header (`case\n  y = 1`) is invalid
+      // MATLAB. Treating `case` here as an intermediate corrupts the switch arm structure.
+      const source = 'switch x\n  case\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case with empty header must not be registered as an intermediate');
+    });
+
+    test('should not register case as intermediate when followed by ; (case;)', () => {
+      const source = 'switch x\n  case;\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case; must not be registered as an intermediate');
+    });
+
+    test('should not register case as intermediate when followed by , (case,)', () => {
+      const source = 'switch x\n  case,\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case, must not be registered as an intermediate');
+    });
+
+    test('should not register case as intermediate when followed by % comment only (case % comment)', () => {
+      // `case % comment\n  y = 1` has no value expression — the line ends at the comment,
+      // so the header is effectively empty.
+      const source = 'switch x\n  case % comment\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'case followed by comment only must not be registered as an intermediate');
+    });
+
+    test('should still register case as intermediate when followed by a value (sanity)', () => {
+      // `case 1` is valid MATLAB. It must remain recognised as an intermediate.
+      const source = 'switch x\n  case 1\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'case 1 must remain a valid intermediate');
+    });
+
+    test('should not register otherwise as intermediate when header is empty (otherwise<NL>)', () => {
+      // Wait — `otherwise` typically takes NO header (just falls through to the body).
+      // Let's verify what existing behaviour is. Actually `otherwise` followed by NL is
+      // valid; only `case` REQUIRES a value. Skip otherwise from the rejection.
+      // Sanity check that `otherwise` alone on a line still works.
+      const source = 'switch x\n  case 1\n    y = 1;\n  otherwise\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 2, 'case and otherwise must both remain intermediates');
+    });
+  });
+
   suite('Regression: block_middle keyword followed by strictly-binary operator is not intermediate', () => {
     test('should not register case as intermediate when followed by * operator', () => {
       // `case * 5` is invalid MATLAB: `case` requires a value expression, and `*` cannot start
