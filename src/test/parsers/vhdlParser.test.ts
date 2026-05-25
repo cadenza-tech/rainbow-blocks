@@ -4256,6 +4256,40 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: architecture/configuration of <reserved_word>', () => {
+    // `architecture <id> of <reserved_word> is ...` and `configuration <id> of <reserved_word>
+    // is ...` should treat the reserved word as the entity reference, NOT as a fresh block
+    // opener. Without this guard the reserved word is tokenized as a stray block_open and
+    // absorbs the surrounding architecture's `is` / `begin` into its (orphan) intermediates.
+    test('should not treat entity in architecture of <reserved> as block opener', () => {
+      const source = 'architecture rtl of entity is\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const isIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(isIntermediate, 'architecture should retain its is intermediate');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+      const entityOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'entity');
+      assert.ok(!entityOpener, 'entity in architecture of <name> should not pair as a block opener');
+    });
+
+    test('should not treat process in architecture of <reserved> as block opener', () => {
+      const source = 'architecture rtl of process is\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const isIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isIntermediate, 'architecture should retain its is intermediate');
+    });
+
+    test('should not treat package in configuration of <reserved> as block opener', () => {
+      const source = 'configuration cfg of package is\nend configuration;';
+      const pairs = parser.parse(source);
+      const cfgBlock = findBlock(pairs, 'configuration');
+      const isIntermediate = cfgBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isIntermediate, 'configuration should retain its is intermediate');
+    });
+  });
+
   suite('Regression 2026-05-25: type indication colon followed by reserved-word block opener', () => {
     // A type indication (`signal x : view;` / `variable y : units;` / etc.) cannot legally
     // be a block opener — the reserved word is the type name. Without rejecting it, the
