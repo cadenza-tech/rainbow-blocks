@@ -6609,6 +6609,26 @@ fi`;
     });
   });
 
+  suite('Regression: line continuation inside the time prefix word', () => {
+    test('should recognize if after time split by backslash-newline', () => {
+      // Real bash removes `\<newline>` at the lexer stage, so `t\<NL>ime` and
+      // `time` are equivalent. Without the fix, `isAtCommandPosition` could
+      // only see the literal 4-character `time` token sitting before the
+      // keyword, missing the case where one or more `\<NL>` continuations
+      // split the prefix. The following `if`/`fi` block then failed the
+      // command-position check and was not paired.
+      const source = 't\\\nime if true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should recognize for after time with backslash-newline in the middle of the word', () => {
+      const source = 'ti\\\nme for i in 1 2; do echo; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
   suite('Regression: heredoc delimiter is backslash-escaped space', () => {
     test('should treat backslash-space as a literal single-space terminator', () => {
       // Real bash: `<<\ ` (backslash-space) makes the delimiter exactly one
