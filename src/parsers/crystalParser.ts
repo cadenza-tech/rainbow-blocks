@@ -23,7 +23,12 @@ const REGEX_FLAGS_PATTERN = /[imx]/;
 // Valid specifiers for percent literals
 const PERCENT_SPECIFIERS_PATTERN = /[qQwWiIrx]/;
 
-// Keywords after which / starts a regex, not division
+// Keywords after which / starts a regex, not division.
+// Includes true control keywords (`if`, `unless`, ...) plus method-like keywords
+// (`puts`, `print`, `raise`) that often take a regex literal as the first argument.
+// The method-like subset is also listed in METHOD_LIKE_REGEX_KEYWORDS so that
+// `isRegexStart` only treats them as regex starters under the method-call spacing
+// rule (`puts /re/` is regex, `puts / 2` is division).
 const REGEX_PRECEDING_KEYWORDS = new Set([
   'if',
   'unless',
@@ -49,6 +54,11 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
   'ensure',
   'select'
 ]);
+
+// Method-like identifiers that double as keywords here but are really method names.
+// For these, `/` after whitespace is division by default; only `ident /regex/` (no
+// space after `/`) is treated as a regex argument.
+const METHOD_LIKE_REGEX_KEYWORDS = new Set(['puts', 'print', 'raise']);
 
 // `abstract def` declarations have no body and no `end`. This matches `abstract`
 // immediately before `def`, allowing only spaces/tabs and backslash line
@@ -856,7 +866,7 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Checks if slash is regex start (not division)
   private isRegexStart(source: string, pos: number): boolean {
-    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS, this._lastExcludedRegion ?? undefined);
+    return isRegexStart(source, pos, REGEX_PRECEDING_KEYWORDS, this._lastExcludedRegion ?? undefined, METHOD_LIKE_REGEX_KEYWORDS);
   }
 
   // Checks if % at position is a modulo operator (not a percent literal)
