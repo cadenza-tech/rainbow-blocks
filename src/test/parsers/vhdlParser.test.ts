@@ -4256,6 +4256,35 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: multiple trailing reserved-word labels after compound end', () => {
+    // VHDL grammar allows at most one label after a compound `end <type>`. Editing-in-progress
+    // code can contain malformed `end process loop case;` shapes where TWO reserved words
+    // sit between `end <type>` and `;`. Previously findTrailingLabelPositions only inspected
+    // the first word; the second (and subsequent) reserved words leaked as block_open tokens
+    // and could falsely pair with later `end <kw>` constructs. The fix walks any contiguous
+    // run of reserved-word labels (whitespace/comment-separated, terminated by `;` or EOF)
+    // and marks all of them for skipping.
+    test('should suppress both loop and case after end process', () => {
+      const source = 'process\nbegin\n  null;\nend process loop case;';
+      const tokens = parser.getTokens(source);
+      const looseLoop = tokens.find((t) => t.value.toLowerCase() === 'loop');
+      const looseCase = tokens.find((t) => t.value.toLowerCase() === 'case');
+      assert.ok(!looseLoop, 'second-to-last trailing reserved label `loop` must not leak as a block_open token');
+      assert.ok(!looseCase, 'final trailing reserved label `case` must not leak as a block_open token');
+    });
+
+    test('should suppress three consecutive trailing reserved labels after end if', () => {
+      const source = 'if a then null; end if for while case;';
+      const tokens = parser.getTokens(source);
+      const looseFor = tokens.find((t) => t.value.toLowerCase() === 'for');
+      const looseWhile = tokens.find((t) => t.value.toLowerCase() === 'while');
+      const looseCase = tokens.find((t) => t.value.toLowerCase() === 'case');
+      assert.ok(!looseFor, 'first trailing reserved label `for` must not leak as a block_open token');
+      assert.ok(!looseWhile, 'middle trailing reserved label `while` must not leak as a block_open token');
+      assert.ok(!looseCase, 'final trailing reserved label `case` must not leak as a block_open token');
+    });
+  });
+
   suite('Regression 2026-05-25: deeply nested generate begin/end body nestLevel', () => {
     // adjustGenerateBodyNestLevels subtracts an over-count for sibling generates and for
     // control-prefix keywords that share a generate's close offset. In deeply nested
