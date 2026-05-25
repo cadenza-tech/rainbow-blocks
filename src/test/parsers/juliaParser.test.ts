@@ -5147,6 +5147,71 @@ end`;
     });
   });
 
+  suite('Regression: end followed by postfix index marker is not a block close (Bug 2)', () => {
+    test('should not treat end as block close when followed by ? (ternary)', () => {
+      // `end?(x):(y)` — `end?` is the condition of a ternary, where `end` would need to
+      // be a value (e.g. lastindex). Outside indexing brackets, `end?` is invalid syntax,
+      // but it must NOT be classified as block_close so the trailing real `end` pairs.
+      const source = 'function f()\n  end?(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by ( (call)', () => {
+      // `end(x)` is a function call applying `end` (lastindex) as a callable. Outside
+      // indexing brackets this is invalid syntax, but it must not be classified as
+      // block_close so the trailing real `end` pairs with the surrounding function.
+      const source = 'function f()\n  end(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by [ (indexing)', () => {
+      // `end[x]` is indexing `end` (lastindex) by `x`. Outside an outer indexing bracket
+      // this is invalid, but the trailing real `end` must still pair with `function`.
+      const source = 'function f()\n  end[x]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still treat end as block close when followed by , in call site (cost-minimization)', () => {
+      // `f(begin 1 end, if ... end)` — the inner `end,` is a legitimate block close
+      // terminating the `begin` argument. Rejecting `,` as a postfix index marker would
+      // break this common valid pattern. The pathological `function f() end, more end`
+      // form (where `end, more` is invalid) is left unhandled to preserve `end,` in
+      // calls and tuples (see isFollowedByPostfixIndexMarker Note 2).
+      const source = 'f(begin\n  1\nend, if true\n  x\nelse\n  -x\nend)';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'begin');
+      findBlock(pairs, 'if');
+    });
+
+    test('should not treat end as block close when followed by .<letter> (field access)', () => {
+      // `end.foo` is field access on `end`. Outside indexing brackets this is invalid,
+      // but it must not be classified as block_close. (The existing tokenize step
+      // already filters keywords directly preceded by `.`, but does not filter ones
+      // followed by `.<letter>` — this test guards against regression.)
+      const source = 'function f()\n  end.foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still treat end as block close when followed by .+ (broadcast operator on value-returning block)', () => {
+      // `begin x end .+ 1` is a value-returning block broadcasted by `+ 1`. The inner
+      // `end` closes `begin` (so `(begin x end) .+ 1` is the operand). This case must
+      // NOT be affected by the bug 2 fix — `.<op>` is a broadcast operator, distinct
+      // from `.<letter>` field access.
+      const source = 'begin x end .+ 1';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: end followed by typeassert/subtype operators inside indexing brackets is lastindex', () => {
     test('should treat end followed by :: as lastindex inside indexing brackets', () => {
       // `arr[if end::Int 1 else 0 end]` — `end::Int` is a type-asserted lastindex.
