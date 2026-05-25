@@ -6609,6 +6609,30 @@ fi`;
     });
   });
 
+  suite('Regression: heredoc delimiter is backslash-escaped space', () => {
+    test('should treat backslash-space as a literal single-space terminator', () => {
+      // Real bash: `<<\ ` (backslash-space) makes the delimiter exactly one
+      // space character. Without the fix, the backslash terminator character
+      // class included `\s`, so the run ended immediately and `<<\ ` was not
+      // recognised as a heredoc opener; the trailing `if`/`then`/`fi` were
+      // then parsed as a spurious block instead of heredoc body content.
+      const source = 'cat <<\\ \nbody\n\nif true; then echo; fi\n';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should exclude block keywords inside backslash-space heredoc body', () => {
+      // After the fix the `<<\ ` heredoc body extends until the next line that
+      // is exactly one space, so an if/fi sitting between the opener and the
+      // terminator must not be parsed as a real block. Without the fix the
+      // heredoc was not recognised at all, so the inner if/fi paired up and
+      // appeared alongside the trailing for/done as a spurious second block.
+      const source = 'cat <<\\ \nif true; then\necho ok\nfi\n \nfor i in 1; do echo; done\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
   suite('Regression: heredoc delimiter contains $', () => {
     test('should treat $ in unquoted heredoc delimiter as literal terminator character', () => {
       // Real bash does NOT expand parameters in the heredoc delimiter word:
