@@ -3957,6 +3957,48 @@ end if;`;
     });
   });
 
+  suite('Regression: exception filter recognizes type-mark contexts', () => {
+    test('should filter exception when preceded by is (subtype declaration)', () => {
+      const source = 'package P is\n  subtype S is Exception;\nend P;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!middleValues.includes('exception'), `exception preceded by is must not be intermediate, got ${JSON.stringify(middleValues)}`);
+    });
+
+    test('should filter exception when preceded by is (type declaration)', () => {
+      const source = 'package P is\n  type T1 is Exception;\nend P;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!middleValues.includes('exception'), `exception preceded by is must not be intermediate, got ${JSON.stringify(middleValues)}`);
+    });
+
+    test('should filter exception when preceded by access', () => {
+      const source = 'package P is\n  type T is access Exception;\nend P;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!middleValues.includes('exception'), `exception preceded by access must not be intermediate, got ${JSON.stringify(middleValues)}`);
+    });
+
+    test('should filter exception when preceded by of (array type)', () => {
+      const source = 'package P is\n  type T is array(1..10) of Exception;\nend P;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!middleValues.includes('exception'), `exception preceded by of must not be intermediate, got ${JSON.stringify(middleValues)}`);
+    });
+
+    test('should filter exception when preceded by return (function result type)', () => {
+      const source = 'function F return Exception is\nbegin\n  return E;\nend F;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!middleValues.includes('exception'), `exception preceded by return must not be intermediate, got ${JSON.stringify(middleValues)}`);
+    });
+  });
+
   suite('Regression: exception backward-scan filter recognizes Unicode whitespace', () => {
     test('should filter exception as type when colon and exception are separated by NBSP', () => {
       // U+00A0 (NBSP) is intra-line whitespace per Ada LRM 2.1. The exception
