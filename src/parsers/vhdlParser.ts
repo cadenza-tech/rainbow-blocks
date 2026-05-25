@@ -90,6 +90,18 @@ const ATTRIBUTE_PREFIX_KEYWORDS: ReadonlySet<string> = new Set([
 // '()' backward scan, so '[' and '{' are deliberately not tracked.
 const PAREN_OPENERS: ReadonlySet<string> = new Set(['(']);
 
+// Detects whether an excluded region is an unterminated VHDL string literal. A string
+// region starts with `"`. matchVhdlString returns the region ending at the closing `"`
+// when terminated, or at the first newline / source.length when not. We only need to
+// inspect the first and last char: if the region opens with `"` but does NOT close
+// with `"`, the string is unterminated. Block comments and character literals are NOT
+// flagged (terminated block comments may legitimately span newlines).
+function isUnterminatedStringRegion(source: string, region: ExcludedRegion): boolean {
+  if (source[region.start] !== '"') return false;
+  if (region.end - region.start < 2) return true;
+  return source[region.end - 1] !== '"';
+}
+
 // Block-opener keywords that should NEVER appear on the RHS of an expression
 // (assignment, comparison, argument list, etc.). Reserved words cannot legally be
 // identifiers in VHDL, but editors regularly encounter in-progress or hand-written
@@ -382,6 +394,16 @@ export class VhdlBlockParser extends BaseBlockParser {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
         if (region) {
+          // An unterminated string (one that ends at a newline or EOF because the closing
+          // `"` is missing) signals editor-in-progress code. Crossing it backward would let
+          // a stale `:=` / `<=` / `=` further up falsely classify the keyword as RHS-context
+          // and silently drop legitimate block openers that the user is about to write.
+          // Treat such a region as a hard stop instead. Terminated block comments may span
+          // newlines legitimately and must not trigger this guard, so check only string
+          // regions (start char `"`) and only by inspecting the closing char.
+          if (isUnterminatedStringRegion(source, region)) {
+            return false;
+          }
           i = region.start - 1;
           continue;
         }
