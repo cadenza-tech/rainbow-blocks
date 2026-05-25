@@ -322,6 +322,17 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject reserved-word block openers that appear directly after a type indication `:`
+    // (e.g., `signal x : view;`, `variable v : units;`). The reserved word here is being
+    // used (illegally) as a type name, not as a block opener. Without this guard the
+    // keyword is tokenized as a stray block_open and absorbs the surrounding architecture's
+    // `begin` into its (orphan) intermediates. attribute_specification (`: view is ...`)
+    // is already excluded by the entity_class check above, so the remaining `:` cases are
+    // type indications that should never open a block.
+    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isPrecededByTypeIndicationColon(source, position, excludedRegions)) {
+      return false;
+    }
+
     if (lowerKeyword === 'for') {
       return isValidForOpen(source, position, excludedRegions, cb);
     }
@@ -435,6 +446,85 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `/=` (inequality) ends with `=` and is caught above; bare `/` here is division.
     if (prev === ',' || prev === '+' || prev === '-' || prev === '*' || prev === '/' || prev === '&') return true;
     return false;
+  }
+
+  // Detects whether the keyword at `position` is part of a type indication (declaration)
+  // rather than a labeled statement. A declaration looks like:
+  //   `<declaration_keyword> <name> : <type>` — e.g., `signal x : view`, `variable y : units`.
+  // A labeled statement looks like:
+  //   `<label> : <block_statement_keyword> ...` — e.g., `blk: block`, `lbl: process`.
+  // The distinguishing factor is the declaration keyword (signal/variable/constant/
+  // shared/file) appearing before the `name :`. attribute_specification (`attribute X of
+  // Y : view is ...`) is handled separately by isInAttributeSpecification; this helper
+  // assumes the caller has already excluded that case.
+  private isPrecededByTypeIndicationColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step 1: walk back past whitespace/comments to find the `:`.
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0 || source[i] !== ':') return false;
+    // Step 2: walk back past the `:`, then past whitespace/comments, then past the
+    // identifier (the declared name or label).
+    i--;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
+    // Skip the identifier.
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    // Step 3: walk past whitespace/comments, then read the preceding word.
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) return false;
+    // The preceding token must be a declaration keyword for this to be a type indication.
+    if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const word = source.slice(i + 1, wordEnd).toLowerCase();
+    // VHDL declaration keywords that introduce a type indication (LRM 6.4.2):
+    //   signal, variable, constant, file. `shared variable` ends with `variable` so the
+    //   single-word check covers it. `port`/`generic` formal_part also use `:` but those
+    //   are inside parens (handled by the isInsideParens check upstream).
+    const DECL_KEYWORDS: ReadonlySet<string> = new Set(['signal', 'variable', 'constant', 'file']);
+    return DECL_KEYWORDS.has(word);
   }
 
   // Validates `record` as a block opener: must be preceded by `is` keyword
