@@ -337,7 +337,7 @@ export class RubyBlockParser extends BaseBlockParser {
         return false;
       }
       // Filter out keywords used as method names after 'def' (e.g., def do, def begin, def end)
-      if (this.isAfterDefKeyword(source, token.startOffset)) {
+      if (this.isAfterDefKeyword(source, token.startOffset, excludedRegions)) {
         return false;
       }
       // Filter out :: scope resolution (e.g., Module::Class::Begin)
@@ -397,7 +397,10 @@ export class RubyBlockParser extends BaseBlockParser {
 
   // Checks if keyword is used as a method name after 'def' (e.g., def do, def begin, def end).
   // Recognizes backslash line continuation: `def \<NL>do` is `def do` (a method named 'do').
-  private isAfterDefKeyword(source: string, position: number): boolean {
+  // Backslash inside an excluded region (e.g. a comment that ends with `\`) is just text,
+  // not a continuation marker — the scan must stop at the newline in that case so a `def`
+  // appearing inside the comment is not mistaken for the keyword on the previous logical line.
+  private isAfterDefKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
       const ch = source[i];
@@ -406,7 +409,9 @@ export class RubyBlockParser extends BaseBlockParser {
         continue;
       }
       // Backslash line continuation: a newline preceded by an odd number of backslashes
-      // is a line continuation. Step past the newline and the trailing backslash.
+      // is a line continuation. Step past the newline and the trailing backslash. If the
+      // trailing backslash lies inside an excluded region (e.g., a `# def \` comment), it
+      // is plain text — do not treat the newline as a continuation.
       if (ch === '\n' || ch === '\r') {
         let nlStart = i;
         if (ch === '\n' && i > 0 && source[i - 1] === '\r') {
@@ -419,6 +424,11 @@ export class RubyBlockParser extends BaseBlockParser {
           bs--;
         }
         if (count % 2 === 1) {
+          // The trailing backslash sits at index `nlStart - 1`. If it lies inside an
+          // excluded region, ignore the apparent continuation.
+          if (this.isInExcludedRegion(nlStart - 1, excludedRegions)) {
+            break;
+          }
           i = bs;
           continue;
         }
