@@ -633,6 +633,26 @@ export class ElixirBlockParser extends BaseBlockParser {
           }
         }
       }
+      // Reject middle keywords used as the right-hand side of an assignment or binary
+      // operator (e.g. `x = else`, `x = a + else`, `x |> rescue`). The middle keyword is
+      // an operand of the expression, not a clause head of the enclosing try/if/receive.
+      // We look at the previous non-whitespace character on the same line: `=` (assignment
+      // or composite like `==`/`!=`/`<=`/`>=`/`=~`), or any expression operator lead char
+      // (`+ - * / < > | ^ & ~`). A real clause head sits at a statement boundary (newline,
+      // `;`, or start of source after the opener's body), never directly after an operator.
+      if (token.type === 'block_middle' && token.startOffset > 0) {
+        let q = token.startOffset - 1;
+        while (q >= 0 && (source[q] === ' ' || source[q] === '\t')) q--;
+        if (q >= 0) {
+          const before = source[q];
+          // `=` covers assignment and compound operators (==, !=, <=, >=, =~, =>, etc.).
+          // `>` covers `->` arrow body position too (`pattern -> else_expr`), but in that
+          // case `else` is also an expression value (body), so rejecting it is correct.
+          if (before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) {
+            return false;
+          }
+        }
+      }
       return true;
     });
   }
