@@ -1123,8 +1123,13 @@ export class ErlangBlockParser extends BaseBlockParser {
     // keyword means the keyword sits inside a -define list literal, where bare reserved
     // words must be filtered but real blocks (fun(...)/end) are kept (same as tuples).
     let listDepth = 0;
+    // Binary brackets `<<...>>` are tracked separately too. An unmatched `<<` before the
+    // keyword means the keyword sits inside a binary literal, where bare reserved words
+    // (`<<begin, end>>`) must not be paired as block delimiters. Treated like braces.
+    let binaryDepth = 0;
     let insideUnmatchedBrace = false;
     let insideUnmatchedList = false;
+    let insideUnmatchedBinary = false;
     // An unmatched '(' not preceded by an identifier is a grouping paren (e.g. -define(M, (begin))).
     // Its contents are real expressions, so bare reserved words are filtered while real
     // blocks are kept -- same treatment as tuple braces and list brackets.
@@ -1138,8 +1143,29 @@ export class ErlangBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[i];
-      if (ch === ',' && parenDepth === 0 && braceDepth === 0 && listDepth === 0) {
+      if (ch === ',' && parenDepth === 0 && braceDepth === 0 && listDepth === 0 && binaryDepth === 0) {
         sawCommaAtTopLevel = true;
+        continue;
+      }
+      // Binary close `>>` (in backward scan: increases binary depth). Must be checked
+      // before the single-char '}'/']' / single '>' (which is not a Erlang token by
+      // itself in this context) so '>>' is treated atomically. `i-1` is not checked
+      // against excluded regions here: that costs O(log n) per scan step and quadratic
+      // total cost on large -define bodies; `>` is not a valid trailing comment char
+      // in practice.
+      if (ch === '>' && i > stopAt && source[i - 1] === '>') {
+        binaryDepth++;
+        i--;
+        continue;
+      }
+      // Binary open `<<` (in backward scan: decreases binary depth, or marks unmatched).
+      if (ch === '<' && i > stopAt && source[i - 1] === '<') {
+        if (binaryDepth > 0) {
+          binaryDepth--;
+        } else {
+          insideUnmatchedBinary = true;
+        }
+        i--;
         continue;
       }
       if (ch === ')') {
@@ -1203,9 +1229,10 @@ export class ErlangBlockParser extends BaseBlockParser {
       return this.isBareReservedWordInRecordBody(source, pos, span, excludedRegions);
     }
     // For -define, the body (after the first top-level ',') contains real expressions
-    // outside nested function calls. Tuple braces ({...}), list brackets ([...]) and
-    // grouping parens ((...)) inside the body still hold real expressions too: a real
-    // block (fun(...)/begin/case...) is recognized while a bare reserved word stays filtered.
+    // outside nested function calls. Tuple braces ({...}), list brackets ([...]),
+    // grouping parens ((...)) and binary literals (<<...>>) inside the body still hold
+    // real expressions too: a real block (fun(...)/begin/case...) is recognized while
+    // a bare reserved word stays filtered.
     // Nested function calls (e.g. list:map(fun(X) -> X end, L)) also contain real
     // expressions when wrapped in a -define body, so the opener-stack analysis applies.
     if (attrName === 'define' && sawCommaAtTopLevel) {
@@ -1216,12 +1243,18 @@ export class ErlangBlockParser extends BaseBlockParser {
       }
       // Bare-keyword body case: -define(NAME, KEYWORD). Here the body is just the keyword
       // itself, so it's a reserved-word reference, not a real block opener.
-      if (!insideUnmatchedBrace && !insideUnmatchedList && !insideGroupingParen && this.isBareKeywordInDefineBody(source, pos, excludedRegions)) {
+      if (
+        !insideUnmatchedBrace &&
+        !insideUnmatchedList &&
+        !insideGroupingParen &&
+        !insideUnmatchedBinary &&
+        this.isBareKeywordInDefineBody(source, pos, excludedRegions)
+      ) {
         return true;
       }
-      // Inside a tuple brace, list bracket or grouping paren: filter only bare reserved
-      // words, keep real blocks.
-      if (insideUnmatchedBrace || insideUnmatchedList || insideGroupingParen) {
+      // Inside a tuple brace, list bracket, grouping paren or binary literal: filter
+      // only bare reserved words, keep real blocks.
+      if (insideUnmatchedBrace || insideUnmatchedList || insideGroupingParen || insideUnmatchedBinary) {
         return this.isBareReservedWordInDefineBody(source, pos, span, excludedRegions);
       }
       return false;
