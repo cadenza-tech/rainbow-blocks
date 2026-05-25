@@ -3957,6 +3957,35 @@ end if;`;
     });
   });
 
+  suite('Regression: matchSingleLineComment recognizes Unicode line terminators', () => {
+    test('should terminate single-line comment at U+0085 (NEL)', () => {
+      // Per Ada LRM 2.2, comments extend to the end of the line, which ends at
+      // any line terminator (LF, CR, NEL U+0085, LS U+2028, PS U+2029). The
+      // default baseParser.matchSingleLineComment only recognizes `\n` and
+      // `\r`, so AdaBlockParser must override it to include NEL/LS/PS;
+      // otherwise a `-- comment<NEL>if X then ... end if;` swallows the
+      // trailing block and no pair is produced.
+      const nel = String.fromCharCode(0x85);
+      const source = `-- comment${nel}if X then\nnull;\nend if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should terminate single-line comment at U+2028 (LS)', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `-- comment${ls}if X then\nnull;\nend if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should terminate single-line comment at U+2029 (PS)', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `-- comment${ps}if X then\nnull;\nend if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   suite('Regression: compound end separator recognizes Unicode line terminators', () => {
     test('should reject end<NEL>if as compound when NEL is a line terminator', () => {
       // Per Ada LRM 2.2, U+0085 (NEL) is a line terminator. When `end` and the
