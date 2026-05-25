@@ -4743,5 +4743,62 @@ end`;
     });
   });
 
+  suite('Regression: method-like keywords followed by spaced / should treat / as division (not regex)', () => {
+    test('should treat puts / 2 as division (not regex literal)', () => {
+      // `puts / 2; if x; end` — `puts` is a method-like keyword. With a space on
+      // both sides of `/`, the slash is division, not a regex argument. Treating
+      // it as regex consumes `/ 2; if x; end` as a regex literal, hiding the
+      // genuine if/end block and orphaning the outer def.
+      const source = 'def foo\n  puts / 2; if x; end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should treat print / 2 as division (not regex literal)', () => {
+      const source = 'def foo\n  print / 2; if x; end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should treat raise / 2 as division (not regex literal)', () => {
+      const source = 'def foo\n  raise / 2; if x; end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should still treat puts /pattern/ as regex (no space after /)', () => {
+      // Sanity: `puts /pattern/` (no space after `/`) IS a regex argument. The
+      // method-call spacing rule must not break this case.
+      const source = 'def foo\n  puts /pattern/\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The /pattern/ region should be excluded
+      const regions = parser.getExcludedRegions(source);
+      const regexRegion = regions.find((r) => source.slice(r.start, r.end).startsWith('/pattern/'));
+      assert.ok(regexRegion, 'puts /pattern/ should still produce a regex excluded region');
+    });
+
+    test('should still treat raise /msg/ as regex (no space after /)', () => {
+      const source = 'def foo\n  raise /msg/\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      const regions = parser.getExcludedRegions(source);
+      const regexRegion = regions.find((r) => source.slice(r.start, r.end).startsWith('/msg/'));
+      assert.ok(regexRegion, 'raise /msg/ should still produce a regex excluded region');
+    });
+  });
+
   generateCommonTests(config);
 });
