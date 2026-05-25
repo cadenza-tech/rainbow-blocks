@@ -882,13 +882,18 @@ export class MatlabBlockParser extends BaseBlockParser {
                 break;
               }
             } else {
-              const hasClassdef = stack.some((b) => b.token.value.toLowerCase() === 'classdef');
-              if (!hasClassdef) {
-                // Drop the token: section keywords like `properties(obj)` / `methods(obj)`
-                // outside of a classdef are function calls, not section blocks. Pushing
-                // pendingSkipDepth here would consume a legitimate `end` from an enclosing
-                // block (e.g. a `function` body containing `properties(obj)`), destroying
-                // outer block pairing.
+              // The non-arguments section keywords (properties/methods/events/enumeration)
+              // are only valid section blocks when their CLOSEST enclosing block is the
+              // classdef itself. When something like `function`/`methods`/`properties` sits
+              // between the section keyword and the enclosing classdef, the keyword at
+              // line-start is a function call (e.g. `properties(obj)` inside `function f`,
+              // `methods(obj)` inside another `methods` section) rather than a real section.
+              // Walking only the top of the stack — not the whole stack — prevents the
+              // token from being paired as a section, which would otherwise consume an
+              // inner `end` and orphan the outer classdef. Dropping the token (no
+              // pendingSkipDepth) preserves outer block pairing.
+              const closest = stack.length > 0 ? stack[stack.length - 1].token.value.toLowerCase() : '';
+              if (closest !== 'classdef') {
                 break;
               }
             }
