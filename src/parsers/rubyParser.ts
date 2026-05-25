@@ -98,6 +98,25 @@ const ELSIF_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless']
 // a syntax error, so it must not be collected as an intermediate.
 const RESCUE_ENSURE_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['begin', 'def', 'class', 'module', 'do']);
 
+// Keywords/operators that require an expression on their right-hand side. When `end`
+// follows one of these (separated by whitespace), the `end` is in expression position
+// and is invalid (e.g., `x or end`, `return end`, `defined? end`). isEndInExpressionPosition
+// uses this set to filter out such stray `end` tokens so surrounding blocks pair correctly.
+// Note: `defined?` is matched specially because it ends with `?`, which is not part of an
+// ordinary identifier.
+const RHS_EXPECTING_KEYWORD_OPERATORS: ReadonlySet<string> = new Set([
+  'or',
+  'and',
+  'not',
+  'return',
+  'yield',
+  'raise',
+  'next',
+  'break',
+  'in',
+  'defined?'
+]);
+
 // Ruby interpolation check: %q, %w, %i, %s do not interpolate
 function isRubyInterpolatingPercent(_specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -627,7 +646,41 @@ export class RubyBlockParser extends BaseBlockParser {
       }
       return false;
     }
+    // Keyword operator RHS: `end` directly after `or`, `and`, `not`, `return`, `yield`,
+    // `raise`, `next`, `break`, `in`, or `defined?` is in expression position because these
+    // keywords expect an expression on their right. The trailing char is part of the keyword
+    // word; read backward to extract the identifier and look it up.
+    if (/[a-zA-Z?]/.test(ch)) {
+      const word = this.readBackwardWord(source, i);
+      if (word && RHS_EXPECTING_KEYWORD_OPERATORS.has(word)) {
+        // Must be a standalone keyword (not part of a longer identifier like `terminate`)
+        const beforeWord = i - word.length;
+        if (beforeWord < 0 || !/[a-zA-Z0-9_]/.test(source[beforeWord])) {
+          return true;
+        }
+      }
+    }
     return false;
+  }
+
+  // Reads backward from `endIdx` (inclusive) to extract a contiguous identifier-like word.
+  // Accepts ASCII identifier characters plus a trailing `?` (so `defined?` is captured).
+  // Returns the word with original casing, or an empty string if no identifier char at endIdx.
+  private readBackwardWord(source: string, endIdx: number): string {
+    let start = endIdx;
+    // Allow `?` only at the very end (matches `defined?`); other positions require
+    // ASCII identifier chars.
+    if (start < 0) return '';
+    const first = source[start];
+    if (!/[a-zA-Z0-9_?]/.test(first)) return '';
+    // If the trailing char is `?`, include it and continue scanning identifier chars
+    if (first === '?') {
+      start--;
+    }
+    while (start >= 0 && /[a-zA-Z0-9_]/.test(source[start])) {
+      start--;
+    }
+    return source.slice(start + 1, endIdx + 1);
   }
 
   // Finds excluded regions: comments, strings, regex, heredocs, percent literals, symbols
