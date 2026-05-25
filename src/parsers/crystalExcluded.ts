@@ -179,6 +179,19 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         continue;
       }
       if (source.slice(i, i + 2) === '}}') {
+        // `}}}` (three or more consecutive `}`) with at least one unbalanced inner
+        // `{`: leading `}` closes one inner brace. The trailing `}}` is reserved
+        // for either the template close (when sBD becomes 0 after the leading
+        // close) or another inner close on the next iteration (when sBD remains
+        // > 0). Without this case, `{{ { x { }}}` would consume the first `}}` as
+        // two inner closes (sBD: 2 -> 0) and leave a lone `}` that never closes
+        // the template, letting the macro extend to EOF and swallow following
+        // blocks.
+        if (singleBraceDepth >= 1 && i + 2 < source.length && source[i + 2] === '}') {
+          singleBraceDepth--;
+          i++;
+          continue;
+        }
         if (singleBraceDepth >= 2) {
           // Both braces close single { inside the template, not the template itself
           singleBraceDepth -= 2;
@@ -186,12 +199,6 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
           continue;
         }
         if (singleBraceDepth === 1) {
-          if (i + 2 < source.length && source[i + 2] === '}') {
-            // }}} = first } closes inner brace, then }} closes template
-            singleBraceDepth = 0;
-            i++;
-            continue;
-          }
           // Unbalanced single {: treat }} as template closer
           singleBraceDepth = 0;
           depth--;
