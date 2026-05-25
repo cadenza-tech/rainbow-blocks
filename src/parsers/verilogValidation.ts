@@ -18,7 +18,15 @@ const ASSERTION_VERBS = ['assert', 'assume', 'cover', 'expect', 'restrict'];
 // IEEE 1800-2017 grammar (LRM A.1.6 / A.2.6), so they are not included here.
 const QUALIFIER_KEYWORDS = new Set(['protected', 'local', 'static', 'automatic', 'virtual', 'forkjoin']);
 
-// Modifier keywords that indicate non-block usage per keyword
+// Modifier keywords that indicate non-block usage per keyword.
+// `extern` extends to declaration-only forms of block-opening constructs
+// (LRM §6.6, §8.24, §16.8 etc): `extern function`, `extern task`,
+// `extern module`, etc. Newly-added entries (`primitive`, `checker`,
+// `sequence`, `property`, `config`) appear in real-world code even when the
+// LRM does not formally define them; suppressing the block_open token here
+// follows the best-effort principle (CLAUDE.md "ベストエフォート・パーシング原則")
+// by preventing the inner identifier from falsely consuming the outer
+// `end<construct>` keyword.
 const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
   class: ['typedef', 'extern'],
   interface: ['extern'],
@@ -26,7 +34,12 @@ const MODIFIER_MAP: Readonly<Record<string, readonly string[]>> = {
   task: ['extern'],
   module: ['extern'],
   macromodule: ['extern'],
-  program: ['extern']
+  program: ['extern'],
+  primitive: ['extern'],
+  checker: ['extern'],
+  sequence: ['extern'],
+  property: ['extern'],
+  config: ['extern']
 };
 
 // Validates 'wait': rejects the `wait fork` statement family (SystemVerilog
