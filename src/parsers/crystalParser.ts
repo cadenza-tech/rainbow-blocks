@@ -607,15 +607,23 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Checks whether the context-dependent keyword ending at endOffset is being used as an
-  // ordinary identifier rather than a block opener. Three same-line forms qualify:
+  // ordinary identifier rather than a block opener. The following same-line forms qualify:
   //   1. Method-call receiver `KEYWORD.method` — a single `.` (not a range `..`/`...`).
-  //   2. Assignment target `KEYWORD = expr` — a standalone `=` (not `==`/`===`/`=~`/`=>`).
-  //   3. Function-call form `KEYWORD(args)` — a `(` immediately after the keyword.
-  // Spaces and tabs between the keyword and the `.`/`=`/`(` are permitted, but newlines are not
-  // crossed: a keyword alone on its line (e.g. `enum\n  Red`, `struct Point`) keeps its block
-  // role because real openers are followed by a name/newline, never by `.`, `=`, or `(` on the
-  // same line. Excluded regions are skipped. Used to suppress the seven receiver-like openers
-  // (`select`, `union`, `enum`, `struct`, `lib`, `macro`, `annotation`) when used as values.
+  //   2. Assignment / `=`-led operator `KEYWORD = expr`, `KEYWORD == ...`, `KEYWORD =~ ...`,
+  //      `KEYWORD => ...`.
+  //   3. Compound assignment `KEYWORD += / -= / *= / /= / %= / <<= / >>= / &= / |= / ^=`.
+  //   4. Function-call form `KEYWORD(args)`, indexed access `KEYWORD[idx]`, or block-arg
+  //      syntax `KEYWORD|x|`.
+  //   5. Binary operator / separator / expression terminator: `,`, `<`, `>`, `+`, `-`, `*`,
+  //      `%`, `?`, `:`, `)`, `}`, `]`. Any of these immediately after the keyword means the
+  //      keyword is the left operand of a binary expression, a hash/tuple element, or sits
+  //      inside an expression that has just ended — never an opener position.
+  // Spaces and tabs between the keyword and the following symbol are permitted, but newlines
+  // are not crossed: a keyword alone on its line (e.g. `enum\n  Red`, `struct Point`) keeps
+  // its block role because real openers are followed by a name/newline, never by any of the
+  // symbols above on the same line. Excluded regions are skipped. Used to suppress the seven
+  // receiver-like openers (`select`, `union`, `enum`, `struct`, `lib`, `macro`, `annotation`)
+  // when used as values.
   private isReceiverOrAssignmentUsage(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = endOffset;
     while (i < source.length) {
@@ -636,8 +644,9 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (i >= source.length) {
       return false;
     }
+    const ch = source[i];
     // Method-call receiver: a single dot, not a range operator (`..`/`...`).
-    if (source[i] === '.' && source[i + 1] !== '.') {
+    if (ch === '.' && source[i + 1] !== '.') {
       return true;
     }
     // Value usage with `=`-led operator: assignment (`=`), comparison (`==`, `===`,
@@ -645,26 +654,61 @@ export class CrystalBlockParser extends BaseBlockParser {
     // operand and is being used as a value, not opening a block. Real opener forms
     // (`enum Color`, `struct Point`, `lib LibFoo`, ...) are followed by a type name
     // or newline, never by `=`-led punctuation on the same line.
-    if (source[i] === '=') {
+    if (ch === '=') {
       return true;
     }
     // Function-call form: `KEYWORD(args)`. Real opener forms never take parens
     // (`enum Color`, `struct Point`, `lib LibFoo`, `macro name`, `annotation A`,
     // `union U`, `select` without arguments), so a `(` here always means the
     // keyword is being called as a method/function.
-    if (source[i] === '(') {
+    if (ch === '(') {
       return true;
     }
     // Indexed access: `KEYWORD[idx]`. Real opener forms never take a `[` (they
     // require an uppercase type name or a body block), so a `[` here always
     // means the keyword is being used as a value (e.g. `x = select[0]`).
-    if (source[i] === '[') {
+    if (ch === '[') {
       return true;
     }
     // Bitwise-or / block-argument syntax: `KEYWORD|x|` or `KEYWORD | x`. Real
     // opener forms never use `|` directly after the keyword; the keyword is a
     // value (e.g. `x = enum | x` or method-call block args `enum |x| ...`).
-    if (source[i] === '|') {
+    if (ch === '|') {
+      return true;
+    }
+    // Separators, expression terminators, and binary operators. Real opener forms
+    // never have any of these directly after the keyword on the same line — the
+    // opener is always followed by a type name or newline. Any of these here means
+    // the keyword is being used as a value:
+    //   - `,`         — hash/tuple/argument separator (e.g. `{default: enum, ...}`)
+    //   - `)` `}` `]` — closes an enclosing expression (e.g. `(enum)`, `[enum]`)
+    //   - `<` `>`     — comparison operator (e.g. `struct < 5`, `enum > 5`)
+    //   - `+` `-` `*` `%` — binary arithmetic operator (e.g. `enum + 1`).
+    //     `/` is also a binary operator, but it can also start a Crystal regex
+    //     literal (excluded region) which is already skipped above; the bare `/`
+    //     remaining here is always division so it is included.
+    //   - `?` — ternary condition (e.g. `struct ? 1 : 2`)
+    //   - `:` — type annotation or ternary alternative
+    // Compound assignment forms `+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=`, `&=`,
+    // `|=`, `^=` are subsumed: the leading operator (e.g. `+`) matches above, but
+    // for completeness the helper also accepts the bare operator regardless of
+    // whether `=` follows because the operator alone is sufficient to disqualify
+    // the opener position.
+    if (
+      ch === ',' ||
+      ch === ')' ||
+      ch === '}' ||
+      ch === ']' ||
+      ch === '<' ||
+      ch === '>' ||
+      ch === '+' ||
+      ch === '-' ||
+      ch === '*' ||
+      ch === '/' ||
+      ch === '%' ||
+      ch === '?' ||
+      ch === ':'
+    ) {
       return true;
     }
     return false;
