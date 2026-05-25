@@ -463,6 +463,34 @@ export class LuaBlockParser extends BaseBlockParser {
     return pairs;
   }
 
+  // Builds newline positions per Lua 5.3+ spec: all four line-break forms
+  // (LF, CR, CR+LF, LF+CR) count as a SINGLE newline. The base implementation
+  // only collapses CR+LF; this override additionally collapses LF+CR so an
+  // `\n\r` sequence is one line, not two.
+  // We only override (instead of changing the base) to avoid affecting other
+  // languages whose specs do not pair LF+CR (e.g., Python, Bash treat each as
+  // its own newline).
+  protected buildNewlinePositions(source: string): number[] {
+    const positions: number[] = [];
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+      if (ch === '\n') {
+        positions.push(i);
+        // LF followed by CR is part of the same line break (Lua spec).
+        if (i + 1 < source.length && source[i + 1] === '\r') {
+          i++;
+        }
+      } else if (ch === '\r') {
+        positions.push(i);
+        // CR followed by LF is part of the same line break (Lua spec).
+        if (i + 1 < source.length && source[i + 1] === '\n') {
+          i++;
+        }
+      }
+    }
+    return positions;
+  }
+
   // Matches Lua regular strings, stopping at unescaped newlines
   // Lua regular strings cannot span multiple lines (syntax error),
   // but \z (skip whitespace including newlines) and \<newline> (line
