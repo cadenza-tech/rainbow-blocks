@@ -333,6 +333,15 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject reserved-word block openers that appear as the entity name in
+    // `architecture <id> of <reserved> is ...` / `configuration <id> of <reserved> is ...`.
+    // The reserved word here is (illegally) being used as the entity reference; without
+    // this guard it absorbs the surrounding architecture/configuration's `is` and `begin`
+    // into its (orphan) intermediates.
+    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isInArchitectureOrConfigEntityRef(source, position, excludedRegions)) {
+      return false;
+    }
+
     if (lowerKeyword === 'for') {
       return isValidForOpen(source, position, excludedRegions, cb);
     }
@@ -446,6 +455,51 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `/=` (inequality) ends with `=` and is caught above; bare `/` here is division.
     if (prev === ',' || prev === '+' || prev === '-' || prev === '*' || prev === '/' || prev === '&') return true;
     return false;
+  }
+
+  // Detects whether the keyword at `position` is the entity reference in
+  // `architecture <id> of <keyword> is ...` or `configuration <id> of <keyword> is ...`.
+  // Walks backward through whitespace/comments expecting `of`, then an identifier
+  // (the architecture/configuration name), then `architecture` or `configuration`.
+  private isInArchitectureOrConfigEntityRef(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const skipBackWs = (start: number): number => {
+      let q = start;
+      while (q >= 0) {
+        if (this.isInExcludedRegion(q, excludedRegions)) {
+          const region = this.findExcludedRegionAt(q, excludedRegions);
+          if (region) {
+            q = region.start - 1;
+            continue;
+          }
+        }
+        const ch = source[q];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+          q--;
+          continue;
+        }
+        break;
+      }
+      return q;
+    };
+    // Step 1: walk past whitespace to find the preceding word — expect `of`.
+    let i = skipBackWs(position - 1);
+    if (i < 1) return false;
+    if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+    const word1End = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const word1 = source.slice(i + 1, word1End).toLowerCase();
+    if (word1 !== 'of') return false;
+    // Step 2: walk past whitespace to find the identifier (architecture/configuration name).
+    i = skipBackWs(i);
+    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    // Step 3: walk past whitespace to find `architecture` or `configuration`.
+    i = skipBackWs(i);
+    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
+    const word3End = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const word3 = source.slice(i + 1, word3End).toLowerCase();
+    return word3 === 'architecture' || word3 === 'configuration';
   }
 
   // Detects whether the keyword at `position` is part of a type indication (declaration)
