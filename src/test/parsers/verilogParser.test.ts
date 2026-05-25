@@ -5025,5 +5025,42 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: wait fork must not open a block via control-keyword chain', () => {
+    test('should not treat wait as block_open in wait fork begin ... end (invalid syntax)', () => {
+      // Bug: `wait fork` is a SystemVerilog statement (LRM §9.7.1) that waits
+      // for all child processes — it must always be followed by `;`. The form
+      // `wait fork begin ... end` is invalid, but the parser falsely treated
+      // `wait` as a control-keyword that opens a block, then the trailing `end`
+      // chain-consumed `wait` and `initial`, breaking the outer module pair.
+      // Expected: `wait` is rejected; the inner begin/end pair stands alone.
+      const source = 'module m;\n  initial begin\n    wait fork begin\n      x = 1;\n    end\n  end\nendmodule';
+      const tokens = parser.getTokens(source);
+      const waitTokens = tokens.filter((t) => t.value === 'wait');
+      assert.strictEqual(waitTokens.length, 0, '`wait` followed by `fork` must not be tokenized as a control opener');
+      const pairs = parser.parse(source);
+      // module/endmodule must still pair, even with the invalid `wait fork begin` inside.
+      const modulePair = pairs.find((p) => p.openKeyword.value === 'module' && p.closeKeyword?.value === 'endmodule');
+      assert.ok(modulePair, 'module/endmodule pair must survive the invalid wait fork begin form');
+    });
+
+    test('should still reject wait fork; statement (existing behavior preserved)', () => {
+      // Sanity: the existing rejection of `wait fork;` must continue to work.
+      const source = 'initial begin\n  wait fork;\n  x = 1;\nend';
+      const tokens = parser.getTokens(source);
+      const waitTokens = tokens.filter((t) => t.value === 'wait');
+      assert.strictEqual(waitTokens.length, 0, '`wait fork;` must not be tokenized as a control opener');
+    });
+
+    test('should still treat wait (cond) begin ... end as a control opener (sanity)', () => {
+      // Sanity: `wait (cond) statement` is the conditional-wait form (LRM
+      // §9.7.1) and DOES take a single-statement body, so `wait (cond) begin`
+      // must continue to open a block.
+      const source = 'initial begin\n  wait (ready) begin\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      const waitPair = pairs.find((p) => p.openKeyword.value === 'wait');
+      assert.ok(waitPair, '`wait (cond) begin` must still open a block');
+    });
+  });
+
   generateCommonTests(config);
 });
