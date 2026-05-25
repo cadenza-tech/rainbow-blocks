@@ -3362,6 +3362,39 @@ end`;
     });
   });
 
+  suite('Regression: case-else-else duplicate else must be rejected', () => {
+    test('should reject the second else after case-else (only one else intermediate)', () => {
+      // Pascal `case` permits at most one `else` clause. A second `else` is malformed
+      // (syntax error): previously both were added to the intermediates list, polluting
+      // the structure. Only the first `else` should be recorded, matching the behavior
+      // of try-except-else-else duplicate rejection.
+      const source = `case X of
+  1: foo;
+else
+  bar;
+else
+  baz;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of', 'else']);
+    });
+
+    test('should reject the second of after case-of (only one of intermediate)', () => {
+      // Pascal `case` has exactly one `of` immediately after the selector expression.
+      // A second `of` inside the body is malformed: previously both were added to the
+      // intermediates list. Only the first `of` should be recorded.
+      const source = `case X of
+  1: foo;
+of
+  bar;
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['of']);
+    });
+  });
+
   suite('Regression 2026-05-21: nested generic close `>>` must not be treated as shift operator', () => {
     test('should treat record inside nested generic with `>>` close as constraint, not block opener', () => {
       // `function Bar<T: TList<record>>: T;` closes two generic levels with `>>`.
