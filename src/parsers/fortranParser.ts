@@ -95,8 +95,11 @@ function normalizeFortranEndType(rawType: string): string {
 // optional leading `&`) before the next word.
 const GUARD_WORD_SEPARATOR =
   '(?:[ \\t]+|[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*(?:![^\\r\\n]*|&[ \\t]*(?:![^\\r\\n]*)?)?(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*)';
+// `type is` / `class is` guards: also allow line continuation between `is` and the type-parenthesis
+// (e.g., `type is &\n  (integer)`). Use GUARD_WORD_SEPARATOR between `is` and `(`, not just plain
+// whitespace, so the continuation form is detected as a guard intermediate.
 const SELECT_TYPE_GUARD_PATTERN = new RegExp(
-  `\\b(type${GUARD_WORD_SEPARATOR}is[ \\t]*\\(|class${GUARD_WORD_SEPARATOR}is[ \\t]*\\(|class${GUARD_WORD_SEPARATOR}default\\b|case${GUARD_WORD_SEPARATOR}default\\b|rank${GUARD_WORD_SEPARATOR}default\\b)`,
+  `\\b(type${GUARD_WORD_SEPARATOR}is${GUARD_WORD_SEPARATOR}\\(|class${GUARD_WORD_SEPARATOR}is${GUARD_WORD_SEPARATOR}\\(|class${GUARD_WORD_SEPARATOR}default\\b|case${GUARD_WORD_SEPARATOR}default\\b|rank${GUARD_WORD_SEPARATOR}default\\b)`,
   'gi'
 );
 
