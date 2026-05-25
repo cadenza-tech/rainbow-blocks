@@ -3957,6 +3957,61 @@ end if;`;
     });
   });
 
+  suite('Regression: findLineStart recognizes Unicode line terminators', () => {
+    test('should keep is as intermediate for protected<NEL>type Foo is', () => {
+      // The `is` type-decl filter scans the current line and previous lines
+      // for a leading `type` / `subtype` keyword to detect type declarations.
+      // It uses findLineStart to locate line starts. With NEL as the line
+      // separator, the default ASCII-only findLineStart treats the whole
+      // source as a single line, so the `protected` on the previous line is
+      // not recognized as a block opener that the `is` should belong to,
+      // and the filter wrongly removes `is`. The Ada-aware findLineStart
+      // must recognize NEL/LS/PS so the protected/end pair keeps `is` as
+      // its intermediate (matching the LF baseline behavior).
+      const nel = String.fromCharCode(0x85);
+      const source = `protected${nel}type Foo is${nel}  entry Bar;${nel}end Foo;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(middleValues.includes('is'), `is must remain an intermediate of protected, got ${JSON.stringify(middleValues)}`);
+    });
+  });
+
+  suite('Regression: buildNewlinePositions recognizes Unicode line terminators', () => {
+    test('should record U+0085 (NEL) as a line break for line/column metadata', () => {
+      // Per Ada LRM 2.2, U+0085 (NEL), U+2028 (LS), and U+2029 (PS) are
+      // line terminators. The default baseParser.buildNewlinePositions only
+      // recognizes `\n` and `\r`, so AdaBlockParser must override it to
+      // record NEL/LS/PS as line breaks. Otherwise the line/column metadata
+      // on Token nodes is wrong for sources that use Unicode line endings.
+      const nel = String.fromCharCode(0x85);
+      const source = `if X then${nel}null;${nel}end if;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      // `end if` is on the third logical line (after two NEL line breaks).
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, `end if should be on line 2 (3rd line) after two NELs, got ${pairs[0].closeKeyword.line}`);
+      assert.strictEqual(pairs[0].closeKeyword.column, 0, `end if should be at column 0 after a NEL, got ${pairs[0].closeKeyword.column}`);
+    });
+
+    test('should record U+2028 (LS) as a line break for line/column metadata', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `if X then${ls}null;${ls}end if;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      assert.strictEqual(pairs[0].closeKeyword.column, 0);
+    });
+
+    test('should record U+2029 (PS) as a line break for line/column metadata', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `if X then${ps}null;${ps}end if;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      assert.strictEqual(pairs[0].closeKeyword.column, 0);
+    });
+  });
+
   suite('Regression: isValidForOpen rejects for followed by open paren', () => {
     test('should not treat for ( as block opener', () => {
       // `for (T : Integer) use 32;` is invalid Ada syntax (representation
