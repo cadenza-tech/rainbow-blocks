@@ -4256,6 +4256,41 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: type indication colon followed by reserved-word block opener', () => {
+    // A type indication (`signal x : view;` / `variable y : units;` / etc.) cannot legally
+    // be a block opener — the reserved word is the type name. Without rejecting it, the
+    // reserved word is tokenized as a fresh `block_open` and absorbs the surrounding
+    // architecture's `begin` into its (orphan) intermediates, silently breaking the
+    // enclosing block's structure.
+    // attribute_specification (`attribute X of Y : view is ...`) is already handled by
+    // isInAttributeSpecification.
+    test('should not treat view in type indication as block opener', () => {
+      const source = 'architecture a of e is\n  signal x : view;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate, not have it absorbed by stray view opener');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in type indication should not pair as a block opener');
+    });
+
+    test('should not treat units in type indication as block opener', () => {
+      const source = 'architecture a of e is\n  signal x : units;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat block in type indication as block opener', () => {
+      const source = 'architecture a of e is\n  variable v : block;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+    });
+  });
+
   suite('Regression 2026-05-25: isInExpressionRhsContext must not scan across unterminated strings', () => {
     // When isInExpressionRhsContext scans backward from a reserved-word block opener and
     // jumps past an excluded region, it must NOT cross a string literal that is unterminated
