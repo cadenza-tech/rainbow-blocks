@@ -4234,6 +4234,28 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: trailing reserved-word label at EOF or before newline', () => {
+    // findTrailingLabelPositions only suppressed a trailing reserved-word label when it was
+    // followed by `;`. When the trailing word is at EOF or before a bare newline (no `;` and
+    // no further code), the word leaked as a fresh block_open token. Editing-in-progress code
+    // routinely contains this shape — a missing terminating `;` should not produce a stray
+    // opener. The fix accepts EOF and whitespace-only suffixes as label terminators while
+    // leaving the ambiguous case (something else follows the label) untouched.
+    test('should suppress trailing loop label at EOF after end if', () => {
+      const source = 'if a then null;\nend if loop';
+      const tokens = parser.getTokens(source);
+      const looseLoop = tokens.find((t) => t.value.toLowerCase() === 'loop');
+      assert.ok(!looseLoop, 'trailing reserved label `loop` at EOF should not leak as a block_open token');
+    });
+
+    test('should suppress trailing loop label before newline after end if', () => {
+      const source = 'if a then null;\nend if loop\n';
+      const tokens = parser.getTokens(source);
+      const looseLoop = tokens.find((t) => t.value.toLowerCase() === 'loop');
+      assert.ok(!looseLoop, 'trailing reserved label `loop` before newline should not leak as a block_open token');
+    });
+  });
+
   suite('Regression 2026-05-25: deeply nested generate begin/end body nestLevel', () => {
     // adjustGenerateBodyNestLevels subtracts an over-count for sibling generates and for
     // control-prefix keywords that share a generate's close offset. In deeply nested
