@@ -1,6 +1,14 @@
 import * as assert from 'node:assert';
 import { RubyBlockParser } from '../../parsers/rubyParser';
-import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
+import {
+  assertBlockCount,
+  assertIntermediates,
+  assertNestLevel,
+  assertNoBlocks,
+  assertSingleBlock,
+  assertTokenPosition,
+  findBlock
+} from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
 import {
   generateCommonTests,
@@ -4712,6 +4720,85 @@ end`;
       const source = 'def m\n  x = \u{1D400} / 2\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
+  suite('Regression: end after keyword RHS-expecting operator should not pair', () => {
+    // Bug: `or`, `and`, `not`, `return`, etc. expect an expression on the right-hand side.
+    // When `end` followed them, isEndInExpressionPosition only checked single-char operators
+    // and missed these keyword operators, so the stray `end` got tokenized and mis-paired
+    // with surrounding blocks (e.g., `if true\n  x or end\nend` paired the inner end with if
+    // and orphaned the outer end). After the fix, the inner stray `end` is filtered out and
+    // the outer `if` pairs with the outer `end` on the last line.
+    test('should drop end after or keyword RHS', () => {
+      const source = 'if true\n  x or end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // The matched close must be the outer end (line 2), not the inner stray end (line 1)
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after and keyword RHS', () => {
+      const source = 'if true\n  x and end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after not keyword RHS', () => {
+      const source = 'if true\n  not end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after return keyword RHS', () => {
+      const source = 'def m\n  return end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after yield keyword RHS', () => {
+      const source = 'def m\n  yield end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after raise keyword RHS', () => {
+      const source = 'def m\n  raise end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after next keyword RHS', () => {
+      const source = 'loop do\n  next end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after break keyword RHS', () => {
+      const source = 'loop do\n  break end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after in operator RHS in pattern matching', () => {
+      const source = 'if true\n  x in end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop end after defined? keyword RHS', () => {
+      const source = 'if true\n  defined? end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
     });
   });
 
