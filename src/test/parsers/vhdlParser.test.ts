@@ -4195,5 +4195,44 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-25: comment-separated compound end with comments around trailing word', () => {
+    // LRM 15.9 treats comments as whitespace. The same-line regex COMPOUND_END_PATTERN
+    // only allows spaces/tabs, so findCommentSeparatedCompoundEnds supplements it. When
+    // the compound type word is followed by ANOTHER comment before the trailing word
+    // (e.g. `end /* c */ package /* c */ body;`), the lookahead for the second word
+    // (`body` / `process`) must skip block comments, not just whitespace. Otherwise the
+    // compound end is detected only as `end /* c */ package`, the actual trailing word
+    // (`body`) is dropped from closeKeyword, and the surrounding pairing may break.
+    test('should detect end /* c */ package /* c */ body as a single compound close', () => {
+      const source = 'package body p is\nend /* c */ package /* c */ body;';
+      const pairs = parser.parse(source);
+      const pkgPair = findBlock(pairs, 'package');
+      const close = pkgPair.closeKeyword.value.toLowerCase();
+      assert.ok(close.endsWith('body'), `closeKeyword should include trailing 'body', got: ${pkgPair.closeKeyword.value}`);
+    });
+
+    test('should detect end /* c */ protected /* c */ body as a single compound close', () => {
+      const source =
+        'package p is\n  type t is protected\n    procedure x;\n  end protected;\n  type body t is protected body\n    procedure x is begin null; end procedure;\n  end /* c */ protected /* c */ body;\nend package;';
+      const pairs = parser.parse(source);
+      // The inner `protected body` should close the `protected body` opener (not present here,
+      // since the source has no explicit protected body opener -- we focus on lookahead correctness).
+      // Verify no orphan `body` token leaked: the compound close itself must include `body`.
+      const protectedBodyClose = pairs.find(
+        (p) => p.closeKeyword.value.toLowerCase().includes('body') && p.closeKeyword.value.toLowerCase().includes('protected')
+      );
+      assert.ok(protectedBodyClose, 'should find a close that includes both protected and body');
+    });
+
+    test('should detect end /* c */ postponed /* c */ process as a single compound close', () => {
+      const source =
+        'architecture a of e is\nbegin\n  postponed process\n  begin\n    null;\n  end /* c */ postponed /* c */ process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const procPair = findBlock(pairs, 'process');
+      const close = procPair.closeKeyword.value.toLowerCase();
+      assert.ok(close.endsWith('process'), `closeKeyword should include trailing 'process', got: ${procPair.closeKeyword.value}`);
+    });
+  });
+
   generateCommonTests(config);
 });
