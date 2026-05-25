@@ -3281,6 +3281,18 @@ foo() ->
     });
   });
 
+  suite('Regression: unterminated -spec followed by quoted atom function head', () => {
+    test('should detect quoted atom function head as -spec boundary', () => {
+      // -spec without terminating '.' followed by quoted atom function head ('foo'() ->)
+      // should end the spec context, allowing begin/end inside the function body to be paired.
+      const source = "-spec foo() -> integer()\n'foo'() -> begin ok end.";
+      const pairs = parser.parse(source);
+      // begin/end should be paired
+      assertBlockCount(pairs, 1);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: bare end in -record type annotation should not pair with outer begin', () => {
     test('should pair outer begin with outer end when -record type annotation contains bare end', () => {
       const source = 'begin\n  -record(s, {f :: end}),\n  ok\nend';
