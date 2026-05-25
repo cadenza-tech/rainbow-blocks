@@ -442,7 +442,9 @@ export class ErlangBlockParser extends BaseBlockParser {
     // Tolerates leading whitespace, whitespace between '-' and name, and between name and '('.
     // Erlang allows Unicode-identifier characters in attribute names, so the pattern matches
     // \p{L} and \p{N} in addition to ASCII letters/digits/underscore.
-    const pattern = /(^|\r\n|\r|\n)([ \t]*)-[ \t]*([a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}]*)[ \t]*\(/gu;
+    // Leading whitespace tolerates space, tab, form-feed (\f) and vertical-tab (\v),
+    // matching Erlang's lexer (which treats all of these as horizontal whitespace).
+    const pattern = /(^|\r\n|\r|\n)([ \t\f\v]*)-[ \t\f\v]*([a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}]*)[ \t\f\v]*\(/gu;
     for (const match of source.matchAll(pattern)) {
       const dashStart = match.index + match[1].length + match[2].length;
       if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
@@ -486,7 +488,9 @@ export class ErlangBlockParser extends BaseBlockParser {
   // Sorted by keywordStart for binary search.
   private buildSpecLineSpans(source: string, excludedRegions: ExcludedRegion[]): SpecLineSpan[] {
     const spans: SpecLineSpan[] = [];
-    const pattern = /(^|\r\n|\r|\n)([ \t]*)-[ \t]*(spec|type|callback|opaque)\b/g;
+    // Leading whitespace tolerates space, tab, form-feed (\f) and vertical-tab (\v),
+    // matching Erlang's lexer (which treats all of these as horizontal whitespace).
+    const pattern = /(^|\r\n|\r|\n)([ \t\f\v]*)-[ \t\f\v]*(spec|type|callback|opaque)\b/g;
     for (const match of source.matchAll(pattern)) {
       const dashStart = match.index + match[1].length + match[2].length;
       if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
