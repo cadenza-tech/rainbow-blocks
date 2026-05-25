@@ -616,6 +616,13 @@ export class RubyBlockParser extends BaseBlockParser {
       // `!end` is invalid (unary not applied to reserved word in value position)
       return true;
     }
+    if (ch === '?') {
+      // Ternary then-value position (`cond ? end : alt`). `end` is reserved and cannot
+      // be a value, so the `?` here is the ternary operator (a bare `?` not part of a
+      // character literal like `?x`, because character literals have no whitespace before
+      // the following token). Treat as expression position so `end` is filtered out.
+      return true;
+    }
     if (ch === '=') {
       // `=` is a binary operator (assignment). `==`, `=~`, `=>` are handled because
       // they end with `=`, `~`, `>` respectively — but the character at `i` is the
