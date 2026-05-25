@@ -5212,6 +5212,37 @@ end`;
     });
   });
 
+  suite('Regression: end followed by binary operator past block comment is lastindex (Bug 5)', () => {
+    test('should treat end followed by != past block comment as lastindex inside indexing brackets', () => {
+      // `arr[if end #= comment =# != 2; 1; else 0 end]` — the inner `end #= ... =# != 2`
+      // is `end != 2` (lastindex compared to 2) with a block comment between. The
+      // followed-by-binary-operator scan must skip the excluded region (block comment)
+      // to find `!=`. The trailing `end` must pair with the inner `if`.
+      const source = 'arr[if end #= comment =# != 2; 1; else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end followed by + past line comment as lastindex inside indexing brackets', () => {
+      // `arr[if end # trailing\n + 2 > 0; 1; else 0 end]` — single-line comments end at
+      // newline, so the followed-by-operator scan only looks at spaces/tabs after `end`
+      // before hitting a comment. This case keeps the `end` as block-close because the
+      // operator is on a later line. Behavior should stay the same as today (sanity
+      // check that comment handling does not over-skip newlines).
+      // No assertions about pairing here — just that the scan does not crash.
+      const source = 'arr[if end # cmt\nx end]';
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should treat end followed by + past block comment as lastindex inside indexing brackets', () => {
+      const source = 'arr[if end #= cmt =# + 1 > 0; 1; else 0 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: non-block reserved words rejected as string macro prefix (Bug 4)', () => {
     test('should not treat where"..." as string macro (where is a reserved word)', () => {
       // `where"y"begin\nend` — `where` is a Julia reserved word and cannot be a string
