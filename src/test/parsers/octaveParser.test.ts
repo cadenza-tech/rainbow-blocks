@@ -2714,6 +2714,39 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-25: arguments(...) attribute list with line continuation', () => {
+    test('should treat arguments(...<NL>  Input) as block opener (attribute list across continuation)', () => {
+      // `arguments(...<NL>  Input)` is a single logical line `arguments(Input)`, which is a
+      // recognised attribute list (block opener). Without skipping the `...<NL>` continuation
+      // when computing the inner content, the attribute pattern test fails and `arguments`
+      // is wrongly classified as a function call, dropping the arguments/end pair and
+      // orphaning the enclosing function/end pair.
+      const source = 'function f(x)\n  arguments(...\n    Input)\n    x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.line, 5, 'function should pair with outer end on line 5');
+      const argumentsBlock = findBlock(pairs, 'arguments');
+      assert.strictEqual(argumentsBlock.closeKeyword.line, 4, 'arguments should pair with inner end on line 4');
+    });
+
+    test('should treat arguments(\\<NL>  Output) as block opener (backslash continuation)', () => {
+      const source = 'function f(x)\n  arguments(\\\n    Output)\n    x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argumentsBlock = findBlock(pairs, 'arguments');
+      assert.strictEqual(argumentsBlock.closeKeyword.line, 4);
+    });
+
+    test('should treat arguments(Input,...<NL>  Output) as block opener (continuation in the middle)', () => {
+      const source = 'function f(x)\n  arguments(Input,...\n    Output)\n    x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const argumentsBlock = findBlock(pairs, 'arguments');
+      assert.strictEqual(argumentsBlock.closeKeyword.line, 4);
+    });
+  });
+
   suite('Middle keyword followed by end on same line', () => {
     test('should pair if/end when else is followed by end on the same line', () => {
       const source = 'if x\nelse end';
