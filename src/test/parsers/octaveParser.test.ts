@@ -2714,6 +2714,49 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-25: typed close followed by trailing identifier should still close the block', () => {
+    test('should accept endfunction followed by a trailing identifier as block close', () => {
+      // `endfunction garbage` has a trailing identifier after the typed close. While the
+      // trailing identifier is technically a syntax error (the typed close should be the
+      // only token on its statement), the user's intent is clearly to close the function.
+      // Rejecting the close entirely drops the function/endfunction pair, which is worse
+      // than keeping the pair and leaving the trailing identifier as an orphan token
+      // (cost-minimal: orphan 1 token vs. orphan 2 block keywords).
+      const source = 'function f\nendfunction garbage';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    test('should accept endif followed by a trailing identifier as block close', () => {
+      const source = 'if x\n  y = 1;\nendif garbage';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should accept endfor followed by a trailing identifier as block close', () => {
+      const source = 'for i = 1:3\n  y = i;\nendfor garbage';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'endfor');
+    });
+
+    test('should still reject endfunction immediately followed by ( as block close (function call)', () => {
+      // `endfunction(...)` is clearly a function call, not a block close. The trailing `(`
+      // must still be rejected as it indicates the keyword is being used as an identifier.
+      const source = 'function f\nendfunction()';
+      const pairs = parser.parse(source);
+      // The endfunction is rejected as a block close, leaving function orphan (0 pairs).
+      assert.strictEqual(pairs.length, 0, 'endfunction() must not close the function block');
+    });
+
+    test('should still reject endif followed by = as block close (assignment)', () => {
+      // `endif = 5` is clearly an assignment to a variable named `endif`. The trailing `=`
+      // (assignment, not comparison) must still be rejected.
+      const source = 'if x\n  y = 1;\nendif = 5';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 0, 'endif = 5 must not close the if block');
+    });
+  });
+
   suite('Regression 2026-05-25: arguments(...) attribute list with line continuation', () => {
     test('should treat arguments(...<NL>  Input) as block opener (attribute list across continuation)', () => {
       // `arguments(...<NL>  Input)` is a single logical line `arguments(Input)`, which is a
