@@ -297,15 +297,25 @@ export class OctaveBlockParser extends MatlabBlockParser {
         return false;
       }
     }
-    if (keyword === 'arguments' && this.isArgumentsFunctionCall(source, position, excludedRegions)) {
-      // Phantom-section tracking: when `arguments(obj);` is rejected as a block opener,
-      // the user likely wrote a stray `end` for it. Record the position so matchBlocks
-      // can phantom-skip one `end`. Only when the keyword is at line-start (so a stray
-      // `end` would be expected to follow on a subsequent line).
-      if (this.isAtSectionKeywordLineStart(source, position) && !this.isInsideParensOrBrackets(source, position, excludedRegions)) {
-        this.octavePhantomSectionPositions.push(position);
+    // Octave-specific arguments-function-call check. This must run BEFORE the parent's
+    // check (which uses its own MATLAB-style detector that does not skip excluded regions
+    // when computing the inner content, wrongly classifying `arguments(...<NL>  Input)`
+    // as a function call). When Octave's detector returns true, the keyword is a function
+    // call → reject as block opener. When false (valid block opener), we record the
+    // result so we can override the parent's potential false-positive rejection below.
+    let octaveSaysArgumentsIsBlock = false;
+    if (keyword === 'arguments') {
+      if (this.isArgumentsFunctionCall(source, position, excludedRegions)) {
+        // Phantom-section tracking: when `arguments(obj);` is rejected as a block opener,
+        // the user likely wrote a stray `end` for it. Record the position so matchBlocks
+        // can phantom-skip one `end`. Only when the keyword is at line-start (so a stray
+        // `end` would be expected to follow on a subsequent line).
+        if (this.isAtSectionKeywordLineStart(source, position) && !this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+          this.octavePhantomSectionPositions.push(position);
+        }
+        return false;
       }
-      return false;
+      octaveSaysArgumentsIsBlock = true;
     }
     // Section-keyword rejection when followed by an operator across a line continuation,
     // e.g. `properties ...<NL>+ 1` or `methods \<NL>* 2`. The parent's section-keyword
@@ -351,6 +361,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (this.isFalseOperatorRejectionDueToContinuation(keyword, source, position)) {
         return true;
       }
+    }
+    // Override path for `arguments(...<NL>  Input)` and `arguments(\<NL>  Output)`:
+    // Octave's `isArgumentsFunctionCall` (which correctly skips excluded regions when
+    // computing the inner attribute content) already determined this is a real
+    // arguments block opener, but the parent's MATLAB-style detector — which uses
+    // raw `source.slice(...)` for the inner content — wrongly classifies it as a
+    // function call. Trust Octave's verdict so the attribute-list-across-continuation
+    // form is paired with its inner `end` and the enclosing function/end pair is
+    // preserved.
+    if (!result && octaveSaysArgumentsIsBlock) {
+      return true;
     }
     return result;
   }
@@ -595,7 +616,29 @@ export class OctaveBlockParser extends MatlabBlockParser {
       k++;
     }
     if (depth !== 0) return false;
-    const inner = source.slice(j + 1, k).trim();
+    // Build `inner` from the literal content between `(` and `)`, but skip excluded
+    // regions (line continuations `...<NL>` / `\<NL>`, comments, strings) so the
+    // attribute pattern test sees only the real attribute tokens. Without this, an
+    // `arguments(...<NL>  Input)` would expose `...\n      Input` to the test and
+    // fail the attribute regex, wrongly classifying the attribute list as a function call.
+    let innerRaw = '';
+    let m = j + 1;
+    while (m < k) {
+      if (this.isInExcludedRegion(m, excludedRegions)) {
+        const region = this.findExcludedRegionAt(m, excludedRegions);
+        if (region) {
+          // Substitute the excluded region with a single space so adjacent identifiers
+          // do not get concatenated (e.g. `Input...<NL>Output` becomes `Input Output`,
+          // not `InputOutput`).
+          innerRaw += ' ';
+          m = region.end;
+          continue;
+        }
+      }
+      innerRaw += source[m];
+      m++;
+    }
+    const inner = innerRaw.trim();
     // Pattern 1: trailing `;` after `)` (statement-call form, e.g. `arguments(obj);`).
     // Skip horizontal whitespace and line continuations after `)` so a continuation
     // before the `;` still detects the statement form.
