@@ -5062,5 +5062,55 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: extern modifier suppresses primitive/checker/sequence/property/config', () => {
+    test('should suppress primitive after extern (extern primitive)', () => {
+      // Bug: `extern primitive p2;` was not recognized as a non-block form, so
+      // the inner `primitive` was tokenized as a real block_open and would
+      // consume the outer `endprimitive`, breaking the outer pair.
+      const source = 'primitive p1;\n  extern primitive p2;\nendprimitive';
+      const tokens = parser.getTokens(source);
+      const primitiveOpenTokens = tokens.filter((t) => t.value === 'primitive' && t.type === 'block_open');
+      assert.strictEqual(primitiveOpenTokens.length, 1, 'only the outer `primitive` should be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'primitive', 'endprimitive');
+    });
+
+    test('should suppress checker after extern (extern checker)', () => {
+      const source = 'checker c1;\n  extern checker c2;\nendchecker';
+      const tokens = parser.getTokens(source);
+      const checkerOpenTokens = tokens.filter((t) => t.value === 'checker' && t.type === 'block_open');
+      assert.strictEqual(checkerOpenTokens.length, 1, 'only the outer `checker` should be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'checker', 'endchecker');
+    });
+
+    test('should suppress sequence after extern (extern sequence)', () => {
+      const source = 'sequence s1;\n  extern sequence s2;\nendsequence';
+      const tokens = parser.getTokens(source);
+      const sequenceOpenTokens = tokens.filter((t) => t.value === 'sequence' && t.type === 'block_open');
+      assert.strictEqual(sequenceOpenTokens.length, 1, 'only the outer `sequence` should be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'sequence', 'endsequence');
+    });
+
+    test('should suppress property after extern (extern property)', () => {
+      const source = 'property p1;\n  extern property p2;\nendproperty';
+      const tokens = parser.getTokens(source);
+      const propertyOpenTokens = tokens.filter((t) => t.value === 'property' && t.type === 'block_open');
+      assert.strictEqual(propertyOpenTokens.length, 1, 'only the outer `property` should be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'property', 'endproperty');
+    });
+
+    test('should suppress config after extern (extern config)', () => {
+      const source = 'config c1;\n  extern config c2;\nendconfig';
+      const tokens = parser.getTokens(source);
+      const configOpenTokens = tokens.filter((t) => t.value === 'config' && t.type === 'block_open');
+      assert.strictEqual(configOpenTokens.length, 1, 'only the outer `config` should be tokenized as block_open');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'config', 'endconfig');
+    });
+  });
+
   generateCommonTests(config);
 });
