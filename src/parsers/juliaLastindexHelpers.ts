@@ -207,6 +207,15 @@ export function isPrecededByBinaryOperator(source: string, position: number, exc
     if (ch === '!') {
       return true;
     }
+    // Unicode binary operators (math symbols outside the ASCII range), e.g., × U+00D7,
+    // ÷ U+00F7, ± U+00B1. Identifier characters (Unicode Letters and Numbers) are
+    // excluded; what remains is operator-class. Mirrors isBinaryOperatorStart's Unicode
+    // check so `<op>end<op>` is rejected from both sides rather than only the trailing
+    // side. The tokenize step already rejects `end` adjacent to a Unicode letter (e.g.
+    // `αend`), so a non-ASCII non-letter/non-number char reaching here is an operator.
+    if (ch.charCodeAt(0) > 127 && !/[\p{L}\p{N}]/u.test(ch)) {
+      return true;
+    }
     return false;
   }
   return false;
