@@ -173,7 +173,9 @@ export function isValidAcceptOpen(
 
 // Validates 'record': 'null record' is not a block opener
 export function isValidRecordOpen(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: AdaValidationCallbacks): boolean {
-  // Scan backward from record, skipping whitespace and excluded regions, to find null
+  // Scan backward from record, skipping Ada whitespace (LRM 2.1: ASCII
+  // space/tab/CR/LF/VT/FF, NEL U+0085, NBSP U+00A0 and the Zs category,
+  // plus line/paragraph separators) and excluded regions, to find null.
   let j = position - 1;
   while (j >= 0) {
     const region = callbacks.findExcludedRegionAt(j, excludedRegions);
@@ -181,7 +183,7 @@ export function isValidRecordOpen(source: string, position: number, excludedRegi
       j = region.start - 1;
       continue;
     }
-    if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+    if (isAdaWhitespace(source[j])) {
       j--;
       continue;
     }
