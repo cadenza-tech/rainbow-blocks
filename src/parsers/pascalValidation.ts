@@ -537,9 +537,13 @@ export function isVariantRecordCase(
   if (k < source.length && source[k] === ':') {
     return true;
   }
-  // Tagless variant: tag followed by 'of'.
+  // Tagless variant: tag followed by 'of'. Verify the structural pattern via
+  // `isVariantCase` (first label followed by `(...)`). Without this structural check
+  // the header `case X of` matches a standalone case nested inside a variant field
+  // list `(...)`, dropping the inner case from tokenization while the inner `end`
+  // remains and corrupts the outer record pair.
   if (k + 2 <= source.length && /^of\b/i.test(source.slice(k, k + 3))) {
-    return true;
+    return isVariantCase(source, position, excludedRegions, callbacks);
   }
   return false;
 }
