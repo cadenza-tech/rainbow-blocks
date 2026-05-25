@@ -770,20 +770,22 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (isTypedClose && !this.isAtStatementLeadingPosition(source, position, excludedRegions)) {
       return false;
     }
-    // Typed-end keywords (endif/endfor/endwhile/...) must be the only token on their
-    // statement: anything other than a separator (newline / EOF / `;` / `,`) or a comment
-    // immediately after rejects them as a block close (e.g., `endif()`, `endif x = 5`).
-    // `until` is excluded because it requires a condition expression (`until cond`).
-    // Skip horizontal whitespace AND line continuations so `endif ...<NL>` and
-    // `endif \<NL>` are still treated as bare typed-close (the `...` / `\` continues to
-    // the next physical line whose first real token is the newline / EOF / separator).
+    // Typed-end keywords (endif/endfor/endwhile/...) followed immediately by `(` are
+    // function calls (e.g., `endfunction()`, `endif(x)`), not block closes. Only `(`
+    // unambiguously identifies the keyword as an identifier being called; trailing
+    // text such as `endfunction garbage` or `endif foo` is technically a syntax error
+    // in Octave but the user's intent is clearly to close the block, so accepting the
+    // close is cost-minimal (1 spurious orphan identifier vs 2 spurious orphan block
+    // keywords — see CLAUDE.md's coverage of the "BlockPair が壊れる場合は防御強化する"
+    // principle). Assignment forms (`endif = 5`) are already rejected at the top of
+    // this method by isFollowedByAssignment. `until` is excluded because it requires
+    // a condition expression (`until cond`). Skip horizontal whitespace AND line
+    // continuations so `endif ...<NL>` and `endif \<NL>` are still treated as bare
+    // typed-close (the `...` / `\` continues to the next physical line).
     if (isTypedClose && lowerKw !== 'until') {
       const after = skipHorizontalWhitespaceAndContinuations(source, position + keyword.length);
-      if (after < source.length) {
-        const ch = source[after];
-        if (ch !== '\n' && ch !== '\r' && ch !== ';' && ch !== ',' && ch !== '%' && ch !== '#') {
-          return false;
-        }
+      if (after < source.length && source[after] === '(') {
+        return false;
       }
     }
     return super.isValidBlockClose(keyword, source, position, excludedRegions);
