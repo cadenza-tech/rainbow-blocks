@@ -3957,5 +3957,33 @@ end if;`;
     });
   });
 
+  suite('Regression: matchAdaString recognizes Unicode line terminators', () => {
+    test('should terminate string at U+0085 (NEL) so trailing if/end if pair is detected', () => {
+      // Ada strings cannot span multiple lines per LRM 2.6. The Ada parser
+      // already treats U+0085 (NEL), U+2028 (LS), and U+2029 (PS) as line
+      // terminators elsewhere (LRM 2.2). matchAdaString must use the same
+      // line-terminator set, otherwise an unterminated `"hello<NEL>...`
+      // string swallows the trailing block and no pair is generated.
+      const nel = String.fromCharCode(0x85);
+      const source = `X := "hello${nel}if Cond then\nnull;\nend if;\n`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should terminate string at U+2028 (LS)', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `X := "hello${ls}if Cond then\nnull;\nend if;\n`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should terminate string at U+2029 (PS)', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `X := "hello${ps}if Cond then\nnull;\nend if;\n`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   generateCommonTests(config);
 });
