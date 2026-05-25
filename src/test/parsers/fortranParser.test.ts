@@ -5994,6 +5994,40 @@ end where`;
     });
   });
 
+  suite('Regression 2026-05-25: select-type guards `type is`/`class is` with continuation before paren', () => {
+    test('should detect `type is &\\n (integer)` guard across continuation between `is` and `(`', () => {
+      // Free-form Fortran allows line continuation between `is` and the type
+      // parenthesis: `type is &\n  (integer)` is a single `type is` guard. The
+      // GUARD_WORD_SEPARATOR must be applied between `is` and `(` (not only between
+      // `type`/`class` and `is`), otherwise the guard goes undetected and the parent
+      // `select type` block has missing intermediates.
+      const source = `select type (x)
+type is &
+   (integer)
+  a = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const pair = pairs[0];
+      const typeIsInter = pair.intermediates.find((t) => /type[\s\S]*\bis\b/i.test(t.value));
+      assert.ok(typeIsInter, `Expected a 'type is' intermediate; got: ${pair.intermediates.map((t) => t.value).join(' | ')}`);
+    });
+
+    test('should detect `class is &\\n (integer)` guard across continuation between `is` and `(`', () => {
+      // Same as above but for `class is` guard variant.
+      const source = `select type (x)
+class is &
+   (integer)
+  a = 1
+end select`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+      const pair = pairs[0];
+      const classIsInter = pair.intermediates.find((t) => /class[\s\S]*\bis\b/i.test(t.value));
+      assert.ok(classIsInter, `Expected a 'class is' intermediate; got: ${pair.intermediates.map((t) => t.value).join(' | ')}`);
+    });
+  });
+
   suite('Performance: opener validation does not blow up to O(N^2)', () => {
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
