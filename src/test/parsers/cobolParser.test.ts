@@ -3250,6 +3250,23 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-25: PERFORM N *> comment TIMES is a structured block', () => {
+    // Bug: `PERFORM 5 *> comment\nTIMES ... END-PERFORM` — the inline `*>`
+    // comment between the count operand and the TIMES verb broke the
+    // `secondWord` lookahead in computeValidPositions (the regex started
+    // from `\s+` and matched the `*` as a non-space character), so the
+    // structured PERFORM was misclassified as a paragraph call and the
+    // END-PERFORM was left orphan. The fix strips `*>...` and `>>...`
+    // comment runs (just like the no-secondWord branch already does) from
+    // the lookahead string before scanning for the iteration verb so the
+    // structured PERFORM is recognised and paired with its END-PERFORM.
+    test('should pair PERFORM with END-PERFORM when an inline comment separates the count from TIMES', () => {
+      const source = 'PERFORM 5 *> mid comment\nTIMES\n  DISPLAY OK\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+  });
+
   suite('Regression 2026-05-25: bare COPY before END-* or block-middle keyword does not swallow the keyword', () => {
     // Bug: `IF X\nCOPY\nEND-IF` (a COPY statement with no copybook name typed yet)
     // treated the following END-IF as the copybook name, so the END-IF was filtered
