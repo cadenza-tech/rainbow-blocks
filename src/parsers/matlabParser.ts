@@ -644,6 +644,14 @@ export class MatlabBlockParser extends BaseBlockParser {
       // future opener that accepts an empty header) is exempt. Treating an empty-header
       // opener as block_open consumes the outer block's `end`, destroying outer pairing.
       if (MatlabBlockParser.HEADER_REQUIRED_KEYWORDS.has(keyword) && this.isFollowedByEmptyHeader(source, assignFrom)) {
+        // Phantom: when the user wrote `if;`, `for;`, `while,` etc., they likely also
+        // wrote a stray `end` to close the rejected opener. Record the position so the
+        // phantom-skip in matchBlocks consumes the corresponding stray `end` instead of
+        // pairing it with an outer block. Only record when at line start and not inside
+        // parens/brackets — mirrors the section-keyword phantom conditions.
+        if (this.isAtLineStartForSectionKeyword(source, position) && !this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+          this.phantomSectionPositions.push(position);
+        }
         return false;
       }
       // Reject block opener used as standalone identifier on the RHS of an assignment
