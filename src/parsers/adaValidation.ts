@@ -259,9 +259,18 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   if (i < source.length && source[i] === '(') {
     return false;
   }
-  // Expect an identifier
-  if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) {
+  // Expect an identifier (ASCII letter / underscore, or non-ASCII Ada
+  // identifier char). Any other follower — a digit, `;`, operator, etc. —
+  // means this `for` is mid-edit junk and is not a valid block opener.
+  // Returning `true` here previously left a stray `for 123;` as a phantom
+  // block opener that orphaned the enclosing subprogram body. Treat
+  // end-of-source as "still typing" so a `for` at EOF does not panic the
+  // pair; the open opener will resolve once the user finishes the header.
+  if (i >= source.length) {
     return true;
+  }
+  if (!(/[a-zA-Z_]/.test(source[i]) || source.charCodeAt(i) > 127)) {
+    return false;
   }
   // Skip identifier
   while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
