@@ -4966,5 +4966,24 @@ end`;
     });
   });
 
+  suite('Regression: quoted heredoc identifier with leading whitespace in Ruby', () => {
+    test('should close heredoc with quoted identifier containing leading space', () => {
+      // Bug: when the heredoc opener uses a quoted identifier `<<" EOF"` (leading space
+      // inside the quotes), the body terminator must match exactly. The implementation
+      // trimmed the body line so ` EOF` matched `EOF` but never the original ` EOF`,
+      // and a body line of ` EOF` (with the exact required leading space) would not be
+      // recognised as terminator -- closing the heredoc only after a later coincidence.
+      const source = 'x = <<" EOF"\nbody\n EOF\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should close heredoc with quoted identifier containing trailing space', () => {
+      const source = 'x = <<"EOF "\nbody\nEOF \ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
