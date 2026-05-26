@@ -2835,6 +2835,31 @@ end`;
     });
   });
 
+  suite('Regression: do as condition expression with multi-identifier header', () => {
+    test('should reject do as block_open in if x do<NL>end', () => {
+      // `if x do\nend` — the `do` is a multi-identifier expression in the if header
+      // (`if x do` is syntactically `if (x do ...)`). Treating it as a block_open leaves
+      // a spurious `do` on the stack that the trailing `end` cannot close (generic `end`
+      // does not close `do` in Octave; only `until` does), destroying the if/end pair.
+      const source = 'if x do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject do as block_open in while x y do<NL>end', () => {
+      const source = 'while x y do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should still accept do as block_open on its own statement', () => {
+      // Sanity: outside of a condition-keyword context, `do` opens a do/until block.
+      const source = 'do\n  body;\nuntil x';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
   suite('Regression: typed-close indexing-assignment guard', () => {
     test('should reject endif{1} = 5 as block close (cell-array indexing assignment)', () => {
       // `endif{1} = 5;` is an indexing assignment to a variable named `endif`, not a
