@@ -4985,5 +4985,26 @@ end`;
     });
   });
 
+  suite('Regression: elsif is not a valid intermediate of unless in Ruby', () => {
+    test('should not collect elsif as intermediate of an unless block', () => {
+      // Ruby spec: `unless ... else ... end` is valid; `unless ... elsif ... end` is a
+      // syntax error. The previous implementation treated `elsif` as an intermediate of
+      // both `if` and `unless`, allowing the invalid form to pair with `end` and
+      // collecting `elsif` as an intermediate.
+      const source = 'unless x\n  a\nelsif y\n  b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unless', 'end');
+      // `elsif` must not be present in the intermediates list.
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still collect elsif as intermediate of an if block', () => {
+      const source = 'if x\n  a\nelsif y\n  b\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['elsif']);
+    });
+  });
+
   generateCommonTests(config);
 });
