@@ -3769,5 +3769,48 @@ end if`;
     });
   });
 
+  suite('Regression: tell/if/repeat must not open a block as right operand of and/or/not/when', () => {
+    // AppleScript Boolean operators (`and`, `or`, `not`) and the `when` modifier take
+    // an expression as their right operand. A bare `tell`/`if`/`repeat` following one
+    // of them is an identifier (right operand), not a block opener. Without the fix,
+    // the closing `end tell`/`end if`/`end repeat` on the next line would erroneously
+    // pair with the right-operand keyword, producing a spurious block.
+    test('should not treat tell as block opener after and', () => {
+      const source = 'set x to a and tell\nend tell';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat tell as block opener after or', () => {
+      const source = 'set x to a or tell\nend tell';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat tell as block opener after not', () => {
+      const source = 'set x to not tell\nend tell';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat tell as block opener after when', () => {
+      const source = 'set x to b when tell\nend tell';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat if as block opener after and', () => {
+      const source = 'set x to a and if y then\nend if';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat repeat as block opener after and', () => {
+      const source = 'set x to a and repeat\nend repeat';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
