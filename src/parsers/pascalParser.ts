@@ -1316,11 +1316,16 @@ export class PascalBlockParser extends BaseBlockParser {
             // 'else' here is malformed and would otherwise pollute the intermediates.
             // Also reject duplicate 'else' (try-except-else-else): Delphi permits at
             // most one else clause per try-except, so a second else is malformed.
+            // Additionally, reject 'else' that precedes any except/finally clause
+            // (`try ... else ... end` without any handler clause): Delphi has no
+            // bare try-else construct, so the else is malformed and must not be
+            // attached to the try intermediates.
             if (topValue === 'try' && middleValue === 'else') {
               const existing = stack[stack.length - 1].intermediates;
+              const hasExcept = existing.some((t) => t.value.toLowerCase() === 'except');
               const hasFinally = existing.some((t) => t.value.toLowerCase() === 'finally');
               const hasElse = existing.some((t) => t.value.toLowerCase() === 'else');
-              if (hasFinally || hasElse) break;
+              if (hasFinally || hasElse || !hasExcept) break;
             }
             // case block: reject duplicate 'else' and duplicate 'of'. A `case` has
             // exactly one `of` (immediately after the selector) and at most one `else`
