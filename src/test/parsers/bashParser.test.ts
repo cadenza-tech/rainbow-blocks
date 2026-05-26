@@ -6720,5 +6720,21 @@ fi`;
     });
   });
 
+  suite('Regression: case keyword adjacent to a Unicode letter must not enter case scope inside $()', () => {
+    test('should not treat caseα as a case keyword inside $()', () => {
+      // `caseα` (Greek alpha) is a single word in bash because identifier
+      // continuation is not ASCII-only. Without the fix, the subshell
+      // scanner accepted `case` as a keyword, entered case scope, and the
+      // trailing `)` became a case-pattern terminator that never closed
+      // the subshell. After the fix `case` is only recognized when the
+      // immediately following character is a POSIX command separator
+      // (and matchesWord rejects Unicode-letter adjacency), so `caseα`
+      // is treated as a single word and the subshell closes at its `)`.
+      const source = '$(caseα)\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 });
