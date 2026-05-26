@@ -5262,5 +5262,56 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: paren-less #identifier and @identifier delay/sensitivity operand', () => {
+    test('should not tokenize a reserved word after paren-less # delay identifier', () => {
+      // Bug: `#case` (paren-less delay using an identifier as delay value) should
+      // suppress the `case` keyword. The existing isInsideDelayExpression check
+      // covered only the `#(...)` form, not the paren-less `#identifier` form.
+      // Without suppression, the inner `case` was tokenized as a real block_open
+      // and consumed the trailing `endcase`, breaking the outer case/endcase
+      // BlockPair.
+      const source = 'module m;\n  always #case begin\n    x = 1;\n  end\n  case (sel)\n    1: x = 1;\n  endcase\nendmodule';
+      const tokens = parser.getTokens(source);
+      // Only one `case` opener should be tokenized (the real `case (sel)` one).
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 1, '`case` used as #-delay identifier must not be tokenized as block_open');
+      const pairs = parser.parse(source);
+      // module/endmodule pair must be intact
+      const modPair = findBlock(pairs, 'module');
+      assert.strictEqual(modPair.closeKeyword?.value, 'endmodule', 'module must pair with endmodule');
+      // The real case (sel) ... endcase pair must remain
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.closeKeyword?.value, 'endcase', 'real case must pair with endcase');
+    });
+
+    test('should not tokenize a reserved word after paren-less @ sensitivity identifier', () => {
+      // Bug: `@case` (paren-less sensitivity using an identifier as the sensitivity
+      // signal) should suppress the `case` keyword. The existing
+      // isInsideDelayExpression check covered only the `@(...)` form. The
+      // paren-less `@identifier` form is also valid SystemVerilog
+      // (LRM §9.4.2 event_control: `@ hierarchical_identifier`).
+      const source = 'module m;\n  always @case begin\n    x = 1;\n  end\n  case (sel)\n    1: x = 1;\n  endcase\nendmodule';
+      const tokens = parser.getTokens(source);
+      const caseOpenTokens = tokens.filter((t) => t.value === 'case' && t.type === 'block_open');
+      assert.strictEqual(caseOpenTokens.length, 1, '`case` used as @-sensitivity identifier must not be tokenized as block_open');
+      const pairs = parser.parse(source);
+      const modPair = findBlock(pairs, 'module');
+      assert.strictEqual(modPair.closeKeyword?.value, 'endmodule', 'module must pair with endmodule');
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.closeKeyword?.value, 'endcase', 'real case must pair with endcase');
+    });
+
+    test('should still preserve numeric delay (#10) and `@(*)` sensitivity (sanity)', () => {
+      // Sanity: the suppression must NOT fire for the normal `#<number>` delay or
+      // `@(*)` sensitivity-list wildcard. Both forms have a non-identifier
+      // immediately after `#`/`@`, so they are not in the paren-less identifier
+      // form.
+      const source = 'module m;\n  always #10 begin\n    x = 1;\n  end\n  always @(*) begin\n    y = 1;\n  end\nendmodule';
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPairs.length, 2, 'normal #<number> and @(*) forms must not be affected');
+    });
+  });
+
   generateCommonTests(config);
 });
