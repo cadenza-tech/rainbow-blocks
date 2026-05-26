@@ -6677,5 +6677,25 @@ fi`;
     });
   });
 
+  suite('Regression: bare (( inside $() must not enable << heredoc detection', () => {
+    test('should treat << inside (( ... )) inside $() as arithmetic left-shift', () => {
+      // Inside `$( ((1 << 5)) )` the `<<` is the arithmetic left-shift
+      // operator, not a heredoc operator. Without the fix, the subshell
+      // frame inside $(...) treated bare `((` as just two paren increments,
+      // so `<<` was still seen by stepSubshellFrame as a heredoc operator
+      // and the body extended to end-of-source, swallowing the following
+      // if/fi block.
+      const source = '$( ((1 << 5)) )\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not detect heredoc for << inside (( ... )) inside $() with following for-done', () => {
+      const source = '$( ((x << 2)) )\nfor i in 1; do echo; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+  });
+
   generateCommonTests(config);
 });
