@@ -4520,5 +4520,37 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-26: entity followed by reserved-word name should not open a nested block', () => {
+    // `entity <reserved_word> is ... end entity;` — the reserved word is the entity name,
+    // not a fresh block opener. Without this guard the reserved word is tokenized as a
+    // stray `block_open` and absorbs the surrounding entity's `is` intermediate, silently
+    // breaking the enclosing block's structure (the entity loses its `is` intermediate).
+    test('should not treat protected after entity as block opener', () => {
+      const source = 'entity protected is\nend entity;';
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      const isIntermediate = entityBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isIntermediate, 'entity should retain its is intermediate');
+      const protectedOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'protected');
+      assert.ok(!protectedOpener, 'protected after entity should not pair as a block opener');
+    });
+
+    test('should not treat process after entity as block opener', () => {
+      const source = 'entity process is\nend entity;';
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      const isIntermediate = entityBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isIntermediate, 'entity should retain its is intermediate');
+    });
+
+    test('should not treat view after entity as block opener', () => {
+      const source = 'entity view is\nend entity;';
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      const isIntermediate = entityBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isIntermediate, 'entity should retain its is intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });
