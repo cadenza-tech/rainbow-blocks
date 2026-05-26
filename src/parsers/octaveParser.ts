@@ -187,6 +187,23 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return char === '#' || char === '%';
   }
 
+  // Octave adds `unwind_protect_cleanup` to the middle-keyword line-leaders set so that
+  // `unwind_protect_cleanup end` (the bare `end` after the cleanup middle keyword) is
+  // accepted as a legitimate block close of the enclosing unwind_protect, mirroring how
+  // `else end` / `catch end` are accepted for if/try.
+  private static readonly OCTAVE_MIDDLE_KEYWORDS_AS_LINE_LEADERS: ReadonlySet<string> = new Set([
+    'else',
+    'elseif',
+    'case',
+    'otherwise',
+    'catch',
+    'unwind_protect_cleanup'
+  ]);
+
+  protected override getMiddleKeywordsAsLineLeaders(): ReadonlySet<string> {
+    return OctaveBlockParser.OCTAVE_MIDDLE_KEYWORDS_AS_LINE_LEADERS;
+  }
+
   // Reject block open keywords used as variable names (do = 1, if = 5, etc.)
   // Reject `do` immediately followed by `(` — `do(args)` is a function call, not a do/until block.
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
