@@ -6117,5 +6117,64 @@ end associate`;
     });
   });
 
+  suite('Regression 2026-05-26: matchBlocks compoundEndTypesAt does not consume O(N^2) memory', () => {
+    test('should parse 8000 program/end-program blocks within 256 MB heap', function () {
+      // Before the fix, matchBlocks built a `compoundEndTypesAt[i]` array snapshot per
+      // token index by prepending the current type to a new array (`[type, ...acc]`).
+      // Although `acc` itself was re-bound on each iteration, the per-position snapshot
+      // arrays were retained in `compoundEndTypesAt`, so the total array elements grew
+      // as 1 + 2 + ... + N = O(N^2). On 8000 independent program/end-program blocks the
+      // pre-fix parser OOMed under a 256 MB heap (heap exhausted before parsing even
+      // finished). After the fix, the multiset of pending compound-end types is tracked
+      // by a single running `Map<string, number>` whose memory is O(distinct end types).
+      //
+      // Verify the fix by spawning a child Node process with `--max-old-space-size=256`
+      // and running the parser on 8000 program/end-program blocks. The pre-fix code
+      // crashes with a heap-out-of-memory error (non-zero exit code); the post-fix code
+      // exits with code 0 and reports the expected pair count.
+      //
+      // We must spawn the real Node binary (not `process.execPath`) because mocha runs
+      // inside the VS Code Electron host where `process.execPath` points at the Electron
+      // binary, which honors `--max-old-space-size` differently than `node`.
+      this.timeout(30000);
+      const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+      const path = require('node:path') as typeof import('node:path');
+
+      // Resolve the real Node binary via `which node`. Skip the test when it cannot be
+      // resolved (e.g., minimal CI image without a system Node), since the test depends
+      // on `--max-old-space-size` semantics being respected by the spawned process.
+      const whichResult = spawnSync('which', ['node'], { encoding: 'utf8' });
+      if (whichResult.status !== 0 || !whichResult.stdout.trim()) {
+        this.skip();
+        return;
+      }
+      const nodeBinary = whichResult.stdout.trim();
+
+      const parserPath = path.resolve(__dirname, '..', '..', 'parsers', 'fortranParser.js');
+      const script = `
+        const { FortranBlockParser } = require(${JSON.stringify(parserPath)});
+        const lines = [];
+        for (let i = 0; i < 8000; i++) {
+          lines.push('program p' + i);
+          lines.push('end program');
+        }
+        const source = lines.join('\\n');
+        const parser = new FortranBlockParser();
+        const pairs = parser.parse(source);
+        if (pairs.length !== 8000) {
+          process.stderr.write('unexpected pair count: ' + pairs.length + '\\n');
+          process.exit(2);
+        }
+        process.stdout.write('ok ' + pairs.length + '\\n');
+      `;
+      const result = spawnSync(nodeBinary, ['--max-old-space-size=256', '-e', script], {
+        encoding: 'utf8',
+        timeout: 25000
+      });
+      assert.strictEqual(result.status, 0, `child exited with status=${result.status}, signal=${result.signal}, stderr=${result.stderr}`);
+      assert.match(result.stdout, /^ok 8000$/m);
+    });
+  });
+
   generateCommonTests(config);
 });
