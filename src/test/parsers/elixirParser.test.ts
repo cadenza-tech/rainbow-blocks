@@ -5261,5 +5261,56 @@ end`;
     });
   });
 
+  suite('Bug: middle keyword right after a closing quote should not attach as intermediate', () => {
+    // When a middle keyword (else/rescue/catch/after) directly follows a closing quote of
+    // a string or charlist literal (e.g. `"a"else"b"`), it sits in expression position
+    // (the prior literal is the LHS value), not as a clause head. Without this guard, the
+    // existing prefix check passes because `"` is not in EXPRESSION_OPERATOR_LEAD_CHARS,
+    // and the middle keyword is mis-attached to the enclosing opener as an intermediate.
+    test('should not attach else as intermediate when directly preceded by "..." closing quote', () => {
+      const source = 'try do\n  "a"else"b"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach rescue as intermediate when directly preceded by closing quote', () => {
+      const source = 'try do\n  "a"rescue"b"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach catch as intermediate when directly preceded by closing quote', () => {
+      const source = 'try do\n  "a"catch"b"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach after as intermediate when directly preceded by closing quote', () => {
+      const source = 'receive do\n  "a"after"b"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when directly preceded by single-quoted charlist closing quote', () => {
+      const source = "try do\n  'a'else'b'\nend";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach real else to try when binary RHS in body (mixed quote case)', () => {
+      // The pre-quote `else` is an identifier; the real `else` clause head on its own line
+      // is the intermediate. Only one else attaches.
+      const source = 'try do\n  "a"else"b"\n  :ok\nelse\n  err -> err\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   generateCommonTests(config);
 });
