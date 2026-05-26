@@ -3615,5 +3615,29 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: end preceded by transpose operator on same logical line is not block close', () => {
+    test("should not treat end after transpose operator as block close (x = A' end)", () => {
+      // `x = A' end` places `end` in operand position after the transpose operator `'`
+      // (which produces a value). Same root cause as the closing-quote case but the quote
+      // here is the transpose operator, not a string terminator. Without the fix the inner
+      // end is consumed, leaving the outer function unmatched.
+      const source = "function f\n  if true\n    x = A' end\n  end\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3, 'if should pair with the real inner end (line 3)');
+    });
+
+    test("should not treat end after transpose of array indexing as block close (x = A(1)' end)", () => {
+      const source = "function f\n  if true\n    x = A(1)' end\n  end\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+  });
+
   generateCommonTests(config);
 });
