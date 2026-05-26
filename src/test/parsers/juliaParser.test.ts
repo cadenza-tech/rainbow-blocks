@@ -5293,6 +5293,66 @@ end`;
     });
   });
 
+  suite('Regression: intermediate keywords inside brackets do not attach to outer block', () => {
+    test('should not attach elseif inside () call to outer if intermediates', () => {
+      // `if x\n  call(elseif)\nend` — `elseif` is a (invalid) identifier inside the call
+      // argument list. It must NOT be attached as an intermediate of the surrounding
+      // `if` block. The single `if...end` pair should have no intermediates.
+      const source = 'if x\n  call(elseif)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach catch inside () call to outer try intermediates', () => {
+      // `try\n  println(catch)\nend` — `catch` is an (invalid) identifier inside the call
+      // argument list. It must NOT be attached as an intermediate of the surrounding
+      // `try` block.
+      const source = 'try\n  println(catch)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else inside [] indexing to outer try intermediates', () => {
+      // `try\n  arr[else]\nend` — `else` is an (invalid) identifier inside the indexing
+      // brackets. It must NOT be attached as an intermediate of the surrounding `try`.
+      const source = 'try\n  arr[else]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach catch inside {} type parameters to outer try intermediates', () => {
+      // `try\n  Dict{catch}\nend` — `catch` is an (invalid) identifier inside the curly
+      // brace type parameters. It must NOT be attached as an intermediate of the
+      // surrounding `try`.
+      const source = 'try\n  Dict{catch}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach else inside () to inner block-form if', () => {
+      // `(if true 1 else 2 end)` — the `else` is inside parens, but the if-block opener
+      // is ALSO inside the same parens. The else IS a legitimate intermediate of the
+      // inner `if`, not of any outer block. This sanity test must keep passing after
+      // the bracket-context filter for intermediates is added.
+      const source = 'x = (if true 1 else 2 end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should still attach else inside [] to inner block-form if', () => {
+      // `[if true 1 else 2 end]` — same as above for square brackets.
+      const source = '[if true 1 else 2 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   suite('Regression: end followed by binary operator past block comment is lastindex (Bug 5)', () => {
     test('should treat end followed by != past block comment as lastindex inside indexing brackets', () => {
       // `arr[if end #= comment =# != 2; 1; else 0 end]` — the inner `end #= ... =# != 2`
