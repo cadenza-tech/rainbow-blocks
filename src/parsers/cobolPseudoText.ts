@@ -8,6 +8,7 @@ import {
   COPY_TERMINATING_MIDDLE_VERBS,
   COPY_TERMINATING_NONBLOCK_VERBS,
   COPY_TERMINATING_VERBS,
+  isUnicodeIdentifierChar,
   matchExecBlock
 } from './cobolHelpers';
 import { isInExcludedRegion } from './parserUtils';
@@ -328,14 +329,24 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
     // begin words to avoid duplicate work mid-identifier.
     if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
       const prev = i > 0 ? source[i - 1] : '';
-      // Must be at a word boundary
-      if (prev && (prev === '-' || /[a-zA-Z0-9_]/.test(prev))) {
+      // Must be at a word boundary. A preceding ASCII identifier char (letter,
+      // digit, underscore, hyphen) means we are mid-identifier; the same applies
+      // to a preceding non-ASCII Unicode letter (e.g. αREPLACE is a single
+      // identifier, not the bare REPLACE keyword), so skip these too.
+      if (prev && (prev === '-' || /[a-zA-Z0-9_]/.test(prev) || isUnicodeIdentifierChar(prev))) {
         i++;
         continue;
       }
       let end = i + 1;
       while (end < source.length && /[a-zA-Z0-9_-]/.test(source[end])) {
         end++;
+      }
+      // Reject if the captured identifier is immediately followed by a non-ASCII
+      // Unicode letter (e.g. REPLACEα is one identifier, not the bare REPLACE
+      // keyword followed by α).
+      if (end < source.length && isUnicodeIdentifierChar(source[end])) {
+        i = end;
+        continue;
       }
       const word = source.slice(i, end).toUpperCase();
       // Reject hyphenated identifiers like X-REPLACING by checking the next char

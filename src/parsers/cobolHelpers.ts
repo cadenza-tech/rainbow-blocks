@@ -2,6 +2,20 @@
 
 import type { ExcludedRegion } from '../types';
 
+// Returns true when `ch` is a non-ASCII Unicode character that would continue an
+// identifier (Letter, Mark, Number, or Connector Punctuation). Mirrors the
+// identifier-continuation classes used by BaseBlockParser.isAdjacentToUnicodeLetter
+// so backward/forward COBOL boundary scans treat e.g. αREPLACE as a single
+// identifier (not a bare REPLACE keyword). ASCII letters/digits/underscore are
+// expected to be handled by the caller's existing /[a-zA-Z0-9_]/ test; this
+// helper covers only code points outside the ASCII range.
+export function isUnicodeIdentifierChar(ch: string): boolean {
+  if (!ch) return false;
+  const code = ch.charCodeAt(0);
+  if (code <= 127) return false;
+  return /[\p{L}\p{M}\p{N}\p{Pc}]/u.test(ch);
+}
+
 // Block-opening verbs (uppercase). When such a verb appears past the copybook
 // name of a COPY statement, the COPY statement is over: a period-less COPY does
 // not extend across a following block-opening statement. Kept in sync with
@@ -405,11 +419,18 @@ function walkBackThroughPseudoChain(source: string, i: number, callbacks: CobolH
     if (j >= 1 && source[j] === '=' && source[j - 1] === '=') {
       continue;
     }
-    // Check if the preceding word is BY; if so, skip it and continue the loop
+    // Check if the preceding word is BY; if so, skip it and continue the loop.
+    // Extend the backward scan across digits/underscore so identifiers like
+    // `BY1` or `MY_BY` are read in full (their full spelling is not `BY`); a
+    // non-ASCII Unicode letter just before the word means we are mid-identifier
+    // (e.g. `αBY`), so reject the match there too.
     const byEnd = j + 1;
     let byStart = j;
-    while (byStart >= 0 && /[a-zA-Z]/.test(source[byStart])) {
+    while (byStart >= 0 && /[a-zA-Z0-9_]/.test(source[byStart])) {
       byStart--;
+    }
+    if (byStart >= 0 && isUnicodeIdentifierChar(source[byStart])) {
+      break;
     }
     const byWord = source.slice(byStart + 1, byEnd).toUpperCase();
     if (byWord !== 'BY') {
@@ -445,13 +466,18 @@ export function isPrecededByKeyword(source: string, i: number, target: string, c
   if (j < 0) {
     return false;
   }
-  // Extract the preceding word
+  // Extract the preceding word. Walk across ASCII letters/digits/underscore so
+  // identifiers like `REPLACE5` / `MY_REPLACE` are read in full (their full
+  // spelling is not `REPLACE`); a non-ASCII Unicode letter just before the word
+  // means we are mid-identifier (e.g. `αREPLACE`), which is also not the bare
+  // keyword.
   const wordEnd = j + 1;
-  while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
+  while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) {
     j--;
   }
-  // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger data name)
-  if (j >= 0 && source[j] === '-') {
+  // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger
+  // data name) and Unicode-prefixed identifiers like αREPLACE.
+  if (j >= 0 && (source[j] === '-' || isUnicodeIdentifierChar(source[j]))) {
     return false;
   }
   const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
@@ -469,13 +495,18 @@ export function findPrecedingKeywordPosition(source: string, i: number, target: 
   if (j < 0) {
     return -1;
   }
-  // Extract the preceding word
+  // Extract the preceding word. Walk across ASCII letters/digits/underscore so
+  // identifiers like `REPLACING5` / `MY_REPLACING` are read in full (their full
+  // spelling is not `REPLACING`); a non-ASCII Unicode letter just before the
+  // word means we are mid-identifier (e.g. `αREPLACING`), which is also not the
+  // bare keyword.
   const wordEnd = j + 1;
-  while (j >= 0 && /[a-zA-Z]/.test(source[j])) {
+  while (j >= 0 && /[a-zA-Z0-9_]/.test(source[j])) {
     j--;
   }
-  // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger data name)
-  if (j >= 0 && source[j] === '-') {
+  // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger
+  // data name) and Unicode-prefixed identifiers like αREPLACING.
+  if (j >= 0 && (source[j] === '-' || isUnicodeIdentifierChar(source[j]))) {
     return -1;
   }
   const prevWord = source.slice(j + 1, wordEnd).toUpperCase();
@@ -694,14 +725,19 @@ export function isInPseudoTextContext(source: string, pos: number, callbacks: Co
   if (i >= 1 && source[i] === '=' && source[i - 1] === '=') {
     return isPrecededByReplacingOrReplace(source, i, callbacks);
   }
-  // Extract the word ending at position i
+  // Extract the word ending at position i. Walk across ASCII letters/digits/
+  // underscore so identifiers like `REPLACE5` / `MY_REPLACING` are read in
+  // full; a non-ASCII Unicode letter just before the word means we are
+  // mid-identifier (e.g. `αREPLACE`), so the word is part of a larger data
+  // name, not the bare keyword.
   const wordEnd = i + 1;
-  while (i >= 0 && /[a-zA-Z]/.test(source[i])) {
+  while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) {
     i--;
   }
   const word = source.slice(i + 1, wordEnd).toUpperCase();
-  // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a larger data name)
-  if (i >= 0 && source[i] === '-') {
+  // Reject hyphenated identifiers like MY-REPLACE, X-REPLACING (part of a
+  // larger data name) and Unicode-prefixed identifiers like αREPLACE.
+  if (i >= 0 && (source[i] === '-' || isUnicodeIdentifierChar(source[i]))) {
     return false;
   }
   // REPLACE (in REPLACE ==old== BY ==new==) - standalone statement
