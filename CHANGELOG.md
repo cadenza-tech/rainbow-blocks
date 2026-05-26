@@ -5,6 +5,67 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.59] - 2026-05-27
+
+### Fixed
+
+- Ada: Recognize Unicode line terminators in compound end designator lookahead bound
+- Ada: Recognize Unicode line terminators in compound end line-comment
+- Ada: Recognize Unicode line terminators in `isInsideParens` crossedNewline detection
+- Ada: Recognize Unicode line terminators in multi-line type-decl `is` filter
+- Ada: Reject `for` followed by non-identifier as block opener
+- Ada: Restrict `is` intermediate to `is`-valid openers in `matchBlocks`
+- AppleScript: Skip `tell`/`if`/`repeat` as right operand of `and`/`or`/`not`/`when`
+- Bash: Push separate subshell frame for bare `(` inside `$()`
+- Bash: Reject Unicode letter adjacency for `case`/`esac`/`in` keywords
+- Bash: Require separator after `case` keyword inside `$()`
+- Bash: Skip heredoc detection inside `[[ ]]` inside `$()`
+- Bash: Treat bare `((` inside `$()` as arithmetic evaluation
+- COBOL: Reject Unicode-letter-adjacent `COPY` matches
+- COBOL: Treat Unicode letters as identifier boundary in `REPLACE`/`REPLACING` context detection
+- Crystal: Handle missing `&` and `^` operators in receiver-like usage detection
+- Crystal: Skip newlines when detecting range operator around `end`
+- Crystal: Skip receiver-like keywords used as `case`/`when` pattern values
+- Elixir: Reject `end` as expression-RHS of assignment or binary operator
+- Elixir: Reject `end` followed by `(` or `.` as `block_close`
+- Elixir: Reject middle keyword right after closing quote
+- Erlang: Treat `@` as identifier continuation character in tokenizer
+- Fortran: Prevent O(N²) memory consumption in `matchBlocks` compound-end tracking
+- Fortran: Reject `associate` without parens as block opener
+- Fortran: Suppress block keyword tokenization in F77-style type declarations without `::`
+- Fortran: Treat numeric literal continuation before bare `end` as expression context
+- Julia: Reject `end` followed by incomplete postfix marker (`..`, `.<digit>`, `{T}`, `.`)
+- Julia: Skip intermediate keywords (`else`/`elseif`/`catch`/`finally`) inside brackets
+- MATLAB: Skip `end` followed by colon range outside for-header
+- MATLAB: Skip `end` preceded by closing quote or transpose operator
+- MATLAB: Skip stray `end` for bare section keyword and `arguments` outside their valid context
+- MATLAB: Skip stray `end` for empty-header block opener
+- Octave: Accept typed-close after middle keyword on same line
+- Octave: Detect `do` after condition keyword across line continuation
+- Octave: Recognize shell escape `!` after statement separators
+- Octave: Recognize `unwind_protect_cleanup` as middle keyword line leader
+- Octave: Reject `do` in multi-identifier condition header
+- Octave: Reject typed-close cell/bracket indexing assignment
+- Octave: Skip Unicode horizontal whitespace before line continuation
+- Pascal: Reject `else` in try block without preceding `except`
+- Pascal: Skip `case` as field name in record body
+- Pascal: Skip `case` missing `of` clause in record body
+- Pascal: Skip `case` used as function call in expression
+- Pascal: Skip `end` as field name in record body
+- Pascal: Skip `try`/`record`/`case`/`begin` used as lhs of `:=` assignment
+- Ruby: Detect `end` in expression position after value-like content
+- Ruby: Match quoted heredoc terminator with leading or trailing whitespace
+- Ruby: Recognize next-line `do` after loop keyword line without trailing comment
+- Ruby: Reject `elsif` as intermediate of `unless` block
+- Ruby: Skip trailing comment when detecting line continuation operator
+- Ruby: Treat first `<<` as shift when followed by comma-LtLt pattern
+- Verilog: Allow labeled `begin`/`fork` and end-label suffix inside `case_item` bodies
+- Verilog: Skip keywords used as paren-less `#identifier` or `@identifier` operand
+- Verilog: Suppress reserved word as `specparam` declaration identifier
+- VHDL: Recognize all reserved-word block openers as `entity_class` in `attribute_specification`
+- VHDL: Skip dot-prefixed `block_middle` keywords like `rec.then`
+- VHDL: Skip reserved-word `entity_designator` after `entity` keyword
+
 ## [1.1.58] - 2026-05-26
 
 ### Fixed
@@ -2330,6 +2391,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.59]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.58...v1.1.59
 [1.1.58]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.57...v1.1.58
 [1.1.57]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.56...v1.1.57
 [1.1.56]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.55...v1.1.56
