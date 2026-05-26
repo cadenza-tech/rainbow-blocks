@@ -4871,5 +4871,73 @@ end`;
     });
   });
 
+  suite('Regression: end after value-like expression on same line should not pair', () => {
+    test('should not pair def with stray end after parenthesized value (x = (1) end)', () => {
+      // Bug: `end` directly after `)` on the same line was not detected as expression
+      // position. The inner stray `end` was tokenized as block_close and mis-paired
+      // with the outer `def`, leaving the real outer `end` orphan.
+      const source = 'def foo\n  x = (1) end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after string literal at line start ("str" end)', () => {
+      const source = 'def m\n  "str" end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after backtick string at line start (`cmd` end)', () => {
+      const source = 'def m\n  `cmd` end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after numeric literal at line start (42 end)', () => {
+      const source = 'def m\n  42 end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after symbol literal at line start (:sym end)', () => {
+      const source = 'def m\n  :sym end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after percent literal at line start (%w[a b] end)', () => {
+      const source = 'def m\n  %w[a b] end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end after regex with flags at line start (/pat/i end)', () => {
+      const source = 'def foo\n  /pat/i end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still pair inline if-then-end with numeric value before end', () => {
+      // Cost-minimization: `if true then 1 else 2 end` is a legitimate inline expression.
+      // The value `2` before `end` must not cause filtering.
+      const source = 'x = a / if true then 1 else 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should still pair inline if-then-end with parenthesized value before end', () => {
+      const source = 'if cond then (1) end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
