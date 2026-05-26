@@ -6697,5 +6697,28 @@ fi`;
     });
   });
 
+  suite('Regression: case keyword followed by non-separator must not enter case scope inside $()', () => {
+    test('should not treat case+x as a case keyword inside $()', () => {
+      // `case+x` is the literal word `case+x` (no separator after `case`),
+      // not the `case` reserved keyword. Without the fix, the subshell frame
+      // entered case scope, the trailing `)` was treated as a case-pattern
+      // terminator, the subshell extended to EOF, and the following if/fi
+      // never appeared as block tokens.
+      const source = '$(case+x)\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should not treat case#tag as a case keyword inside $()', () => {
+      // `case#tag` fuses `case` with `#tag` as a single word (bash does not
+      // start a comment at `#` when no separator precedes it). Without the
+      // fix the case keyword was recognized and the subshell extended past
+      // the intended closer.
+      const source = '$(case#tag)\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 });
