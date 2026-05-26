@@ -781,15 +781,19 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (this.isFollowedByAssignment(source, position + keyword.length)) {
       return false;
     }
-    // Reject `end(<expr>) = <value>` / `until(<expr>) = <value>` indexing-assignment
-    // forms: the keyword here is a variable name being indexed and assigned (or
-    // field-assigned, `end(1).x = 5`), not a block close. Without this, the indexed
-    // keyword consumes an outer block opener and the trailing real close becomes orphan.
-    // Applies to bare `end` and `until` (the only closes that can syntactically be
-    // followed by `(`); other typed closes are already constrained by
-    // isAtStatementLeadingPosition and the trailing-token check below.
+    // Reject `<close>(<expr>) = <value>` / `<close>{...} = <value>` / `<close>[...] = <value>`
+    // indexing-assignment forms: the keyword here is a variable name being indexed and
+    // assigned (or field-assigned, `end(1).x = 5`), not a block close. Without this guard
+    // the indexed keyword consumes an outer block opener and the trailing real close
+    // becomes orphan. Applies to ALL Octave close keywords — bare `end`, `until`, and
+    // typed-close (endif / endfor / endwhile / endswitch / end_try_catch / endparfor /
+    // end_unwind_protect / endclassdef / endmethods / endproperties / endevents /
+    // endenumeration / endarguments / endspmd / endfunction). The `(`-after-typed-close
+    // guard below handles bare `endif(...)` function-call form (where the trailing `=` may
+    // be absent), but cannot detect cell/bracket indexing because `{`/`[` are valid
+    // Octave indexers that the function-call guard does not cover.
     const lowerKw = keyword.toLowerCase();
-    if ((lowerKw === 'end' || lowerKw === 'until') && this.isIndexingAssignment(keyword, source, position, excludedRegions)) {
+    if (this.isIndexingAssignment(keyword, source, position, excludedRegions)) {
       return false;
     }
     // Reject `end` appearing on the same logical line as a preceding `until` outside
