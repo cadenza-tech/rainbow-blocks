@@ -311,9 +311,15 @@ export class VhdlBlockParser extends BaseBlockParser {
     }
 
     // Reject entity_class keywords inside attribute_specification (LRM 7.2):
-    //   `attribute X of Y : <package|architecture|configuration|procedure|function|units|...> is <expr>;`
-    // The keyword is the entity_class, not a block opener.
-    // `view` is a VHDL-2019 entity_class (LRM 6.5.2.2): `attribute X of <name> : view is <expr>;`
+    //   `attribute X of Y : <entity_class> is <expr>;`
+    // The keyword is the entity_class, not a block opener. LRM 7.2 lists every entity_class
+    // name: entity, architecture, configuration, procedure, function, package, type, subtype,
+    // constant, signal, variable, component, label, literal, units, group, file. We list the
+    // reserved-word block openers among them (the rest are not VHDL block keywords). `view`
+    // is a VHDL-2019 entity_class (LRM 6.5.2.2). `process`, `block`, `generate`, `record`,
+    // `protected`, `context`, `loop` are also reserved words that can appear in the
+    // entity_class slot of malformed / editor-in-progress code; without rejecting them,
+    // they would absorb the enclosing architecture's `begin` into their (orphan) intermediates.
     const entityClassKeywords = new Set([
       'package',
       'architecture',
@@ -323,7 +329,14 @@ export class VhdlBlockParser extends BaseBlockParser {
       'units',
       'component',
       'entity',
-      'view'
+      'view',
+      'process',
+      'block',
+      'generate',
+      'record',
+      'protected',
+      'context',
+      'loop'
     ]);
     if (entityClassKeywords.has(lowerKeyword) && this.isInAttributeSpecification(source, position, excludedRegions)) {
       return false;
