@@ -3661,11 +3661,16 @@ end`;
   });
 
   suite('Regression: && operator should not trigger & capture filter', () => {
-    test('should not filter end adjacent to && operator', () => {
-      // &&end: the second & of && should not trigger the capture operator filter
+    test('should filter end adjacent to && operator as expression-RHS (not via & capture filter)', () => {
+      // x &&end: the second & of && does not trigger the single-& capture operator filter
+      // (which only fires when the prev char is `&` AND prev-prev is not `&`). However, the
+      // expression-RHS filter on isValidBlockClose correctly rejects `end` here because `&`
+      // is in EXPRESSION_OPERATOR_LEAD_CHARS (the `end` is the RHS operand of the `&&` binary
+      // operator). Symmetric with the block_middle RHS filter (e.g. `x && else`). The `&&`
+      // guard on the capture filter is verified by the rescue clause case below.
       const tokens = parser.getTokens('x &&end');
       const endTokens = tokens.filter((t) => t.value === 'end');
-      assert.strictEqual(endTokens.length, 1, 'end after && should not be filtered');
+      assert.strictEqual(endTokens.length, 0, 'end as expression-RHS of && is filtered by the RHS check');
     });
 
     test('should not filter else adjacent to && operator via the & capture filter', () => {
@@ -5165,6 +5170,42 @@ end`;
       const source = 'if fn(x) # comment\ndo\n  body\nend';
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
+  suite('Bug: end as RHS of assignment or binary operator should not be block_close', () => {
+    // When `end` appears as the right-hand side of `=` or a binary operator (+, -, *, /, etc.),
+    // it is an identifier in expression position, not a block close. Without this guard, the
+    // inner `end` greedily pairs with the surrounding opener and orphans the real outer `end`.
+    // Symmetric with the existing block_middle filter that rejects `else`/`rescue`/`catch`/`after`
+    // as expression-RHS operands (Bug: middle keyword as binary operator RHS).
+    test('should not treat end as block_close when used as RHS of assignment (x = end)', () => {
+      const source = 'def foo do\n  x = end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // The closing `end` is the outer one at the end of source.
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of binary operator (a + end)', () => {
+      const source = 'def foo do\n  x = a + end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of pipe operator (x |> end)', () => {
+      const source = 'def foo do\n  y = x |> end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of minus operator (a - end)', () => {
+      const source = 'def foo do\n  x = a - end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
     });
   });
 
