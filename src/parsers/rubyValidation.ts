@@ -569,31 +569,58 @@ function prevLineEndsWithComment(
   return source[region.start] === '#';
 }
 
+// Returns true when the logical line starting at `logicalLineStart` begins with a Ruby
+// loop keyword (`while`, `until`, `for`) followed by a word boundary. Used to recognise
+// next-line `do` separators in forms like `while x\ndo\n  body\nend`, where Ruby's
+// strict grammar rejects the form but best-effort parsing still pairs `while`/`end`
+// rather than mis-pairing the bare `do` with a later `end`.
+function logicalLineStartsWithLoopKeyword(source: string, logicalLineStart: number): boolean {
+  let i = logicalLineStart;
+  while (i < source.length && (source[i] === ' ' || source[i] === '\t')) {
+    i++;
+  }
+  for (const kw of ['while', 'until', 'for'] as const) {
+    if (source.slice(i, i + kw.length) === kw) {
+      const after = source[i + kw.length];
+      if (after === undefined || !/[a-zA-Z0-9_]/.test(after)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
 export function isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[], callbacks: RubyValidationCallbacks): boolean {
   // Find logical line start (following backslash continuations)
   let lineStart = findLogicalLineStart(source, position, excludedRegions, callbacks);
 
   // If `do` is the first non-whitespace token on its physical line and the previous
-  // physical line ends with a comment (and is not itself blank), pretend the comment
-  // is whitespace and join the previous line. Ruby's strict grammar rejects this form
-  // (`while cond # comment\ndo\nbody\nend`), but typing this is a common mistake and
-  // recognising the loop-do here lets `while` pair correctly with `end` rather than
-  // creating a misleading `do`/`end` pair that hides the `while` orphan.
+  // physical line either (a) ends with a comment, or (b) is a loop statement (starts
+  // with `while`/`until`/`for`), pretend the newline is whitespace and join the
+  // previous line. Ruby's strict grammar rejects these forms (`while cond\ndo\nbody\nend`
+  // and `while cond # comment\ndo\nbody\nend`), but typing them is a common mistake;
+  // recognising the loop-do here lets `while`/`until`/`for` pair correctly with `end`
+  // rather than creating a misleading `do`/`end` pair that hides the loop orphan.
   if (isDoFirstOnPhysicalLine(source, position, lineStart) && lineStart > 0) {
     const prevLineEnd = lineStart - 1; // points at \n or \r before the do line
     let prevContentEnd = prevLineEnd;
     if (source[prevLineEnd] === '\n' && prevLineEnd > 0 && source[prevLineEnd - 1] === '\r') {
       prevContentEnd = prevLineEnd - 1;
     }
-    // The previous line must end with a comment (`# ...`) at its tail to qualify.
-    if (prevLineEndsWithComment(source, prevContentEnd, excludedRegions, callbacks)) {
-      // Recompute logical line start from the previous line.
-      let prevPhysicalLineStart = prevContentEnd;
-      while (prevPhysicalLineStart > 0 && source[prevPhysicalLineStart - 1] !== '\n' && source[prevPhysicalLineStart - 1] !== '\r') {
-        prevPhysicalLineStart--;
-      }
-      lineStart = findLogicalLineStart(source, prevPhysicalLineStart, excludedRegions, callbacks);
+    // Find the start of the previous physical line and its logical line start.
+    let prevPhysicalLineStart = prevContentEnd;
+    while (prevPhysicalLineStart > 0 && source[prevPhysicalLineStart - 1] !== '\n' && source[prevPhysicalLineStart - 1] !== '\r') {
+      prevPhysicalLineStart--;
+    }
+    const prevLogicalLineStart = findLogicalLineStart(source, prevPhysicalLineStart, excludedRegions, callbacks);
+    // Join the previous line when its tail is a comment OR the logical line begins
+    // with a loop keyword (`while x`, `until y`, `for i in xs`, ...).
+    if (
+      prevLineEndsWithComment(source, prevContentEnd, excludedRegions, callbacks) ||
+      logicalLineStartsWithLoopKeyword(source, prevLogicalLineStart)
+    ) {
+      lineStart = prevLogicalLineStart;
     }
   }
 
