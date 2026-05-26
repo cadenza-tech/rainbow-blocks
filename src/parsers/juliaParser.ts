@@ -182,19 +182,72 @@ export class JuliaBlockParser extends BaseBlockParser {
       return true;
     });
 
+    // Drop block_middle tokens (else/elseif/catch/finally) that appear inside a bracket
+    // group with no matching block_open inside the same bracket. Without this filter, an
+    // (invalid) identifier-like use such as `call(elseif)` or `arr[else]` attaches the
+    // keyword to whatever block_open is on the matchBlocks stack (the surrounding if/try),
+    // mis-coloring it as an intermediate of the outer block. Legitimate block-form usage
+    // like `(if true 1 else 2 end)` keeps both the opener and the intermediate inside the
+    // same bracket, so the intermediate is preserved.
+    const bracketIndex = this.getBracketIndex(source, excludedRegions);
+    const filteredBracketAware = filtered.filter((token) => {
+      if (token.type !== 'block_middle') return true;
+      const enclosing = bracketIndex.enclosing(token.startOffset);
+      if (enclosing === null) return true;
+      const matchingOpener = this.getIntermediateOpenerKeyword(token.value);
+      if (matchingOpener === null) return true;
+      return this.hasMatchingOpenerInsideBracket(filtered, token, enclosing.open, enclosing.close, matchingOpener);
+    });
+
     // Record block_close `end` tokens followed by a binary operator (e.g. `end + 1`).
     // These stay block_close candidates but are only used by matchBlocks to rescue an
     // otherwise-unmatched opener (see tentativeCloseOffsets). Indexing-bracket `end`s
     // (lastindex) are already filtered out by isValidBlockClose, so any block_close `end`
     // reaching here that is followed by an operator is an outside-brackets block terminator.
     this.tentativeCloseOffsets = new Set<number>();
-    for (const token of filtered) {
+    for (const token of filteredBracketAware) {
       if (token.type === 'block_close' && this.isFollowedByBinaryOperator(source, token.startOffset, excludedRegions)) {
         this.tentativeCloseOffsets.add(token.startOffset);
       }
     }
 
-    return filtered;
+    return filteredBracketAware;
+  }
+
+  // Returns the block-open keyword that the given intermediate keyword can attach to,
+  // matching the constraint in isIntermediateValidForOpener. `null` for unknown intermediates.
+  // else/elseif → 'if' (else also attaches to 'try' but the bracket-content check below
+  // accepts EITHER 'if' or 'try' for 'else', so this returns 'if' as the primary opener).
+  private getIntermediateOpenerKeyword(intermediate: string): string | null {
+    if (intermediate === 'elseif') return 'if';
+    if (intermediate === 'else') return 'if';
+    if (intermediate === 'catch' || intermediate === 'finally') return 'try';
+    return null;
+  }
+
+  // Returns true if there is at least one block_open token inside the bracket range
+  // (`bracketOpen` < token.startOffset < bracketClose) whose value matches `openerKeyword`.
+  // `else` is treated as compatible with both 'if' and 'try' (Julia 1.8+ try/catch/else).
+  private hasMatchingOpenerInsideBracket(
+    tokens: Token[],
+    middleToken: Token,
+    bracketOpen: number,
+    bracketClose: number,
+    openerKeyword: string
+  ): boolean {
+    // bracketClose === -1 means the bracket is unclosed; treat the range as open-ended
+    // to the end of the source so a block_open before the middle inside an unclosed
+    // bracket still rescues the intermediate.
+    const upperBound = bracketClose === -1 ? Number.POSITIVE_INFINITY : bracketClose;
+    for (const t of tokens) {
+      if (t.startOffset <= bracketOpen) continue;
+      if (t.startOffset >= upperBound) break;
+      if (t.type !== 'block_open') continue;
+      if (t.value === openerKeyword) return true;
+      // `else` may follow `try` as well as `if` (Julia 1.8+).
+      if (middleToken.value === 'else' && t.value === 'try') return true;
+    }
+    return false;
   }
 
   // Pairs blocks with context-aware intermediate handling: catch/finally only attach to
