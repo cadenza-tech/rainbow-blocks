@@ -6210,5 +6210,42 @@ end program`;
     });
   });
 
+  suite('Regression 2026-05-26: associate without parens is not a block opener', () => {
+    test('should reject `associate name => obj%val` without parens', () => {
+      // Pre-fix bug: `isValidBlockOpen` for `associate` only rejected empty parens
+      // (`associate ()`) but accepted *no* parens, so a malformed `associate name => expr`
+      // statement (no enclosing `(...)`) was tokenized as an associate block opener.
+      // The `end associate` then paired with this phantom opener, leaving the enclosing
+      // subroutine without a matching close (because the `end subroutine` was consumed
+      // as the final pair).
+      // Fortran 2003: `associate (name => expr [, name => expr]*)`. Without the leading
+      // `(` the statement is invalid syntax, so the opener must be rejected so the
+      // matching `end associate` becomes an orphan rather than a crossed pair.
+      const source = `subroutine test
+  associate name => obj%val
+    x = 5
+  end associate
+end subroutine`;
+      const pairs = parser.parse(source);
+      // Expect a single `subroutine ... end subroutine` pair. The malformed associate
+      // line must not produce a block opener, and the stray `end associate` becomes an
+      // orphan with no matching block (no BlockPair generated).
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should accept valid `associate (name => expr)` with parens', () => {
+      // Sanity check: the valid parenthesized form remains a block opener.
+      const source = `subroutine test
+  associate (name => obj%val)
+    x = 5
+  end associate
+end subroutine`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const associatePair = findBlock(pairs, 'associate');
+      assert.strictEqual(associatePair.closeKeyword.value.toLowerCase(), 'end associate');
+    });
+  });
+
   generateCommonTests(config);
 });
