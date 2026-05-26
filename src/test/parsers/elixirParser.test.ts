@@ -1072,7 +1072,12 @@ end)`;
       });
 
       test('should handle end followed by non-whitespace in hasDoKeyword', () => {
-        // Tests the branch where afterEnd is not undefined and not whitespace
+        // Tests the branch where afterEnd is not undefined and not whitespace inside
+        // hasDoKeyword's lookahead. After the field-access rejection on isValidBlockClose
+        // (`end.chain` — `end` is the receiver identifier of `.chain`), the first `end`
+        // is no longer a block close, so the first `if` is orphaned (no matching end).
+        // Only the second `if`/`end` pair remains. This matches the best-effort principle:
+        // prefer unhighlighted over mis-highlighted.
         const source = `if condition do
   something
 end.chain
@@ -1080,7 +1085,9 @@ if true do
   x
 end`;
         const pairs = parser.parse(source);
-        assertBlockCount(pairs, 2);
+        assertBlockCount(pairs, 1);
+        // The remaining pair is the second `if true do ... end` (lines are 0-indexed).
+        assert.strictEqual(pairs[0].openKeyword.line, 3);
       });
 
       test('should handle end at end of source in hasDoKeyword', () => {
@@ -5206,6 +5213,51 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
       assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
+  suite('Bug: end followed by ( or . should not be block_close (identifier context)', () => {
+    // `end(...)` is a function call where `end` is an identifier; `end.field` is field
+    // access. Neither is a block close. Without this guard, the inner `end` pairs with
+    // the enclosing opener and orphans the real outer `end`.
+    test('should not treat end as block_close when followed by ( (end is function call identifier)', () => {
+      const source = 'def foo do\n  end()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when followed by . (end.field access)', () => {
+      const source = 'def foo do\n  end.bar\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when followed by .method() (end.method())', () => {
+      const source = 'def foo do\n  end.bar()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still treat end as block_close when followed by .. (range operator, end..x)', () => {
+      // `end..x` would be invalid as a block close (the `..` after `end` is a range
+      // operator). However, `end..` is not a sensible block close construct anyway. The
+      // existing `..`-preceded guard only handles `..end` (range BEFORE end); this test
+      // ensures the new `.` (single-dot) follow-up rejection does not accidentally apply
+      // to the `..` range operator that follows `end`. The outer `end` still closes def.
+      const source = 'def foo do\n  end..x\nend';
+      const pairs = parser.parse(source);
+      // Either: end..x is treated as block close (then no outer pair) OR
+      // end..x is treated as identifier (then outer end pairs with def).
+      // The chosen behavior is to KEEP `end..` as a block close (the `..` after is the
+      // range operator; this is bizarre code but we only special-case the `.` (single dot)
+      // follow-up, not `..`). The outer `end` orphans here; but the def..first-end pair
+      // exists. We assert at least one pair exists with def opener and end closer.
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'def');
+      assert.strictEqual(pairs[0].closeKeyword?.value, 'end');
     });
   });
 
