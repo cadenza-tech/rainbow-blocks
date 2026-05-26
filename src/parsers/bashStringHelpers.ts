@@ -204,6 +204,21 @@ function isWordUsedAsAssignmentOrFunction(source: string, pos: number, wordLen: 
   return p < source.length && source[p] === '(';
 }
 
+// Returns true when the character at `pos` is a POSIX shell command separator
+// that can terminate the `case` reserved word before its subject. `case` must be
+// followed by whitespace, newline, or a separator like `;`/`|`/`&` because the
+// subject word comes next (`case WORD in ...`). Anything else (`)`, `+`, `#`,
+// identifier characters, etc.) means `case` is fused with the following text as
+// a single word, not the keyword. Used to keep the subshell scanner from
+// entering case scope for malformed inputs like `$(case+x)`, `$(case#tag)`,
+// `$(case)` where the trailing `)` would otherwise be misread as a case-pattern
+// terminator and the subshell extended past its intended closer.
+function isCaseSubjectSeparator(source: string, pos: number): boolean {
+  if (pos >= source.length) return false;
+  const ch = source[pos];
+  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === ';' || ch === '|' || ch === '&';
+}
+
 // Returns true when the position is immediately preceded (after whitespace) by the bare `in` keyword.
 // In bash case statements, the syntax `case word in [pattern_list] esac` allows an empty pattern list,
 // so `esac` may appear directly after `in` without an intervening separator.
@@ -287,11 +302,15 @@ function stepSubshellFrame(source: string, i: number, frame: ScanFrame): Subshel
   // Only match case at command position (not as argument like `echo case`).
   // Reject when used as a variable name (case=val), array (case[i]=val), augmented
   // assignment (case+=val), or function definition (case() {...}).
+  // Also require the character immediately after `case` to be a command separator,
+  // so word-fused forms like `case+x`, `case#tag`, and `case)` (no subject word)
+  // do not enter case scope and trap the subshell's closing `)`.
   if (
     !(i > 0 && source[i - 1] === '$') &&
     matchesWord(source, i, 'case') &&
     !isWordUsedAsAssignmentOrFunction(source, i, 4) &&
-    isAtSubshellCommandPosition(source, i)
+    isAtSubshellCommandPosition(source, i) &&
+    isCaseSubjectSeparator(source, i + 4)
   ) {
     frame.caseDepth++;
     return { nextPos: i + 4 };
