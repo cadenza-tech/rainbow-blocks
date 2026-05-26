@@ -371,6 +371,45 @@ export class AdaBlockParser extends BaseBlockParser {
     return 0;
   }
 
+  // Steps `scanPos` past the line terminator that ends a previous line so
+  // the next backward-scan iteration lands on the last character of that
+  // previous line. Recognizes the full Ada LRM 2.2 line terminator set
+  // (LF, CR, NEL U+0085, LS U+2028, PS U+2029) plus the CRLF pair, matching
+  // findLineStart and buildNewlinePositions. The type-decl `is` filter
+  // relies on this to walk across NEL/LS/PS-separated lines; before this
+  // helper existed the decrement only matched `\n`/`\r`, so a source
+  // separated by NEL/LS/PS got stuck on the terminator (scanPos unchanged
+  // across iterations) and the backward scan never reached the `type`
+  // keyword across blank lines or a type-name-on-its-own-line layout.
+  private skipPreviousLineTerminator(source: string, scanPos: number): number {
+    if (scanPos < 0) return scanPos;
+    // CRLF: consume both characters as a single line terminator.
+    if (scanPos >= 1 && source[scanPos] === '\n' && source[scanPos - 1] === '\r') {
+      return scanPos - 2;
+    }
+    const code = source.charCodeAt(scanPos);
+    if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) {
+      return scanPos - 1;
+    }
+    return scanPos;
+  }
+
+  // Lowercases the slice `source[start..end)` and removes any leading Ada
+  // whitespace (LRM 2.1: ASCII space/tab/CR/LF/VT/FF, NEL, NBSP, LS/PS, and
+  // the Zs category). The type-decl `is` filter uses this to obtain the
+  // logical content of a previous line: `String.prototype.trimStart()` does
+  // not strip U+0085 (NEL), so a line consisting of one or more NELs would
+  // be classified as non-empty by the naive `slice().trimStart()` and trip
+  // the "stop at non-type-decl line" guard before the backward scan could
+  // reach the actual `type` keyword.
+  private trimStartAdaLower(source: string, start: number, end: number): string {
+    let i = start;
+    while (i < end && isAdaWhitespace(source[i])) {
+      i++;
+    }
+    return source.slice(i, end).toLowerCase();
+  }
+
   // Override tokenize to handle compound end keywords and case insensitivity
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Find all compound end keywords and their positions
@@ -711,9 +750,8 @@ export class AdaBlockParser extends BaseBlockParser {
         const hasUnmatchedCloseParen = lineParenDepth < 0;
         if (lineBefore.length === 0 || /^\(.*\)\s*$/.test(lineBefore) || hasUnmatchedCloseParen) {
           let scanPos = lineStart - 1;
-          // Skip line terminator (\n, \r\n, or \r)
-          if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-          if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+          // Skip line terminator (Ada LRM 2.2: LF, CR, CRLF, NEL, LS, PS).
+          scanPos = this.skipPreviousLineTerminator(source, scanPos);
           let isTypeDecl = false;
           let typeDeclStart = -1;
           // Track paren depth for multi-line discriminant lists
@@ -721,16 +759,14 @@ export class AdaBlockParser extends BaseBlockParser {
           let scanParenDepth = hasUnmatchedCloseParen ? -lineParenDepth : 0;
           while (scanPos >= 0) {
             const prevStart = this.findLineStart(source, scanPos);
-            const prevLine = source
-              .slice(prevStart, scanPos + 1)
-              .toLowerCase()
-              .trimStart();
+            // trimStartAdaLower also strips U+0085 (NEL), which JS
+            // `trimStart()` does not, so a line consisting only of NEL
+            // characters is correctly classified as empty.
+            const prevLine = this.trimStartAdaLower(source, prevStart, scanPos + 1);
             if (prevLine.length > 0) {
               // Skip comment lines (starting with --)
               if (/^--/.test(prevLine)) {
-                scanPos = prevStart - 1;
-                if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-                if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
                 continue;
               }
               // Track paren depth for multi-line discriminant lists
@@ -770,9 +806,7 @@ export class AdaBlockParser extends BaseBlockParser {
                     const checkLineStart = this.findLineStart(source, checkEnd);
                     const checkToken = this.stripExcludedRegions(source, checkLineStart, checkEnd, excludedRegions).toLowerCase().trimEnd();
                     if (/\b(?:protected|task)$/.test(checkToken)) {
-                      scanPos = prevStart - 1;
-                      if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-                      if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                      scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
                       continue;
                     }
                   }
@@ -801,23 +835,17 @@ export class AdaBlockParser extends BaseBlockParser {
               if (!isTypeDecl && scanParenDepth <= 0 && !/^\(/.test(prevLine)) {
                 // Allow one extra line if this line is just an identifier (type name)
                 if (/^[a-zA-Z_][a-zA-Z0-9_]*[ \t]*$/.test(prevLine)) {
-                  scanPos = prevStart - 1;
-                  if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-                  if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+                  scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
                   continue;
                 }
                 break;
               }
-              scanPos = prevStart - 1;
-              if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-              if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+              scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
               if (isTypeDecl) break;
               continue;
             }
             // Move past line terminator to previous line
-            scanPos = prevStart - 1;
-            if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
-            if (scanPos >= 0 && source[scanPos] === '\r') scanPos--;
+            scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
           }
           // Only skip if no ';' or new declaration keyword between type/subtype and this 'is'
           // Track parenthesis depth so semicolons inside discriminant parts are ignored
