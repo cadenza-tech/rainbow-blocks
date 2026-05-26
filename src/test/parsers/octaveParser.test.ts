@@ -2835,6 +2835,27 @@ end`;
     });
   });
 
+  suite('Regression: shell escape ! after statement separators', () => {
+    test('should treat ! as shell escape after ;', () => {
+      // After `;` the `!` starts a shell escape that consumes the rest of the line,
+      // so the `if true` text after `!ls` is inside the shell escape (excluded). The
+      // outer `if` at offset 0 should pair with the `end` at the bottom. Without this
+      // fix the `!` is not recognised as shell escape and the inner `if true` opens a
+      // spurious inner block that consumes the `end`, leaving the outer `if` orphan.
+      const source = 'if x\n  y = 1; !ls if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer if (offset 0) must pair with the end');
+    });
+
+    test('should treat ! as shell escape after ,', () => {
+      const source = 'if x\n  y = 1, !ls if true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0, 'outer if (offset 0) must pair with the end');
+    });
+  });
+
   suite('Regression: unwind_protect_cleanup as middle keyword line leader', () => {
     test('should pair unwind_protect/end when unwind_protect_cleanup is followed by end on the same line', () => {
       // `unwind_protect_cleanup end` is the "middle keyword followed by close on the
