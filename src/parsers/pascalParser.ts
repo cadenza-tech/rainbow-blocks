@@ -466,6 +466,43 @@ export class PascalBlockParser extends BaseBlockParser {
     if ((keyword === 'until' || keyword === 'end') && this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
       return false;
     }
+    // Field declaration: `end: Integer;` inside a record uses `end` as a field name,
+    // not the block-close keyword. Detect `end:` (followed by ':' that is not ':=')
+    // and reject the close. The case-label check above only matches when the backward
+    // token is `of`/`;`/`,`; a record-body field declaration is reached via a newline
+    // after the prior field declaration (or right after `record`), so it does not
+    // satisfy the case-label backward boundary. A general "`end:` is never a block
+    // close" rule is safe because Pascal grammar has no construct where the block-close
+    // `end` is immediately followed by a `:`.
+    if (keyword === 'end' && this.isFollowedByColonNotAssign(source, position + 3, excludedRegions)) {
+      return false;
+    }
+    return true;
+  }
+
+  // Returns true when the first non-whitespace, non-comment character at or after `from`
+  // is a `:` that is not part of a `:=` assignment operator. Used to detect `end:` field
+  // declarations and `case:` labels where the keyword names a record field rather than a
+  // block boundary.
+  private isFollowedByColonNotAssign(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = from;
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (j >= source.length || source[j] !== ':') return false;
+    // `:=` is the assignment operator, not a field/label colon
+    if (j + 1 < source.length && source[j + 1] === '=') return false;
     return true;
   }
 
