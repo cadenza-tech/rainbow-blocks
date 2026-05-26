@@ -573,7 +573,12 @@ export function isVariantRecordCase(
   if (k + 2 <= source.length && /^of\b/i.test(source.slice(k, k + 3))) {
     return isVariantCase(source, position, excludedRegions, callbacks);
   }
-  return false;
+  // Malformed variant case missing the `of` clause: `case Tag` followed by neither
+  // ':' nor 'of'. Inside a record this is not a standalone block opener (a record's
+  // `case` never has its own matching `end`), so reject the keyword as a block opener.
+  // Without this guard the `case` is pushed and the surrounding `record`'s `end`
+  // closes `case` instead, leaving the record orphan.
+  return true;
 }
 
 // Returns true when the parentheses opening at `openParen` enclose a variant-record field
