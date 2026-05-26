@@ -3872,5 +3872,37 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: case used as function call inside expression', () => {
+    test('should not treat `if case(x) then ...` case as block opener', () => {
+      // `if case(x) then writeln;` uses `case` as a function-call identifier inside
+      // the boolean expression of an `if`. Without an expression-context guard the
+      // `case` is pushed onto the stack and the trailing `end` closes `case` instead
+      // of `begin`, leaving the surrounding `begin` orphan.
+      const source = `begin
+  if case(x) then writeln;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` used as function call in expression must not produce a block pair');
+    });
+
+    test('should not treat `while case(x) do ...` case as block opener', () => {
+      // Same issue with `while`: `case(x)` is a function call inside the while
+      // expression, not a case statement.
+      const source = `begin
+  while case(x) do writeln;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` used as function call in expression must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
