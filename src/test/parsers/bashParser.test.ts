@@ -6736,5 +6736,21 @@ fi`;
     });
   });
 
+  suite('Regression: nested ( ... ) inside $() must not share case scope', () => {
+    test('should not let inner case scope leak into outer subshell scope', () => {
+      // `$( (case x in a) echo;; esac) for i in 1; do echo; done )` puts the
+      // for/done loop inside the outer subshell. The inner subshell
+      // `(case ... esac)` opens its own case scope. Without the fix, the
+      // outer subshell frame's caseDepth was shared with the nested paren
+      // group, so its closing `)` at the inner subshell boundary was
+      // misread as a case-pattern terminator and the outer region ended
+      // too early, exposing the for/done loop as a parsed pair instead of
+      // keeping it inside the excluded region.
+      const source = '$( (case x in a) echo;; esac) for i in 1; do echo; done )';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
