@@ -53,6 +53,19 @@ export class PascalBlockParser extends BaseBlockParser {
         return false;
       }
     }
+    // Keyword used as left-hand-side of `:=` assignment: `try := 5;`, `record := 5;`,
+    // `case := 5;`, `begin := 5;`. Without this guard the keyword is pushed onto the
+    // stack and the surrounding `end` closes it instead of the real enclosing block,
+    // leaving the outer block orphan. The `asm` keyword already has its own forward
+    // check earlier; the `repeat` keyword's lhs use does not corrupt the BlockPair
+    // set (no matching `until` follows), so it is not listed here.
+    if (
+      (keyword === 'try' || keyword === 'record' || keyword === 'case' || keyword === 'begin') &&
+      this.isFollowedByAssignment(source, position + keyword.length, excludedRegions)
+    ) {
+      return false;
+    }
+
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
@@ -478,6 +491,29 @@ export class PascalBlockParser extends BaseBlockParser {
       return false;
     }
     return true;
+  }
+
+  // Returns true when the first non-whitespace, non-comment characters at or after `from`
+  // form a `:=` assignment operator. Used to detect a keyword used as the left-hand-side
+  // of an assignment (e.g. `try := 5`, `case := 5`) where the keyword names a variable
+  // identifier rather than opening a block.
+  private isFollowedByAssignment(source: string, from: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = from;
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    return j + 1 < source.length && source[j] === ':' && source[j + 1] === '=';
   }
 
   // Returns true when the first non-whitespace, non-comment character at or after `from`
