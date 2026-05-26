@@ -4552,5 +4552,37 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-26: dot-prefixed block_middle keywords should not be tokenized', () => {
+    // `rec.then` / `rec.is` / `rec.else` etc. are record member accesses, NOT block intermediates.
+    // Without the dot-check applied to block_middle keywords in tokenize, the trailing word
+    // gets added to the enclosing block's intermediates (e.g., `then` appears twice in the
+    // `if` block's intermediates because `rec.then` is incorrectly added as a second `then`).
+    test('should not add dot-prefixed then to enclosing if intermediates', () => {
+      const source = 'if x then\n  v := rec.then;\nend if;';
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenCount = ifBlock.intermediates.filter((t) => t.value.toLowerCase() === 'then').length;
+      assert.strictEqual(thenCount, 1, 'if block should have exactly one then intermediate');
+    });
+
+    test('should not add dot-prefixed else to enclosing if intermediates', () => {
+      const source = 'if x then\n  v := rec.else;\nelse\n  null;\nend if;';
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const elseCount = ifBlock.intermediates.filter((t) => t.value.toLowerCase() === 'else').length;
+      assert.strictEqual(elseCount, 1, 'if block should have exactly one else intermediate');
+    });
+
+    test('should not add dot-prefixed when to enclosing case intermediates', () => {
+      const source =
+        'architecture a of b is\nbegin\nprocess\nbegin\n  case sel is\n    when 0 => v := rec.when;\n    when others => null;\n  end case;\nend process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const casePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(casePair, 'case should be paired');
+      const whenCount = casePair.intermediates.filter((t) => t.value.toLowerCase() === 'when').length;
+      assert.strictEqual(whenCount, 2, 'case block should have exactly two when intermediates (not three)');
+    });
+  });
+
   generateCommonTests(config);
 });
