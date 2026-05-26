@@ -2394,17 +2394,22 @@ end if;`;
   });
 
   suite('Coverage: isValidForOpen non-identifier after for', () => {
-    test('should treat for followed by non-identifier as valid block open', () => {
-      // Covers adaValidation.ts lines 188-189: isValidForOpen returns true
-      // when for is not followed by an identifier (e.g., followed by a number)
+    test('should reject for followed by non-identifier (e.g., a digit)', () => {
+      // After the for-not-followed-by-identifier fix, a `for` followed by
+      // a digit is rejected as a block opener entirely (it cannot be a
+      // valid Ada `for ... loop` header or `for ... use ...` clause).
+      // No pair is generated either way: previously the `for` was tracked
+      // as a pseudo opener with no matching `end`; now it is filtered out
+      // at tokenize time.
       const source = 'for 123';
       const pairs = parser.parse(source);
-      // for is treated as valid block open but has no matching end
       assertNoBlocks(pairs);
     });
 
     test('should treat for at end of source as valid block open', () => {
-      // Covers adaValidation.ts lines 188-189: i >= source.length branch
+      // Covers the `i >= source.length` branch: a `for` at EOF is treated
+      // as still being typed (the user has not yet entered the loop
+      // variable), so it remains a valid block opener candidate.
       const source = 'for';
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
@@ -4268,6 +4273,43 @@ end if;`;
       const innerIf = pairs.find((p) => p.openKeyword.startOffset === 12);
       assert.ok(innerIf, 'inner if B should be paired');
       assert.strictEqual(innerIf.closeKeyword.value.toLowerCase(), 'end');
+    });
+  });
+
+  suite('Regression: isValidForOpen rejects for followed by non-identifier (mid-edit)', () => {
+    // A valid Ada `for` keyword is always followed by an identifier (loop
+    // header `for I in ...`, representation clause `for T use ...`). If
+    // the next non-whitespace token is anything else — a digit, a `;`,
+    // an operator, etc. — the `for` is mid-edit junk and must not be
+    // accepted as a block opener. The existing guard handled `for (`
+    // (paren) but otherwise returned `true` whenever the next character
+    // was non-identifier, leaving a stray `for 123;` as a phantom block
+    // opener that orphaned the enclosing subprogram's `procedure`/`end`
+    // pair.
+    test('should not treat for followed by digit as block opener', () => {
+      const source = 'procedure P is\n  for 123;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      // Expect a single procedure/end P pair (the stray `for 123;` does
+      // not create a phantom block opener).
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat for followed by semicolon as block opener', () => {
+      const source = 'procedure P is\n  for;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should not treat for followed by operator as block opener', () => {
+      const source = 'procedure P is\n  for + 1;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should still accept for followed by valid loop header', () => {
+      const source = 'for I in 1..10 loop\n  null;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
     });
   });
 
