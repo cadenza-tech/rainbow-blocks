@@ -2835,6 +2835,40 @@ end`;
     });
   });
 
+  suite('Regression: typed-close after middle keyword on same line', () => {
+    test('should pair if/endif when else is followed by endif on the same line', () => {
+      // Mirrors `if x\nelse end` for the typed-close form. Without the fix, the parent's
+      // typed-close statement-leading check rejects `endif` because the immediately
+      // preceding non-whitespace character is the identifier-letter `e` of `else`,
+      // destroying the if/endif pairing.
+      const source = 'if x\nelse endif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should pair switch/endswitch when otherwise is followed by endswitch on the same line', () => {
+      const source = 'switch x\ncase 1\n  body\notherwise endswitch';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'endswitch');
+      assertIntermediates(pairs[0], ['case', 'otherwise']);
+    });
+
+    test('should pair try/end_try_catch when catch is followed by end_try_catch on the same line', () => {
+      const source = 'try\n  body;\ncatch end_try_catch';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end_try_catch');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should pair unwind_protect/end_unwind_protect when unwind_protect_cleanup is followed by end_unwind_protect on the same line', () => {
+      const source = 'unwind_protect\n  body;\nunwind_protect_cleanup end_unwind_protect';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unwind_protect', 'end_unwind_protect');
+      assertIntermediates(pairs[0], ['unwind_protect_cleanup']);
+    });
+  });
+
   suite('Regression: shell escape ! after statement separators', () => {
     test('should treat ! as shell escape after ;', () => {
       // After `;` the `!` starts a shell escape that consumes the rest of the line,
