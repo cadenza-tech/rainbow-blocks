@@ -69,15 +69,25 @@ const COMPOUND_END_SEPARATOR_CHARS = ' \\t\\v\\f\\r\\n\\u0085\\u00A0\\u1680\\u20
 
 // Pattern to match compound end keywords (case insensitive)
 // Allows whitespace, newlines, and -- line comments between 'end' and the type keyword.
+// The line-comment alternative must use the full Ada LRM 2.2 line terminator
+// set (LF, CR, NEL U+0085, LS U+2028, PS U+2029) — both for the
+// "comment body" character class (a comment body excludes its terminator)
+// and for the terminator literal that follows. Otherwise a comment ending
+// at NEL/LS/PS swallows the line terminator into its body, the trailing
+// terminator alternative fails to match, and the entire compound-end
+// alternative is rejected — leaving `end --comment<NEL>if` to be tokenized
+// as a simple `end` followed by an orphan `if` opener.
 const COMPOUND_END_PATTERN = new RegExp(
-  `\\bend(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n]*(?:\\r\\n|\\r|\\n))+(${COMPOUND_END_TYPES.join('|')})\\b`,
+  `\\bend(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n\\u0085\\u2028\\u2029]*(?:\\r\\n|\\r|\\n|\\u0085|\\u2028|\\u2029))+(${COMPOUND_END_TYPES.join('|')})\\b`,
   'gi'
 );
 
 // Re-extracts the type keyword from a compound-end token's value (e.g.,
 // 'end<sep>if' -> 'if'). Uses COMPOUND_END_SEPARATOR_CHARS so it accepts the
 // exact separator set tokenize used to build the token (including U+0085 NEL).
-const COMPOUND_END_CLOSE_PATTERN = new RegExp(`^end(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n]*)+(\\w+)`);
+// The comment body character class mirrors COMPOUND_END_PATTERN so a comment
+// ending at NEL/LS/PS does not over-consume the terminator.
+const COMPOUND_END_CLOSE_PATTERN = new RegExp(`^end(?:[${COMPOUND_END_SEPARATOR_CHARS}]|--[^\\r\\n\\u0085\\u2028\\u2029]*)+(\\w+)`);
 
 // Upper bound on the number of characters isSelectAlternativeOrAtLineStart
 // scans backward from a line-start `or` while looking for the nearest delimiter
