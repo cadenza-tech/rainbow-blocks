@@ -565,8 +565,10 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Checks if the keyword at position is immediately preceded by a range operator
-  // (.. or ...). Whitespace is permitted between the operator and the keyword.
-  // Skips characters inside excluded regions.
+  // (.. or ...). Whitespace, including newlines (`\n`, `\r`, `\r\n`), is permitted
+  // between the operator and the keyword: `(1..\n  end)` is also invalid Crystal
+  // because `..` causes implicit line continuation and `end` cannot be the RHS of
+  // a range. Skips characters inside excluded regions.
   private isPrecededByRangeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -578,7 +580,7 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t') {
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
         i--;
         continue;
       }
@@ -592,9 +594,10 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Checks if the keyword that ends at endOffset is immediately followed by a range
-  // operator (.. or ...). Whitespace is permitted between the keyword and the operator.
-  // Skips characters inside excluded regions. Symmetric to isPrecededByRangeOperator
-  // and used to filter `end` on the LHS of a range (`end..N`).
+  // operator (.. or ...). Whitespace, including newlines (`\n`, `\r`, `\r\n`), is
+  // permitted between the keyword and the operator. Skips characters inside excluded
+  // regions. Symmetric to isPrecededByRangeOperator and used to filter `end` on the
+  // LHS of a range (`end..N`, including the multi-line form `end\n  ..N`).
   private isFollowedByRangeOperator(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = endOffset;
     while (i < source.length) {
@@ -606,7 +609,7 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t') {
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
         i++;
         continue;
       }
