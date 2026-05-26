@@ -4939,5 +4939,32 @@ end`;
     });
   });
 
+  suite('Regression: line continuation with trailing comment in Ruby', () => {
+    test('should recognize line continuation when binary operator is followed by trailing comment', () => {
+      // Bug: when the trailing line end is followed by a comment, endsWithContinuationOperator
+      // saw the comment region first and returned false. The continuation `+` before the
+      // comment was missed, so `end` on the next line was not recognized as expression-position.
+      const source = 'def m\n  x = a + # comment\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should recognize line continuation when assignment operator is followed by trailing comment', () => {
+      const source = 'def m\n  x = # comment\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still not treat string-ending line as continuation', () => {
+      // Sanity: a string literal at end of line is a value, not a continuation operator.
+      // The `end` on the next line is a legitimate block close.
+      const source = 'def m\n  x = "str"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
