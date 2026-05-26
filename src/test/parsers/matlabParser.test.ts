@@ -3673,5 +3673,42 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: end followed by colon range outside for-header is not block close', () => {
+    test('should not treat end:1 as block close (end:1 outside for-header)', () => {
+      // `end:1` is a colon range expression where the `end` is the array-index `end`
+      // (typically inside indexing), not a block close. Outside a for-header `end` is in
+      // operand context (it forms the LHS of a colon range). Without the fix the `end`
+      // is misclassified as block close, consuming the inner if's end and orphaning the
+      // outer function. Line 3 (0-indexed) = outer end of function.
+      const source = 'function f\n  if true\n    end:1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end on line 4');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3, 'if should pair with the real inner end on line 3');
+    });
+
+    test('should not treat end:n (with n variable) as block close outside for-header', () => {
+      const source = 'function f\n  if true\n    end:n\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+    });
+
+    test('should still treat for i = end:5 as a valid for-header (sanity check)', () => {
+      // The for-header LHS-range form `for i = end:5` is the legitimate use of `end:N`
+      // and must remain unaffected. Lines: 0=function, 1=A=1:10, 2=for, 3=disp, 4=inner end, 5=outer end.
+      const source = 'function f\n  A = 1:10;\n  for i = end:5\n    disp(i);\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      const funcBlock = findBlock(pairs, 'function');
+      assert.strictEqual(forBlock.closeKeyword.line, 4);
+      assert.strictEqual(funcBlock.closeKeyword.line, 5);
+    });
+  });
+
   generateCommonTests(config);
 });
