@@ -469,7 +469,15 @@ export function isInsideParens(source: string, position: number, excludedRegions
     }
     if (callbacks.isInExcludedRegion(i, excludedRegions)) continue;
     const ch = source[i];
-    if (ch === '\n' || ch === '\r') {
+    // Per Ada LRM 2.2, line terminators are LF, CR, NEL (U+0085),
+    // LS (U+2028), and PS (U+2029). All of them break a "same line" guard
+    // for an enclosing `(`: an unterminated string or unterminated `(`
+    // on a previous line should not be treated as enclosing the current
+    // keyword. Recognizing only `\n`/`\r` left NEL/LS/PS-separated code
+    // mis-classified as inside parentheses, suppressing the trailing
+    // block (e.g., `Put("hello<NEL>if X then ... end if;` produced 0 pairs).
+    const code = ch.charCodeAt(0);
+    if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029) {
       crossedNewline = true;
     }
     // A top-level `;` terminates the previous statement. Ada parentheses
