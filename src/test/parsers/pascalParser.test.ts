@@ -3767,5 +3767,26 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-26: `end:` field declaration inside record', () => {
+    test('should not treat record-body `end:` field declaration as block close', () => {
+      // `end: Integer;` inside a record is a field declaration (`end` is a field
+      // name, not the block-close keyword). Without an isValidBlockClose guard, the
+      // inner `end` consumes the surrounding `record`, leaving the outer `end` orphan.
+      const source = `TFoo = record
+  end: Integer;
+end`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      // The matched close must be the outer `end`, not the field-name `end:`.
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(
+        recordPairs[0].closeKeyword?.startOffset,
+        outerEndOffset,
+        'record must pair with the outer end, not the `end:` field declaration'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
