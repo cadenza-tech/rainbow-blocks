@@ -524,12 +524,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
     );
   }
 
-  // Returns true when `do` at position immediately follows a condition/header keyword
-  // (if/elseif/while/switch/case/until) on the same logical line, e.g. `if do`. Such a `do`
-  // is used in expression position and is not a do/until opener. Scans backward over
-  // horizontal whitespace and `...`/`\` line continuations to read the preceding word; a
-  // line break or statement separator before any word means `do` starts its own statement
-  // (a real opener) and is not rejected.
+  // Returns true when `do` at position appears anywhere on a logical line that begins with
+  // a condition/header keyword (if/elseif/while/switch/case/until). The simple form `if do`
+  // (no intervening identifier) is the original case; this method also handles the
+  // multi-identifier form `if x do` / `while x y do` where the `do` is part of the header
+  // expression. In all such cases, the `do` is used in expression position and is not a
+  // do/until opener. Treating it as a block_open leaves a spurious `do` on the stack that
+  // the trailing `end` cannot close (Octave's `end` does not close `do` — only `until` does),
+  // destroying the enclosing block pair. The scan walks backward over horizontal whitespace,
+  // identifiers, and `...`/`\` line continuations until a line break (or statement separator)
+  // is reached; if any identifier on the way is a DO_CONDITION_KEYWORD, the `do` is rejected.
   private isDoInConditionContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
@@ -560,17 +564,34 @@ export class OctaveBlockParser extends MatlabBlockParser {
             continue;
           }
         }
+        // Raw newline (not a continuation) terminates the logical line scan — no condition
+        // keyword found before `do` on the same statement, so `do` is a real opener.
+        return false;
       }
-      break;
-    }
-    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) {
-      return false;
-    }
-    const idEnd = i;
-    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) {
+      // Statement separator (`;` / `,`) also terminates the logical line scan (semantically
+      // `if x; do` starts a new statement at `do`, so `do` is a real opener there).
+      if (source[i] === ';' || source[i] === ',') return false;
+      // Identifier (letter / digit / underscore) — read it backward, check if it is a
+      // DO_CONDITION_KEYWORD. If yes, this `do` is in a condition context. Otherwise the
+      // identifier is some other token on the logical line and we keep scanning backward
+      // (multi-identifier headers like `if x do` or `while x y do` need the scan to
+      // traverse past `x` / `y` to reach the leading keyword).
+      if (/[a-zA-Z0-9_]/.test(source[i])) {
+        const idEnd = i;
+        while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+        const ident = source.slice(i + 1, idEnd + 1).toLowerCase();
+        if (DO_CONDITION_KEYWORDS.has(ident)) return true;
+        // i is now one before the identifier's first char; continue the outer loop to keep
+        // scanning backward for an earlier token on the same logical line.
+        continue;
+      }
+      // Any other non-whitespace, non-identifier, non-separator character (operators,
+      // punctuation, etc.) — `do` is part of an expression. Cost-minimal: keep scanning
+      // backward so multi-identifier expressions like `if x + y do` still detect the
+      // leading `if`.
       i--;
     }
-    return DO_CONDITION_KEYWORDS.has(source.slice(i + 1, idEnd + 1).toLowerCase());
+    return false;
   }
 
   // Returns true when an Octave keyword (`do`) at position is the argument of a
