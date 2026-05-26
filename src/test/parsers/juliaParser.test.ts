@@ -5212,6 +5212,87 @@ end`;
     });
   });
 
+  suite('Regression: incomplete end postfix marker is not a block close', () => {
+    test('should not treat end as block close when followed by .. (range)', () => {
+      // `end..1` — `..` is not a Julia operator; `end.` (field access on `end`) followed
+      // by `.1` is syntactically invalid (digits cannot start an identifier). Either way
+      // `end` is being used as a value, so the inner `end` must not be classified as
+      // block_close. The trailing real `end` must pair with the surrounding function.
+      const source = 'function foo()\n  end..1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by .<digit> (invalid field access on end)', () => {
+      // `end.0` — `.0` cannot start an identifier (digits are not identifier-start chars),
+      // so `end.0` is not valid field access either, but `end` is still being used as a
+      // value (lastindex-style). The trailing real `end` must pair with `function`.
+      const source = 'function foo()\n  end.0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by { (type parameter)', () => {
+      // `end{T}` is parameterized-type syntax applied to `end` (lastindex). Outside
+      // indexing brackets this is invalid Julia, but classifying inner `end` as block_close
+      // would mis-pair the surrounding function's real `end`.
+      const source = 'function foo()\n  end{T}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by . at EOF (no follower)', () => {
+      // `end.` with nothing after the dot. Field access on `end` is invalid, but the
+      // intent is clearly value-use. Even at EOF, the inner `end` must not be classified
+      // as block_close; the surrounding real `end` should pair with `function`.
+      const source = 'function foo()\nend\nend.';
+      const pairs = parser.parse(source);
+      // The first `end` (line 2) pairs with `function`; the trailing `end.` is orphan.
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.indexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by . then space', () => {
+      // `end. ` — dot followed by whitespace is not field access (no identifier after dot)
+      // and not a broadcast operator (no operator char after dot). The inner `end` must
+      // not be a block_close.
+      const source = 'function foo()\n  end. \nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by . then newline', () => {
+      // `end.\n` — dot at end of line. Not field access, not broadcast operator. Inner
+      // `end` is value-use, must not be block_close.
+      const source = 'function foo()\n  end.\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by .<quote> (invalid)', () => {
+      // `end."x"` — dot followed by string literal. Field access requires an identifier,
+      // not a string literal, so this is invalid syntax. Inner `end` is value-use.
+      const source = 'function foo()\n  end."x"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block close when followed by .{T} (invalid)', () => {
+      // `end.{T}` — dot followed by curly brace is not field access (curly is not an
+      // identifier-start char). Inner `end` is value-use, must not be block_close.
+      const source = 'function foo()\n  end.{T}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: end followed by binary operator past block comment is lastindex (Bug 5)', () => {
     test('should treat end followed by != past block comment as lastindex inside indexing brackets', () => {
       // `arr[if end #= comment =# != 2; 1; else 0 end]` — the inner `end #= ... =# != 2`
