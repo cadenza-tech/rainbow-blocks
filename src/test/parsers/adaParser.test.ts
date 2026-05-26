@@ -3957,6 +3957,56 @@ end if;`;
     });
   });
 
+  suite('Regression: type-decl is filter recognizes Unicode line terminators when stepping past line terminator', () => {
+    // The multi-line type-declaration `is` filter (adaParser.ts:712-821)
+    // scans backward across previous lines looking for a leading `type` or
+    // `subtype` keyword. After computing `prevLine`, it steps `scanPos` past
+    // the line terminator before continuing the scan. The decrement only
+    // recognized `\n` and `\r`, so a source whose lines are separated by
+    // NEL (U+0085), LS (U+2028), or PS (U+2029) left `scanPos` stuck on the
+    // line terminator. On the next iteration `findLineStart` returned the
+    // same line, so the backward scan failed to reach the `type` keyword
+    // when at least one intermediate line (e.g., blank line, or a type name
+    // on its own line) lay between `type` and `is`. The bogus `is` then
+    // leaked through the filter and ended up as a second intermediate of
+    // the enclosing `procedure` / `function`.
+    test('should filter is when type name is on its own line separated by NEL', () => {
+      const nel = String.fromCharCode(0x85);
+      const source = `procedure P is${nel}  type${nel}  T_Name${nel}  is range 1..10;${nel}begin${nel}  null;${nel}end P;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(middleValues, ['is', 'begin']);
+    });
+
+    test('should filter is when type name is on its own line separated by LS', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `procedure P is${ls}  type${ls}  T_Name${ls}  is range 1..10;${ls}begin${ls}  null;${ls}end P;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(middleValues, ['is', 'begin']);
+    });
+
+    test('should filter is when type name is on its own line separated by PS', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `procedure P is${ps}  type${ps}  T_Name${ps}  is range 1..10;${ps}begin${ps}  null;${ps}end P;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(middleValues, ['is', 'begin']);
+    });
+
+    test('should filter is across blank lines separated by NEL', () => {
+      const nel = String.fromCharCode(0x85);
+      const source = `procedure P is${nel}  type T${nel}${nel}${nel}  is range 1..10;${nel}begin${nel}  null;${nel}end P;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(middleValues, ['is', 'begin']);
+    });
+  });
+
   suite('Regression: findLineStart recognizes Unicode line terminators', () => {
     test('should keep is as intermediate for protected<NEL>type Foo is', () => {
       // The `is` type-decl filter scans the current line and previous lines
