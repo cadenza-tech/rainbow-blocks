@@ -28,6 +28,14 @@ export class MatlabBlockParser extends BaseBlockParser {
   // position to avoid pairing it with an outer `classdef`/`function` block. Populated
   // by tokenize, consumed by matchBlocks. Not thread-safe, but parse() is synchronous.
   private phantomSectionPositions: number[] = [];
+  // Positions of section keywords whose attribute list `(` (i.e., the line-start `properties(`,
+  // `methods(`, `arguments(` etc.) immediately follows the keyword. Used by matchBlocks to
+  // distinguish a `properties()` function-call form (no stray `end` expected) from a bare
+  // `properties\n` block opener (stray `end` likely). When the section keyword is dropped
+  // in matchBlocks, the pendingSkipDepth push only happens when the position is NOT in
+  // this set — otherwise we would consume an outer block's legitimate `end`. Populated
+  // by tokenize, consumed by matchBlocks. Not thread-safe, but parse() is synchronous.
+  private sectionKeywordsWithParen: Set<number> = new Set<number>();
   // Per-position bracket depth cache: bracketDepthAtPos[p] is the number of balanced
   // (), [], or {} pairs that strictly enclose position p. Populated by tokenize() before
   // any isValidBlockOpen / isValidBlockClose call so that isInsideParensOrBrackets can
@@ -655,6 +663,15 @@ export class MatlabBlockParser extends BaseBlockParser {
             this.phantomSectionPositions.push(position);
             return false;
           }
+          // Record positions where a section keyword is followed by `(`. matchBlocks
+          // uses this set to distinguish the `properties(args)`/`methods(args)` function-call
+          // shape (no stray `end` expected) from the bare `properties\n` block-opener shape
+          // (stray `end` likely). Both pass isValidBlockOpen because `(` is in the allowed
+          // nextChar set above, but only the bare form should trigger a pendingSkipDepth
+          // when dropped in matchBlocks.
+          if (nextChar === '(') {
+            this.sectionKeywordsWithParen.add(position);
+          }
         }
       }
     }
@@ -844,6 +861,9 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Reset phantom positions for this parse — they accumulate via isValidBlockOpen
     // side effects below.
     this.phantomSectionPositions = [];
+    // Reset section-keyword-with-paren set for this parse — populated by isValidBlockOpen,
+    // consumed by matchBlocks to distinguish function-call shapes from bare openers.
+    this.sectionKeywordsWithParen = new Set<number>();
     // Pre-compute bracket depth at each position so isInsideParensOrBrackets is O(1)
     // per query. Must run before super.tokenize() because that calls isValidBlockOpen /
     // isValidBlockClose for every keyword match, which in turn call isInsideParensOrBrackets.
@@ -998,10 +1018,16 @@ export class MatlabBlockParser extends BaseBlockParser {
               });
               if (!hasFunctionOrClass) {
                 // Drop the token: an `arguments` block outside of any function/methods/
-                // classdef context is almost certainly a function call (`arguments(obj)`)
-                // rather than a real section block. Pushing pendingSkipDepth here would
-                // consume a legitimate `end` from an enclosing block (e.g. a `function`
-                // wrapping a `arguments(obj)` call), destroying outer block pairing.
+                // classdef context cannot be a real arguments block. When the keyword is
+                // followed by `(` (e.g. `arguments(obj)`) it's a function call with no
+                // stray `end` expected, so we drop without pendingSkipDepth — pushing
+                // pendingSkipDepth here would consume a legitimate `end` from an outer
+                // block. When the keyword is bare (no `(`), the user likely wrote a
+                // stray `end` for it; record pendingSkipDepth so the next `end` at this
+                // depth is skipped instead of pairing with an outer block.
+                if (!this.sectionKeywordsWithParen.has(token.startOffset)) {
+                  pendingSkipDepths.push(stack.length);
+                }
                 break;
               }
             } else {
@@ -1009,14 +1035,16 @@ export class MatlabBlockParser extends BaseBlockParser {
               // are only valid section blocks when their CLOSEST enclosing block is the
               // classdef itself. When something like `function`/`methods`/`properties` sits
               // between the section keyword and the enclosing classdef, the keyword at
-              // line-start is a function call (e.g. `properties(obj)` inside `function f`,
-              // `methods(obj)` inside another `methods` section) rather than a real section.
-              // Walking only the top of the stack — not the whole stack — prevents the
-              // token from being paired as a section, which would otherwise consume an
-              // inner `end` and orphan the outer classdef. Dropping the token (no
-              // pendingSkipDepth) preserves outer block pairing.
+              // line-start may be a function call (e.g. `properties(obj)` inside `function f`,
+              // `methods(obj)` inside another `methods` section) — drop without pendingSkipDepth.
+              // When the keyword is bare (no `(`) the user likely wrote a stray `end` for it
+              // (bug 5: properties at line start outside classdef); push pendingSkipDepth so
+              // the next `end` at this depth is skipped instead of pairing with an outer block.
               const closest = stack.length > 0 ? stack[stack.length - 1].token.value.toLowerCase() : '';
               if (closest !== 'classdef') {
+                if (!this.sectionKeywordsWithParen.has(token.startOffset)) {
+                  pendingSkipDepths.push(stack.length);
+                }
                 break;
               }
             }
