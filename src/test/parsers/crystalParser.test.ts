@@ -4780,6 +4780,74 @@ end`;
     });
   });
 
+  suite('Regression: receiver-like keyword used as case/when pattern value should not open a block', () => {
+    test('should not treat enum as a block opener in when pattern', () => {
+      // `when enum` is a case branch whose pattern value is `enum` (a constant/value
+      // expression, not the `enum` keyword). Treating `enum` as a block opener pairs
+      // it with the outer `end`, hiding the case/end block.
+      const source = 'case x\nwhen enum\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat struct as a block opener in when pattern', () => {
+      const source = 'case x\nwhen struct\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat select as a block opener in when pattern', () => {
+      const source = 'case x\nwhen select\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat lib as a block opener in when pattern', () => {
+      const source = 'case x\nwhen lib\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat macro as a block opener in when pattern', () => {
+      const source = 'case x\nwhen macro\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat annotation as a block opener in when pattern', () => {
+      const source = 'case x\nwhen annotation\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat union as a block opener in when pattern', () => {
+      const source = 'case x\nwhen union\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should still open a real enum block as separate top-level statement (sanity)', () => {
+      // A genuine `enum Color\n  Red\nend` (not preceded by `when` on the same line)
+      // must remain a real block opener.
+      const source = 'enum Color\n  Red\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+
+    test('should still open a real enum block inside a case body, not in when value (sanity)', () => {
+      // `when X\n  enum Color\n  ...\n  end` — here `enum` is at the start of its
+      // own line (block body), not in `when X` value position, so it should still
+      // open a real block. The intermediate `when` belongs to case.
+      const source = 'case x\nwhen 1\n  enum Color\n    Red\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.closeKeyword?.value, 'end');
+      const enumPair = findBlock(pairs, 'enum');
+      assert.strictEqual(enumPair.closeKeyword?.value, 'end');
+    });
+  });
+
   suite('Regression: method-like keywords followed by spaced / should treat / as division (not regex)', () => {
     test('should treat puts / 2 as division (not regex literal)', () => {
       // `puts / 2; if x; end` — `puts` is a method-like keyword. With a space on
