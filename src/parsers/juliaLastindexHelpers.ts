@@ -85,17 +85,20 @@ export function isFollowedByBinaryOperator(source: string, position: number, exc
 
 // Checks if the `end` at `position` is immediately followed (no whitespace) by a postfix
 // marker that signals `end` is being used as a value (lastindex-style): `?` (ternary
-// condition), `(` (call), `[` (indexing), or `.<letter>` (field access). These appear in
-// expressions like `end?(x):(y)`, `end(x)`, `end[x]`, `end.foo`. Outside indexing brackets
-// these are invalid Julia syntax, but classifying `end` as block_close in such contexts
-// would mis-pair the surrounding block's real `end`.
+// condition), `(` (call), `[` (indexing), `{` (parameterized-type application), or `.`
+// (field access or other non-operator follower). These appear in expressions like
+// `end?(x):(y)`, `end(x)`, `end[x]`, `end{T}`, `end.foo`, `end..1`, `end.0`. Outside
+// indexing brackets these are invalid Julia syntax, but classifying `end` as block_close
+// in such contexts would mis-pair the surrounding block's real `end`.
 //
-// Note 1: `.<op>` (broadcast operator like `.+`, `.==`, `.<`) is intentionally excluded so
-// that value-returning blocks like `begin x end .+ 1` still close `begin` with the inner
-// `end`. The broadcast-vs-field-access distinction mirrors isBinaryOperatorStart's `.`
-// handling.
+// `.` handling: `.<op>` (broadcast operator like `.+`, `.==`, `.<`) is intentionally
+// excluded so that value-returning blocks like `begin x end .+ 1` still close `begin`
+// with the inner `end`. The broadcast operator chars are the ASCII operator characters
+// `+ - * / % ^ \ < > = ! ? & | ~`. Any other follower after `.` (letter for field access,
+// digit, quote, brace, dot, whitespace, EOF) means `end` is being used as a value, not as
+// a block close.
 //
-// Note 2: `,` (tuple/argument separator) is intentionally NOT treated as a postfix marker
+// Note: `,` (tuple/argument separator) is intentionally NOT treated as a postfix marker
 // here. In a call site like `f(begin 1 end, if ... end)`, the inner `end,` is a legitimate
 // block close terminating the `begin` argument. The pathological `function f() end, more
 // end` form is left as-is rather than rejecting `,` globally, because rejecting `,` would
@@ -105,15 +108,16 @@ export function isFollowedByPostfixIndexMarker(source: string, position: number)
   const i = position + 3;
   if (i >= source.length) return false;
   const c = source[i];
-  if (c === '?' || c === '(' || c === '[') return true;
+  if (c === '?' || c === '(' || c === '[' || c === '{') return true;
   if (c === '.') {
     const c2 = i + 1 < source.length ? source[i + 1] : '';
-    if (c2 === '') return false;
-    // ASCII letter or underscore -> field access (`end.foo`); reject `end` as block_close.
-    if (/[a-zA-Z_]/.test(c2)) return true;
-    // Unicode letter -> field access (`end.α`); reject.
-    if (c2.charCodeAt(0) > 127 && /\p{L}/u.test(c2)) return true;
-    return false;
+    // `.<broadcast-op>` (e.g. `.+`, `.==`, `.<=`) is a broadcast operator on `end`; treat
+    // it as a binary-operator follower (block-close on a value-returning block). Mirrors
+    // the broadcast-vs-field-access distinction in isBinaryOperatorStart's `.` handling.
+    if (c2 !== '' && /[!%&*+\-/<=>?\\^|~]/.test(c2)) return false;
+    // Any other follower after `.` (letter for field access, digit, quote, brace, dot,
+    // whitespace, EOF) means `end` is being used as a value, not as a block close. Reject.
+    return true;
   }
   return false;
 }
