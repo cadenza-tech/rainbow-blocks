@@ -1348,6 +1348,17 @@ export class VhdlBlockParser extends BaseBlockParser {
         continue;
       }
 
+      // Reject block_middle keywords preceded by '.' (record member access like `rec.then`,
+      // `rec.is`, `rec.else`). Without this guard the trailing word is tokenized as a fresh
+      // block_middle and absorbed by the enclosing block's intermediates (e.g. `rec.then`
+      // adds a spurious second `then` to the surrounding if-block's intermediates). The
+      // helper skips whitespace, newlines, and excluded regions so cases like `rec . then`
+      // are also rejected. block_open/block_close go through their own validation methods
+      // which already apply isPrecededByDot.
+      if (type === 'block_middle' && isPrecededByDot(source, startOffset, excludedRegions, this.validationCallbacks)) {
+        continue;
+      }
+
       // Skip 'is' in type/subtype/alias declarations (not block-level 'is')
       // Uses statement-based detection: finds the last unquoted semicolon on the line
       // and checks if the text after it starts with a declaration keyword
