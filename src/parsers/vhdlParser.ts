@@ -349,6 +349,16 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject reserved-word block openers that appear as the entity_designator name in
+    // `entity <reserved> is ... end entity;`. The reserved word here is (illegally) being
+    // used as the entity name; without this guard it absorbs the surrounding entity's
+    // `is` intermediate into its (orphan) intermediates, silently breaking the enclosing
+    // entity declaration's structure. The symmetric case for `architecture/configuration
+    // <id> of <reserved>` is handled above by isInArchitectureOrConfigEntityRef.
+    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isPrecededByEntityKeyword(source, position, excludedRegions)) {
+      return false;
+    }
+
     if (lowerKeyword === 'for') {
       return isValidForOpen(source, position, excludedRegions, cb);
     }
@@ -462,6 +472,35 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `/=` (inequality) ends with `=` and is caught above; bare `/` here is division.
     if (prev === ',' || prev === '+' || prev === '-' || prev === '*' || prev === '/' || prev === '&') return true;
     return false;
+  }
+
+  // Detects whether the keyword at `position` is the entity_designator name in
+  // `entity <keyword> is ...`. Walks backward through whitespace/comments expecting
+  // the `entity` keyword. The symmetric `architecture/configuration <id> of <keyword>`
+  // case is handled by isInArchitectureOrConfigEntityRef.
+  private isPrecededByEntityKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 5) return false;
+    if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const word = source.slice(i + 1, wordEnd).toLowerCase();
+    return word === 'entity';
   }
 
   // Detects whether the keyword at `position` is the entity reference in
