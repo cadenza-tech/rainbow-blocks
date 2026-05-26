@@ -72,6 +72,14 @@ export class PascalBlockParser extends BaseBlockParser {
       if (isVariantRecordCase(source, position, excludedRegions, this.validationCallbacks, this.recordContextMap)) {
         return false;
       }
+      // `case(x) then ...` / `case(x) do ...`: `case` is used as a function-call
+      // identifier inside an expression, not as a case statement opener. A real
+      // `case (expr) of` is followed by `of` after the parenthesized expression.
+      // Without this guard the `case` is pushed onto the stack and the surrounding
+      // `end` closes `case` instead of the enclosing block.
+      if (this.isCaseUsedAsFunctionCall(source, position, excludedRegions)) {
+        return false;
+      }
     }
 
     // Generic constraint: function Bar<T: record>: T;
@@ -488,6 +496,69 @@ export class PascalBlockParser extends BaseBlockParser {
     // close" rule is safe because Pascal grammar has no construct where the block-close
     // `end` is immediately followed by a `:`.
     if (keyword === 'end' && this.isFollowedByColonNotAssign(source, position + 3, excludedRegions)) {
+      return false;
+    }
+    return true;
+  }
+
+  // Returns true when the `case` keyword at `position` is used as a function-call
+  // identifier inside an expression (e.g. `if case(x) then ...`). The check forwards
+  // past whitespace/comments to the first significant character: if it is not `(`,
+  // the keyword is not a function call. Otherwise the balanced `(...)` group is
+  // skipped and the next significant character is inspected: if it is `of`, the
+  // keyword is a real `case (expr) of` statement; anything else (`then`, `do`,
+  // `;`, etc.) means the keyword is the identifier in a function call.
+  private isCaseUsedAsFunctionCall(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Skip whitespace and excluded regions after `case`.
+    let j = position + 4;
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (j >= source.length || source[j] !== '(') return false;
+    // Skip the balanced `(...)` group.
+    let depth = 1;
+    j++;
+    while (j < source.length && depth > 0) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === '(') depth++;
+      else if (source[j] === ')') depth--;
+      j++;
+    }
+    // Skip whitespace/comments after the `)` and inspect the next token.
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    // `case (expr) of` is the legitimate statement; anything else means `case`
+    // names an identifier in a function call.
+    if (j + 1 < source.length && /^of\b/i.test(source.slice(j, j + 3))) {
       return false;
     }
     return true;
