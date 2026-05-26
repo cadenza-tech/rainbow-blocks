@@ -3267,6 +3267,50 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-26: Unicode identifier boundary in REPLACE/REPLACING context detection', () => {
+    // Bug: both the backward keyword scan (cobolHelpers.ts:
+    // walkBackThroughPseudoChain, isPrecededByKeyword,
+    // findPrecedingKeywordPosition, isInPseudoTextContext word extraction) and
+    // the forward keyword scan (cobolPseudoText.ts: getPseudoTextStarts
+    // boundary check) used `/[a-zA-Z]/` / `/[a-zA-Z0-9_]/` to test identifier
+    // continuation, so they treated a non-ASCII Unicode letter / digit /
+    // underscore as a word boundary. As a result `αREPLACE`, `1REPLACE`,
+    // `_REPLACE` were classified as the bare REPLACE keyword and the
+    // following `==...==` pairs were marked as pseudo-text excluded regions —
+    // hiding real block keywords from the tokenizer and dropping the
+    // surrounding block pair.
+    test('should not treat αREPLACE as REPLACE keyword (Unicode letter prefix)', () => {
+      const source = 'αREPLACE ==a== BY ==b==.\nIF X\nEND-IF';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0, 'αREPLACE must not enter pseudo-text context');
+    });
+
+    test('should not treat 1REPLACE as REPLACE keyword (digit prefix)', () => {
+      const source = '1REPLACE ==a== BY ==b==.\nIF X\nEND-IF';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0, '1REPLACE must not enter pseudo-text context');
+    });
+
+    test('should not treat _REPLACE as REPLACE keyword (underscore prefix)', () => {
+      const source = '_REPLACE ==a== BY ==b==.\nIF X\nEND-IF';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0, '_REPLACE must not enter pseudo-text context');
+    });
+
+    test('should not wrap IF/END-IF as pseudo-text when REPLACE is preceded by a Unicode letter', () => {
+      const source = 'αREPLACE ==IF X = 0\nEND-IF==.';
+      const regions = parser.getExcludedRegions(source);
+      const pseudoRegions = regions.filter((r) => source.slice(r.start, r.start + 2) === '==');
+      assert.strictEqual(pseudoRegions.length, 0, 'αREPLACE must not enter pseudo-text context');
+      // With pseudo-text correctly suppressed, IF/END-IF should pair as a block.
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   suite('Regression 2026-05-25: bare COPY before END-* or block-middle keyword does not swallow the keyword', () => {
     // Bug: `IF X\nCOPY\nEND-IF` (a COPY statement with no copybook name typed yet)
     // treated the following END-IF as the copybook name, so the END-IF was filtered
