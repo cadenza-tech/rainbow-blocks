@@ -616,6 +616,51 @@ export class CrystalBlockParser extends BaseBlockParser {
     return i + 1 < source.length && source[i] === '.' && source[i + 1] === '.';
   }
 
+  // Checks whether the keyword at `position` is the value of a case/when branch on the
+  // same logical line: `when KEYWORD\n  ...`. Real opener forms (`enum Color`, `struct
+  // Point`) never appear as a when value because that position requires an expression,
+  // not a block-opening keyword. So a receiver-like keyword preceded only by `when`
+  // (plus whitespace) on the same line is being used as an identifier/constant value
+  // and must be suppressed from block-open classification. Scans backward from
+  // `position`, skipping spaces, tabs, and excluded regions (no newlines), and checks
+  // that the immediately preceding word is exactly `when` with a non-identifier
+  // character (or start of source/line) before it.
+  private isPrecededByWhen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    // Need at least `when` (4 chars) before position. The character at index i must
+    // be the last `n` of `when`, and the substring [i-3..i+1] must equal `when`.
+    if (i < 3) {
+      return false;
+    }
+    if (source.slice(i - 3, i + 1) !== 'when') {
+      return false;
+    }
+    // The character before `when` (or start of source) must be a non-identifier
+    // boundary so we do not match identifiers like `myWhen`/`somewhen`.
+    if (i - 3 > 0) {
+      const before = source[i - 4];
+      if (/[A-Za-z0-9_]/.test(before)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Checks whether the context-dependent keyword ending at endOffset is being used as an
   // ordinary identifier rather than a block opener. The following same-line forms qualify:
   //   1. Method-call receiver `KEYWORD.method` — a single `.` (not a range `..`/`...`).
@@ -1091,6 +1136,14 @@ export class CrystalBlockParser extends BaseBlockParser {
     // receivers (`select.upcase`, `enum.foo`) or assignment targets (`select = "x"`).
     // In both forms the keyword is a value/variable, not a block opener.
     if (RECEIVER_LIKE_OPENERS.has(keyword) && this.isReceiverOrAssignmentUsage(source, position + keyword.length, excludedRegions)) {
+      return false;
+    }
+
+    // Reject receiver-like keywords used as case/when branch values (`when enum\n ...`).
+    // In this position the keyword is a constant/value expression, not a block opener.
+    // Real opener forms (`enum Color`, `struct Point`) never appear in this position
+    // because `when` introduces a pattern/value expression, not a block.
+    if (RECEIVER_LIKE_OPENERS.has(keyword) && this.isPrecededByWhen(source, position, excludedRegions)) {
       return false;
     }
 
