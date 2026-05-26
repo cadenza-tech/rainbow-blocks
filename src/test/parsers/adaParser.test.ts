@@ -4271,6 +4271,40 @@ end if;`;
     });
   });
 
+  suite('Regression: isInsideParens crossedNewline recognizes Unicode line terminators', () => {
+    // isInsideParens scans backward from a candidate block keyword to find
+    // the enclosing `(`. When the open paren is on a different line, an
+    // unterminated string between `(` and the keyword (or an unterminated
+    // `(` itself) means the keyword is NOT really inside parentheses —
+    // typical of mid-edit code like `Put("hello\nif X then ... end if;`.
+    // The "different line" check used `ch === '\n' || ch === '\r'`,
+    // ignoring Ada LRM 2.2 NEL/LS/PS. With those line terminators the
+    // unterminated-string guard never fired, the `(` was treated as
+    // enclosing, and the trailing `if X then ... end if;` pair was
+    // suppressed entirely (0 pairs instead of 1).
+    test('should detect crossedNewline at NEL so unterminated-string guard fires', () => {
+      const nel = String.fromCharCode(0x85);
+      const source = `Put("hello${nel}if X then null; end if;`;
+      const pairs = parser.parse(source);
+      // LF baseline behavior: 1 pair (if / end if).
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect crossedNewline at LS so unterminated-string guard fires', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `Put("hello${ls}if X then null; end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should detect crossedNewline at PS so unterminated-string guard fires', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `Put("hello${ps}if X then null; end if;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+  });
+
   suite('Regression: compound end designator lookahead bound recognizes Unicode line terminators', () => {
     // After matching `end<sep>type`, tokenize() computes `lookaheadEnd` as
     // the end of the current logical line (next `\n` / `\r` / `;`) and
