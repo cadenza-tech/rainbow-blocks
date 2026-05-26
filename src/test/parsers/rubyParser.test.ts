@@ -5006,5 +5006,29 @@ end`;
     });
   });
 
+  suite('Regression: next-line do after loop keyword without comment in Ruby', () => {
+    test('should recognize while as loop opener when do is on next line without trailing comment', () => {
+      // Bug: `while x\ndo\n  body\nend` -- the `do` on the next physical line was not
+      // joined with the previous `while x` line because the join logic required the
+      // prev line to end with a comment. The `do` was treated as a block opener,
+      // creating a do/end pair instead of while/end, and orphaning the `while`.
+      const source = 'while x\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should recognize until as loop opener when do is on next line without trailing comment', () => {
+      const source = 'until x\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'until', 'end');
+    });
+
+    test('should recognize for as loop opener when do is on next line without trailing comment', () => {
+      const source = 'for i in 1..3\ndo\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
