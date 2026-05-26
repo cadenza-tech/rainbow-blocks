@@ -4271,6 +4271,65 @@ end if;`;
     });
   });
 
+  suite('Regression: compound end designator lookahead bound recognizes Unicode line terminators', () => {
+    // After matching `end<sep>type`, tokenize() computes `lookaheadEnd` as
+    // the end of the current logical line (next `\n` / `\r` / `;`) and
+    // restricts the optional-designator scan to that window. When `end`
+    // and the type keyword are on separate lines (separator contains a
+    // newline) and no `;` terminates the same line, the compound-end is
+    // supposed to be rejected so the type keyword belongs to a separate
+    // construct. The bound recognized only `\n`/`\r`; with NEL/LS/PS
+    // as the line terminator the lookahead extended past the line and
+    // consumed an unrelated next-line identifier (or worse, a complete
+    // statement ending in `;`) as a "designator". The reject path then
+    // never fired because `source[lookahead] === ';'` was true. The
+    // result: a stray `end<NEL>loop` swallowed the following `null;`
+    // statement and registered as a `loop`-typed compound end with no
+    // matching opener, leaving the surrounding `if X then ... end` pair
+    // unpaired.
+    test('should reject end<NEL>loop as compound when designator scan would cross NEL', () => {
+      const nel = String.fromCharCode(0x85);
+      const source = `if X then${nel}  null;${nel}end${nel}loop${nel}  null;${nel}end loop;${nel}`;
+      const pairs = parser.parse(source);
+      // Expected: simple `end` closes the `if`, then an independent `loop`
+      // block is paired by its trailing `end loop;` — same pairing the
+      // LF baseline already produces.
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(firstIf, 'first if block should be paired');
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop block (independent) should also be paired');
+      assert.match(loopBlock.closeKeyword.value.toLowerCase(), /^end\s+loop$/);
+    });
+
+    test('should reject end<LS>loop as compound when designator scan would cross LS', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `if X then${ls}  null;${ls}end${ls}loop${ls}  null;${ls}end loop;${ls}`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(firstIf, 'first if block should be paired');
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop block (independent) should also be paired');
+      assert.match(loopBlock.closeKeyword.value.toLowerCase(), /^end\s+loop$/);
+    });
+
+    test('should reject end<PS>loop as compound when designator scan would cross PS', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `if X then${ps}  null;${ps}end${ps}loop${ps}  null;${ps}end loop;${ps}`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const firstIf = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(firstIf, 'first if block should be paired');
+      assert.strictEqual(firstIf.closeKeyword.value.toLowerCase(), 'end');
+      const loopBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'loop');
+      assert.ok(loopBlock, 'loop block (independent) should also be paired');
+      assert.match(loopBlock.closeKeyword.value.toLowerCase(), /^end\s+loop$/);
+    });
+  });
+
   suite('Regression: compound end pattern line-comment ends at Unicode line terminators', () => {
     // The compound-end regex allows an Ada line comment between `end` and the
     // type keyword (e.g., `end --note\n if`). The comment alternative was
