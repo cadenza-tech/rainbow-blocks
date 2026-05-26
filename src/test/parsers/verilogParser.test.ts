@@ -5313,5 +5313,22 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: specparam declaration suppresses reserved-word identifier', () => {
+    test('should suppress reserved word used as specparam declared identifier', () => {
+      // Bug: `specparam endmodule = 10;` declares a specparam with `endmodule`
+      // as the identifier (an invalid use because `endmodule` is a reserved
+      // word). The DECLARATION_KEYWORDS suppression set did not include
+      // `specparam`, so `endmodule` was tokenized as a real close keyword and
+      // prematurely closed the outer module/endmodule pair.
+      const source = 'module m;\n  specparam endmodule = 10;\nendmodule';
+      const pairs = parser.parse(source);
+      const modPair = findBlock(pairs, 'module');
+      assert.strictEqual(modPair.closeKeyword?.value, 'endmodule', 'module must pair with the trailing endmodule, not the specparam identifier');
+      // The trailing endmodule (at the actual end) must be the closer
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset, 'module must pair with the last endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
