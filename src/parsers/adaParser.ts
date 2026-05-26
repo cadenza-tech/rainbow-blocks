@@ -1304,6 +1304,31 @@ export class AdaBlockParser extends BaseBlockParser {
               if (topOpener === 'if' || topOpener === 'select') {
                 stack[stack.length - 1].intermediates.push(token);
               }
+            } else if (middleKw === 'is') {
+              // Whitelist of openers that take `is` as part of their syntax:
+              //   - procedure / function:  `procedure P is`, `function F return T is`
+              //   - package:               `package P is`
+              //   - task / protected body: `task body B is`, `protected body B is`
+              //   - case:                  `case X is`
+              //   - entry body:            `entry E ... is`
+              // Other openers (loop / for / while / declare / begin / if /
+              // select / record / return / accept) never have `is` as part
+              // of their construct. The tokenize-time filter drops most stray
+              // `is` tokens (renaming clauses, type declarations, etc.) but
+              // any survivor must not be attached to an unrelated enclosing
+              // opener (e.g., a `loop\n  X : Integer is 5;\nend loop;` edit
+              // would otherwise list `is` as the loop's intermediate).
+              if (
+                topOpener === 'procedure' ||
+                topOpener === 'function' ||
+                topOpener === 'package' ||
+                topOpener === 'task' ||
+                topOpener === 'protected' ||
+                topOpener === 'case' ||
+                topOpener === 'entry'
+              ) {
+                stack[stack.length - 1].intermediates.push(token);
+              }
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
