@@ -564,12 +564,25 @@ const TRANSPARENT_OPENERS_FOR_CASE_SCAN: ReadonlySet<string> = new Set(['begin',
 // `case (s) 1: begin case: x = 1; end endcase` would not recognise the inner
 // `case:` as a case_item-position label-name misuse and the spurious inner
 // `case` would consume the outer `endcase`.
+//
+// `closeKeywordValidOpeners` is an optional set of opener keywords that match a
+// block_close keyword being checked (e.g., `begin`/`fork` for `end`/`join*`).
+// When this set is supplied and a NON-case opener in it is found at depth 0, the
+// close keyword legitimately pairs with that opener — its `: label` is an
+// end-label suffix (LRM §9.3.1) at the close keyword's normal position, not a
+// case_item label name. Returning false in that case keeps a labeled
+// `begin : block_a` ... `end : block_a` pair intact inside a case_item body.
+// Case openers (case/casex/casez/randcase) are excluded from this check because
+// for `endcase`, the only opener encountered backward is the enclosing case
+// header itself, and that should still be treated as the case-item context for
+// label-name misuse like `endcase: x = 1;`.
 export function isEnclosingBlockCase(
   source: string,
   fromPos: number,
   excludedRegions: ExcludedRegion[],
   keywords: LanguageKeywords,
-  callbacks: VerilogValidationCallbacks
+  callbacks: VerilogValidationCallbacks,
+  closeKeywordValidOpeners?: ReadonlySet<string>
 ): boolean {
   const openSet = new Set(keywords.blockOpen);
   const closeSet = new Set(keywords.blockClose);
@@ -598,6 +611,15 @@ export function isEnclosingBlockCase(
         depth++;
       } else if (openSet.has(word)) {
         if (depth === 0) {
+          // When checking a close keyword (end-label suffix candidate), a matching
+          // non-case opener at depth 0 means this close legitimately pairs with
+          // that opener — its `: label` is end-label syntax, not a case_item label
+          // name. Case openers are excluded here so the enclosing case header
+          // still terminates the scan in the `endcase: x = 1;` case-item label
+          // misuse path (the only `case` opener encountered is the case header).
+          if (closeKeywordValidOpeners?.has(word) && !CASE_OPEN_KEYWORDS.has(word)) {
+            return false;
+          }
           // Statement-block openers (`begin`/`fork`) at depth 0 are case_item
           // body boundaries, not the enclosing opener. Scan past them
           // transparently (no depth change) so a case header further back is

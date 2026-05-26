@@ -158,6 +158,14 @@ const CONTROL_KEYWORDS = [
   'wait'
 ];
 
+// Statement-block openers that legitimately accept a `: <block_label>` suffix
+// per IEEE 1800-2017 §9.3.1 (named blocks: `begin : my_label ... end : my_label`,
+// `fork : my_label ... join* : my_label`). When one of these keywords is followed
+// by a label colon inside a case_item body, it is opening a named block, not
+// being misused as a case_item label name, so the case_item label-name
+// suppression must not fire for them.
+const NAMED_BLOCK_OPENERS: ReadonlySet<string> = new Set(['begin', 'fork']);
+
 // SystemVerilog data type and qualifier keywords. When one of these immediately precedes
 // a block-keyword identifier (e.g., `int function`, `input module`), the block keyword is
 // being used as a parameter or variable name rather than introducing a block.
@@ -920,11 +928,23 @@ export class VerilogBlockParser extends BaseBlockParser {
   // block opener/closer. Restricted to case context because outside a case,
   // `<keyword> : <name>` is the named-block syntax where the leading keyword
   // really does open a block.
-  private isCaseItemLabelName(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
+  //
+  // `closeKeywordValidOpeners` is supplied when this check is invoked for a
+  // block_close keyword (`end`, `endcase`, ...). When the close keyword has a
+  // matching opener at depth 0 in the backward scan, its `: label` is an
+  // end-label suffix (LRM §9.3.1), not a case_item label name, so the check
+  // returns false so the close keyword stays tokenized.
+  private isCaseItemLabelName(
+    source: string,
+    position: number,
+    keywordLength: number,
+    excludedRegions: ExcludedRegion[],
+    closeKeywordValidOpeners?: ReadonlySet<string>
+  ): boolean {
     if (!isFollowedByLabelColon(source, position, keywordLength, excludedRegions)) {
       return false;
     }
-    return isEnclosingBlockCase(source, position - 1, excludedRegions, this.keywords, this.validationCallbacks);
+    return isEnclosingBlockCase(source, position - 1, excludedRegions, this.keywords, this.validationCallbacks, closeKeywordValidOpeners);
   }
 
   // Validates block open: control keywords need a following 'begin' to be valid
@@ -1053,7 +1073,17 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Without this check the keyword would be tokenized and pair with a later
     // close keyword, breaking the BlockPair set. Restricted to case context so
     // outside a case the named-block `<keyword> : <name>` form still opens a block.
-    if (!CONTROL_KEYWORDS.includes(keyword) && this.isCaseItemLabelName(source, position, keyword.length, excludedRegions)) {
+    //
+    // Statement-block openers (`begin`/`fork`) are exempted because their
+    // `<keyword> : <label>` form is the named-block syntax (LRM §9.3.1), which is
+    // legitimate INSIDE a case_item body too. e.g., `1: begin : block_a ... end`
+    // opens a named begin block as the case_item body. Suppressing it would
+    // break the begin/end pair.
+    if (
+      !CONTROL_KEYWORDS.includes(keyword) &&
+      !NAMED_BLOCK_OPENERS.has(keyword) &&
+      this.isCaseItemLabelName(source, position, keyword.length, excludedRegions)
+    ) {
       return false;
     }
 
@@ -1151,7 +1181,13 @@ export class VerilogBlockParser extends BaseBlockParser {
     // identifier expression and reserved words cannot legitimately be identifiers.
     // Without this check the close keyword would prematurely pair with an earlier
     // open, breaking the outer case/endcase BlockPair.
-    if (this.isCaseItemLabelName(source, position, keyword.length, excludedRegions)) {
+    //
+    // Pass the close keyword's matching openers so a legitimate end-label suffix
+    // (LRM §9.3.1) on a labeled `begin : block_a` ... `end : block_a` pair inside
+    // a case_item body is NOT mistaken for a case_item label name misuse.
+    const validOpeners = CLOSE_TO_OPEN[keyword];
+    const validOpenersSet = validOpeners !== undefined ? new Set(validOpeners) : undefined;
+    if (this.isCaseItemLabelName(source, position, keyword.length, excludedRegions, validOpenersSet)) {
       return false;
     }
 
