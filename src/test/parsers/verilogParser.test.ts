@@ -5212,5 +5212,55 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: end-label suffix on labeled begin/end inside case statement', () => {
+    test('should pair labeled begin/end with end-label suffix inside case_item body', () => {
+      // Bug: When a labeled `begin : label_name` ... `end : label_name` pair sits
+      // inside a case_item body, the trailing `end : label_name` was incorrectly
+      // suppressed by isCaseItemLabelName because `end` is followed by `:` and
+      // the enclosing block (via transparent pass-through of begin) is `case`.
+      // The end-label suffix is a valid SystemVerilog construct (LRM §9.3.1) and
+      // must not be suppressed.
+      const source = `module m;
+  initial case (s)
+    1: begin : block_a
+         x = 1;
+       end : block_a
+    2: begin
+         y = 1;
+       end
+  endcase
+endmodule`;
+      const pairs = parser.parse(source);
+      // module must pair
+      const modPair = findBlock(pairs, 'module');
+      assert.strictEqual(modPair.closeKeyword?.value, 'endmodule', 'module must pair with endmodule');
+      // case must pair with endcase
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.closeKeyword?.value, 'endcase', 'case must pair with endcase');
+      // Both begin blocks must pair with their respective ends (2 begin/end pairs)
+      const beginPairs = pairs.filter((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPairs.length, 2, 'expected 2 begin/end pairs inside case_item bodies');
+      for (const bp of beginPairs) {
+        assert.strictEqual(bp.closeKeyword?.value, 'end', 'each begin must pair with end');
+      }
+    });
+
+    test('should still suppress endcase used as case_item label name (preserved existing behavior)', () => {
+      // Sanity check: the original case_item label-name suppression must still
+      // apply. `endcase: x = 1;` at case_item statement position is a misused
+      // identifier and must not pair with the enclosing case.
+      const source = 'module m;\n  initial case (sel)\n    endcase: x = 1;\n    default: y = 0;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assert.ok(casePair.closeKeyword, 'case must have a closing endcase');
+      const trailingEndcaseOffset = source.lastIndexOf('endcase');
+      assert.strictEqual(
+        casePair.closeKeyword.startOffset,
+        trailingEndcaseOffset,
+        'case must pair with the trailing endcase, not the case_item label `endcase`'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
