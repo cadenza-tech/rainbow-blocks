@@ -252,10 +252,17 @@ export class FortranBlockParser extends BaseBlockParser {
       }
     }
 
-    // 'associate' requires at least one association `(name => selector)`. Reject empty parens
-    // `associate ()` (or the cross-line `associate (\n)`), consistent with the empty-paren
-    // rejection for select case/where/forall/submodule.
+    // 'associate' requires at least one association `(name => selector)`. Reject the
+    // missing-parens form `associate name => expr` (no `(...)`) and the empty-paren form
+    // `associate ()` (or the cross-line `associate (\n)`), consistent with the
+    // missing-parens / empty-paren rejection for select case/where/forall/submodule/team.
     if (lowerKeyword === 'associate') {
+      const afterAssociateStart = position + keyword.length;
+      let afterAssociate = source.slice(afterAssociateStart, findLogicalLineEnd(source, afterAssociateStart));
+      afterAssociate = collapseContinuationLines(afterAssociate);
+      if (!/^[ \t]*\(/.test(afterAssociate)) {
+        return false;
+      }
       // `hasEmptyParenthesizedCondition` handles both same-line and cross-line empty parens
       // uniformly (newlines inside the parens are treated as whitespace).
       if (hasEmptyParenthesizedCondition(source, position + keyword.length)) {
