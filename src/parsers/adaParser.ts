@@ -455,7 +455,16 @@ export class AdaBlockParser extends BaseBlockParser {
         let lookaheadEnd = lookaheadStart;
         while (lookaheadEnd < source.length) {
           const ch = source[lookaheadEnd];
-          if (ch === '\n' || ch === '\r' || ch === ';') break;
+          // Ada LRM 2.2 line terminators (LF, CR, NEL, LS, PS) — and the
+          // statement terminator `;` — bound the designator lookahead to
+          // the current logical line. Without NEL/LS/PS the lookahead
+          // extended past the line and consumed a next-line statement as
+          // a "designator", which made the reject path see `;` and accept
+          // the compound end across the line break.
+          const code = ch.charCodeAt(0);
+          if (code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029 || ch === ';') {
+            break;
+          }
           lookaheadEnd++;
         }
         let lookahead = skipAdaWhitespaceAndComments(source, lookaheadStart);
