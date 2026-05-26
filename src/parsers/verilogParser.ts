@@ -906,6 +906,33 @@ export class VerilogBlockParser extends BaseBlockParser {
     return k >= 0 && source[k] === '#';
   }
 
+  // Returns true when the keyword at `position` is the operand of a paren-less
+  // `#identifier` delay control or `@identifier` event control. SystemVerilog
+  // allows both forms (LRM §3.13, §9.4.2):
+  //   - `#<delay_value>` where delay_value can be a hierarchical identifier
+  //   - `@<hierarchical_identifier>` for event control
+  // When a reserved word is used as the identifier (e.g., `#case`, `@case`),
+  // it is being misused as an identifier and must not be tokenized as a real
+  // block opener/closer. The companion `isInsideDelayExpression` only covers
+  // the parenthesized `#(...)` and `@(...)` forms; this method handles the
+  // bare-identifier form. Skips whitespace and block/line comments between
+  // `#`/`@` and the keyword.
+  private isDelayOrSensitivityOperand(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let k = position - 1;
+    while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+    // Skip block comments and line comments (whitespace-equivalent trivia).
+    while (k >= 0 && this.isInExcludedRegion(k, excludedRegions)) {
+      const region = this.findExcludedRegionAt(k, excludedRegions);
+      if (!region) break;
+      const isBlockComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*';
+      const isLineComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '/';
+      if (!isBlockComment && !isLineComment) break;
+      k = region.start - 1;
+      while (k >= 0 && (source[k] === ' ' || source[k] === '\t')) k--;
+    }
+    return k >= 0 && (source[k] === '#' || source[k] === '@');
+  }
+
   // Returns true when the keyword at `position` follows a label colon whose label
   // name is itself a reserved word AND the enclosing block is a case statement.
   // In that situation the preceding `<keyword> :` is a case_item label (its name
@@ -963,6 +990,13 @@ export class VerilogBlockParser extends BaseBlockParser {
     // words cannot legitimately appear as delay/parameter expression operands;
     // tokenizing them would generate bogus BlockPairs against later close keywords.
     if (this.isInsideDelayExpression(source, position, excludedRegions)) {
+      return false;
+    }
+
+    // Reject any keyword used as a paren-less `#identifier` delay or
+    // `@identifier` event-control operand (e.g., `#case`, `@case`). Reserved
+    // words cannot legitimately appear as delay/sensitivity identifiers.
+    if (this.isDelayOrSensitivityOperand(source, position, excludedRegions)) {
       return false;
     }
 
@@ -1138,6 +1172,12 @@ export class VerilogBlockParser extends BaseBlockParser {
     // (mirrors the isValidBlockOpen check). Reserved words cannot legitimately
     // appear as delay/parameter expression operands.
     if (this.isInsideDelayExpression(source, position, excludedRegions)) {
+      return false;
+    }
+
+    // Reject any close keyword used as a paren-less `#identifier` delay or
+    // `@identifier` event-control operand (mirrors the isValidBlockOpen check).
+    if (this.isDelayOrSensitivityOperand(source, position, excludedRegions)) {
       return false;
     }
 
