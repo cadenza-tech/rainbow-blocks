@@ -227,13 +227,14 @@ const METHOD_QUALIFIER_TARGETS: ReadonlySet<string> = new Set(['function', 'task
 
 // SystemVerilog declaration introducer keywords. When one of these immediately
 // precedes a block-keyword identifier (e.g., `localparam endmodule = 1;`,
-// `genvar case;`), the block keyword is being used as a declared name rather
-// than introducing a block. Per IEEE 1800-2017 these introducers are followed
-// by either a data type (already handled by DATA_TYPE_KEYWORDS) or directly by
-// the declared identifier, so adding them to the suppression set does not
-// break the data-type-prefixed form (`localparam int endmodule;`) which is
-// already covered by the data-type word-match in isPrecededByDataTypeKeyword.
-const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set(['localparam', 'parameter', 'genvar']);
+// `genvar case;`, `specparam endmodule = 10;`), the block keyword is being used
+// as a declared name rather than introducing a block. Per IEEE 1800-2017 these
+// introducers are followed by either a data type (already handled by
+// DATA_TYPE_KEYWORDS) or directly by the declared identifier, so adding them to
+// the suppression set does not break the data-type-prefixed form
+// (`localparam int endmodule;`) which is already covered by the data-type
+// word-match in isPrecededByDataTypeKeyword.
+const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set(['localparam', 'parameter', 'genvar', 'specparam']);
 
 // case-statement opener keywords. These keywords introduce a case statement and
 // never appear as an expression operand, so finding one on the right-hand side
