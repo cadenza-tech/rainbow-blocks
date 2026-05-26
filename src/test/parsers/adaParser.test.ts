@@ -4271,6 +4271,46 @@ end if;`;
     });
   });
 
+  suite('Regression: compound end pattern line-comment ends at Unicode line terminators', () => {
+    // The compound-end regex allows an Ada line comment between `end` and the
+    // type keyword (e.g., `end --note\n if`). The comment alternative was
+    // `--[^\r\n]*(?:\r\n|\r|\n)` — its character class excluded only `\r`
+    // and `\n`, so a comment ending at NEL/LS/PS (Ada LRM 2.2 line
+    // terminators) was not recognized: the `[^\r\n]*` swallowed the
+    // line terminator and the trailing `(?:\r\n|\r|\n)` alternative
+    // failed to match. The compound-end fell back to a simple `end`,
+    // leaving the following `if` to spawn a new orphan block opener.
+    test('should match end --comment<NEL>if as compound end if', () => {
+      const nel = String.fromCharCode(0x85);
+      const source = `if X then null;end --comment${nel}if;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'if');
+      const close = pairs[0].closeKeyword.value.toLowerCase();
+      assert.ok(/^end[\s\S]*if$/.test(close), `expected compound end if, got ${JSON.stringify(close)}`);
+    });
+
+    test('should match end --comment<LS>if as compound end if', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `if X then null;end --comment${ls}if;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'if');
+      const close = pairs[0].closeKeyword.value.toLowerCase();
+      assert.ok(/^end[\s\S]*if$/.test(close), `expected compound end if, got ${JSON.stringify(close)}`);
+    });
+
+    test('should match end --comment<PS>if as compound end if', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `if X then null;end --comment${ps}if;`;
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'if');
+      const close = pairs[0].closeKeyword.value.toLowerCase();
+      assert.ok(/^end[\s\S]*if$/.test(close), `expected compound end if, got ${JSON.stringify(close)}`);
+    });
+  });
+
   suite('Regression: matchAdaString recognizes Unicode line terminators', () => {
     test('should terminate string at U+0085 (NEL) so trailing if/end if pair is detected', () => {
       // Ada strings cannot span multiple lines per LRM 2.6. The Ada parser
