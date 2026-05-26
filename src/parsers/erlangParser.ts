@@ -577,6 +577,16 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '#') {
         return false;
       }
+      // Reject keywords adjacent to '@' on either side. Per Erlang Reference Manual,
+      // atom syntax is [a-z][a-zA-Z0-9_@]* and variable syntax is [A-Z_][a-zA-Z0-9_@]*,
+      // so '@' is an identifier continuation character, not a word boundary. JavaScript
+      // \b treats '@' as a boundary, causing false matches like `begin@host` or `node@end`.
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '@') {
+        return false;
+      }
+      if (token.endOffset < source.length && source[token.endOffset] === '@') {
+        return false;
+      }
       // Reject keywords preceded by '-' at line start (preprocessor directives like -if, -else)
       if (token.startOffset > 0 && source[token.startOffset - 1] === '-') {
         let j = token.startOffset - 2;
