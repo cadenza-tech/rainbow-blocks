@@ -6176,5 +6176,39 @@ end associate`;
     });
   });
 
+  suite('Regression 2026-05-26: numeric literal with continuation before bare end is not block_close', () => {
+    test('should treat `42 &\\n end` as expression continuation, not block_close', () => {
+      // Pre-fix bug: `isPrecededByOperator` only recognized operator characters (+, -, *,
+      // /, =, etc.) and a small set of statement-keyword predecessors (`call`, `save`, ...)
+      // but not numeric literals. With `x = 42 &\n  end` the bare `end` is the variable
+      // continuation of the expression `42`, yet the parser saw a bare `end` keyword
+      // preceded only by `&` (continuation) + digit `2` and treated it as a real
+      // block_close, phantom-closing the enclosing `program` block.
+      const source = `program test
+  integer :: end
+  end = 5
+  x = 42 &
+  end
+end program`;
+      const pairs = parser.parse(source);
+      // Expect a single `program ... end program` pair. The bare `end` on line 4 is the
+      // tail of `42 & end` (numeric expression continuation), not a block close.
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+
+    test('should treat `1.5e10 &\\n end` (floating-point) as expression continuation', () => {
+      // Floating-point literals end with letters (`e`, `d`) followed by digits, so the
+      // backward-scan lands on a digit. Confirm the same fix covers them.
+      const source = `program test
+  real :: end
+  end = 0.0
+  x = 1.5e10 &
+  end
+end program`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'program', 'end program');
+    });
+  });
+
   generateCommonTests(config);
 });
