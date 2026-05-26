@@ -494,6 +494,14 @@ export function isVariantRecordCase(
   if (j >= source.length) {
     return false;
   }
+  // `case:` (tag missing, only ':' follows) is a malformed field declaration where
+  // `case` names the field. Inside a record this is not a variant selector — treat
+  // as a non-block opener so the surrounding `record` keeps its `end`. Without this
+  // guard the `case` becomes a standalone block opener, the inner `end` closes the
+  // case, and the surrounding record is left orphan.
+  if (source[j] === ':' && (j + 1 >= source.length || source[j + 1] !== '=')) {
+    return true;
+  }
   // Determine the end of the selector tag token. The tag is one of:
   //  - an identifier (possibly qualified, e.g. Types.MyEnum)
   //  - a parenthesized group: an anonymous ordinal type `(Foo, Bar)` (FreePascal) or a
