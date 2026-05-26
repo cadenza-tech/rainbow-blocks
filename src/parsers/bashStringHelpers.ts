@@ -284,13 +284,17 @@ function stepSubshellFrame(source: string, i: number, frame: ScanFrame): Subshel
     return { nextPos: j };
   }
 
-  // Detect heredoc operators (<<WORD, <<-WORD) and track pending body
+  // Detect heredoc operators (<<WORD, <<-WORD) and track pending body.
+  // Skip detection inside [[ ]]: redirections are not allowed in conditional
+  // expressions, so `<<` is bash's arithmetic left-shift operator there.
+  // This mirrors the top-level findExcludedRegions gate.
   if (
     char === '<' &&
     i + 1 < source.length &&
     source[i + 1] === '<' &&
     (i + 2 >= source.length || source[i + 2] !== '<') &&
-    (i === 0 || source[i - 1] !== '<')
+    (i === 0 || source[i - 1] !== '<') &&
+    frame.doubleBracketDepth === 0
   ) {
     const heredoc = parseHeredocOperator(source, i);
     if (heredoc) {
