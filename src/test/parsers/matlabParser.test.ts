@@ -3639,5 +3639,39 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: empty-header block opener should not pair its end with an outer block', () => {
+    test('should not pair if; with outer function end (if; rejected, inner end stays orphan)', () => {
+      // `if;` is rejected as a block opener (empty header). Without the phantom-skip wiring
+      // the inner `end` (intended to close the rejected `if`) is wrongly paired with the
+      // outer `function`, leaving the real outer `end` orphan.
+      // function should pair with the outer end on line 3 (0-indexed).
+      const source = 'function f\n  if;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'function must pair with the outer end on line 3 (0-indexed)');
+    });
+
+    test('should not pair for; with outer function end', () => {
+      const source = 'function f\n  for;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not pair while, with outer function end', () => {
+      const source = 'function f\n  while,\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+
+    test('should not pair switch; with outer function end', () => {
+      const source = 'function f\n  switch;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
+  });
+
   generateCommonTests(config);
 });
