@@ -6247,5 +6247,60 @@ end subroutine`;
     });
   });
 
+  suite('Regression 2026-05-26: Fortran 77-style type declaration without :: suppresses keyword tokenization', () => {
+    test('should treat `integer end` (F77 declaration) as a variable, not block_close', () => {
+      // Pre-fix bug: Fortran 77 declarations omit the `::` separator (`INTEGER X, Y, Z`).
+      // When an identifier on a F77-style declaration line happens to spell a block
+      // keyword (e.g., `integer end` declares a variable named END), the bare `end`
+      // was tokenized as a block_close, stealing the matching `end subroutine` close
+      // and leaving the enclosing subroutine as an orphan.
+      const source = `subroutine test
+  integer end
+  end = 5
+end subroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should treat `double precision end` (two-word type spec) as a variable', () => {
+      // `double precision` is two words separated by whitespace; the F77 type-spec
+      // detection must accept both single-word and two-word forms.
+      const source = `subroutine test
+  double precision end
+  end = 5.0
+end subroutine`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+
+    test('should treat `integer enddo` (F77 declaration) as variable, not block_close token', () => {
+      // The concatenated compound-end keyword `enddo` must also be suppressed when it
+      // appears as a variable name on a F77 type declaration line. Pre-fix, the
+      // BlockPair set was correct (because the phantom `enddo` had no matching `do`),
+      // but the token list emitted a phantom block_close. This test asserts the token
+      // list directly.
+      const source = `subroutine test
+  integer enddo
+  enddo = 42
+end subroutine`;
+      const tokens = parser.getTokens(source);
+      // Expect only the subroutine open/close tokens.
+      const tokenValues = tokens.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(tokenValues, ['subroutine', 'end subroutine']);
+    });
+
+    test('should preserve `integer function foo()` as a valid function block opener', () => {
+      // Sanity check: the F77 type-spec prefix on `integer function foo()` must NOT
+      // suppress the `function` keyword. Otherwise the function declaration would not
+      // be recognized as a block opener.
+      const source = `integer function foo(a)
+  integer a
+  foo = a + 1
+end function`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end function');
+    });
+  });
+
   generateCommonTests(config);
 });
