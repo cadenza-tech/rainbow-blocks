@@ -88,9 +88,11 @@ const WHEN_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['case']);
 // no exception). while/until/for loops and def/class/module do not take `else`.
 const ELSE_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 'case', 'begin']);
 
-// Open keywords whose blocks can take an `elsif` clause. `elsif` belongs to
-// if/unless only.
-const ELSIF_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless']);
+// Open keywords whose blocks can take an `elsif` clause. `elsif` belongs to `if`
+// only -- Ruby allows `unless ... else ... end` but not `unless ... elsif ... end`
+// (which is a syntax error). A bare `elsif` inside an `unless` body is not a
+// syntactic element of that block, so it must not be collected as an intermediate.
+const ELSIF_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if']);
 
 // Open keywords whose blocks can take a bare `rescue`/`ensure` clause. These are
 // valid directly inside begin/def/class/module bodies, and inside `do...end`
