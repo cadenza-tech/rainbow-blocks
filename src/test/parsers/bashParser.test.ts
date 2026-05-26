@@ -6752,5 +6752,20 @@ fi`;
     });
   });
 
+  suite('Regression: << inside [[ ]] inside $() must not be parsed as heredoc', () => {
+    test('should not treat << as heredoc inside [[ ]] inside $()', () => {
+      // `[[ a << b ]]` inside `$()` is a conditional expression where `<<`
+      // is bash's arithmetic left-shift operator (in [[ ]] arithmetic
+      // context), not a heredoc operator. The top-level findExcludedRegions
+      // already gates heredoc detection on `doubleBracketDepth === 0`;
+      // the subshell scanner must do the same so a `<<` inside `[[ ]]`
+      // inside `$()` does not produce a phantom heredoc body that extends
+      // past the real `)` and swallows the following if/fi block.
+      const source = '$([[ a << b ]])\nif true; then echo; fi';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 });
