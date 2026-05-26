@@ -87,6 +87,14 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (source[assignFrom] === '.' && source[assignFrom + 1] !== '.') {
       return false;
     }
+    // Reject end immediately followed by `:N` (N is anything except `=`). `end:N` is always
+    // an array-index range expression (typically `A(end:N)` inside indexing, or `for i = end:N`
+    // in a for-header), never a block close. The narrower for-header-only check below has the
+    // same effect for `for i = end:5`, but cannot catch the form outside a for-header where
+    // `end:1` would otherwise be misclassified as block close, consuming an inner block's `end`.
+    if (keyword === 'end' && this.isEndFollowedByColon(source, position, excludedRegions)) {
+      return false;
+    }
     // Reject end immediately after `:` on a for-loop header line. Such `end` is part of
     // the loop's range expression (e.g., `for i = 1:end`) — array-index `end`, not block close.
     if (this.isEndInForHeaderRange(source, position, excludedRegions)) {
@@ -430,6 +438,26 @@ export class MatlabBlockParser extends BaseBlockParser {
   // Returns true when `end` at position is preceded by an expression operator (operand context)
   private isPrecededByBinaryOperator(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     return isPrecededByBinaryOperator(source, position, excludedRegions);
+  }
+
+  // Returns true when `end` at `position` is immediately followed by `:N` where N is any
+  // character other than `=`. Such forms (`end:1`, `end:n`, `for i = end:5`) place `end`
+  // in array-indexing range context — `end` here is the array-index `end` (the last index
+  // of the enclosing indexing context), never a block close. Whitespace and `...`/`\`
+  // line continuations between `end` and `:` are tolerated. `:=` is excluded because it
+  // could potentially be a future compound-assignment operator (and we already filter
+  // `end = ...` via isFollowedBySimpleAssignment, so leaving `:=` alone is harmless here).
+  // Generalises the LHS-range branch of isEndInForHeaderRange: the for-header context is
+  // not required because `end:N` is invalid in any other context anyway (treating it as
+  // block close consumes an inner block's `end` and destroys outer pairing).
+  private isEndFollowedByColon(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const j = this.skipWhitespaceAndContinuations(source, position + 3, excludedRegions);
+    if (j >= source.length || source[j] !== ':') {
+      return false;
+    }
+    // `:=` is left alone (not a colon-range). `::` is also unusual in MATLAB but harmless
+    // to leave alone here.
+    return j + 1 >= source.length || source[j + 1] !== '=';
   }
 
   // Returns true when `end` is part of a for-loop header range expression.
