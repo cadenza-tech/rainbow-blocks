@@ -3831,5 +3831,25 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: `case:` field declaration inside record', () => {
+    test('should not treat record-body `case:` field declaration as block opener', () => {
+      // `case: Integer;` inside a record uses `case` as a field name, not a variant
+      // case selector. Without an isValidBlockOpen guard the `case` is pushed onto the
+      // stack and the surrounding `end` closes `case` instead of `record`, leaving
+      // the outer `record` orphan.
+      const source = `TFoo = record
+  case: Integer;
+end`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(recordPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      // `case` must not produce a block pair.
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` used as field name must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
