@@ -217,9 +217,30 @@ export function endsWithContinuationOperator(
   }
   if (i < 0) return false;
 
-  // Skip if the trailing character is inside an excluded region (e.g., string or comment)
+  // Skip a trailing single-line comment region: `x + # comment\n` should still recognise
+  // the continuation `+`. The comment occupies the tail of the physical line and is
+  // syntactic whitespace, so we look back past it to find the operator. Only the first
+  // (innermost) trailing comment is skipped -- after one comment region we continue
+  // checking the actual operator character, not another comment behind it.
   if (excludedRegions && callbacks.isInExcludedRegion(i, excludedRegions)) {
-    return false;
+    const region = callbacks.findExcludedRegionAt(i, excludedRegions);
+    if (region && source[region.start] === '#') {
+      // Move before the comment and skip any whitespace between the operator and `#`
+      i = region.start - 1;
+      while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+        i--;
+      }
+      if (i < 0) return false;
+      // If after skipping we are still inside an excluded region (string/regex/heredoc
+      // terminator), it is a value, not an operator -- not a continuation.
+      if (callbacks.isInExcludedRegion(i, excludedRegions)) {
+        return false;
+      }
+    } else {
+      // The trailing char is inside a non-comment region (string, regex, heredoc body, ...);
+      // that is a value, not a continuation operator.
+      return false;
+    }
   }
 
   const ch = source[i];
