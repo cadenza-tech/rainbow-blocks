@@ -2835,5 +2835,31 @@ end`;
     });
   });
 
+  suite('Regression: Unicode horizontal whitespace before line continuation', () => {
+    test('should treat if<VT>\\<NL>... as block opener (VT before backslash continuation)', () => {
+      // The continuation-rescue scanner must use the same Unicode-aware horizontal
+      // whitespace set as the rest of the parser (isHorizontalWhitespace). Without the
+      // fix the ASCII-only ` ` / `\t` skip cannot reach the `\\<NL>` continuation, the
+      // parent's binary-operator rejection wins, and the if/end pair is lost.
+      const source = 'if\v\\\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat if<NBSP>\\<NL>... as block opener (NBSP before backslash continuation)', () => {
+      const source = 'if \\\n  true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat do<VT>\\<NL>... as do/until opener', () => {
+      // `do<VT>\\\n  body\nuntil c` — the VT before `\\<NL>` must also be skipped so
+      // the do/until pair is detected. Mirrors the if<VT>\\<NL> case for the do keyword.
+      const source = 'do\v\\\n  x = 1;\nuntil x';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
   generateCommonTests(config);
 });
