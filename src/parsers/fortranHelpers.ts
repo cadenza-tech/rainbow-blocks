@@ -954,6 +954,96 @@ export function isAfterDoubleColon(source: string, position: number, excludedReg
   return false;
 }
 
+// Checks if `position` is an identifier in a Fortran 77-style type declaration line
+// (no `::` separator), e.g. `integer end` / `real x, end` / `logical foo`.
+// Fortran 77 allows declarations to omit the `::` separator: `INTEGER X, Y, Z` declares
+// X, Y, Z as integers. In such lines, identifiers that happen to spell block keywords
+// (e.g., `INTEGER END` declares a variable named END) must not be tokenized as keywords.
+// Without this filter, the bare `end` would be a phantom block_close that steals the
+// matching `end <type>` from the enclosing procedure.
+//
+// The function returns true when:
+//   1. `position` lies on a line whose leading non-whitespace text starts with a Fortran
+//      77-style type specifier (`integer` / `real` / `logical` / `complex` /
+//      `character` / `double precision` / `byte`).
+//   2. No `::` separator appears between the type specifier and `position` (with `::`,
+//      isAfterDoubleColon handles the suppression instead).
+//   3. The identifier at `position` is not `function` / `subroutine`, which are valid
+//      block openers preceded by a type-spec prefix (e.g., `integer function foo()`).
+//
+// Same-line only: continuation across `&` is not handled here because Fortran 77 fixed
+// form used column-6 continuation, which is rarely combined with bare type declarations
+// in the wild and would significantly complicate this check without addressing a
+// observed bug class.
+export function isAfterF77TypeDeclaration(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  // Reject `function` / `subroutine` so `integer function foo()` and `real subroutine bar()`
+  // still pair as block openers (the type-spec is a prefix to the procedure declaration).
+  // Other identifiers on a type-decl line are suppressed.
+  // Read identifier at position to test against the allow-list.
+  let identEnd = position;
+  while (identEnd < source.length && /[A-Za-z0-9_]/.test(source[identEnd])) {
+    identEnd++;
+  }
+  const ident = source.slice(position, identEnd).toLowerCase();
+  if (ident === 'function' || ident === 'subroutine') {
+    return false;
+  }
+
+  const lineStart = findLineStart(source, position);
+  // Find the start of the current statement (honor `;` statement separators).
+  let stmtStart = lineStart;
+  for (let i = position - 1; i >= lineStart; i--) {
+    if (source[i] === ';' && !isInExcludedRegion(i, excludedRegions)) {
+      stmtStart = i + 1;
+      break;
+    }
+  }
+  const stmtBeforeRaw = source.slice(stmtStart, position);
+  // If `::` appears in the statement before position, isAfterDoubleColon handles it.
+  // Returning false here keeps the responsibility partition clear.
+  if (stmtBeforeRaw.includes('::')) {
+    return false;
+  }
+  // Strip inline comments (Fortran free-form `!`) so a `!` inside a string does not
+  // truncate the line. Use a forward scan that respects single/double-quoted strings
+  // (Fortran uses doubled quotes as escape).
+  let inlineCommentIdx = -1;
+  for (let i = 0; i < stmtBeforeRaw.length; i++) {
+    const ch = stmtBeforeRaw[i];
+    if (ch === "'" || ch === '"') {
+      i++;
+      while (i < stmtBeforeRaw.length) {
+        if (stmtBeforeRaw[i] === ch) {
+          if (i + 1 < stmtBeforeRaw.length && stmtBeforeRaw[i + 1] === ch) {
+            i++;
+          } else {
+            break;
+          }
+        }
+        i++;
+      }
+      continue;
+    }
+    if (ch === '!') {
+      inlineCommentIdx = i;
+      break;
+    }
+  }
+  const stmtBefore = inlineCommentIdx >= 0 ? stmtBeforeRaw.slice(0, inlineCommentIdx) : stmtBeforeRaw;
+  // Match a leading F77 type specifier. `double precision` is two words separated by
+  // whitespace; the others are single words.
+  const f77TypePattern = /^[ \t]*(integer|real|logical|complex|character|byte|double[ \t]+precision)\b/i;
+  if (!f77TypePattern.test(stmtBefore)) {
+    return false;
+  }
+  // The statement begins with a F77 type-spec. The identifier at `position` is either
+  // - the first variable name directly after the type spec, OR
+  // - a subsequent variable name after a `,` separator.
+  // Both cases qualify as F77 declarations. Return true to suppress keyword tokenization
+  // at this position.
+  return true;
+}
+
 // Matches 'else where' (with possible continuation) for block middle detection
 export function matchElseWhere(source: string, afterElse: number, excludedRegions: ExcludedRegion[]): { whereStart: number; end: number } | null {
   const afterElseText = source.slice(afterElse);

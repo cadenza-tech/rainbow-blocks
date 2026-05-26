@@ -9,6 +9,7 @@ import {
   findLogicalLineEnd,
   hasEmptyParenthesizedCondition,
   isAfterDoubleColon,
+  isAfterF77TypeDeclaration,
   isBlockWhereOrForall,
   isOnKeywordSplittingContinuationLine,
   isPrecedingContinuationKeyword,
@@ -957,7 +958,11 @@ export class FortranBlockParser extends BaseBlockParser {
     let match = COMPOUND_END_PATTERN.exec(source);
     while (match !== null) {
       const pos = match.index;
-      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions)) {
+      if (
+        !this.isInExcludedRegion(pos, excludedRegions) &&
+        !isAfterDoubleColon(source, pos, excludedRegions) &&
+        !isAfterF77TypeDeclaration(source, pos, excludedRegions)
+      ) {
         const fullMatch = match[0];
         // Reject when the compound `end <type>` (or concatenated form like `endif`) is
         // adjacent to a non-ASCII Unicode identifier continuation character (e.g.,
@@ -996,7 +1001,12 @@ export class FortranBlockParser extends BaseBlockParser {
     let contMatch = CONTINUATION_COMPOUND_END_PATTERN.exec(source);
     while (contMatch !== null) {
       const pos = contMatch.index;
-      if (!this.isInExcludedRegion(pos, excludedRegions) && !isAfterDoubleColon(source, pos, excludedRegions) && !compoundEndPositions.has(pos)) {
+      if (
+        !this.isInExcludedRegion(pos, excludedRegions) &&
+        !isAfterDoubleColon(source, pos, excludedRegions) &&
+        !isAfterF77TypeDeclaration(source, pos, excludedRegions) &&
+        !compoundEndPositions.has(pos)
+      ) {
         const fullMatch = contMatch[0];
         // Reject when the continuation-form compound `end <type>` is adjacent to a
         // non-ASCII Unicode identifier continuation character. Mirrors the bare-keyword
@@ -1066,6 +1076,14 @@ export class FortranBlockParser extends BaseBlockParser {
 
       // Skip keywords on variable declaration lines (after ::)
       if (isAfterDoubleColon(source, startOffset, excludedRegions)) {
+        continue;
+      }
+
+      // Skip identifiers in Fortran 77-style type declarations (no `::` separator).
+      // Example: `INTEGER END` declares a variable named END; the bare `end` here must not
+      // be tokenized as a block_close. The check excludes `function`/`subroutine`, which
+      // are valid block openers preceded by a type-spec prefix (`integer function foo()`).
+      if (isAfterF77TypeDeclaration(source, startOffset, excludedRegions)) {
         continue;
       }
 
