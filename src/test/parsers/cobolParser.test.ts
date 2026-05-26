@@ -3360,5 +3360,26 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression 2026-05-26: Unicode identifier boundary in COPY statement detection', () => {
+    // Bug: isInCopyStatement in cobolParser.ts and cobolHelpers.ts used the
+    // regex /(?<![a-zA-Z0-9_-])COPY(?![a-zA-Z0-9_-])/gi to locate the COPY
+    // keyword in the current statement. JavaScript's lookbehind/lookahead
+    // character class only handles ASCII identifier characters, so a non-ASCII
+    // Unicode letter adjacent to COPY (e.g. `αCOPY`, `COPYβ`) was not rejected
+    // — the match was accepted and the following `IF` / `END-IF` were
+    // suppressed as the copybook name of a phantom COPY statement.
+    test('should pair IF with END-IF when αCOPY precedes them (Unicode letter prefix)', () => {
+      const source = 'αCOPY IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should pair IF with END-IF when COPYα precedes them (Unicode letter suffix)', () => {
+      const source = 'COPYα IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });
