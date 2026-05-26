@@ -225,9 +225,18 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
     // accept indented terminators and terminators with trailing whitespace under all
     // forms, so the heredoc closes instead of swallowing the rest of the source when
     // the user writes a slightly-malformed terminator (e.g. `EOF  \t` or `  EOF`).
+    //
+    // Quoted heredoc identifiers (`<<" EOF"`) may carry leading/trailing whitespace as
+    // part of the terminator string itself. Match strategy in priority order:
+    //   1. Exact `trimmedLine === terminator` -- standard case
+    //   2. Exact `line === terminator` -- quoted identifier with required whitespace
+    //   3. Trimmed-both `trimmedLine === terminator.trim()` -- fallback for quoted
+    //      identifier with extra trailing whitespace on the body line
     const trimmedLine = line.trim();
+    const matchesTerminator =
+      trimmedLine === currentTerminator.terminator || line === currentTerminator.terminator || trimmedLine === currentTerminator.terminator.trim();
 
-    if (trimmedLine === currentTerminator.terminator) {
+    if (matchesTerminator) {
       terminatorIndex++;
       if (terminatorIndex === terminators.length) {
         return {
