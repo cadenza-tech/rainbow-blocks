@@ -647,11 +647,19 @@ export function isInCopyStatement(source: string, posBeforeKeyword: number, call
   const lastPeriod = callbacks.findLastPeriodOutsideStringsBefore(posBeforeKeyword);
   const beforeKeyword = source.slice(0, posBeforeKeyword + 1);
   const stmtStart = lastPeriod + 1;
-  // Search for COPY word-boundary match, verifying each match is not inside a string or comment
+  // Search for COPY word-boundary match, verifying each match is not inside a
+  // string or comment. The ASCII-only lookbehind/lookahead cannot reject
+  // non-ASCII Unicode identifier characters, so reject `αCOPY` / `COPYβ`
+  // explicitly via the adjacent-char check below.
   const copyPattern = /(?<![a-zA-Z0-9_-])COPY(?![a-zA-Z0-9_-])/gi;
   const statement = beforeKeyword.slice(stmtStart);
   for (const match of statement.matchAll(copyPattern)) {
     const absPos = stmtStart + match.index;
+    // Reject the match when an adjacent Unicode identifier character makes this
+    // a mid-identifier occurrence (e.g. `αCOPY`, `COPYβ`).
+    if (absPos > 0 && isUnicodeIdentifierChar(source[absPos - 1])) continue;
+    const afterPos = absPos + 4;
+    if (afterPos < source.length && isUnicodeIdentifierChar(source[afterPos])) continue;
     // Skip if on a fixed-format comment line or >> compiler directive line
     if (isOnExcludedLine(source, absPos, callbacks)) continue;
     // Quick check: skip if inside a quoted string (scan backward for unmatched quote)

@@ -11,7 +11,13 @@ import {
   matchCobolString
 } from './cobolFixedFormat';
 import type { CobolHelperCallbacks } from './cobolHelpers';
-import { isInCopyStatement as isInCopyStatementHelper, isInPseudoTextContext, matchExecBlock, matchPseudoText } from './cobolHelpers';
+import {
+  isInCopyStatement as isInCopyStatementHelper,
+  isInPseudoTextContext,
+  isUnicodeIdentifierChar,
+  matchExecBlock,
+  matchPseudoText
+} from './cobolHelpers';
 import { buildPeriodPositions, findBlockVerbAfterCopybook, getPseudoTextStarts } from './cobolPseudoText';
 import { buildCaseInsensitiveKeywordPattern, findLastOpenerByType } from './parserUtils';
 
@@ -547,11 +553,20 @@ export class CobolBlockParser extends BaseBlockParser {
     if (stmtStart >= position) return false;
     // Scan the statement for the COPY keyword with proper word-boundary
     // matching. The regex avoids matching identifiers like MY-COPY or COPY-X.
+    // The ASCII-only lookbehind/lookahead cannot reject non-ASCII Unicode
+    // identifier characters, so check the immediate neighbours below for any
+    // Unicode letter / mark / digit / connector — e.g. `αCOPY` and `COPYα`
+    // must not be matched as the bare COPY keyword.
     const COPY_PATTERN = /(?<![a-zA-Z0-9_-])COPY(?![a-zA-Z0-9_-])/gi;
     COPY_PATTERN.lastIndex = 0;
     const statement = source.slice(stmtStart, position);
     for (const match of statement.matchAll(COPY_PATTERN)) {
       const absPos = stmtStart + match.index;
+      // Reject the match when an adjacent Unicode identifier character makes
+      // this a mid-identifier occurrence (e.g. `αCOPY`, `COPYβ`).
+      if (absPos > 0 && isUnicodeIdentifierChar(source[absPos - 1])) continue;
+      const afterPos = absPos + 4;
+      if (afterPos < source.length && isUnicodeIdentifierChar(source[afterPos])) continue;
       // Skip COPY tokens inside excluded regions (strings, comments, EXEC
       // blocks, compiler directive lines, etc.)
       if (this.isInExcludedRegion(absPos, excludedRegions)) continue;
