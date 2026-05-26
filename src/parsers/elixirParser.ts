@@ -714,6 +714,26 @@ export class ElixirBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject 'end' used as the right-hand side of an assignment or binary operator
+    // (e.g., `x = end`, `x = a + end`, `x |> end`). In these positions `end` is an
+    // identifier in expression position, not a block close. Without this guard the
+    // inner `end` greedily pairs with the surrounding opener and orphans the real outer
+    // `end`. Symmetric with the block_middle filter that rejects else/rescue/catch/after
+    // as expression-RHS operands (see EXPRESSION_OPERATOR_LEAD_CHARS use above).
+    if (keyword === 'end' && position > 0) {
+      let q = position - 1;
+      while (q >= 0 && (source[q] === ' ' || source[q] === '\t')) q--;
+      if (q >= 0) {
+        const before = source[q];
+        // `=` covers assignment and compound operators (==, !=, <=, >=, =~, =>, etc.).
+        // EXPRESSION_OPERATOR_LEAD_CHARS covers `+ - * / < > | ^ & ~` (binary operators).
+        // `..` (range) is handled separately above as a preceding-`..` rejection.
+        if (before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) {
+          return false;
+        }
+      }
+    }
+
     // Reject 'end' that is being used as a parameter / argument identifier rather than
     // a block close (e.g., `def foo(end) do ... end`). 'end' is a parameter identifier
     // only when it sits as a complete comma-separated element: bordered on both sides
