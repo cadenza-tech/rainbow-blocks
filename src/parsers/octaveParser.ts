@@ -391,7 +391,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
   private isFalseOperatorRejectionDueToContinuation(keyword: string, source: string, position: number): boolean {
     const afterKw = position + keyword.length;
     let probe = afterKw;
-    while (probe < source.length && (source[probe] === ' ' || source[probe] === '\t')) probe++;
+    // Use the Unicode-aware horizontal whitespace set (VT/FF/NBSP/U+3000 etc.) so
+    // forms like `if<VT>\<NL>...` and `do<NBSP>\<NL>...` are recognised as having
+    // a line continuation immediately after the keyword. Without this, the
+    // continuation-rescue path falls through and the parent's binary-operator
+    // rejection wins, dropping the surrounding block pair.
+    while (probe < source.length && isHorizontalWhitespace(source[probe])) probe++;
     if (probe >= source.length) return false;
     const restAtProbe = source.slice(probe);
     const dotsCont = restAtProbe.match(LINE_CONTINUATION_PATTERN);
