@@ -443,7 +443,9 @@ export class BashBlockParser extends BaseBlockParser {
     while (j >= 0 && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) j--;
     if (j >= 1 && source[j] === 'n' && source[j - 1] === 'i') {
       const inStart = j - 1;
-      if (inStart === 0 || !/[a-zA-Z0-9_]/.test(source[inStart - 1])) {
+      // Word boundary must reject any Unicode letter/digit, not just ASCII, so
+      // `αin esac` is not misread as the `in` keyword preceding `esac`.
+      if (inStart === 0 || !/[\p{L}\p{N}_]/u.test(source[inStart - 1])) {
         return this.isCaseHeaderIn(source, inStart, excludedRegions);
       }
     }
@@ -471,13 +473,14 @@ export class BashBlockParser extends BaseBlockParser {
         return false;
       }
       // `case` keyword reached (word boundaries on both sides) with only the subject
-      // word in between.
+      // word in between. Word boundaries must reject any Unicode letter/digit,
+      // not just ASCII, so `αcase` and `caseα` are not misread as the keyword.
       if (
         ch === 'e' &&
         k >= 3 &&
         source.slice(k - 3, k + 1) === 'case' &&
-        (k - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 4])) &&
-        (k + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[k + 1]))
+        (k - 4 < 0 || !/[\p{L}\p{N}_]/u.test(source[k - 4])) &&
+        (k + 1 >= source.length || !/[\p{L}\p{N}_]/u.test(source[k + 1]))
       ) {
         return true;
       }

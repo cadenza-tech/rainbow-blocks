@@ -229,8 +229,9 @@ function isPrecededByInKeyword(source: string, pos: number): boolean {
   }
   if (j < 1) return false;
   if (source[j] !== 'n' || source[j - 1] !== 'i') return false;
-  // Word boundary: must not be part of a longer identifier (e.g., `bin`, `coin`)
-  return j - 2 < 0 || !/[a-zA-Z0-9_]/.test(source[j - 2]);
+  // Word boundary: must not be part of a longer identifier (e.g., `bin`, `coin`,
+  // `αin`). Reject any Unicode letter/digit, not just ASCII.
+  return j - 2 < 0 || !/[\p{L}\p{N}_]/u.test(source[j - 2]);
 }
 
 // Result of processing one position within a subshell frame.

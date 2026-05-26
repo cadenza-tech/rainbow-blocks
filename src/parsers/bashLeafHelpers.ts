@@ -34,13 +34,22 @@ export function isDollarHashVariable(source: string, pos: number): boolean {
   return count > 0;
 }
 
-// Checks if source matches a whole word at position (word boundary check)
+// Word-character class for shell identifiers, including non-ASCII letters and
+// numbers. Bash treats any Unicode letter/digit as a word constituent (e.g.
+// `αcase` is one word, not `α` + the keyword `case`), so the word-boundary
+// check must reject identifier characters from any script, not just ASCII.
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+// Checks if source matches a whole word at position (word boundary check).
+// Word boundaries reject any Unicode letter/digit on either side, so
+// `caseα` / `αcase` / `caseДЕЛО` are correctly seen as single words rather
+// than the `case` reserved keyword adjacent to non-identifier text.
 export function matchesWord(source: string, pos: number, word: string): boolean {
   if (pos + word.length > source.length) return false;
   if (source.slice(pos, pos + word.length) !== word) return false;
-  if (pos > 0 && /[a-zA-Z0-9_]/.test(source[pos - 1])) return false;
+  if (pos > 0 && WORD_CHAR.test(source[pos - 1])) return false;
   const after = pos + word.length;
-  if (after < source.length && /[a-zA-Z0-9_]/.test(source[after])) return false;
+  if (after < source.length && WORD_CHAR.test(source[after])) return false;
   return true;
 }
 
