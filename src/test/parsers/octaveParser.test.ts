@@ -2835,6 +2835,37 @@ end`;
     });
   });
 
+  suite('Regression: typed-close indexing-assignment guard', () => {
+    test('should reject endif{1} = 5 as block close (cell-array indexing assignment)', () => {
+      // `endif{1} = 5;` is an indexing assignment to a variable named `endif`, not a
+      // block close. Without the indexing-assignment guard extended to typed-closes, the
+      // inner `endif{1}` would consume the outer `if` and the trailing real `endif` would
+      // be left orphan, destroying the outer pair.
+      const source = 'if x\n  endif{1} = 5;\nendif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+      // The matching `endif` must be the one on line 3 (offset of the LAST endif).
+      const lastEndifOffset = source.lastIndexOf('endif');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, lastEndifOffset, 'must pair with the bottom endif, not the indexed one');
+    });
+
+    test('should reject endfor(1) = 5 as block close (paren indexing assignment)', () => {
+      const source = 'for i = 1:3\n  endfor(1) = 5;\nendfor';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'endfor');
+      const lastEndforOffset = source.lastIndexOf('endfor');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, lastEndforOffset, 'must pair with the bottom endfor');
+    });
+
+    test('should reject endwhile[1] = 5 as block close (bracket indexing assignment)', () => {
+      const source = 'while x\n  endwhile[1] = 5;\nendwhile';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'endwhile');
+      const lastEndwhileOffset = source.lastIndexOf('endwhile');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, lastEndwhileOffset, 'must pair with the bottom endwhile');
+    });
+  });
+
   suite('Regression: typed-close after middle keyword on same line', () => {
     test('should pair if/endif when else is followed by endif on the same line', () => {
       // Mirrors `if x\nelse end` for the typed-close form. Without the fix, the parent's
