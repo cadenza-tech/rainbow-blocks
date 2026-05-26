@@ -3581,5 +3581,39 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: end preceded by closing string quote on same logical line is not block close', () => {
+    test('should not treat end after closing double-quoted string as block close (x = "abc" end)', () => {
+      // `x = "abc" end` places `end` in operand position after the closing double quote.
+      // Invalid MATLAB outside indexing, but treating it as a block close consumes the
+      // inner if's end, leaving the outer function unmatched.
+      const source = 'function f\n  if true\n    x = "abc" end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4, 'function should pair with the outer end');
+      assert.strictEqual(ifBlock.closeKeyword.line, 3, 'if should pair with the real inner end (line 3)');
+    });
+
+    test("should not treat end after closing single-quoted string as block close (x = 'abc' end)", () => {
+      // `x = 'abc' end` places `end` in operand position after the closing single quote of a
+      // MATLAB character vector literal. Same root cause as the double-quoted case.
+      const source = "function f\n  if true\n    x = 'abc' end\n  end\nend";
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const funcBlock = findBlock(pairs, 'function');
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(funcBlock.closeKeyword.line, 4);
+      assert.strictEqual(ifBlock.closeKeyword.line, 3);
+    });
+
+    test('should still treat end on its own line after a string assignment as block close (sanity)', () => {
+      // Sanity: a normal end on its own physical line after a string assignment must keep working.
+      const source = 'function f\n  if true\n    x = "abc";\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
