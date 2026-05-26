@@ -224,6 +224,9 @@ interface SubshellStep {
   nextPos: number;
   // When set, the subshell frame closed at this offset (its region end).
   closedEnd?: number;
+  // When set, push this frame on top of the current one (used for nested
+  // contexts like `((...))` inside `$()` that need independent state).
+  pushFrame?: ScanFrame;
 }
 
 // Processes one position inside a subshell frame, handling heredocs, comments,
@@ -305,6 +308,13 @@ function stepSubshellFrame(source: string, i: number, frame: ScanFrame): Subshel
   }
 
   if (char === '(') {
+    // Bare `((` at a command position inside a subshell opens arithmetic
+    // evaluation. Push a separate arithParen frame so its `<<` (left-shift),
+    // `[[` etc. are not interpreted as heredoc operators or conditional
+    // expressions by stepSubshellFrame.
+    if (i + 1 < source.length && source[i + 1] === '(' && isAtSubshellCommandPosition(source, i)) {
+      return { nextPos: i + 2, pushFrame: createFrame('arithParen', 2, i) };
+    }
     frame.depth++;
     return { nextPos: i + 1 };
   }
@@ -442,6 +452,9 @@ function runScanner(source: string, initialFrame: ScanFrame, scanStart: number):
     if (frame.kind === 'subshell') {
       const step = stepSubshellFrame(source, i, frame);
       i = step.nextPos;
+      if (step.pushFrame !== undefined) {
+        stack.push(step.pushFrame);
+      }
       if (step.closedEnd !== undefined) {
         if (stack.length === 1) {
           bottomEnd = step.closedEnd;
