@@ -734,6 +734,20 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
     }
 
+    // Reject 'end' followed by `(` (function call: `end(args)` — `end` is the function
+    // identifier) or by `.` (field access: `end.field` — `end` is the receiver
+    // identifier). The `..` range operator after `end` is left alone (degenerate case
+    // `end..x` is preserved). Symmetric with the block_middle isFunctionCall /
+    // isFieldAccess filter (see tokenize lines above).
+    if (keyword === 'end') {
+      if (afterKeyword === '(') {
+        return false;
+      }
+      if (afterKeyword === '.' && source[position + keyword.length + 1] !== '.') {
+        return false;
+      }
+    }
+
     // Reject 'end' that is being used as a parameter / argument identifier rather than
     // a block close (e.g., `def foo(end) do ... end`). 'end' is a parameter identifier
     // only when it sits as a complete comma-separated element: bordered on both sides
