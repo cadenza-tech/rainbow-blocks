@@ -973,20 +973,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Note: modifier-style keywords (is/as/with/where/given/returning/in/of/by/from/to/without)
       // are intentionally excluded — after these, the next word is a value (e.g., `whose name is tell`).
       // 'on' is excluded because handler definitions like `on tell()` use the next word as the handler name.
-      const allowedPrecedingKeywords = new Set([
-        'if',
-        'else',
-        'while',
-        'until',
-        'when',
-        'then',
-        'and',
-        'or',
-        'not',
-        'considering',
-        'ignoring',
-        'try'
-      ]);
+      // Boolean operators (`and`, `or`, `not`) and the `when` modifier are also excluded:
+      // they take an expression as right operand, so `set x to a and tell` treats the
+      // trailing `tell` as an identifier value, not a block opener.
+      const allowedPrecedingKeywords = new Set(['if', 'else', 'while', 'until', 'then', 'considering', 'ignoring', 'try']);
       if (allowedPrecedingKeywords.has(word)) {
         return false;
       }
