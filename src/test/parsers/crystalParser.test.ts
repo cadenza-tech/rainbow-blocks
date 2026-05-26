@@ -4735,6 +4735,43 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
     });
 
+    test('should not treat enum & value as a block opener (bitwise and)', () => {
+      // `enum & 1` is a bitwise-and where `enum` is a value (variable). Treating
+      // `enum` as a block opener pairs it with the inner `end`, orphaning the def.
+      const source = 'def foo\n  x = enum & 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum && value as a block opener (logical and)', () => {
+      // `enum && 1` is a logical-and where `enum` is a value.
+      const source = 'def foo\n  x = enum && 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum &= value as a block opener (compound bitwise-and assignment)', () => {
+      // `enum &= 1` is a compound assignment where `enum` is the variable being
+      // updated. Like other `=`-led compound assignments, this must not open a block.
+      const source = 'def foo\n  enum &= 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum ^ value as a block opener (bitwise xor)', () => {
+      // `enum ^ 1` is a bitwise-xor where `enum` is a value.
+      const source = 'def foo\n  x = enum ^ 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not treat enum ^= value as a block opener (compound xor assignment)', () => {
+      // `enum ^= 1` is a compound assignment on a variable named `enum`.
+      const source = 'def foo\n  enum ^= 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
     test('should still open a real enum block when followed by a name (sanity)', () => {
       // The new binary-operator/separator suppression must not break real opener forms.
       const source = 'enum Color\n  Red\nend';
