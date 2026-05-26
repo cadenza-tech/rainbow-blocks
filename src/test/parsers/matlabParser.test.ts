@@ -3758,5 +3758,37 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: bare arguments outside function should not pair its end with an outer block', () => {
+    test('should not pair stray arguments...end with outer if end', () => {
+      // Bare `arguments` outside any function/methods/classdef cannot be a real arguments
+      // block, but the user wrote a stray `end` for it. Without the phantom-skip wiring
+      // the inner `end` is wrongly paired with the outer `if`, leaving the real outer `end`
+      // orphan. Lines: 0=if, 1=arguments, 2=y=1, 3=inner end, 4=outer end.
+      const source = 'if x > 0\n  arguments\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'if must pair with the outer end on line 4');
+    });
+
+    test('should not pair stray arguments...end with outer while end', () => {
+      const source = 'while x > 0\n  arguments\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4);
+    });
+
+    test('should still pair arguments inside function as a real block (sanity check)', () => {
+      // Inside a function body the arguments block remains a valid opener: it must pair
+      // with its own `end` and not be dropped.
+      const source = 'function f(x)\n  arguments\n    x (1,1) double\n  end\n  disp(x);\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const args = pairs.find((p) => p.openKeyword.value === 'arguments');
+      const func = pairs.find((p) => p.openKeyword.value === 'function');
+      assert.ok(args, 'arguments must pair as a real block inside a function');
+      assert.ok(func, 'function must still pair with its end');
+    });
+  });
+
   generateCommonTests(config);
 });
