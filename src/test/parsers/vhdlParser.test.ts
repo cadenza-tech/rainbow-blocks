@@ -4584,5 +4584,75 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-26: entity_class reserved words in attribute_specification', () => {
+    // `attribute X of foo : <entity_class> is <expr>;` — the entity_class slot can hold any
+    // of the LRM 7.2 entity_class names. Process, block, generate, record, protected, context,
+    // loop are all valid entity_class names; without rejecting them as block_open, they
+    // absorb the enclosing architecture's `begin` into their (orphan) intermediates,
+    // silently breaking the surrounding block's structure.
+    test('should not treat process in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : process is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat block in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : block is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat generate in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : generate is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat protected in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : protected is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat context in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : context is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat loop in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : loop is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat record in attribute_specification as block opener', () => {
+      const source = 'architecture a of b is\n  attribute keep of foo : record is true;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'architecture');
+      assert.ok(archPair, 'architecture should be paired');
+      const beginCount = archPair.intermediates.filter((i) => i.value.toLowerCase() === 'begin').length;
+      assert.strictEqual(beginCount, 1, 'architecture should retain its begin intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });
