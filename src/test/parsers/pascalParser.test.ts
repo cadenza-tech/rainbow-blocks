@@ -3851,5 +3851,26 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: variant case missing `of` clause', () => {
+    test('should not treat record-body `case Tag` without `of` as block opener', () => {
+      // `case Tag` without a following `of` is a malformed variant case header. In a
+      // valid record, the variant case is `case Tag of ...`. Without an `of` clause
+      // the `case` is not a standalone block opener either (it never has its own
+      // matching `end`). Without this guard the `case` is pushed onto the stack and
+      // the inner `end` closes `case` instead of `record`, leaving the outer record
+      // orphan.
+      const source = `TFoo = record
+  case Tag
+end`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(recordPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` without `of` inside record must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
