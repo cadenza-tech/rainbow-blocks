@@ -4271,6 +4271,84 @@ end if;`;
     });
   });
 
+  suite('Regression: matchBlocks must not attach stray is to non-is-valid openers', () => {
+    // The middle-keyword handler in matchBlocks routed `is` through the
+    // default branch, which appends to whatever opener happens to be on
+    // top of the stack. A stray `is` token that survived the tokenize-time
+    // type-decl filter (e.g., `loop\n  X : Integer is 5;\nend loop;`,
+    // where `is` is the keyword form of an Ada renaming or an in-progress
+    // edit) then leaked through and registered as an intermediate of the
+    // surrounding loop/if/declare/etc., even though those constructs
+    // never have `is` as part of their syntax. The fix whitelists the
+    // openers that DO take `is` (procedure / function / package / task /
+    // protected / case / entry); for any other opener `is` is dropped.
+    test('should not attach is to loop block', () => {
+      const source = 'loop\n  X : Integer is 5;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'loop', 'end loop');
+      assert.deepStrictEqual(
+        pairs[0].intermediates.map((t) => t.value.toLowerCase()),
+        []
+      );
+    });
+
+    test('should not attach is to for loop block', () => {
+      const source = 'for I in 1..10 loop\n  X : Integer is 5;\nend loop;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end loop');
+      assert.deepStrictEqual(
+        pairs[0].intermediates.map((t) => t.value.toLowerCase()),
+        []
+      );
+    });
+
+    test('should not attach is to declare/begin block', () => {
+      const source = 'declare\n  X : Integer is 5;\nbegin\n  null;\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'declare', 'end');
+      // `begin` must remain as the intermediate of declare (its body separator).
+      assert.deepStrictEqual(
+        pairs[0].intermediates.map((t) => t.value.toLowerCase()),
+        ['begin']
+      );
+    });
+
+    test('should not attach is to if block', () => {
+      const source = 'if X then\n  Y : Integer is 5;\nend if;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // `then` is the only legitimate intermediate of an if block.
+      assert.deepStrictEqual(
+        pairs[0].intermediates.map((t) => t.value.toLowerCase()),
+        ['then']
+      );
+    });
+
+    test('should still attach is to procedure block (whitelisted)', () => {
+      const source = 'procedure P is\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(middleValues.includes('is'), `is must remain an intermediate of procedure, got ${JSON.stringify(middleValues)}`);
+    });
+
+    test('should still attach is to case block (whitelisted)', () => {
+      const source = 'case X is\n  when others => null;\nend case;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(middleValues.includes('is'), `is must remain an intermediate of case, got ${JSON.stringify(middleValues)}`);
+    });
+
+    test('should still attach is to entry body (whitelisted)', () => {
+      const source = 'entry Read(V : out Integer) when Count > 0 is\nbegin\n  V := Value;\nend Read;';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 1);
+      const middleValues = pairs[0].intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(middleValues.includes('is'), `is must remain an intermediate of entry body, got ${JSON.stringify(middleValues)}`);
+    });
+  });
+
   suite('Regression: isInsideParens crossedNewline recognizes Unicode line terminators', () => {
     // isInsideParens scans backward from a candidate block keyword to find
     // the enclosing `(`. When the open paren is on a different line, an
