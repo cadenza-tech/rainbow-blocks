@@ -555,29 +555,91 @@ export class RubyBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Checks if `end` at position is in expression value position:
-  // immediately preceded (skipping spaces/tabs and excluded regions) by an opening bracket
-  // (`(`, `[`, `{`) or a binary operator (`=` not part of `==`/`=~`/`=>`, `,`, `+`, `-`,
-  // `*`, `/`, `%`, `<`, `>`, `&`, `|`, `^`, `~`, `!`), or by a hash label colon
-  // (`identifier:`, e.g. `{a: end}`). Since `end` is a reserved word and cannot appear
-  // in expression position, such occurrences are invalid Ruby — e.g., `def foo(end)`,
-  // `[end]`, `x = /pat/ end`, `x = end`, `{a: end}`. The scan follows Ruby implicit
-  // line continuations: when the preceding physical line ends with an operator that
-  // implies continuation (e.g. `x = a +\n  end`), the scan crosses the newline and
-  // checks the operator instead of treating the newline as a statement separator.
-  // The scan stops at `;` or at a newline that is NOT preceded by a continuation
-  // operator, both of which are valid statement separators after which `end` is
-  // legitimate.
-  private isEndInExpressionPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    let i = position - 1;
+  // Scans backward from a closing bracket (`)`, `]`, `}`) at position `closePos` to
+  // find the matching opening bracket. Skips excluded regions and tracks bracket depth
+  // for nested expressions. Returns the index of the matching opener, or -1 when no
+  // match is found (unbalanced brackets within scan range).
+  private findMatchingOpenBracket(source: string, closePos: number, excludedRegions: ExcludedRegion[]): number {
+    const close = source[closePos];
+    const open = close === ')' ? '(' : close === ']' ? '[' : '{';
+    let depth = 1;
+    let i = closePos - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
         if (region) {
-          // If this is the first non-whitespace content encountered, treat the region's
-          // ending position as the previous "token". For example, `/pat/ end` ends with
-          // a regex literal — `end` follows it directly, so we must check what precedes
-          // the regex region.
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === close) {
+        depth++;
+      } else if (ch === open) {
+        depth--;
+        if (depth === 0) return i;
+      }
+      i--;
+    }
+    return -1;
+  }
+
+  // Determines whether an excluded region represents a value-like expression
+  // (string, backtick, regex, symbol, percent literal, character literal, heredoc body)
+  // rather than syntactic whitespace (single-line comment `#` or multi-line comment
+  // `=begin`...`=end`). Used by isEndInExpressionPosition to recognise a value-thing
+  // that precedes a stray `end` on the same line.
+  private isValueLikeRegion(source: string, region: ExcludedRegion): boolean {
+    const startChar = source[region.start];
+    // `#` single-line comment is syntactic whitespace.
+    if (startChar === '#') return false;
+    // `=begin`...`=end` multi-line comment is also syntactic whitespace. The region
+    // starts at the `=` of `=begin` only when `=begin` is at the start of a line.
+    if (startChar === '=') return false;
+    // Everything else recognised by tryMatchExcludedRegion is a value-like literal.
+    return true;
+  }
+
+  // Checks if `end` at position is in expression value position:
+  // immediately preceded (skipping spaces/tabs and excluded regions) by an opening bracket
+  // (`(`, `[`, `{`) or a binary operator (`=` not part of `==`/`=~`/`=>`, `,`, `+`, `-`,
+  // `*`, `/`, `%`, `<`, `>`, `&`, `|`, `^`, `~`, `!`), or by a hash label colon
+  // (`identifier:`, e.g. `{a: end}`), or by a value-like expression that sits at the
+  // start of its physical line (closing bracket, numeric literal, string/backtick/regex/
+  // symbol/percent literal, character literal). Since `end` is a reserved word and cannot
+  // appear in expression position, such occurrences are invalid Ruby -- e.g.,
+  // `def foo(end)`, `[end]`, `x = /pat/ end`, `x = end`, `{a: end}`, `def m\n  "str" end\nend`,
+  // `def m\n  /pat/i end\nend`, `def m\n  (1) end\nend`, `def m\n  42 end\nend`.
+  //
+  // Line-start value detection: when the same-line content preceding `end` is exclusively
+  // a value-like expression (no opener keyword like `then`/`else`/`do`/`when`, no operator,
+  // no statement separator), `end` cannot legitimately close anything. The scan tracks
+  // whether it crosses value content and, on reaching a line start (newline without
+  // continuation), filters `end` if the line was value-only.
+  //
+  // The scan follows Ruby implicit line continuations: when the preceding physical line
+  // ends with an operator that implies continuation (e.g. `x = a +\n  end`), the scan
+  // crosses the newline and checks the operator instead of treating the newline as a
+  // statement separator. The scan stops at `;` or at a newline that is NOT preceded by a
+  // continuation operator, both of which are valid statement separators after which
+  // `end` is legitimate (unless the line above ends with a value-only expression).
+  private isEndInExpressionPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    // Track whether the scan crossed a value-like construct (excluded region, closing
+    // bracket, or numeric literal) on the same physical line as `end`. When the scan
+    // then reaches the start of that line (newline without continuation) without finding
+    // an operator, opener keyword, or statement separator, the line consisted solely of
+    // a value -- and `end` immediately after a bare value is in expression position.
+    let crossedValueOnLine = false;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          if (this.isValueLikeRegion(source, region)) {
+            crossedValueOnLine = true;
+          }
+          // Skip over the region; what precedes it determines whether `end` is in
+          // expression position (e.g. `=` before a regex => yes; `then` before => no).
           i = region.start - 1;
           continue;
         }
@@ -585,6 +647,37 @@ export class RubyBlockParser extends BaseBlockParser {
       const ch = source[i];
       if (ch === ' ' || ch === '\t') {
         i--;
+        continue;
+      }
+      // Closing brackets are value-like content. Jump back to the matching opener so
+      // that `x = (1) end` correctly finds `=` before `(`, while `if cond; (1) end`
+      // finds `;` before `(`.
+      if (ch === ')' || ch === ']' || ch === '}') {
+        crossedValueOnLine = true;
+        const matchPos = this.findMatchingOpenBracket(source, i, excludedRegions);
+        if (matchPos < 0) {
+          // Unbalanced: treat as value at this position
+          return true;
+        }
+        i = matchPos - 1;
+        continue;
+      }
+      // Numeric literal: scan back through trailing digits / decimal points / underscores
+      // (Ruby allows `_` as a digit separator) and exponent suffix characters. The
+      // numeric literal is a value -- treat it like a closing bracket and continue
+      // scanning to find what precedes it.
+      if (ch >= '0' && ch <= '9') {
+        crossedValueOnLine = true;
+        let n = i;
+        while (n >= 0) {
+          const nc = source[n];
+          if ((nc >= '0' && nc <= '9') || nc === '_' || nc === '.') {
+            n--;
+            continue;
+          }
+          break;
+        }
+        i = n;
         continue;
       }
       // Implicit line continuation: if we hit a newline and the previous physical line
@@ -599,16 +692,28 @@ export class RubyBlockParser extends BaseBlockParser {
         }
         if (endsWithContinuationOperator(source, prevLineEnd, excludedRegions, this.validationCallbacks)) {
           i = prevLineEnd - 1;
+          // Cross to new physical line -- value tracker only applies to the current line.
+          crossedValueOnLine = false;
           continue;
+        }
+        // Reached line start. If we crossed a value-only line, `end` is in expression
+        // position regardless of what's above (the bare value cannot be a block closer).
+        if (crossedValueOnLine) {
+          return true;
         }
         break;
       }
       break;
     }
-    if (i < 0) return false;
+    if (i < 0) {
+      // Reached the start of source. If we crossed a value on the way, it was the only
+      // content of the source before `end` -- a bare value followed by `end` is invalid.
+      return crossedValueOnLine;
+    }
     const ch = source[i];
-    // Statement separators: `;`, `\n`, `\r`. `end` is legitimate here.
-    if (ch === ';' || ch === '\n' || ch === '\r') {
+    // Statement separators: `;`. `end` after `;` is legitimate (closes some earlier
+    // opener). (`\n`/`\r` are handled by the line-start branch above.)
+    if (ch === ';') {
       return false;
     }
     // Opening brackets directly before `end`: definitely expression position.
