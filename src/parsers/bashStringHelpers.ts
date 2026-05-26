@@ -335,6 +335,14 @@ function stepSubshellFrame(source: string, i: number, frame: ScanFrame): Subshel
     if (i + 1 < source.length && source[i + 1] === '(' && isAtSubshellCommandPosition(source, i)) {
       return { nextPos: i + 2, pushFrame: createFrame('arithParen', 2, i) };
     }
+    // Bare `(` at a command position inside a subshell opens a nested
+    // subshell scope. Push a separate subshell frame so its case/esac
+    // nesting and [[ ]] depth do not leak into the outer subshell — the
+    // outer frame must see the inner frame's matching `)` as a true paren
+    // close, not as a case-pattern terminator that prolongs its region.
+    if (isAtSubshellCommandPosition(source, i)) {
+      return { nextPos: i + 1, pushFrame: createFrame('subshell', 1, i) };
+    }
     frame.depth++;
     return { nextPos: i + 1 };
   }
