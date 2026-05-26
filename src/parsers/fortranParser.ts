@@ -1344,25 +1344,26 @@ export class FortranBlockParser extends BaseBlockParser {
     // Track select blocks that have had their first case skipped
     const firstCaseSkipped = new Set<OpenBlock>();
 
-    // Pre-compute the multiset of compound-end types available *at or after*
-    // each token index. Used to detect when pairing a compound `end <type>`
-    // with a deeper opener would cross an intervening opener whose own
-    // compound close is still pending later in the token stream.
-    // compoundEndTypesAt[i] = compound-end types of block_close tokens with
-    // index >= i (e.g., 'do', 'if', 'program', 'block data', ...).
-    const compoundEndTypesAt: string[][] = new Array(tokens.length + 1);
-    {
-      let acc: string[] = [];
-      compoundEndTypesAt[tokens.length] = acc;
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        const t = tokens[i];
-        if (t.type === 'block_close') {
-          const m = t.value.toLowerCase().match(/^end[ \t]*(.+)/);
-          if (m) {
-            acc = [normalizeFortranEndType(m[1]), ...acc];
-          }
+    // Maintain a running multiset of compound-end types pending later in the
+    // token stream. Used to detect when pairing a compound `end <type>` with
+    // a deeper opener would cross an intervening opener whose own compound
+    // close is still pending later. Memory is O(distinct end types), avoiding
+    // the per-position array snapshots that previously caused O(N^2) memory
+    // (and OOM on large files with thousands of independent blocks).
+    //
+    // Initial state: count every compound-end token in the stream. When the
+    // main loop visits a compound block_close, its count is decremented before
+    // the cross-pair check so `remainingCompoundEndCounts` represents the
+    // multiset of compound-end types at indices strictly greater than the
+    // current `tokenIndex`.
+    const remainingCompoundEndCounts = new Map<string, number>();
+    for (const t of tokens) {
+      if (t.type === 'block_close') {
+        const m = t.value.toLowerCase().match(/^end[ \t]*(.+)/);
+        if (m) {
+          const ty = normalizeFortranEndType(m[1]);
+          remainingCompoundEndCounts.set(ty, (remainingCompoundEndCounts.get(ty) ?? 0) + 1);
         }
-        compoundEndTypesAt[i] = acc;
       }
     }
 
@@ -1467,6 +1468,17 @@ export class FortranBlockParser extends BaseBlockParser {
             // Normalize so `endblockdata`, `end block data`, `end  block  data` all
             // map to canonical `block data` and find the matching opener.
             const endType = normalizeFortranEndType(compoundMatch[1]);
+
+            // Decrement this token from the running compound-end multiset so the
+            // subsequent cross-pair check sees only types pending at indices
+            // strictly greater than `tokenIndex`.
+            const currentCount = remainingCompoundEndCounts.get(endType) ?? 0;
+            if (currentCount > 1) {
+              remainingCompoundEndCounts.set(endType, currentCount - 1);
+            } else {
+              remainingCompoundEndCounts.delete(endType);
+            }
+
             // Walk stack from top, normalizing each opener value to handle `BLOCKDATA`
             // (concatenated, fixed-form) vs `block data` (spaced, free-form) interchangeably.
             for (let si = stack.length - 1; si >= 0; si--) {
@@ -1489,14 +1501,9 @@ export class FortranBlockParser extends BaseBlockParser {
             // Each Fortran opener's compound-end type equals its normalized
             // opener value, so no opener-type-to-end-type mapping is needed.
             if (matchIndex >= 0 && matchIndex < stack.length - 1) {
-              const remaining = compoundEndTypesAt[tokenIndex + 1] ?? [];
-              const remainingCounts = new Map<string, number>();
-              for (const ty of remaining) {
-                remainingCounts.set(ty, (remainingCounts.get(ty) ?? 0) + 1);
-              }
               for (let s = matchIndex + 1; s < stack.length; s++) {
                 const aboveType = normalizeFortranEndType(stack[s].token.value);
-                if ((remainingCounts.get(aboveType) ?? 0) > 0) {
+                if ((remainingCompoundEndCounts.get(aboveType) ?? 0) > 0) {
                   matchIndex = -1;
                   break;
                 }
