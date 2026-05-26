@@ -833,12 +833,27 @@ export class OctaveBlockParser extends MatlabBlockParser {
     return super.isValidBlockClose(keyword, source, position, excludedRegions);
   }
 
+  // Middle keywords that introduce a new statement within their enclosing block. A
+  // typed-close keyword appearing on the same logical line *after* one of these is at a
+  // statement-leading position (e.g. `else endif`, `catch end_try_catch`), mirroring how
+  // `else end` / `catch end` are accepted for bare `end`. Kept in lock-step with
+  // OCTAVE_MIDDLE_KEYWORDS_AS_LINE_LEADERS.
+  private static readonly OCTAVE_MIDDLE_KEYWORDS_PRECEDING_TYPED_CLOSE: ReadonlySet<string> = new Set([
+    'else',
+    'elseif',
+    'case',
+    'otherwise',
+    'catch',
+    'unwind_protect_cleanup'
+  ]);
+
   // Returns true when the position is at the start of a statement (line start, after
-  // a `;`/`,` separator, or at the beginning of the source). When the previous line
-  // ended with a `...` or `\` continuation, the current line is logically a continuation
-  // of the previous statement, so a typed-end keyword there is mid-expression, not leading.
-  // `...` or `\` appearing inside an excluded region (comment / string) is not a real
-  // continuation — it is just text — so it is ignored.
+  // a `;`/`,` separator, at the beginning of the source, or immediately following a
+  // middle keyword such as `else`/`catch`/`unwind_protect_cleanup` on the same line).
+  // When the previous line ended with a `...` or `\` continuation, the current line is
+  // logically a continuation of the previous statement, so a typed-end keyword there is
+  // mid-expression, not leading. `...` or `\` appearing inside an excluded region
+  // (comment / string) is not a real continuation — it is just text — so it is ignored.
   private isAtStatementLeadingPosition(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0 && isHorizontalWhitespace(source[i])) i--;
@@ -871,6 +886,21 @@ export class OctaveBlockParser extends MatlabBlockParser {
         }
       }
       return true;
+    }
+    // When the previous non-whitespace character is an identifier-letter / `_`, the
+    // preceding token may be a middle keyword (else / elseif / case / otherwise / catch /
+    // unwind_protect_cleanup). In that case the typed-close at `position` is the
+    // legitimate close of the enclosing block, mirroring `else end` / `catch end` for
+    // bare `end`. Read the identifier backward and check the set. Cost-minimal: rejecting
+    // these forms leaves both the middle keyword and the close orphan, which destroys
+    // outer block pairing (e.g. `if x\nelse endif` would lose the entire if/endif pair).
+    if (/[a-zA-Z_]/.test(ch)) {
+      const idEnd = i;
+      while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+      const ident = source.slice(i + 1, idEnd + 1).toLowerCase();
+      if (OctaveBlockParser.OCTAVE_MIDDLE_KEYWORDS_PRECEDING_TYPED_CLOSE.has(ident)) {
+        return true;
+      }
     }
     return false;
   }
