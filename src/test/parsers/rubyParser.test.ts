@@ -4860,5 +4860,16 @@ end`;
     });
   });
 
+  suite('Regression: shift operator with comma-LtLt should not be misdetected as heredoc list', () => {
+    test('should treat first << as shift when no space + non-keyword identifier even with later comma-LtLt', () => {
+      // `a<<b, <<C` — `a<<b` is a shift operator (no space, followed by identifier `b` which
+      // is not a Ruby keyword) and `<<C` is a heredoc. Previously the comma-LtLt exception
+      // path treated both as heredoc openers, swallowing the def/end block.
+      const source = 'def m\n  x = a<<b, <<C\n  body\nC\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
