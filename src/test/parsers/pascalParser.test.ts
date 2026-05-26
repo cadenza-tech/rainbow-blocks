@@ -3788,5 +3788,48 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: keyword used on the left of `:=` assignment', () => {
+    test('should not treat `try` on left of `:=` as block opener', () => {
+      // `try := 5;` uses `try` as the left-hand-side identifier of an assignment.
+      // (In real Pascal this would require the FreePascal `&try` escape; without it
+      // the code is invalid, but the parser must not misclassify it as a block.)
+      // Without a `:=` check the `try` is pushed onto the stack and the enclosing
+      // `end` closes `try` instead of `begin`, leaving the outer `begin` orphan.
+      const source = `begin
+  try := 5;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      // `try` must not produce a block pair.
+      const tryPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'try');
+      assert.strictEqual(tryPairs.length, 0, '`try` on lhs of `:=` must not produce a block pair');
+    });
+
+    test('should not treat `record` on left of `:=` as block opener', () => {
+      const source = `begin
+  record := 5;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 0, '`record` on lhs of `:=` must not produce a block pair');
+    });
+
+    test('should not treat `case` on left of `:=` as block opener', () => {
+      const source = `begin
+  case := 5;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` on lhs of `:=` must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
