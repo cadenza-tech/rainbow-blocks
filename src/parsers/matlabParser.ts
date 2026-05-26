@@ -236,10 +236,14 @@ export class MatlabBlockParser extends BaseBlockParser {
       return false;
     }
     const prev = source[i];
-    // A value-like token tail: identifier char, closing delimiter, or decimal point.
+    // A value-like token tail: identifier char, closing delimiter, decimal point, or
+    // closing string quote / transpose operator. The closing `'` covers both the trailing
+    // quote of a MATLAB character vector literal (`'abc'`) and the transpose operator
+    // (`A'`, `A(1)'`); both produce values, so a following `end` is in operand context.
+    // The closing `"` covers the trailing quote of a MATLAB string literal (R2017a+).
     // The isPrecededByBinaryOperator check (run earlier) already catches the binary
     // operator case, so this method handles only the value-token tail.
-    if (!/[a-zA-Z0-9_)\]}.]/.test(prev)) {
+    if (!/[a-zA-Z0-9_)\]}.'"]/.test(prev)) {
       return false;
     }
     // Determine the leading identifier of the logical line. If it is a block opener
