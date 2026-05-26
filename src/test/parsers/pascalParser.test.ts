@@ -3925,5 +3925,25 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: try-else without except/finally', () => {
+    test('should not attach else to try block when neither except nor finally precedes it', () => {
+      // `try ... else ... end` (no except/finally) is malformed: Delphi requires
+      // `try-except-else` or `try-finally`, never `try-else`. Without an
+      // intermediate-validation guard the bare `else` is attached to the try
+      // intermediates list, polluting it. The else here belongs to no valid
+      // try-block construct and must be rejected.
+      const source = `try
+  WriteLn;
+else
+  HandleError;
+end`;
+      const pairs = parser.parse(source);
+      const tryPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'try');
+      assert.strictEqual(tryPairs.length, 1, 'expected exactly one try..end pair');
+      // The else must not appear in the try block's intermediates list.
+      assert.strictEqual(tryPairs[0].intermediates.length, 0, 'try without except/finally must not collect else as intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });
