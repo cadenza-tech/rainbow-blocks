@@ -3710,5 +3710,53 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: bare section keyword outside classdef should not pair its end with an outer block', () => {
+    test('should not pair stray properties...end with outer function end', () => {
+      // Bare `properties` outside a classdef cannot be a valid section block but the user
+      // wrote a stray `end` for it. Without the phantom-skip wiring the inner `end` is
+      // wrongly paired with the outer `function`, leaving the real outer `end` orphan.
+      // Lines: 0=function, 1=properties, 2=x=1, 3=inner end, 4=outer end.
+      const source = 'function f\n  properties\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'function must pair with the outer end on line 4');
+    });
+
+    test('should not pair stray methods...end with outer function end', () => {
+      const source = 'function f\n  methods\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4);
+    });
+
+    test('should not pair stray events...end with outer function end', () => {
+      const source = 'function f\n  events\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4);
+    });
+
+    test('should not pair stray enumeration...end with outer function end', () => {
+      const source = 'function f\n  enumeration\n    x = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4);
+    });
+
+    test('should still treat properties() inside classdef methods as function call (sanity check, no regression)', () => {
+      // The function-call shape `properties()` at line start inside `methods` must remain
+      // a function call (no pendingSkipDepth pushed). Without the per-position check on
+      // sectionKeywordsWithParen the matchBlocks change would consume the inner `end` and
+      // orphan the classdef.
+      const source = 'classdef A\n  methods\n    properties()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const classdef = pairs.find((p) => p.openKeyword.value === 'classdef');
+      const methods = pairs.find((p) => p.openKeyword.value === 'methods');
+      assert.ok(classdef, 'classdef must pair with its end');
+      assert.ok(methods, 'methods must pair with its end');
+    });
+  });
+
   generateCommonTests(config);
 });
