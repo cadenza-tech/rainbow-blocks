@@ -519,6 +519,25 @@ export class OctaveBlockParser extends MatlabBlockParser {
         i = region.start - 1;
         continue;
       }
+      // Handle a `\n`/`\r` that immediately follows a `...` continuation excluded region.
+      // `...` regions are matched via matchSingleLineComment, whose `end` stops at the
+      // newline (the newline itself is NOT included in the region). The backward walk
+      // therefore lands on the newline first; we need to look one position before to find
+      // the `...` region ending exactly there. Backslash continuation regions are NOT
+      // affected (their pattern consumes the newline, so the region.end is already past
+      // the newline and the previous branch handles it).
+      if (source[i] === '\n' || source[i] === '\r') {
+        // Compute the start of the line terminator (handle CRLF as a 2-char unit).
+        let nlStart = i;
+        if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') nlStart = i - 1;
+        if (nlStart > 0) {
+          const prevRegion = this.findExcludedRegionAt(nlStart - 1, excludedRegions);
+          if (prevRegion && prevRegion.end === nlStart && source[prevRegion.start] === '.' && prevRegion.end > prevRegion.start + 1) {
+            i = prevRegion.start - 1;
+            continue;
+          }
+        }
+      }
       break;
     }
     if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) {
