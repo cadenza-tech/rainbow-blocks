@@ -2835,6 +2835,20 @@ end`;
     });
   });
 
+  suite('Regression: unwind_protect_cleanup as middle keyword line leader', () => {
+    test('should pair unwind_protect/end when unwind_protect_cleanup is followed by end on the same line', () => {
+      // `unwind_protect_cleanup end` is the "middle keyword followed by close on the
+      // same line" form (mirrors `else end`, `catch end`). The middle keyword introduces
+      // a new statement within the enclosing unwind_protect block, so the trailing `end`
+      // is the legitimate block close. Without unwind_protect_cleanup in the middle-keyword-
+      // as-line-leaders set, the parent's value-continuation check rejects the `end`.
+      const source = 'unwind_protect\n  body;\nunwind_protect_cleanup end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'unwind_protect', 'end');
+      assertIntermediates(pairs[0], ['unwind_protect_cleanup']);
+    });
+  });
+
   suite('Regression: Unicode horizontal whitespace before line continuation', () => {
     test('should treat if<VT>\\<NL>... as block opener (VT before backslash continuation)', () => {
       // The continuation-rescue scanner must use the same Unicode-aware horizontal
