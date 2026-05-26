@@ -4375,6 +4375,26 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
     });
+
+    test('should not pair for with end inside range that crosses a newline (1..\\n  end)', () => {
+      // `1..` causes implicit line continuation in Crystal, so the RHS of the range
+      // may appear on the next line: `(1..\n  end)`. The inner `end` is still on the
+      // RHS of `..` and must not be tokenized as block_close. The outer `for` block
+      // must pair with the trailing `end` on the last line, not the in-range one.
+      const source = 'for x in (1..\n  end)\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end on LHS of range that crosses a newline (end\\n  ..N)', () => {
+      // Symmetric form: the `..` may appear on the line after `end`. The `end` is
+      // still on the LHS of the range and must not be tokenized as block_close.
+      const source = 'if cond\n  a = (end\n  ..1)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: end in ternary value position should not be tokenized as block_close', () => {
