@@ -3904,5 +3904,26 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-26: variant case with quoted tag inside record', () => {
+    test('should not treat case with string-literal tag as block opener', () => {
+      // `case 'Test': Integer of ...` uses a quoted string as the (malformed) tag of
+      // a variant case. The tag is an excluded region (string literal); without a
+      // string-tag guard in the selector tag detection, the case is treated as a
+      // standalone block opener and the surrounding `end` closes `case` instead of
+      // `record`.
+      const source = `TFoo = record
+  case 'Test': Integer of
+    0: (X: Integer);
+end`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(recordPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` with quoted tag inside record must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
