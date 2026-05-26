@@ -697,6 +697,10 @@ export class CrystalBlockParser extends BaseBlockParser {
     //     `/` is also a binary operator, but it can also start a Crystal regex
     //     literal (excluded region) which is already skipped above; the bare `/`
     //     remaining here is always division so it is included.
+    //   - `&` `^` — bitwise / logical-and / bitwise-xor operator (e.g. `enum & 1`,
+    //     `enum && 1`, `enum ^ 1`). These also subsume compound assignments
+    //     `&=`, `^=` since the leading operator alone disqualifies the opener
+    //     position. `|` is already handled above (block-arg / bitwise-or).
     //   - `?` — ternary condition (e.g. `struct ? 1 : 2`)
     //   - `:` — type annotation or ternary alternative
     // Compound assignment forms `+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=`, `&=`,
@@ -716,6 +720,8 @@ export class CrystalBlockParser extends BaseBlockParser {
       ch === '*' ||
       ch === '/' ||
       ch === '%' ||
+      ch === '&' ||
+      ch === '^' ||
       ch === '?' ||
       ch === ':'
     ) {
