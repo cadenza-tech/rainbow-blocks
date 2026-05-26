@@ -475,9 +475,17 @@ export function isPrecededByOperator(source: string, position: number): boolean 
       i--;
     }
   }
-  // Follow & continuation backward when at a line boundary
+  // Follow & continuation backward when at a line boundary. Track whether the scan
+  // actually crossed a continuation so that the digit-predecessor heuristic (used for
+  // numeric-literal continuations like `42 &\n end`) is only applied across continuations
+  // and does not collide with labeled statements (`100 end do`) on a single physical line.
+  let crossedContinuation = false;
   if (i >= 0 && (source[i] === '\n' || source[i] === '\r')) {
-    i = skipContinuationBackward(source, i);
+    const newI = skipContinuationBackward(source, i);
+    if (newI !== i) {
+      crossedContinuation = true;
+    }
+    i = newI;
   }
   if (i < 0) return false;
   const char = source[i];
@@ -537,6 +545,17 @@ export function isPrecededByOperator(source: string, position: number): boolean 
     if (FORTRAN_STATEMENT_KEYWORDS.has(word)) {
       return true;
     }
+  }
+  // Digit predecessor indicates the keyword is the tail of a numeric-literal expression
+  // continued across a `&` line break, e.g. `x = 42 &\n  end` (where `end` is a variable
+  // being assigned). Without this, a bare `end` following a digit-ending expression would
+  // be misread as a real block_close and phantom-close the enclosing block.
+  // Both integer literals (`42`) and floating-point literals (`1.5e10`, `1.0d-3`) end with
+  // a digit so the same check handles both.
+  // Restricted to continuations (`crossedContinuation`) so single-line labeled statements
+  // (`100 end do`) are not classified as expression context.
+  if (crossedContinuation && char >= '0' && char <= '9') {
+    return true;
   }
   return false;
 }
