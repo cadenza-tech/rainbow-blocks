@@ -2810,5 +2810,30 @@ end`;
     });
   });
 
+  suite('Regression: do after condition keyword across line continuation', () => {
+    test('should reject do after if ...<NL> as do/until opener', () => {
+      // `if ...\n  do\n  end` — the `do` follows `if` across a `...` continuation,
+      // so it is `do` used in expression position (header of `if`), not a do/until
+      // opener. Treating it as a block_open leaves a spurious `do` on the stack
+      // and breaks the if/end pairing.
+      const source = 'if ...\n  do\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject do after while ...<NL> as do/until opener', () => {
+      const source = 'while ...\n  do\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should reject do after if \\<NL> as do/until opener', () => {
+      // Same idea with backslash continuation: `if \\\n  do\n  end`.
+      const source = 'if \\\n  do\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
