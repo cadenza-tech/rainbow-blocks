@@ -1,6 +1,7 @@
 // Octave block parser: extends MATLAB with # comments, #{ #} block comments, and Octave-specific end keywords
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
+import { isAtStatementStart } from './matlabHelpers';
 import { MatlabBlockParser } from './matlabParser';
 import { findLastOpenerByType } from './parserUtils';
 
@@ -1205,8 +1206,13 @@ export class OctaveBlockParser extends MatlabBlockParser {
       }
     }
 
-    // Shell escape command: ! to end of line (only at line start)
-    if (char === '!' && this.isAtLineStartWithWhitespace(source, pos)) {
+    // Shell escape command: ! to end of line (at statement start — line start or after `;` / `,`).
+    // Octave treats `!cmd` as a shell escape just like MATLAB; the parent MATLAB parser uses
+    // isAtStatementStart for the same purpose, so we mirror that here. Recognising `!` after
+    // `;` / `,` is required so e.g. `y = 1; !ls if true` consumes `if true` inside the shell
+    // escape and the outer block pairing is preserved (without it, the inner `if` opens a
+    // spurious block that consumes a later `end`).
+    if (char === '!' && isAtStatementStart(source, pos)) {
       return this.matchSingleLineComment(source, pos);
     }
 
