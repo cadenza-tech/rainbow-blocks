@@ -3403,5 +3403,43 @@ foo() ->
     });
   });
 
+  suite('Regression: @ as identifier continuation character (atom/variable boundary)', () => {
+    // Per Erlang Reference Manual, atom syntax is [a-z][a-zA-Z0-9_@]* and variable syntax
+    // is [A-Z_][a-zA-Z0-9_@]*. The '@' character is an identifier continuation character,
+    // not a word boundary. Tokens that contain '@' (e.g. node names like node@host) must
+    // not be split into separate keyword matches.
+    test('should not detect begin inside identifier ending with @host', () => {
+      const source = 'f() -> F = begin@host, ok end.';
+      const pairs = parser.parse(source);
+      // begin@host is a single atom; the only end is orphaned, no block_open exists
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect end inside identifier starting with node@', () => {
+      const source = 'foo() -> case X of node@end -> ok; _ -> error end.';
+      const pairs = parser.parse(source);
+      // The inner 'end' inside node@end is part of an atom; only the outer case-end pair exists
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not detect begin when followed by @ identifier continuation', () => {
+      const source = 'f() -> X = begin@suffix, ok end.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect end when preceded by @ identifier continuation', () => {
+      const source = 'f() -> case X of prefix@end -> ok end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should still detect begin/end keywords when @ is not adjacent', () => {
+      const source = 'f() -> X = begin 1 end, X@y.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
