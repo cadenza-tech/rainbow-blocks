@@ -26,6 +26,13 @@ const DEFINITION_KEYWORDS = new Set(['def', 'defp', 'defmodule', 'defmacro', 'de
 // vs `..` range).
 const EXPRESSION_OPERATOR_LEAD_CHARS = new Set(['+', '-', '*', '/', '<', '>', '|', '^', '&', '~']);
 
+// Word-based operators that require an expression on their right-hand side. When `end` or
+// a middle keyword (else/rescue/catch/after) directly follows one of these (separated by
+// whitespace), it is in expression position and must not be treated as a block_close /
+// block_middle. Without this guard the inner keyword greedily pairs with the surrounding
+// opener and orphans the outer block. Symmetric with Ruby's RHS_EXPECTING_KEYWORD_OPERATORS.
+const RHS_EXPECTING_WORD_OPERATORS: ReadonlySet<string> = new Set(['and', 'or', 'not', 'in', 'when']);
+
 // Which middle keywords each opener accepts. A middle keyword (else/rescue/catch/after)
 // belongs to the enclosing opener only if that opener actually has that branch:
 //   if/unless -> else
@@ -736,6 +743,21 @@ export class ElixirBlockParser extends BaseBlockParser {
         // `..` (range) is handled separately above as a preceding-`..` rejection.
         if (before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) {
           return false;
+        }
+        // Word-based operator RHS: `end` directly after `and`/`or`/`not`/`in`/`when`
+        // (e.g., `x and end`, `not end`). The previous non-space char must close a word
+        // that is one of these operators, and that word must be a standalone identifier
+        // (word boundary before it) so identifiers ending in operator letters like
+        // `endor`, `when_x` are not misclassified.
+        if (/[a-z]/.test(before)) {
+          let wordStart = q;
+          while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+            wordStart--;
+          }
+          const word = source.slice(wordStart, q + 1);
+          if (RHS_EXPECTING_WORD_OPERATORS.has(word)) {
+            return false;
+          }
         }
       }
     }
