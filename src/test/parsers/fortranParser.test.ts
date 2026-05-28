@@ -5328,6 +5328,26 @@ end block data`;
       assert.ok(/^block[\s&]+data$/.test(openLower), `Expected opener to span \`block...data\`; got: ${JSON.stringify(pair.openKeyword.value)}`);
       assert.strictEqual(pair.closeKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'end block data');
     });
+
+    test('should pair `block data` with `end &\\n block &\\n data` (continuation between block and data on close)', () => {
+      // Free-form Fortran allows line continuation between `block` and `data` on the
+      // close side as well: `end &\n  block &\n  data`. Both `end <type>` and `block data`
+      // can independently be split across continuation lines, and the parser must
+      // recognize the resulting close keyword as `end block data` and pair it with
+      // the `block data` opener.
+      const source = `block data
+  integer :: x
+end &
+  block &
+  data`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      const pair = pairs[0];
+      assert.strictEqual(pair.openKeyword.value.toLowerCase().replace(/\s+/g, ' '), 'block data');
+      // Close keyword spans `end ... block ... data`; normalize whitespace for the check.
+      const closeNormalized = pair.closeKeyword.value.toLowerCase().replace(/!.*/g, '').replace(/&/g, '').replace(/\s+/g, ' ').trim();
+      assert.strictEqual(closeNormalized, 'end block data');
+    });
   });
 
   suite('Regression: matchBlocks crossed-pair rejection', () => {
