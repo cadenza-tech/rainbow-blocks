@@ -3441,6 +3441,37 @@ foo() ->
     });
   });
 
+  suite('Regression: hasUnclosedOpenerInMapScope must track bracket nesting', () => {
+    // Bug: hasUnclosedOpenerInMapScope only tracks '{'/'}' nesting (nestedBraceDepth). A
+    // 'begin' inside '[...]', '(...)' or '<<...>>' inside the map scope is counted as a
+    // real opener at the map's top level. The outer 'end => v' is then kept as a real
+    // block-close and the bracket-internal 'begin' is incorrectly paired with that map-key.
+    // The forward scan must also track [/], (/), and <</>> so that openers inside any
+    // nested bracket scope do not affect the map-scope opener count.
+    test('should not count begin inside [] as opener in map scope', () => {
+      // `[begin a]` is invalid Erlang (per ベストエフォート原則 we do not validate). The
+      // map-key 'end => 2' must still be filtered (no real opener in the immediate map
+      // scope), and the bracket-internal 'begin' must remain orphan.
+      const source = 'X = #{[begin a], end => 2}.';
+      const pairs = parser.parse(source);
+      // No 'begin'/'end' pair across the bracket boundary should be produced. The outer
+      // 'end' is a map key, the inner 'begin' has no in-scope partner.
+      assertBlockCount(pairs, 0);
+    });
+
+    test('should not count begin inside () as opener in map scope', () => {
+      const source = 'X = #{(begin a), end => 2}.';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+    });
+
+    test('should not count begin inside << >> as opener in map scope', () => {
+      const source = 'X = #{<<begin>>, end => 2}.';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+    });
+  });
+
   suite('Regression: isCatchFollowedByClausePattern must not treat float/range/record dot as terminator', () => {
     // Bug: isCatchFollowedByClausePattern stops the forward scan at the first '.' at top
     // level. A float decimal point (e.g. `1.5`), a range operator (`..`), or a record
