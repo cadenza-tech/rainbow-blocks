@@ -562,7 +562,14 @@ function hasUnterminatedStringAfterParen(
   callbacks: AdaValidationCallbacks
 ): boolean {
   let j = parenPos + 1;
-  while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+  // Per Ada LRM 2.1, intra-line whitespace covers ASCII space/tab, NBSP
+  // (U+00A0), the Zs category (U+1680, U+2000-200A, U+202F, U+205F, U+3000)
+  // and U+0085 NEL. The whitespace skip must accept the full set so a
+  // `( <NBSP> "unterminated...` form is still recognized as `(` followed by
+  // an unterminated string; otherwise the function returns false, the
+  // enclosing `(` is treated as a real enclosing paren around the next-line
+  // keyword, and the trailing block goes undetected.
+  while (j < source.length && isAdaIntraLineWhitespace(source[j])) j++;
   if (j < source.length && source[j] === '"') {
     const region = callbacks.findExcludedRegionAt(j, excludedRegions);
     if (region) {
