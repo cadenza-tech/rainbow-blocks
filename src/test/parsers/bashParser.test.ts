@@ -6767,6 +6767,45 @@ fi`;
     });
   });
 
+  suite('Regression: } command-group close requires whitespace after block-close keyword', () => {
+    // `{ if x; then echo; fi}` is a syntax error in real bash because `fi}`
+    // fuses into a single POSIX word. isFollowedByHyphen correctly rejects
+    // the trailing `fi` as a keyword, but the `}` matcher used to accept
+    // the `fi` literal as a separator and tokenized `}` as block_close,
+    // producing a phantom `{...}` pair around the orphan body. Mirror the
+    // existing `]]` rule and require whitespace between the predecessor
+    // and the `}` for the keyword path too.
+    test('should not pair { with } when } is glued to fi without whitespace', () => {
+      const pairs = parser.parse('{ if x; then echo; fi}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair { with } when } is glued to done without whitespace', () => {
+      const pairs = parser.parse('{ for i in 1; do echo; done}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair { with } when } is glued to esac without whitespace', () => {
+      const pairs = parser.parse('{ case $x in a) echo;; esac}');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair { with } when whitespace separates them from fi', () => {
+      // Regression guard: the existing `{ if x; then echo; fi }` (space
+      // between fi and }) must keep producing the if/fi and {/} pairs.
+      const source = '{ if x; then echo; fi }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still pair { with } when separated from done by space', () => {
+      // Regression guard for the loop variant.
+      const source = '{ for i in 1; do echo; done }';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   suite('Regression: ASCII shell metacharacters <, >, | must not fuse with keyword', () => {
     // The Unicode Symbol category (\p{S}) includes ASCII shell metacharacters
     // like `<`, `>`, `|`, `\``, which DO terminate words in POSIX shell. They
