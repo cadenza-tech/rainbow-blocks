@@ -27,7 +27,10 @@ export class MatlabBlockParser extends BaseBlockParser {
   // intending to close a section block, so matchBlocks skips one `end` per recorded
   // position to avoid pairing it with an outer `classdef`/`function` block. Populated
   // by tokenize, consumed by matchBlocks. Not thread-safe, but parse() is synchronous.
-  private phantomSectionPositions: number[] = [];
+  // Visibility is `protected` so Octave's overridden matchBlocks can union these
+  // positions with its own octavePhantomSectionPositions and apply the same phantom-end
+  // skip logic.
+  protected phantomSectionPositions: number[] = [];
   // Positions of section keywords whose attribute list `(` (i.e., the line-start `properties(`,
   // `methods(`, `arguments(` etc.) immediately follows the keyword. Used by matchBlocks to
   // distinguish a `properties()` function-call form (no stray `end` expected) from a bare
@@ -35,7 +38,8 @@ export class MatlabBlockParser extends BaseBlockParser {
   // in matchBlocks, the pendingSkipDepth push only happens when the position is NOT in
   // this set — otherwise we would consume an outer block's legitimate `end`. Populated
   // by tokenize, consumed by matchBlocks. Not thread-safe, but parse() is synchronous.
-  private sectionKeywordsWithParen: Set<number> = new Set<number>();
+  // Visibility is `protected` for the same reason as phantomSectionPositions above.
+  protected sectionKeywordsWithParen: Set<number> = new Set<number>();
   // Per-position bracket depth cache: bracketDepthAtPos[p] is the number of balanced
   // (), [], or {} pairs that strictly enclose position p. Populated by tokenize() before
   // any isValidBlockOpen / isValidBlockClose call so that isInsideParensOrBrackets can

@@ -1164,7 +1164,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // probably wrote a stray `end` to close it. We skip one `end` per phantom — but
     // only when doing so doesn't leave a real opener unmatched (defensive: prefer
     // pairing real openers with real closes).
-    const phantomPositions = [...this.octavePhantomSectionPositions];
+    //
+    // Union the parent MATLAB phantom positions (recorded for empty-header `if;`,
+    // `while;`, `for;`, `switch;` openers via the parent's HEADER_REQUIRED_KEYWORDS
+    // rejection path) with the Octave-specific phantom positions (recorded for
+    // section-keyword rejections inside Octave's own isValidBlockOpen). Without
+    // this, Octave's matchBlocks would only see its own phantom set, the inner
+    // `end` from the user's stray write would be paired with the outer block, and
+    // the real outer `end` would become orphan — destroying outer block pairing.
+    // Sort the union so phantomCursor advances in source order.
+    const phantomPositions = [...this.octavePhantomSectionPositions, ...this.phantomSectionPositions].sort((a, b) => a - b);
     let phantomCursor = 0;
     // Pre-compute remaining block_close count from each token index forward.
     const remainingCloses: number[] = new Array(tokens.length + 1);
