@@ -6767,6 +6767,40 @@ fi`;
     });
   });
 
+  suite('Regression: empty-subject case header must not pair', () => {
+    // `case in esac` with no subject between `case` and `in` is a syntax error
+    // (real bash requires `case WORD in`). The `isCaseHeaderIn` rescue used
+    // to fire as long as the backward scan reached `case` before any arm
+    // separator, which mis-rescued the no-subject form too. Require at least
+    // one subject character between `case` and `in`.
+    test('should not pair case with esac when subject is missing', () => {
+      const pairs = parser.parse('case in esac');
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair case with esac when subject word is present', () => {
+      // Regression guard: `case $x in esac` (variable subject) must still pair.
+      const pairs = parser.parse('case $x in esac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should still pair case with esac when subject is bare word', () => {
+      // Regression guard: `case x in esac` (bare-word subject) must still pair.
+      const pairs = parser.parse('case x in esac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should still pair case with esac when subject is parameter expansion', () => {
+      // Regression guard: `case ${x} in esac` (parameter expansion subject)
+      // must still pair. The subject lives inside an excluded region, so the
+      // backward scan must count excluded-region content as a subject too.
+      const dollar = '$';
+      const source = `case ${dollar}{x} in esac`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
   suite('Regression: } command-group close requires whitespace after block-close keyword', () => {
     // `{ if x; then echo; fi}` is a syntax error in real bash because `fi}`
     // fuses into a single POSIX word. isFollowedByHyphen correctly rejects
