@@ -3120,5 +3120,67 @@ end`;
     });
   });
 
+  suite('Bug: section keyword statement-call form inside function body', () => {
+    test('should treat properties(x); inside function as function call, not section block', () => {
+      // `properties(x);` inside a function body is a function call (reflection helper),
+      // not a properties section. Without the fix, properties opens a spurious block that
+      // consumes an inner `end`, leaving the outer methods/end orphan.
+      const source = 'classdef Foo\n  methods\n    function f\n      properties(x);\n      body\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      assert.ok(!pairs.some((p) => p.openKeyword.value === 'properties'), 'properties(x); must not open a block');
+      const fn = findBlock(pairs, 'function');
+      assert.strictEqual(fn.closeKeyword?.line, 5, 'function must close at line 5');
+      const meth = findBlock(pairs, 'methods');
+      assert.strictEqual(meth.closeKeyword?.line, 6, 'methods must close at line 6');
+      const cls = findBlock(pairs, 'classdef');
+      assert.strictEqual(cls.closeKeyword?.line, 7, 'classdef must close at line 7');
+    });
+
+    test('should treat methods(x); inside function as function call, not section block', () => {
+      const source = 'classdef Foo\n  methods\n    function f\n      methods(x);\n      body\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const blockOpenValues = pairs.map((p) => p.openKeyword.value);
+      // Should be exactly one methods (the outer one), function, classdef
+      const methodsCount = blockOpenValues.filter((v) => v === 'methods').length;
+      assert.strictEqual(methodsCount, 1, 'only the outer methods should open a block');
+    });
+
+    test('should treat events(x); inside function as function call, not section block', () => {
+      const source = 'classdef Foo\n  methods\n    function f\n      events(x);\n      body\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assert.ok(!pairs.some((p) => p.openKeyword.value === 'events'), 'events(x); must not open a block');
+    });
+
+    test('should treat enumeration(x); inside function as function call, not section block', () => {
+      const source = 'classdef Foo\n  methods\n    function f\n      enumeration(x);\n      body\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assert.ok(!pairs.some((p) => p.openKeyword.value === 'enumeration'), 'enumeration(x); must not open a block');
+    });
+
+    test('should still recognize properties (Access = public) as a real block opener', () => {
+      // The attribute-list form `properties (Access = public)` is a real section opener.
+      // The function-call detection must not regress this case.
+      const source = 'classdef Foo\n  properties (Access = public)\n    x = 1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value === 'properties'),
+        'properties (Access = public) must open a block'
+      );
+    });
+
+    test('should still recognize bare properties as a real block opener', () => {
+      const source = 'classdef Foo\n  properties\n    x = 1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(
+        pairs.some((p) => p.openKeyword.value === 'properties'),
+        'bare properties must open a block'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
