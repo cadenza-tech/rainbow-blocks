@@ -719,7 +719,21 @@ export function isPrecededByReplacingOrReplace(source: string, posEnd: number, c
   if (isPrecededByKeyword(source, posEnd, 'REPLACE', callbacks)) {
     return true;
   }
-  return isPrecededByKeyword(source, posEnd, 'ALSO', callbacks);
+  // ALSO introduces an additional REPLACING-set clause of a REPLACE/REPLACING
+  // statement: `REPLACE ==a== BY ==b== ALSO ==c== BY ==d==`. A bare ALSO with
+  // no REPLACE/REPLACING ancestor (e.g. `NOTHING ALSO ==x== ...`) is not a
+  // pseudo-text context, so verify the ALSO itself is preceded by REPLACE or
+  // by another REPLACING/REPLACE-chained pseudo-text. Without this check, a
+  // stray ALSO caused later `==` pairs to be classified as pseudo-text and
+  // any real code inside them was swallowed.
+  const alsoPos = findPrecedingKeywordPosition(source, posEnd, 'ALSO', callbacks);
+  if (alsoPos < 0) {
+    return false;
+  }
+  // The ALSO must itself sit in a REPLACE/REPLACING pseudo-text chain. Recurse
+  // with the position just before ALSO to verify; the same backward walk-back
+  // through pseudo-text pairs and BY keywords applies.
+  return isPrecededByReplacingOrReplace(source, alsoPos, callbacks);
 }
 
 // Checks if == at pos is in a COPY REPLACING or REPLACE statement context
