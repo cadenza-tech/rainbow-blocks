@@ -5048,5 +5048,20 @@ end`;
     });
   });
 
+  suite('Regression: class/module heredoc detection with Unicode identifier prefix', () => {
+    test('should treat αclass <<EOF as heredoc (αclass is not standalone class keyword)', () => {
+      // Bug: matchHeredoc class/module detection used ASCII-only regex
+      // !/[a-zA-Z0-9_]/.test(source[identStart - 1]) to check if "class" is standalone.
+      // With `αclass <<EOF`, `α` is a non-ASCII identifier char, so the ASCII regex returns
+      // false, and the code incorrectly treats "class" as a standalone keyword and rejects
+      // the heredoc. Result: heredoc body becomes regular Ruby and the inner if/end gets
+      // tokenized as a block_pair.
+      // Expected: 0 pair (αclass is a regular identifier, <<EOF is a heredoc, body is text).
+      const source = 'αclass <<EOF\n  if true\n    1\n  end\nEOF';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   generateCommonTests(config);
 });
