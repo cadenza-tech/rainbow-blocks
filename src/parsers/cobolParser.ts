@@ -398,6 +398,16 @@ export class CobolBlockParser extends BaseBlockParser {
         }
       }
       const isClose = match[0].length > lowerKeyword.length;
+      // Skip reserved-word opener used as a paragraph name in `PERFORM <reserved>.`.
+      // The reserved word is the operand of a paragraph-call PERFORM; the period
+      // terminates the statement. Without this skip, the inner reserved word (IF
+      // in `PERFORM IF.`) is pushed onto the opener stack here and steals the
+      // matching END-IF from the real opener (or, when no real opener exists,
+      // produces a phantom block pair with the trailing END-IF). The PERFORM
+      // verb itself is rejected by the perform-handling block below.
+      if (!isClose && this.isPerformParagraphName(source, pos, match[0].length)) {
+        continue;
+      }
       if (isClose) {
         closerPositions.add(pos);
       } else {
@@ -498,10 +508,20 @@ export class CobolBlockParser extends BaseBlockParser {
                 // Exception: if the word is a known COBOL block opener verb (DISPLAY, IF, etc.),
                 // it's an inline statement even when alone on the line (e.g., PERFORM DISPLAY\nEND-PERFORM)
                 const isBlockOpenerVerb = this.keywords.blockOpen.some((kw) => kw === word);
+                // Strip inline COBOL comments (*>) before checking trailing content
+                const afterNextWordNoCommentLocal = afterNextWord.replace(/\*>.*|>>.*/, '');
+                // Even when the next word looks like a reserved-word block opener
+                // (IF/EVALUATE/READ/...), a `.` immediately after it makes the
+                // PERFORM a paragraph-call with that reserved word used as the
+                // paragraph name (e.g. `PERFORM IF.`). The statement terminates at
+                // the period with no body or iteration phrase, so reject the
+                // PERFORM and leave the trailing END-* orphan. Mirrors the
+                // `PERFORM.` (no operand) path higher up.
+                if (/^[ \t]*\./.test(afterNextWordNoCommentLocal)) {
+                  continue;
+                }
                 if (!isBlockOpenerVerb) {
-                  // Strip inline COBOL comments (*>) before checking
-                  const afterNextWordNoComment = afterNextWord.replace(/\*>.*|>>.*/, '');
-                  const hasMoreContent = afterNextWordNoComment.match(/^[ \t]*([^\n\r. \t])/);
+                  const hasMoreContent = afterNextWordNoCommentLocal.match(/^[ \t]*([^\n\r. \t])/);
                   if (!hasMoreContent) {
                     continue;
                   }
@@ -734,6 +754,64 @@ export class CobolBlockParser extends BaseBlockParser {
   // isPrecedingWordDataNameVerbSameLine in cobolFixedFormat.ts for the rationale.
   private isPrecedingWordDataNameVerbSameLine(source: string, position: number): boolean {
     return isPrecedingWordDataNameVerbSameLine(source, position, this.helperCallbacks);
+  }
+
+  // Returns true when the reserved-word opener at `position` is used as the
+  // paragraph name of a paragraph-call PERFORM: `PERFORM <reserved>.` on the
+  // same line, with the period immediately following the opener (optionally
+  // preceded by spaces/tabs). In that case the reserved word is not a block
+  // opener — it is the operand of PERFORM, and the period terminates the
+  // statement. The trailing END-* keyword is left orphan.
+  //
+  // The check is intentionally tight: PERFORM and the reserved word must sit on
+  // the same line (a paragraph-call PERFORM completes on its own line; a
+  // structured PERFORM whose UNTIL/VARYING phrase wraps to the next line has no
+  // period and is not affected), and the period must be the very next
+  // non-blank character after the opener (ignoring inline comments). The
+  // PERFORM token preceding the opener must itself be on the same line and not
+  // hyphenated/Unicode-prefixed.
+  private isPerformParagraphName(source: string, position: number, keywordLength: number): boolean {
+    // Look backward for PERFORM on the same line, skipping whitespace.
+    let i = position - 1;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
+      i--;
+    }
+    if (i < 6) return false;
+    // The PERFORM token must end at `i + 1`.
+    const performStart = i - 6;
+    const candidate = source.slice(performStart, i + 1).toUpperCase();
+    if (candidate !== 'PERFORM') return false;
+    // Reject if PERFORM is part of a hyphenated identifier (e.g. MY-PERFORM).
+    if (performStart > 0) {
+      const prev = source[performStart - 1];
+      if (/[a-zA-Z0-9_-]/.test(prev)) return false;
+      if (prev.charCodeAt(0) > 127) return false;
+    }
+    // PERFORM must be on the same line as the opener (no newline between them).
+    for (let k = performStart + 7; k < position; k++) {
+      if (source[k] === '\n' || source[k] === '\r') return false;
+    }
+    // Look forward from the end of the opener for the next non-blank character.
+    // Skip spaces/tabs and `*>` / `>>` inline comments. A `.` immediately
+    // following (modulo blanks/inline comments) makes this a paragraph-call.
+    let j = position + keywordLength;
+    while (j < source.length) {
+      const ch = source[j];
+      if (ch === ' ' || ch === '\t') {
+        j++;
+        continue;
+      }
+      if (ch === '*' && j + 1 < source.length && source[j + 1] === '>') {
+        // Inline `*>` comment to end of line — not a period.
+        return false;
+      }
+      if (ch === '>' && j + 1 < source.length && source[j + 1] === '>') {
+        // `>>` compiler directive to end of line — not a period.
+        return false;
+      }
+      return ch === '.';
+    }
+    return false;
   }
 
   // Returns true when the keyword is preceded by an expression-context character
