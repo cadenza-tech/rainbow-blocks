@@ -4494,6 +4494,39 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'enum', 'end');
     });
+
+    test('should not pair select with end when next non-whitespace token is a dot-led method chain on a later line', () => {
+      // `x = select\n    .first` is a method-chain assignment where `select`
+      // is the receiver (an ordinary identifier/value), continued onto the
+      // next line by a leading `.`. Treating `select` as a block opener here
+      // makes it consume the trailing `end` of the surrounding def block,
+      // hiding the genuine def/end pair.
+      const source = 'def foo\n  x = select\n    .first\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should not pair enum with end when next non-whitespace token is a dot-led method chain on a later line', () => {
+      const source = 'def bar\n  x = enum\n    .to_a\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still open a real enum block when newline is followed by an identifier (not a method chain)', () => {
+      // Sanity: real opener forms put a constant/identifier (not a leading `.`)
+      // on the next physical line. The cross-line dot detection must not trip
+      // on these.
+      const source = 'enum\n  Red\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+
+    test('should still open a real select block when newline is followed by when (not a method chain)', () => {
+      // Sanity: `select` opens a real block whose body is `when` branches.
+      const source = 'select\nwhen ch\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end');
+    });
   });
 
   suite('Regression: unterminated char literal followed by backslash should not extend to next line', () => {
