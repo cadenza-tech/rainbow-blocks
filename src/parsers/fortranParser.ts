@@ -204,10 +204,19 @@ export class FortranBlockParser extends BaseBlockParser {
       if ((subKw === 'type' || subKw === 'rank' || subKw === 'case') && !/^[ \t]*\(/.test(afterSubKw)) {
         return false;
       }
-      // Reject empty parens `select case ()` / `select rank ()` / `select type ()`.
-      // The parenthesized content must not be empty (only whitespace).
-      const parenMatch = afterSubKw.match(/^[ \t]*\(([ \t]*)\)/);
-      if (parenMatch) {
+      // Reject empty parens including the cross-line form `select case (\n)` /
+      // `select rank (\n)` / `select type (\n)`. We locate the opening paren in
+      // `source` (after the `case|type|rank` keyword, walking past whitespace,
+      // line breaks, comments, and `&` continuation tokens) and ask
+      // `hasEmptyParenthesizedCondition` to inspect the parenthesized group.
+      // The helper treats newlines as whitespace inside the parens (unlike the
+      // same-line `[ \t]*` regex), so it catches both `select case ()` and
+      // `select case (\n)`. `afterSubKw` (collapsed) cannot be used directly
+      // because `findLogicalLineEnd` stops at the first line break that lacks a
+      // trailing `&`, so the slice may exclude the closing `)` for the cross-line
+      // form `select case (\n)` and leave the helper unable to terminate the group.
+      const parenOpenSrcPos = this.findOpenParenAfterSelectSubkw(source, position + keyword.length, subKw);
+      if (parenOpenSrcPos >= 0 && hasEmptyParenthesizedCondition(source, parenOpenSrcPos)) {
         return false;
       }
     }
@@ -367,6 +376,56 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     return true;
+  }
+
+  // Walks `source` from `afterSelectStart` (the position right after the `select`
+  // keyword), past whitespace / line breaks / comments / `&` continuation tokens,
+  // and the `subKw` (`case` / `type` / `rank`) word, then continues skipping
+  // whitespace / line breaks / comments / `&` until it finds the opening
+  // parenthesis of the select-condition. Returns the paren position in `source`,
+  // or -1 if no `(` is found before non-skip content. Used to anchor
+  // `hasEmptyParenthesizedCondition` on the original source so it can resolve the
+  // closing `)` even when the parenthesized group spans multiple physical lines.
+  private findOpenParenAfterSelectSubkw(source: string, afterSelectStart: number, subKw: string): number {
+    let i = afterSelectStart;
+    // Skip whitespace, line breaks, `&` continuation tokens, and comment-only
+    // continuation lines up to the `subKw`.
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '&' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      if (ch === '!') {
+        i = findLineEnd(source, i);
+        continue;
+      }
+      break;
+    }
+    // Verify the next word matches `subKw` (case-insensitive). If not, bail out.
+    const wordSlice = source.slice(i, i + subKw.length).toLowerCase();
+    if (wordSlice !== subKw) {
+      return -1;
+    }
+    i += subKw.length;
+    // After the subKw, continue skipping whitespace / line breaks / comments / `&`
+    // until the opening paren.
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '&' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      if (ch === '!') {
+        i = findLineEnd(source, i);
+        continue;
+      }
+      if (ch === '(') {
+        return i;
+      }
+      return -1;
+    }
+    return -1;
   }
 
   // Detects construct labels: 'name: if/do/block/...' where 'name' is any identifier,
