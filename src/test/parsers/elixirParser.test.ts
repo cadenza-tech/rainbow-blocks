@@ -5312,5 +5312,58 @@ end`;
     });
   });
 
+  suite('Bug: end after word operator (and/or/not/in/when) should not be block_close', () => {
+    // `end` directly after `and`/`or`/`not`/`in`/`when` is in expression position: these
+    // word operators expect an expression on their right-hand side, so `end` there is an
+    // identifier (invalid Elixir, but still must not steal a block_close pairing). Without
+    // this guard, the inner `end` greedily pairs with the enclosing opener and orphans the
+    // outer `end`. Symmetric with the existing `=` / EXPRESSION_OPERATOR_LEAD_CHARS guard
+    // in isValidBlockClose, but applied to word-based operators rather than symbolic ones.
+    test('should not treat end as block_close when used as RHS of and (x and end)', () => {
+      const source = 'if true do\n  x and end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of or (x or end)', () => {
+      const source = 'if true do\n  x or end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of not (not end)', () => {
+      const source = 'if true do\n  not end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of in (x in end)', () => {
+      const source = 'if true do\n  x in end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat end as block_close when used as RHS of when (x when end)', () => {
+      const source = 'if true do\n  x when end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still treat end as block_close when preceded by identifier ending in word-operator letters (endor)', () => {
+      // `endor` is an identifier, not the word operator `or`. The inner `end` must remain
+      // a real block_close even though the previous token's last letters happen to spell
+      // an operator name. This validates the word-boundary check in the new guard.
+      const source = 'def foo do\n  endor = 1\n  endor\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
