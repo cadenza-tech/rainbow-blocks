@@ -272,8 +272,14 @@ export function isValidForOpen(source: string, position: number, excludedRegions
   if (!(/[a-zA-Z_]/.test(source[i]) || source.charCodeAt(i) > 127)) {
     return false;
   }
-  // Skip identifier
-  while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
+  // Skip identifier. Per Ada LRM 2.3, identifiers may contain non-ASCII
+  // letters (`Ñ`, Cyrillic, etc.); the skip loop must include any code unit
+  // whose codepoint is > 127, matching the leading-character check above and
+  // the isWordChar helper used elsewhere in this file. Without the Unicode
+  // branch, the loop stalls at the first non-ASCII letter, the subsequent
+  // `use` keyword goes undetected, and the `for ... use ...;` representation
+  // clause is misclassified as a loop opener.
+  while (i < source.length && (/[a-zA-Z0-9_]/.test(source[i]) || source.charCodeAt(i) > 127)) {
     i++;
   }
   // Continue past dotted names (Pkg.Type.Component) with whitespace/comments between parts
@@ -281,8 +287,8 @@ export function isValidForOpen(source: string, position: number, excludedRegions
     const j = skipAdaWhitespaceAndComments(source, i);
     if (j < source.length && source[j] === '.') {
       i = skipAdaWhitespaceAndComments(source, j + 1);
-      // Skip identifier after dot
-      while (i < source.length && /[a-zA-Z0-9_]/.test(source[i])) {
+      // Skip identifier after dot (Unicode-aware, same as above)
+      while (i < source.length && (/[a-zA-Z0-9_]/.test(source[i]) || source.charCodeAt(i) > 127)) {
         i++;
       }
     } else {
