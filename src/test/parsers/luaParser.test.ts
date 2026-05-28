@@ -1954,5 +1954,112 @@ end`;
     });
   });
 
+  suite('Regression: reserved words after .. concat operator must not act as block keywords', () => {
+    // Lua's `..` is the string concatenation operator. Reserved words cannot
+    // appear as the right-hand operand of `..` (except `function`, which starts
+    // a function-literal expression that does produce a string-coercible value).
+    // Bug: isPrecededByDotOrColon returned false for `..` (correctly skipping
+    // field-access semantics), but no other check stopped the trailing reserved
+    // word from being tokenised. `..end` in a function body therefore consumed
+    // the outer block's `end`, and `..then` injected a phantom intermediate
+    // into the enclosing if.
+    // Fix: filter close/middle keywords (and non-function open keywords) when
+    // they are directly preceded by `..` so they fall out of the token stream.
+
+    test('should pair function with the outer end, not the inner end after .. (バグ2 再現1)', () => {
+      // `..end` inside the function body must NOT be treated as a block_close;
+      // the function should pair with the real outer `end`.
+      const source = 'function f()\n  return "x"..end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The outer end is the only legitimate end. Its offset is 31, not 27.
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, 31, 'function must close at the outer end, not the inner ..end');
+    });
+
+    test('should drop a phantom then injected by .. inside an if (バグ2 再現2)', () => {
+      // `..then` inside the if body must NOT be treated as a block_middle;
+      // the if must keep its single legitimate `then` only.
+      const source = 'if true then\n  x = "a"..then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should drop a close keyword preceded by .. with whitespace', () => {
+      // `.. end` (with space) is still string concat with the keyword `end`.
+      // We treat it identically to the no-space case.
+      const source = 'function f()\n  return "x" .. end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should drop an else preceded by .. inside an if body', () => {
+      // else after .. must be filtered (mirror of the then case).
+      const source = 'if true then\n  x = "a"..else\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should drop an elseif preceded by .. inside an if body', () => {
+      const source = 'if true then\n  x = "a"..elseif\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should keep function after .. as a valid expression keyword', () => {
+      // Exception: `..function() ... end()` is a valid concatenation with the
+      // result of an immediately-invoked anonymous function, so `function`
+      // after `..` must still act as a block_open.
+      const source = 'local s = "x" .. function() return "y" end()\ndo end';
+      const pairs = parser.parse(source);
+      // Two pairs: the anonymous function, and the standalone do block below.
+      assertBlockCount(pairs, 2);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.openKeyword.value, 'function');
+      assert.strictEqual(functionBlock.closeKeyword.value, 'end');
+    });
+
+    test('should drop a do preceded by .. (open keyword other than function)', () => {
+      // `do` directly after `..` is a Lua syntax error, not a valid block opener.
+      // Filtering keeps the legitimate function open on the stack to pair with
+      // its real `end`.
+      const source = 'function f()\n  return "x"..do\nend';
+      const pairs = parser.parse(source);
+      // function pairs with the only end on the last line.
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still treat ..function as a block_open (control)', () => {
+      // Plain anonymous-function expression after `..` should still open a
+      // function block.
+      const source = 'local s = "x" .. function()\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should not regress trailing-dot number literal heuristic (control)', () => {
+      // Control: the existing trailing-dot-on-number heuristic (the dot of a
+      // number literal like `1.` is not field access) must not be confused
+      // with the new `..` concat handling. `return 1.\nend` keeps pairing
+      // function with the outer end via the existing dot/colon logic.
+      const source = 'function f()\n  return 1.\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should treat ... varargs followed by reserved word as not preceded by ..', () => {
+      // Control: `...` is the varargs token, not the concat operator. A
+      // reserved word directly after `...` is the only legitimate keyword
+      // (e.g. `function(...) end`), and must NOT be filtered by the new
+      // concat-operator check.
+      const source = 'function f(...)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
