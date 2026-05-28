@@ -487,21 +487,31 @@ export class LuaBlockParser extends BaseBlockParser {
   // We only override (instead of changing the base) to avoid affecting other
   // languages whose specs do not pair LF+CR (e.g., Python, Bash treat each as
   // its own newline).
+  //
+  // For multi-char line breaks (CR+LF, LF+CR) we record the position of the
+  // LAST char so that getLineAndColumn (column = offset - lastNewline - 1)
+  // produces column 0 for the first byte AFTER the line break. Recording the
+  // first char left the second char inside the previous line, which made the
+  // next token report column 1 instead of 0.
   protected buildNewlinePositions(source: string): number[] {
     const positions: number[] = [];
     for (let i = 0; i < source.length; i++) {
       const ch = source[i];
       if (ch === '\n') {
-        positions.push(i);
         // LF followed by CR is part of the same line break (Lua spec).
         if (i + 1 < source.length && source[i + 1] === '\r') {
           i++;
+          positions.push(i);
+        } else {
+          positions.push(i);
         }
       } else if (ch === '\r') {
-        positions.push(i);
         // CR followed by LF is part of the same line break (Lua spec).
         if (i + 1 < source.length && source[i + 1] === '\n') {
           i++;
+          positions.push(i);
+        } else {
+          positions.push(i);
         }
       }
     }
