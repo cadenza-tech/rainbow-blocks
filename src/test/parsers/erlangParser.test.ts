@@ -3441,5 +3441,30 @@ foo() ->
     });
   });
 
+  suite('Regression: hasUnclosedOpenerInMapScope must treat @ as identifier continuation', () => {
+    // Bug: hasUnclosedOpenerInMapScope counts '@'-suffix atoms (e.g. `begin@host`) as a
+    // real opener because the forward scan uses /[a-zA-Z0-9_]/ as the identifier continuation
+    // class and does not include '@'. Per the Erlang Reference Manual, atom syntax is
+    // [a-z][a-zA-Z0-9_@]*, so `begin@host` is a single atom, not the keyword `begin`.
+    test('should not count begin@host as opener in map scope', () => {
+      // The outer begin must pair with the final 'end' (column 0 line 3), not with the
+      // map-key 'end => 2'. The `begin@host` is a single atom value, not a real block opener.
+      const source = 'begin\n  X = #{begin@host => 1, end => 2}\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not count node@end as opener via @-suffix identifier continuation', () => {
+      // The atom `node@end` contains 'end' as a continuation suffix. The map-key 'end => 2'
+      // must still be filtered (no real opener inside the map), so the outer begin pairs
+      // with the final 'end'.
+      const source = 'begin\n  X = #{value => node@end, end => 2}\nend.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
