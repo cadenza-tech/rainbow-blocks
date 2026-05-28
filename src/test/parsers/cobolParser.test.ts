@@ -3425,5 +3425,33 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: ALSO walk-back must verify REPLACE prefix', () => {
+    // Bug: isPrecededByReplacingOrReplace fell back to isPrecededByKeyword(..., 'ALSO', ...)
+    // without verifying that the ALSO itself was preceded by REPLACE. So a stray ALSO
+    // (e.g. `NOTHING ALSO ==a== BY ==...== `) caused later `==` pairs to be classified
+    // as pseudo-text, swallowing real code inside them.
+    test('should not classify == as pseudo-text when ALSO has no REPLACE prefix', () => {
+      // The inner IF/END-IF must remain code (one pair). Without the fix, the
+      // pseudo-text classifier returns true for the `==IF inner\nEND-IF inner ==`,
+      // suppressing the inner IF/END-IF entirely.
+      const source = 'NOTHING ALSO ==a== BY ==IF inner\nEND-IF inner ==';
+      const pairs = parser.parse(source);
+      // The inner IF should still be paired with its END-IF because `==` is not
+      // in a real REPLACE context.
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
+    });
+
+    test('should still classify == as pseudo-text in real REPLACE ALSO context', () => {
+      // Guard: in a valid REPLACE ==a== BY ==b== ALSO ==c== BY ==d== chain, the
+      // ALSO walk-back via REPLACE must still treat the `==` as pseudo-text.
+      const source = 'REPLACE ==a== BY ==b== ALSO ==c== BY ==d==.\nIF X\nEND-IF';
+      const pairs = parser.parse(source);
+      // The IF/END-IF outside REPLACE should still be paired.
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });
