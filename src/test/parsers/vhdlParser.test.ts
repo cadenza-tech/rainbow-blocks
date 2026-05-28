@@ -4654,6 +4654,39 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-29: stray else/elsif/then not added to non-if openers intermediates', () => {
+    // `else`/`elsif`/`then` are only legitimate intermediates for `if` constructs
+    // (and `then` also for `if generate`). When the current stack top is a different
+    // block opener (architecture/process/case/loop/etc.), a stray control-flow keyword
+    // is from malformed or in-progress code and should NOT be absorbed as the opener's
+    // intermediate. Existing logic suppresses these only for record/units; this expands
+    // the suppression to all non-if openers.
+    test('should not add stray else to architecture intermediates', () => {
+      const source = 'architecture a of e is\nbegin\n  else x;\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const elseTokens = archBlock.intermediates.filter((t) => t.value.toLowerCase() === 'else');
+      assert.strictEqual(elseTokens.length, 0, 'architecture intermediates should not absorb stray else');
+    });
+
+    test('should not add stray elsif to architecture intermediates', () => {
+      const source = 'architecture a of e is\nbegin\n  elsif x;\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const elsifTokens = archBlock.intermediates.filter((t) => t.value.toLowerCase() === 'elsif');
+      assert.strictEqual(elsifTokens.length, 0, 'architecture intermediates should not absorb stray elsif');
+    });
+
+    test('should not add stray then to process intermediates', () => {
+      const source = 'architecture a of e is\nbegin\n  p: process is\n  begin\n    then x;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const procBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.ok(procBlock, 'process should be paired');
+      const thenTokens = procBlock.intermediates.filter((t) => t.value.toLowerCase() === 'then');
+      assert.strictEqual(thenTokens.length, 0, 'process intermediates should not absorb stray then');
+    });
+  });
+
   suite('Regression 2026-05-29: conditional expression else inside if condition not added to if intermediates', () => {
     // `if <conditional_expression> then ... end if;` — the conditional_expression
     // (VHDL-2008, LRM 9.2.6) can contain `when ... else ...` clauses that compute the
