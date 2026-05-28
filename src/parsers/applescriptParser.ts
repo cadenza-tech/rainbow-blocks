@@ -711,6 +711,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
+      // Reject bare 'end' used as a record key (e.g., multi-line
+      // `{\n  end: 5\n}`). Mirrors the compound block_close guard at
+      // tryMatchCompoundKeywordToken lines 511-513: even at physical line start,
+      // the keyword may be a property name inside a record literal that spans
+      // multiple lines, in which case it must not pair with an outer block opener.
+      if (type === 'block_close' && keyword === 'end' && this.isAtRecordKeyPosition(source, i, endPos, excludedRegions)) {
+        return { nextPos: endPos };
+      }
+
       // Check if 'end' is used as a variable/property name
       if (type === 'block_close' && keyword === 'end' && isKeywordAsVariableName(source, i, keyword, excludedRegions, this.helperCallbacks)) {
         return { nextPos: endPos };
