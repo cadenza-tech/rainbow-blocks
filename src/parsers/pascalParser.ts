@@ -154,6 +154,14 @@ export class PascalBlockParser extends BaseBlockParser {
         if (prev === ';') {
           return true;
         }
+        // A `:` preceding `asm` is a case-label delimiter (e.g. `case x of 1: asm ... end`)
+        // when the token before `:` is a case-label-compatible value (numeric literal,
+        // identifier, char constant, string literal). Without this branch, `1: asm` is
+        // unconditionally treated as expression context and the asm block is missed,
+        // leaving the inner `end` to mispair with the outer `case`.
+        if (prev === ':' && this.isCaseLabelColon(source, bp, excludedRegions)) {
+          return true;
+        }
         // Expression/declaration prefixes that disqualify `asm` as a block opener.
         // `[asm]` / `arr[0] asm` (array index), `<asm>` / `a > asm` (generic param or
         // comparison), `(x) asm` (condition/expression context after a closing paren),
@@ -690,6 +698,33 @@ export class PascalBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Returns true when the `:` at `colonPos` is a case-label delimiter (e.g. `1: asm`,
+  // `Red: asm`, `'a': asm`). A case-label colon is preceded by a case-label-compatible
+  // value: numeric literal (digit-ending), identifier (letter/underscore-ending), or
+  // string/char constant (closing quote of an excluded region). Other prefixes (`)`,
+  // `]`, operators, `;`, `,`, etc.) indicate expression/declaration context and are not
+  // treated as case-label colons here. Whitespace immediately before the `:` is skipped
+  // but excluded regions (strings, comments) are not crossed -- landing inside one
+  // signals a string/char literal terminator.
+  private isCaseLabelColon(source: string, colonPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let bp = colonPos - 1;
+    while (bp >= 0 && (source[bp] === ' ' || source[bp] === '\t' || source[bp] === '\n' || source[bp] === '\r')) {
+      bp--;
+    }
+    if (bp < 0) {
+      return false;
+    }
+    // Landing inside an excluded region means the previous token is a string/char
+    // literal (`'...'`/`"..."`); the closing quote is included in the region span.
+    if (this.isInExcludedRegion(bp, excludedRegions)) {
+      return true;
+    }
+    const prev = source[bp];
+    // Numeric literal end (`1`, `$FF`, `1..5`, `Red`+digit suffix) or identifier end
+    // (letters/underscore). These are the syntactic categories of Pascal case labels.
+    return /[0-9a-zA-Z_]/.test(prev);
+  }
+
   // Skip backward over whitespace and excluded regions starting from `start` (inclusive);
   // returns the index of the first non-whitespace, non-comment character, or -1 if none.
   private skipBackwardWhitespace(source: string, start: number, excludedRegions: ExcludedRegion[]): number {
@@ -1038,13 +1073,16 @@ export class PascalBlockParser extends BaseBlockParser {
         if (bp >= 0 && source[bp] !== '\n' && source[bp] !== '\r') {
           const prev = source[bp];
           if (prev !== ';') {
-            // @asm = address-of, &asm = identifier-escape, <asm> = generic param,
-            // [asm] = array indexing, (x) asm = condition/expression context after a
-            // closing paren, +/-/*/asm = arithmetic, $asm = hex-literal prefix,
-            // #asm = char-constant prefix. None of these can introduce an asm block;
-            // treat them as non-statement context. The set must stay in sync with the
-            // backward check in isValidBlockOpen.
-            if (
+            // A `:` preceding `asm` is a case-label delimiter (e.g. `case x of 1: asm`)
+            // when the token before `:` is a case-label-compatible value (numeric
+            // literal, identifier, char constant, string literal). In that case the
+            // asm block opens here and its body must be added as an excluded region;
+            // skipping it would leave the asm body keywords (`mov`, `case`, etc.)
+            // tokenised as Pascal keywords and corrupt the BlockPair set. This must
+            // stay in sync with the corresponding branch in isValidBlockOpen.
+            if (prev === ':' && this.isCaseLabelColon(source, bp, regions)) {
+              // Fall through to the asm-body scan below.
+            } else if (
               prev === '.' ||
               prev === ':' ||
               prev === ',' ||
@@ -1062,9 +1100,14 @@ export class PascalBlockParser extends BaseBlockParser {
               prev === '*' ||
               prev === '/'
             ) {
+              // @asm = address-of, &asm = identifier-escape, <asm> = generic param,
+              // [asm] = array indexing, (x) asm = condition/expression context after a
+              // closing paren, +/-/*/asm = arithmetic, $asm = hex-literal prefix,
+              // #asm = char-constant prefix. None of these can introduce an asm block;
+              // treat them as non-statement context. The set must stay in sync with the
+              // backward check in isValidBlockOpen.
               continue;
-            }
-            if (/[a-zA-Z0-9_]/.test(prev)) {
+            } else if (/[a-zA-Z0-9_]/.test(prev)) {
               let ws = bp;
               while (ws >= 0 && /[a-zA-Z0-9_]/.test(source[ws])) {
                 ws--;
