@@ -537,6 +537,48 @@ end`;
       assert.strictEqual(pairs[0].closeKeyword.line, 2, 'two LFs must remain two newlines');
     });
 
+    test('should report column 0 for end immediately after CRLF', () => {
+      // Bug: buildNewlinePositions recorded the FIRST char of a multi-byte line
+      // break (the `\r` in `\r\n`), so the column of the next char was offset
+      // from the wrong anchor. For `if true then\r\nend`, `end` lives at offset
+      // 14 with `\r` at 12 and `\n` at 13; recording 12 gave column = 14-12-1=1,
+      // but column should be 0 (the very first column of the next line).
+      // Fix: record the LAST char of the line break (the `\n` of `\r\n`, the
+      // `\r` of `\n\r`) so column counts from the byte after the line break.
+      const source = 'if true then\r\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1, 'end after CRLF must be on line 1');
+      assert.strictEqual(pairs[0].closeKeyword.column, 0, 'end after CRLF must be at column 0');
+    });
+
+    test('should report column 0 for end immediately after LF+CR', () => {
+      // Mirror of the CRLF column fix for the LF+CR form. For `if true then\n\rend`,
+      // `end` lives at offset 14 with `\n` at 12 and `\r` at 13; recording 12
+      // gave column = 14-12-1 = 1, but column should be 0.
+      const source = 'if true then\n\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 1, 'end after LF+CR must be on line 1');
+      assert.strictEqual(pairs[0].closeKeyword.column, 0, 'end after LF+CR must be at column 0');
+    });
+
+    test('should report column 0 for end immediately after plain LF (control)', () => {
+      // Control: single-char line breaks must keep column-0 behaviour.
+      const source = 'if true then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.column, 0);
+    });
+
+    test('should report column 0 for end immediately after plain CR (control)', () => {
+      // Control: single-char CR-only line breaks must keep column-0 behaviour.
+      const source = 'if true then\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.column, 0);
+    });
+
     test('should handle nested long strings with different levels', () => {
       const source = `x = [==[
   if true then
