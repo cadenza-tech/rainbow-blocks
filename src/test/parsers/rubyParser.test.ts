@@ -5116,5 +5116,34 @@ end`;
     });
   });
 
+  suite('Regression: end on LHS of range operator should not pair', () => {
+    test('should filter end when followed by range operator (end..1)', () => {
+      // Bug: Ruby parser had isPrecededByRangeOperator for filtering end on the RHS of a
+      // range (1..end), but no symmetric isFollowedByRangeOperator for the LHS (end..1).
+      // Without the filter, the inner end on line 1 closes the def on line 0, leaving the
+      // outer end on line 2 as orphan. Expected: 1 pair (def at line 0 / outer end at line
+      // 2), since `end..1` is invalid Ruby (end cannot be a range LHS value).
+      const source = 'def m\n  end..1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // Verify the def pairs with the OUTER end on line 2, not the inner end on line 1.
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'def should pair with the outer end on line 2');
+    });
+
+    test('should filter end when followed by triple-dot range operator (end...1)', () => {
+      const source = 'def m\n  end...1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'def should pair with the outer end on line 2');
+    });
+
+    test('should filter end when followed by newline then range operator', () => {
+      const source = 'def m\n  end\n  ..1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'def should pair with the outer end on line 3');
+    });
+  });
+
   generateCommonTests(config);
 });
