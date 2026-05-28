@@ -5386,5 +5386,61 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: reserved word used as instance name must not be tokenized as block_close', () => {
+    test('should treat endmodule between identifier and `(` as instance name (module top; sub endmodule (.x(y)); endmodule)', () => {
+      // Bug: In `module top; sub endmodule (.x(y)); endmodule`, the inner
+      // `endmodule` is being used as the instance name of a module instantiation
+      // `sub endmodule (.x(y));`. SystemVerilog instance names follow the
+      // module type identifier and precede the port-connection parenthesis.
+      // A reserved word here is a misused identifier and must not be tokenized
+      // as the close keyword of the outer `module top`. Without suppression, the
+      // outer module/endmodule pair was wrongly formed with the inner instance-
+      // name endmodule, leaving the real trailing endmodule orphan.
+      const source = 'module top;\n  sub endmodule (.x(y));\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(
+        modPair.closeKeyword?.startOffset,
+        trailingOffset,
+        'module must pair with the trailing endmodule, not the instance-name endmodule'
+      );
+    });
+
+    test('should suppress endfunction used as instance name (function_inst pattern)', () => {
+      // Same pattern with `endfunction`: `sub endfunction (.x(y));` uses
+      // `endfunction` as an instance name. Per the same rule, it must not
+      // close the outer module's body (it would not pair with anything anyway,
+      // but the false token would break the BlockPair set).
+      const source = 'module top;\n  sub endfunction (.x(y));\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should suppress endclass used as instance name', () => {
+      const source = 'module top;\n  sub endclass (.x(y));\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still tokenize endmodule when not followed by `(` (sanity)', () => {
+      // Sanity: a plain `endmodule` not in instance-name position must remain
+      // tokenized as a real close keyword.
+      const source = 'module top;\n  wire x;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should not affect bare `endmodule` even when followed by `(` directly (no preceding identifier)', () => {
+      // Sanity: `endmodule(` directly (no preceding identifier-word) is not an
+      // instance-name pattern; it would just be a malformed close keyword.
+      // It should still be tokenized as a close keyword (orphan if no opener).
+      const source = 'module top;\nendmodule\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
