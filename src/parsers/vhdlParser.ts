@@ -1560,6 +1560,14 @@ export class VhdlBlockParser extends BaseBlockParser {
         if (/^(?:type|subtype|alias|attribute|file|group|signal|variable|constant|shared\s+variable)\b/.test(stmtBefore)) {
           continue;
         }
+        // Skip `is` immediately following `=>` (case branch arrow, named association arrow).
+        // For example, a malformed `when 1 => is;` inside a case branch should not leak `is`
+        // as an intermediate of the surrounding case-block. trimEnd tolerates any whitespace
+        // (already stripped from stmtBefore via excluded regions and trimStart, so a remaining
+        // trailing `=>` is exactly the arrow we are looking for).
+        if (stmtBefore.trimEnd().endsWith('=>')) {
+          continue;
+        }
         // Check previous lines for type/subtype declaration (multi-line case)
         // e.g., "type state_t\n  is (idle, active);"
         // Also handle attribute_specification with entity_class on its own line, e.g.:
