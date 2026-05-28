@@ -6051,6 +6051,43 @@ end select`;
     });
   });
 
+  suite('Regression: cross-line empty parens for select case/rank/type', () => {
+    test('should reject `select case (\\n)` with empty parens spanning a line break', () => {
+      // `select case (expr)` requires a non-empty case-expression. Empty parens
+      // spanning a line break (`select case (\n)`) is just as invalid as `select case ()`.
+      // The same-line empty-paren regex misses the cross-line form, so the opener was
+      // accepted and `end select` produced a spurious pair around the no-content body.
+      const source = `select case (
+)
+  case (1)
+    y = 1
+end select`;
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select case with cross-line empty parens is invalid; should not open');
+    });
+
+    test('should reject `select rank (\\n)` with empty parens spanning a line break', () => {
+      const source = `select rank (
+)
+  rank (0)
+    y = 1
+end select`;
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select rank with cross-line empty parens is invalid; should not open');
+    });
+
+    test('should reject `select type (\\n)` with empty parens spanning a line break', () => {
+      const source = `select type (
+)
+end select`;
+      const pairs = parser.parse(source);
+      const selectBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'select');
+      assert.ok(!selectBlock, 'select type with cross-line empty parens is invalid; should not open');
+    });
+  });
+
   suite('Regression 2026-05-25: cross-line empty parens for change team/submodule/associate', () => {
     test('should reject `change team (\\n)` with empty parens spanning a line break', () => {
       // `change team (...)` requires a non-empty team-value expression. Empty parens
