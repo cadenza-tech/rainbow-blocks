@@ -3021,5 +3021,66 @@ end`;
     });
   });
 
+  suite('Bug: block_open keywords as case/elseif value', () => {
+    test('should treat function as a value in case, not block_open', () => {
+      // `case function` — `function` here is an operand in the case value expression
+      // (not a block open). Treating it as a block_open consumes a real outer `end`
+      // and destroys outer block pairing.
+      const source = 'switch x\n  case function\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should treat try as a value in case, not block_open', () => {
+      const source = 'switch x\n  case try\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should treat unwind_protect as a value in case, not block_open', () => {
+      // From bug report: `function f\n  switch x\n    case unwind_protect\n      body\n  end\nend`
+      // The `unwind_protect` after `case` is an operand, not a block open. Without the fix,
+      // it pairs with the inner `end`, leaving the switch unmatched.
+      const source = 'function f\n  switch x\n    case unwind_protect\n      body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const switchPair = findBlock(pairs, 'switch');
+      assert.strictEqual(switchPair.closeKeyword?.value, 'end');
+      assertIntermediates(switchPair, ['case']);
+      const fnPair = findBlock(pairs, 'function');
+      assert.strictEqual(fnPair.closeKeyword?.value, 'end');
+    });
+
+    test('should treat classdef as a value in case, not block_open', () => {
+      const source = 'switch x\n  case classdef\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should treat spmd as a value in case, not block_open', () => {
+      const source = 'switch x\n  case spmd\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should treat function as a value in elseif, not block_open', () => {
+      const source = 'if x\n  elseif function\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['elseif']);
+    });
+
+    test('should treat try as a value in elseif, not block_open', () => {
+      const source = 'if x\n  elseif try\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['elseif']);
+    });
+  });
+
   generateCommonTests(config);
 });
