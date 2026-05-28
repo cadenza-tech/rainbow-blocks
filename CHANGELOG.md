@@ -5,6 +5,58 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.60] - 2026-05-29
+
+### Fixed
+
+- Ada: Recognize Ada intra-line whitespace in unterminated-string-after-paren detection
+- Ada: Recognize non-ASCII letters in for-clause identifier scan
+- Ada: Treat comment regions as transparent in extended-return malformed-form detection
+- AppleScript: Replace linear `excludedRegions.filter` with binary search
+- AppleScript: Skip record key positions for bare `end`
+- Bash: Allow ASCII shell metacharacters to terminate keywords
+- Bash: Require subject word between `case` and `in` for empty-case rescue
+- Bash: Require whitespace before `}` when preceded by block-close keyword
+- COBOL: Reset `REPLACE` pseudo-text context at statement-boundary verb
+- COBOL: Skip reserved-word paragraph names in `PERFORM <verb>.`
+- COBOL: Verify `REPLACE` prefix in `ALSO` walk-back for pseudo-text
+- Crystal: Recognize `do` as loop separator across implicit-continuation lines
+- Crystal: Stop following range operator filter from crossing newlines outside parens
+- Crystal: Stop preceding range operator filter from crossing newlines outside parens
+- Crystal: Suppress receiver-like keywords followed by cross-line method-chain dot
+- Elixir: Skip `end` after word operators (`and`/`or`/`not`/`in`/`when`)
+- Elixir: Skip middle keywords after word operators (`and`/`or`/`not`/`in`/`when`)
+- Erlang: Exempt float, range, and record-field dots from terminator in catch clause scan
+- Erlang: Skip comments between `fun` keyword and `(` in `-define` body analysis
+- Erlang: Track all bracket nesting in `hasUnclosedOpenerInMapScope`
+- Erlang: Treat `@` as identifier continuation in `hasUnclosedOpenerInMapScope`
+- Fortran: Recognize continuation-split `block data` in compound end keyword
+- Fortran: Reject cross-line empty parens in `select case`/`rank`/`type`
+- Julia: Count nested block openers inside leading-for indexing brackets
+- Lua: Anchor column at last char of multi-byte line break
+- Lua: Drop reserved words after `..` concat operator
+- MATLAB: Guard `pendingSkipDepths` skip with `remainingCloses` check
+- MATLAB: Reject `function` used as identifier in function header
+- Octave: Read parent MATLAB phantom-end positions in `matchBlocks`
+- Octave: Reject block_open keywords used in `case`/`elseif` value position
+- Octave: Reject `do` followed by identifier or unary operator on same line
+- Octave: Treat section keyword `(...);` statement call as function call
+- Octave: Treat typed-close keywords as value tokens in `case`/`elseif` headers
+- Pascal: Recognize `asm` block opener after case-label colon
+- Pascal: Recognize `class` after generic close directly preceding equals
+- Ruby: Apply Unicode boundary check to loop keyword and `do` detection
+- Ruby: Detect shift operator after Unicode identifier in heredoc
+- Ruby: Filter `end` placed before range operator (`end..N`)
+- Ruby: Recognize Unicode hash label colon when filtering `end` in expression position
+- Ruby: Recognize Unicode identifier prefix before `class`/`module` in heredoc detection
+- Verilog: Handle invalid end-label suffix on `endcase`
+- Verilog: Suppress reserved words used as instance names
+- VHDL: Deduplicate `begin` intermediate in single-begin block openers
+- VHDL: Drop `else` inside `if` condition before `then`
+- VHDL: Drop stray `else`/`elsif`/`then` for non-if/generate openers
+- VHDL: Reject reserved-word type marks in type indication contexts
+- VHDL: Skip `is` after `=>` in case branch arrow
+
 ## [1.1.59] - 2026-05-27
 
 ### Fixed
@@ -2391,6 +2443,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.60]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.59...v1.1.60
 [1.1.59]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.58...v1.1.59
 [1.1.58]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.57...v1.1.58
 [1.1.57]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.56...v1.1.57
