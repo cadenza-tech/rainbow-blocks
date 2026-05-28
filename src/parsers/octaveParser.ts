@@ -82,6 +82,21 @@ const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
 // do/until opener.
 const DO_CONDITION_KEYWORDS = new Set(['if', 'elseif', 'while', 'switch', 'case', 'until']);
 
+// Middle keywords that take a value/condition expression. A block_open keyword appearing on
+// the same logical line *after* one of these (e.g. `case function`, `elseif try`) is being
+// used as a value/condition operand, NOT as a block opener. Treating it as a block_open
+// consumes a real outer `end` and destroys outer block pairing. `else`/`otherwise`/`catch`/
+// `unwind_protect_cleanup` are deliberately excluded: they take no header, so a following
+// block_open like `else function` is genuinely a nested block opener.
+const OCTAVE_VALUE_CONTEXT_MIDDLE_KEYWORDS = new Set(['case', 'elseif']);
+
+// Block-open keywords whose acceptance must be guarded against `case <kw>` / `elseif <kw>`
+// value-context misclassification. Section keywords (methods/properties/events/enumeration/
+// arguments) and HEADER_REQUIRED_KEYWORDS (if/while/switch/for/parfor) are already covered by
+// the parent's checks (line-start section detection, empty-header rejection, etc.). `do` is
+// covered separately by isDoInConditionContext above.
+const OCTAVE_BLOCK_OPENERS_NEEDING_VALUE_CONTEXT_GUARD = new Set(['function', 'try', 'unwind_protect', 'classdef', 'spmd']);
+
 export class OctaveBlockParser extends MatlabBlockParser {
   // Mirror of MatlabBlockParser.phantomSectionPositions for Octave's overridden matchBlocks.
   // Populated by isValidBlockOpen below in lock-step with the parent's tracking, so that
@@ -220,6 +235,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
       ) {
         this.octavePhantomSectionPositions.push(position);
       }
+      return false;
+    }
+    // Reject `function` / `try` / `unwind_protect` / `classdef` / `spmd` appearing on the
+    // same logical line as a preceding `case` / `elseif`. The middle keyword takes a value
+    // (case) or condition (elseif) expression, so the block_open keyword here is an operand,
+    // NOT a block opener. Treating it as a block_open consumes a real outer `end` and
+    // destroys outer block pairing. Section keywords and HEADER_REQUIRED_KEYWORDS are
+    // already covered by the parent's section-keyword / empty-header rejection paths; `do`
+    // is covered by isDoInConditionContext below.
+    if (OCTAVE_BLOCK_OPENERS_NEEDING_VALUE_CONTEXT_GUARD.has(keyword) && this.isInValueContextMiddleKeyword(source, position, excludedRegions)) {
       return false;
     }
     if (keyword === 'do') {
@@ -522,6 +547,55 @@ export class OctaveBlockParser extends MatlabBlockParser {
       nextChar !== '=' &&
       !this.isCommentChar(nextChar)
     );
+  }
+
+  // Returns true when the block_open keyword at `position` lies on a logical line that
+  // contains a preceding `case` / `elseif` middle keyword (i.e. the keyword is being used as
+  // a value/condition operand of that middle keyword). Walks backward over horizontal
+  // whitespace, identifiers, `...`/`\` line continuations, and other expression characters
+  // until a raw newline or `;`/`,` statement separator terminates the logical line. If any
+  // identifier encountered on the way is in OCTAVE_VALUE_CONTEXT_MIDDLE_KEYWORDS, the
+  // block_open is in value-context and must be rejected. Mirrors the structure of
+  // isDoInConditionContext but with the value-context middle-keyword set.
+  private isInValueContextMiddleKeyword(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (isHorizontalWhitespace(source[i])) {
+        i--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.start - 1;
+        continue;
+      }
+      // Handle a `\n`/`\r` that immediately follows a `...` continuation excluded region.
+      if (source[i] === '\n' || source[i] === '\r') {
+        let nlStart = i;
+        if (source[i] === '\n' && i > 0 && source[i - 1] === '\r') nlStart = i - 1;
+        if (nlStart > 0) {
+          const prevRegion = this.findExcludedRegionAt(nlStart - 1, excludedRegions);
+          if (prevRegion && prevRegion.end === nlStart && source[prevRegion.start] === '.' && prevRegion.end > prevRegion.start + 1) {
+            i = prevRegion.start - 1;
+            continue;
+          }
+        }
+        return false;
+      }
+      // Statement separator terminates the logical line scan.
+      if (source[i] === ';' || source[i] === ',') return false;
+      // Identifier — check if it is `case` / `elseif`.
+      if (/[a-zA-Z0-9_]/.test(source[i])) {
+        const idEnd = i;
+        while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+        const ident = source.slice(i + 1, idEnd + 1).toLowerCase();
+        if (OCTAVE_VALUE_CONTEXT_MIDDLE_KEYWORDS.has(ident)) return true;
+        continue;
+      }
+      // Any other expression character — keep scanning backward.
+      i--;
+    }
+    return false;
   }
 
   // Returns true when `do` at position appears anywhere on a logical line that begins with
