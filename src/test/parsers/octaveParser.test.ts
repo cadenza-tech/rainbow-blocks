@@ -3182,5 +3182,77 @@ end`;
     });
   });
 
+  suite('Bug: do followed by unexpected leading characters', () => {
+    test('should reject do followed by identifier', () => {
+      // `do x;` — `do` followed by an identifier on the same line is `do` used as a
+      // variable (e.g. `do x` = call command-syntax `do('x')`, or `do x` is `do` being
+      // multiplied without operator), NOT a do/until opener. The orphan `do` consumes
+      // the enclosing function's `end` if accepted as a block_open. Expected: function/end
+      // pair survives.
+      const source = 'function f\n  do x;\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by ?', () => {
+      // `do ?` — `?` is not a valid Octave operator that follows a block opener. Treating
+      // `do` as a block_open leaves an orphan that consumes the outer `end`.
+      const source = 'function f\n  do ?\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by !', () => {
+      const source = 'function f\n  do !\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by @', () => {
+      const source = 'function f\n  do @\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by +', () => {
+      const source = 'function f\n  do +\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by -', () => {
+      const source = 'function f\n  do -\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by ~', () => {
+      const source = 'function f\n  do ~\n  body;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should still recognize do followed by newline as block opener', () => {
+      // `do\n  body\nuntil c` — the canonical do/until form. The fix must not regress this.
+      const source = 'do\n  body;\nuntil c';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should still recognize do followed by comment as block opener', () => {
+      // `do % comment\n  body\nuntil c` — line comment after `do` ends the statement.
+      const source = 'do % comment\n  body;\nuntil c';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+
+    test('should still recognize do followed by line continuation as block opener', () => {
+      // `do ...\n  body\nuntil c` — line continuation does not reject the opener.
+      const source = 'do ...\n  body;\nuntil c';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
   generateCommonTests(config);
 });
