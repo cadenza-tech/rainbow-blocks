@@ -861,12 +861,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // Middle keywords that introduce a new statement within their enclosing block. A
   // typed-close keyword appearing on the same logical line *after* one of these is at a
   // statement-leading position (e.g. `else endif`, `catch end_try_catch`), mirroring how
-  // `else end` / `catch end` are accepted for bare `end`. Kept in lock-step with
-  // OCTAVE_MIDDLE_KEYWORDS_AS_LINE_LEADERS.
+  // `else end` / `catch end` are accepted for bare `end`.
+  //
+  // Excludes `case` and `elseif` because both keywords take a value/condition expression
+  // (`case <value>`, `elseif <condition>`), and a typed-close keyword on the same line
+  // (e.g. `case endswitch`, `elseif endif`) is therefore part of the value/condition
+  // expression — NOT a block close. Treating it as a block close consumes the enclosing
+  // switch/if and orphans the real outer `end`. `else`/`otherwise`/`catch`/
+  // `unwind_protect_cleanup` take no header expression, so `else endif` / `catch
+  // end_try_catch` etc. legitimately introduce the close.
   private static readonly OCTAVE_MIDDLE_KEYWORDS_PRECEDING_TYPED_CLOSE: ReadonlySet<string> = new Set([
     'else',
-    'elseif',
-    'case',
     'otherwise',
     'catch',
     'unwind_protect_cleanup'
