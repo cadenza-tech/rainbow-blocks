@@ -742,8 +742,10 @@ export class RubyBlockParser extends BaseBlockParser {
       if (source[i - 1] === ':' || source[i + 1] === ':') {
         return false;
       }
-      // Require an identifier character immediately before the colon (label syntax)
-      if (i >= 1 && /[a-zA-Z0-9_]/.test(source[i - 1])) {
+      // Require an identifier character immediately before the colon (label syntax).
+      // Ruby permits non-ASCII identifier chars (e.g. `{αβγ: end}` is a hash label), so
+      // use the Unicode-aware helper instead of an ASCII-only regex.
+      if (i >= 1 && endsWithIdentifierChar(source, i - 1)) {
         return true;
       }
       return false;
