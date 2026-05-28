@@ -8,7 +8,8 @@ import {
   isInsideIfCondition,
   isKeywordAsVariableName,
   isUnicodeWhitespace,
-  matchCompoundKeyword
+  matchCompoundKeyword,
+  stripExcludedRegionsInRange
 } from './applescriptHelpers';
 import { BaseBlockParser } from './baseParser';
 
@@ -575,19 +576,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Check if compound open keyword is used as a variable name
       if (type === 'block_open') {
         const ls = findLogicalLineStart(source, i, excludedRegions, this.helperCallbacks);
-        let lineBeforeRaw = source.slice(ls, i);
-        // Strip excluded regions first (before toLowerCase to preserve positions)
-        if (excludedRegions) {
-          const regionsBefore = excludedRegions.filter((region) => region.end > ls && region.start < i);
-          for (const region of regionsBefore) {
-            const overlapStart = Math.max(region.start, ls);
-            const overlapEnd = Math.min(region.end, i);
-            const regionLen = overlapEnd - overlapStart;
-            const relStart = overlapStart - ls;
-            lineBeforeRaw = lineBeforeRaw.substring(0, relStart) + ' '.repeat(regionLen) + lineBeforeRaw.substring(relStart + regionLen);
-          }
-        }
-        const lineBefore = lineBeforeRaw
+        // Strip excluded regions first (before toLowerCase to preserve positions). Use the
+        // binary-search-backed helper so the cost is O(log N + K) per keyword rather than
+        // O(N) per keyword via excludedRegions.filter(...), which made tokenize O(N^2) when
+        // every block carried a trailing comment.
+        const lineBefore = stripExcludedRegionsInRange(source, ls, i, excludedRegions)
           .toLowerCase()
           .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
@@ -880,15 +873,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
       lineStart--;
     }
-    let beforeText = source.substring(lineStart, pos);
-    const regionsBefore = excludedRegions.filter((region) => region.end > lineStart && region.start < pos);
-    for (const region of regionsBefore) {
-      const overlapStart = Math.max(region.start, lineStart);
-      const overlapEnd = Math.min(region.end, pos);
-      const regionLen = overlapEnd - overlapStart;
-      const relStart = overlapStart - lineStart;
-      beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
-    }
+    // Use the binary-search-backed strip helper so this stays O(log N + K) per call
+    // instead of O(N) via excludedRegions.filter(...), which dominated tokenize when
+    // many block keywords coexisted with many excluded regions (e.g. trailing comments).
+    const beforeText = stripExcludedRegionsInRange(source, lineStart, pos, excludedRegions);
     return LINE_LEADING_WHITESPACE_PATTERN.test(beforeText);
   }
 
@@ -1029,16 +1017,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return false;
       }
     }
-    // Strip excluded regions (block comments) from the text before the keyword
-    let beforeText = source.substring(lineStart, pos);
-    const regionsBefore = excludedRegions.filter((region) => region.end > lineStart && region.start < pos);
-    for (const region of regionsBefore) {
-      const overlapStart = Math.max(region.start, lineStart);
-      const overlapEnd = Math.min(region.end, pos);
-      const regionLen = overlapEnd - overlapStart;
-      const relStart = overlapStart - lineStart;
-      beforeText = beforeText.substring(0, relStart) + ' '.repeat(regionLen) + beforeText.substring(relStart + regionLen);
-    }
+    // Strip excluded regions (block comments) from the text before the keyword.
+    // Binary-search-backed to keep the cost O(log N + K) per call (same reason as
+    // isAtPhysicalLineStart above).
+    const beforeText = stripExcludedRegionsInRange(source, lineStart, pos, excludedRegions);
     return LINE_LEADING_WHITESPACE_PATTERN.test(beforeText);
   }
 

@@ -8,6 +8,75 @@ export interface ApplescriptHelperCallbacks {
   findExcludedRegionAt: (pos: number, regions: ExcludedRegion[]) => ExcludedRegion | null;
 }
 
+// Returns the index of the first excluded region whose end is greater than `rangeStart`.
+// Because excludedRegions is sorted by start and individual regions never overlap
+// (each region's end is at most the next region's start), the `end` property is
+// monotonically non-decreasing, so binary search on `end` is valid.
+function firstRegionEndingAfter(regions: ExcludedRegion[], rangeStart: number): number {
+  let lo = 0;
+  let hi = regions.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (regions[mid].end > rangeStart) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
+}
+
+// Returns the offset one past the n-th physical newline starting at `start`.
+// If fewer than `lineCount` newlines exist, returns `source.length`. Used to cap
+// the after-keyword scan window inside isKeywordAsVariableName to a bounded
+// number of physical lines, so each call's cost stays bounded regardless of
+// the total source length.
+export function findNthPhysicalLineEnd(source: string, start: number, lineCount: number): number {
+  let seen = 0;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '\r') {
+      seen++;
+      if (i + 1 < source.length && source[i + 1] === '\n') i++;
+      if (seen >= lineCount) return i + 1;
+      continue;
+    }
+    if (ch === '\n') {
+      seen++;
+      if (seen >= lineCount) return i + 1;
+    }
+  }
+  return source.length;
+}
+
+// Returns source.substring(rangeStart, rangeEnd) with every character whose
+// offset falls inside an excluded region replaced with a single-space character.
+// Uses binary search on the sorted excludedRegions array so the cost is
+// O(log N + K) where K is the number of regions overlapping the range, instead
+// of the O(N) `excludedRegions.filter(...)` pattern that scans the whole array
+// for every keyword being validated.
+export function stripExcludedRegionsInRange(
+  source: string,
+  rangeStart: number,
+  rangeEnd: number,
+  excludedRegions: ExcludedRegion[] | undefined
+): string {
+  let result = source.substring(rangeStart, rangeEnd);
+  if (!excludedRegions || excludedRegions.length === 0 || rangeStart >= rangeEnd) {
+    return result;
+  }
+  for (let i = firstRegionEndingAfter(excludedRegions, rangeStart); i < excludedRegions.length; i++) {
+    const region = excludedRegions[i];
+    if (region.start >= rangeEnd) break;
+    const overlapStart = Math.max(region.start, rangeStart);
+    const overlapEnd = Math.min(region.end, rangeEnd);
+    const regionLen = overlapEnd - overlapStart;
+    const relStart = overlapStart - rangeStart;
+    result = result.substring(0, relStart) + ' '.repeat(regionLen) + result.substring(relStart + regionLen);
+  }
+  return result;
+}
+
 // Detects Unicode whitespace characters that may separate words in compound keywords:
 // NBSP (U+00A0), EN/EM/IDEOGRAPHIC SPACEs, and zero-width space.
 export function isUnicodeWhitespace(ch: string): boolean {
@@ -369,37 +438,21 @@ export function isKeywordAsVariableName(
   // Find start of logical line (following continuations backward)
   const lineStart = findLogicalLineStart(source, position, excludedRegions, callbacks);
   // Strip excluded regions (block comments) from lineBefore, replacing with spaces
-  let rawLineBefore = source.slice(lineStart, position);
-  if (excludedRegions) {
-    const regionsBefore = excludedRegions.filter((region) => region.end > lineStart && region.start < position);
-    for (const region of regionsBefore) {
-      const overlapStart = Math.max(region.start, lineStart);
-      const overlapEnd = Math.min(region.end, position);
-      const regionLen = overlapEnd - overlapStart;
-      const relStart = overlapStart - lineStart;
-      rawLineBefore = rawLineBefore.substring(0, relStart) + ' '.repeat(regionLen) + rawLineBefore.substring(relStart + regionLen);
-    }
-  }
   // Normalize continuations to spaces so regexes match across line breaks
   // toLowerCase to avoid case mismatch
-  const lineBefore = rawLineBefore
+  const lineBefore = stripExcludedRegionsInRange(source, lineStart, position, excludedRegions)
     .toLowerCase()
     .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
     .trimStart();
 
-  // Strip excluded regions from after-keyword text first (before toLowerCase to preserve positions)
+  // Strip excluded regions from after-keyword text first (before toLowerCase to preserve positions).
+  // The patterns below only inspect up to the first few physical lines (and the first logical line
+  // after \u00AC-continuation normalization), so cap the scan at a small bounded window instead of the
+  // entire remaining source. Capping is required to keep tokenize linear when many keywords appear
+  // in the same file \u2014 otherwise each keyword would pay O(remaining source) for the strip+regex pass.
   const kwEnd = position + keyword.length;
-  let rawAfterKwText = source.slice(kwEnd);
-  if (excludedRegions) {
-    const regionsAfter = excludedRegions.filter((region) => region.end > kwEnd && region.start < source.length);
-    for (const region of regionsAfter) {
-      const overlapStart = Math.max(region.start, kwEnd);
-      const overlapEnd = region.end;
-      const regionLen = overlapEnd - overlapStart;
-      const relStart = overlapStart - kwEnd;
-      rawAfterKwText = rawAfterKwText.substring(0, relStart) + ' '.repeat(regionLen) + rawAfterKwText.substring(relStart + regionLen);
-    }
-  }
+  const afterEnd = findNthPhysicalLineEnd(source, kwEnd, 10);
+  let rawAfterKwText = stripExcludedRegionsInRange(source, kwEnd, afterEnd, excludedRegions);
   rawAfterKwText = rawAfterKwText.toLowerCase();
   const afterKwNorm = rawAfterKwText.replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ');
 
