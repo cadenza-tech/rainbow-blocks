@@ -4631,5 +4631,47 @@ end if;`;
     });
   });
 
+  suite('Regression: hasUnterminatedStringAfterParen recognizes Unicode whitespace', () => {
+    test('should detect if/end-if block when ( is followed by NBSP then an unterminated string', () => {
+      // Ada LRM 2.1 intra-line whitespace covers NBSP (U+00A0) and the entire
+      // Zs category, not just ASCII space/tab. When an open paren is followed
+      // by Ada whitespace and then an unterminated string literal (typically
+      // a typo / in-progress edit), the if-block on the next line must be
+      // recognized: the unterminated string is what blocks `(` from being a
+      // genuine enclosing paren around the if. Without Unicode-aware
+      // whitespace skipping, NBSP-separated cases fall through to "no
+      // unterminated string", isInsideParens incorrectly classifies the if
+      // as inside parens, and no pair is produced.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `procedure P is\nbegin\n  Put(${nbsp}"unterminated\n  if X then null; end if;);\nend P;`;
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifPair, 'if/end-if block must be detected when ( is separated from an unterminated string by NBSP');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should detect if/end-if block when ( is followed by U+2000 EN QUAD then an unterminated string', () => {
+      // U+2000 EN QUAD is part of the Zs category and is intra-line
+      // whitespace per Ada LRM 2.1. Same scenario as NBSP above.
+      const enQuad = String.fromCharCode(0x2000);
+      const source = `procedure P is\nbegin\n  Put(${enQuad}"unterminated\n  if X then null; end if;);\nend P;`;
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifPair, 'if/end-if block must be detected when ( is separated from an unterminated string by U+2000');
+    });
+
+    test('should detect if/end-if block when ( is followed by mixed ASCII and Unicode whitespace then an unterminated string', () => {
+      // Combinations of NBSP + space + tab + NBSP must all be skipped: the
+      // whitespace skip is a Kleene-* over Ada intra-line whitespace
+      // characters, so any sequence of them must lead to the same outcome
+      // as a single ASCII space.
+      const nbsp = String.fromCharCode(0xa0);
+      const source = `procedure P is\nbegin\n  Put(${nbsp} \t${nbsp}"unterminated\n  if X then null; end if;);\nend P;`;
+      const pairs = parser.parse(source);
+      const ifPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifPair, 'if/end-if block must be detected when ( is separated from an unterminated string by mixed whitespace');
+    });
+  });
+
   generateCommonTests(config);
 });
