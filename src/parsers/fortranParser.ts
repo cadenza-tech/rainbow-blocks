@@ -28,6 +28,16 @@ import {
 } from './fortranValidation';
 import { buildCaseInsensitiveKeywordPattern, findLineStart, getTokenTypeCaseInsensitive, mergeCompoundEndTokens } from './parserUtils';
 
+// Continuation-aware word separator: same-line whitespace, or a Fortran free-form
+// line continuation (`block &\n[&] data`). Trailing `&` optionally followed by an
+// inline comment, then one or more newlines (with possible comment-only/blank lines
+// and optional leading `&`) before the next word. Used by the `block data` compound
+// in COMPOUND_END_TYPES so `end block data` is recognized even when `block` and
+// `data` are split across a continuation on the close side (e.g., `end &\n  block
+// &\n  data`).
+const COMPOUND_END_WORD_SEPARATOR =
+  '(?:[ \\t]+|[ \\t]*&[ \\t]*(?:![^\\r\\n]*)?(?:\\r\\n|\\r|\\n)(?:[ \\t]*(?:![^\\r\\n]*|&[ \\t]*(?:![^\\r\\n]*)?)?(?:\\r\\n|\\r|\\n))*[ \\t]*&?[ \\t]*)';
+
 // List of block types that have compound end keywords
 // 'block data' must be listed BEFORE 'block' for longest-first alternation matching:
 // `end block data` should match the multi-word form, not `end block`.
@@ -41,7 +51,10 @@ const COMPOUND_END_TYPES = [
   'do',
   'select',
   // Fortran block data program unit (legacy). Both spaced and concatenated forms.
-  'block[ \\t]+data',
+  // The separator between `block` and `data` allows same-line whitespace OR a
+  // Fortran free-form continuation (`block &\n[&] data`), so the close form
+  // `end &\n block &\n data` is recognized.
+  `block${COMPOUND_END_WORD_SEPARATOR}data`,
   'blockdata',
   'block',
   'associate',
@@ -72,7 +85,11 @@ const CONTINUATION_COMPOUND_END_PATTERN = new RegExp(
 // opener token value, including the continuation form `block&\n[&]?data`.
 function normalizeFortranEndType(rawType: string): string {
   const lower = rawType.toLowerCase();
-  if (lower === 'blockdata' || /^block[ \t&!\r\n]+data$/.test(lower)) {
+  // Match `block` followed by `data` with any combination of whitespace, `&`
+  // continuation tokens, inline comments (`! ...`), and line breaks between them.
+  // This covers `block data`, `block  data`, `block&\n data`, `block &\n & data`,
+  // `block &\n ! comment\n  data`, and the concatenated `blockdata`.
+  if (lower === 'blockdata' || /^block[ \t&!\r\n][\s\S]*?data$/.test(lower)) {
     return 'block data';
   }
   return lower;
@@ -1443,7 +1460,7 @@ export class FortranBlockParser extends BaseBlockParser {
     const remainingCompoundEndCounts = new Map<string, number>();
     for (const t of tokens) {
       if (t.type === 'block_close') {
-        const m = t.value.toLowerCase().match(/^end[ \t]*(.+)/);
+        const m = t.value.toLowerCase().match(/^end[ \t]*([\s\S]+)/);
         if (m) {
           const ty = normalizeFortranEndType(m[1]);
           remainingCompoundEndCounts.set(ty, (remainingCompoundEndCounts.get(ty) ?? 0) + 1);
@@ -1547,7 +1564,7 @@ export class FortranBlockParser extends BaseBlockParser {
           let matchIndex = -1;
 
           // Check if it's a compound end (e.g., "end program", "endprogram")
-          const compoundMatch = closeValue.match(/^end[ \t]*(.+)/);
+          const compoundMatch = closeValue.match(/^end[ \t]*([\s\S]+)/);
           if (compoundMatch) {
             // Normalize so `endblockdata`, `end block data`, `end  block  data` all
             // map to canonical `block data` and find the matching opener.
