@@ -252,6 +252,11 @@ export class LuaBlockParser extends BaseBlockParser {
 
   // Filters out middle keywords preceded by '.' or ':' (table field/method access)
   // Also filters out reserved keywords used as goto labels (`goto end`, `goto do`, etc.)
+  // Also filters reserved keywords directly preceded by `..` (concat operator):
+  // `..end` / `..then` etc. cannot be block keywords because Lua's `..` only
+  // accepts value-producing expressions on its right-hand side. The lone
+  // exception is `function`, which starts an anonymous-function literal that
+  // *is* a value (e.g. `"x" .. function() return "y" end()`).
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
@@ -262,8 +267,48 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isAfterGoto(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Reject reserved words after the `..` concat operator (except `function`,
+      // which can syntactically appear as an expression there).
+      if (token.value !== 'function' && this.isPrecededByConcatOperator(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       return true;
     });
+  }
+
+  // Returns true when the keyword at position is directly preceded (skipping
+  // only whitespace and transparent comments) by the `..` concat operator.
+  // Mirrors isPrecededByDotOrColon's transparency model: comments are
+  // whitespace-equivalent, strings/long strings/labels/shebang act as opaque
+  // walls. The trailing-dot-on-number heuristic from isPrecededByDotOrColon
+  // is NOT relevant here because a `.` belonging to a number literal cannot
+  // be the second dot of `..` (Lua's lexer prefers the longest token, but the
+  // first dot of `..` cannot come from a number literal that already ended
+  // with `.` — that would be lexed as the number's decimal point, not as the
+  // start of `..`). Walk-back therefore only confirms two raw `.` chars.
+  private isPrecededByConcatOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r' || source[i] === '\f' || source[i] === '\v') {
+        i--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region !== null) {
+        if (this.isCommentRegion(source, region)) {
+          i = region.start - 1;
+          continue;
+        }
+        return false;
+      }
+      break;
+    }
+    if (i < 1) return false;
+    if (source[i] !== '.' || source[i - 1] !== '.') return false;
+    // `...` (varargs) is not a concat operator. If a third `.` precedes the
+    // pair, treat it as varargs and let the existing handling apply.
+    if (i >= 2 && source[i - 2] === '.') return false;
+    return true;
   }
 
   // Detects whether the keyword at position is the target of a `goto` statement.
