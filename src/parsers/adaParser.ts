@@ -263,17 +263,30 @@ export class AdaBlockParser extends BaseBlockParser {
           // (no extended-return body) — both are malformed. Skip excluded regions
           // (comments / strings) when scanning backward so a comment ending in `:=`
           // is not confused with a real assignment operator. Track whether the
-          // backward scan crossed any excluded region (string/character literal)
-          // so that `return X : T := "expr" do` is not misclassified as `:= do`:
-          // the literal between := and do is a real expression and must not be
-          // ignored.
+          // backward scan crossed a real expression-bearing region (string or
+          // character literal) so that `return X : T := "expr" do` is not
+          // misclassified as `:= do`: the literal between := and do is a real
+          // expression and must not be ignored.
+          //
+          // A comment region, on the other hand, is not an expression — Ada
+          // comments cannot stand in for a value — so a `:= -- comment\n do`
+          // sequence is still the malformed assignment-then-body form. Treat
+          // comment regions as transparent (do not set crossedExcludedRegion)
+          // so the malformed-form detection continues to fire even when one or
+          // more comments separate `:=` from `do`.
           let pb = i - 1;
           let crossedExcludedRegion = false;
           while (pb >= 0) {
             if (this.isInExcludedRegion(pb, excludedRegions)) {
               const region = this.findExcludedRegionAt(pb, excludedRegions);
               if (region) {
-                crossedExcludedRegion = true;
+                // Ada line comments start with `--`. Anything else (a double
+                // or single quote at region.start) is a string or character
+                // literal that constitutes a real expression.
+                const isComment = region.start + 1 < source.length && source[region.start] === '-' && source[region.start + 1] === '-';
+                if (!isComment) {
+                  crossedExcludedRegion = true;
+                }
                 pb = region.start - 1;
                 continue;
               }
