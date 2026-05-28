@@ -3809,5 +3809,27 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-29: function as identifier inside function header', () => {
+    test('should pair outer function with outer end and treat inner function-named-function as invalid', () => {
+      // `function function()` uses the reserved word `function` as the function NAME.
+      // MATLAB rejects this at parse time, but to keep outer-block pairing intact the
+      // second `function` keyword must NOT be treated as a real block opener. The
+      // expected best-effort pairing is:
+      //   outer function (line 0) <-> outer end (line 3)
+      //   inner function (line 1, col 2) <-> inner end (line 2)
+      // Without this rejection the inner function header consumes two `end`s in a row,
+      // leaving the outer function orphan.
+      const source = 'function outer()\n  function function()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.line === 0);
+      const inner = pairs.find((p) => p.openKeyword.line === 1 && p.openKeyword.column === 2);
+      assert.ok(outer, 'outer function on line 0 must pair with its end');
+      assert.ok(inner, 'inner function on line 1 col 2 must pair with its end');
+      assert.strictEqual(outer.closeKeyword.line, 3, 'outer function must pair with the end on line 3');
+      assert.strictEqual(inner.closeKeyword.line, 2, 'inner function must pair with the end on line 2');
+    });
+  });
+
   generateCommonTests(config);
 });
