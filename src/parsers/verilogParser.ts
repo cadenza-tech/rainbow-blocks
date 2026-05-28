@@ -1305,6 +1305,91 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject close keywords used as a module/primitive instance name. A
+    // SystemVerilog module instantiation has the form
+    //   <module_type_id> [#(...)] <instance_name> (<port_connections>)
+    // where the `<instance_name>` is an identifier between the type identifier and
+    // the port-connection parenthesis. A reserved word in that position is a
+    // misused identifier and must not be tokenized as a real close keyword
+    // (otherwise it falsely closes the enclosing block — e.g., `module top; sub
+    // endmodule (.x(y)); endmodule` would have the inner instance-name
+    // `endmodule` consume the outer `module top`'s close, leaving the real
+    // trailing `endmodule` orphan).
+    //
+    // The check fires only when ALL of the following hold:
+    //   - The preceding word is a plain identifier (letters/digits/underscore,
+    //     not adjacent to `$` or `\`), NOT a SystemVerilog reserved word.
+    //   - The keyword is immediately followed (after trivia) by `(`.
+    // The reserved-word checks (data type, entity introducer, declaration
+    // introducer, qualifier) are already covered by earlier suppressions
+    // (isPrecededByDataTypeKeyword), so this additional check fires only when
+    // the preceding word is a user-defined identifier — the instance-type case.
+    if (this.isInInstanceNamePosition(source, position, keyword.length, excludedRegions)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Returns true when the close keyword at `position` is in module-instantiation
+  // instance-name position: the preceding non-trivia token is a plain
+  // user-defined identifier (not a SystemVerilog reserved word) AND the keyword
+  // is immediately followed (after trivia) by `(`. Used to suppress reserved
+  // words misused as instance names (e.g., `sub endmodule (.x(y));` where
+  // `endmodule` is the instance name, not a real close keyword).
+  private isInInstanceNamePosition(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Check forward: next non-trivia char must be `(`.
+    const afterKeyword = this.skipForwardTrivia(source, position + keywordLength, excludedRegions);
+    if (afterKeyword >= source.length || source[afterKeyword] !== '(') return false;
+
+    // Check backward: preceding non-trivia token must be a plain identifier.
+    // Skip whitespace and block comments backward (line comments and other
+    // excluded regions are also skipped here because they are between tokens).
+    let i = position - 1;
+    while (i >= 0) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        const isBlockComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*';
+        const isLineComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '/';
+        if (isBlockComment || isLineComment) {
+          i = region.start - 1;
+          continue;
+        }
+        // Other excluded regions (strings, escaped identifiers, etc.) break
+        // the type-identifier adjacency. Not an instance pattern.
+        return false;
+      }
+      break;
+    }
+    if (i < 0 || !/[a-zA-Z0-9_]/.test(source[i])) return false;
+    // Walk back to the start of the identifier word.
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_$]/.test(source[i])) i--;
+    // Reject identifier chunks touching `$` (system task names) or `\` (escaped id):
+    // those are not the typical user-defined type-identifier form.
+    if (i >= 0 && (source[i] === '$' || source[i] === '\\')) return false;
+    const word = source.slice(i + 1, wordEnd);
+    // Reject if the preceding word is itself a reserved word handled by earlier
+    // suppressions (data type, declaration introducer, entity introducer, method
+    // qualifier, control keyword, case keyword). Those cases are not the
+    // instance-name pattern.
+    if (DATA_TYPE_KEYWORDS.has(word)) return false;
+    if (METHOD_QUALIFIER_KEYWORDS.has(word)) return false;
+    if (ENTITY_NAME_INTRODUCERS.has(word)) return false;
+    if (DECLARATION_KEYWORDS.has(word)) return false;
+    if (CASE_KEYWORDS.has(word)) return false;
+    if (CONTROL_KEYWORDS.includes(word)) return false;
+    // Reject if the preceding word is itself a block keyword (open / close /
+    // middle). A close keyword immediately following another block keyword is
+    // not an instance pattern (it would be one of the other suppression paths).
+    if (this.keywords.blockOpen.includes(word)) return false;
+    if (this.keywords.blockClose.includes(word)) return false;
+    if (this.keywords.blockMiddle.includes(word)) return false;
     return true;
   }
 
