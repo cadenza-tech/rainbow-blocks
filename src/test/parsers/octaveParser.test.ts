@@ -2986,5 +2986,40 @@ end`;
     });
   });
 
+  suite('Bug: typed-close keywords as case/elseif value', () => {
+    test('should treat endswitch as a value in case, not block_close', () => {
+      // `case endswitch` — `endswitch` here is an operand in the case value expression
+      // (not a block close). Treating it as a block_close consumes the switch and
+      // orphans the real outer `end`, destroying outer block pairing.
+      const source = 'switch x\n  case endswitch\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should treat endif as a value in elseif, not block_close', () => {
+      // `elseif endif` — `endif` here is part of the elseif condition expression
+      // (not a block close). Treating it as a block_close orphans the outer `end`.
+      const source = 'if x\n  elseif endif\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['elseif']);
+    });
+
+    test('should treat endfor as a value in case, not block_close', () => {
+      const source = 'switch x\n  case endfor\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should treat endwhile as a value in case, not block_close', () => {
+      const source = 'switch x\n  case endwhile\n    body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+  });
+
   generateCommonTests(config);
 });
