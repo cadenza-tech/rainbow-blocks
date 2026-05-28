@@ -4654,6 +4654,24 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-29: stray is after => in case branch not added to case intermediates', () => {
+    // VHDL `case x is ... when v => ... end case;` (LRM 10.9). A stray `is` written as the
+    // first statement of a `when` branch (e.g., `when 1 => is;`) is malformed code; the
+    // existing tokenize filter recognizes `is` after declaration keywords (type/subtype/etc.)
+    // but not the `=> is` pattern. Without this guard the stray `is` is absorbed into the
+    // case's intermediates (e.g., `[is, when, is, when]` instead of `[is, when, when]`),
+    // polluting the surrounding case-block's structure.
+    test('should not absorb stray is after => in case when branch into case intermediates', () => {
+      const source =
+        'architecture a of e is\nbegin\n  p: process is\n  begin\n    case x is\n      when 1 => is;\n      when others => null;\n    end case;\n  end process p;\nend architecture;';
+      const pairs = parser.parse(source);
+      const caseBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.ok(caseBlock, 'case should be paired');
+      const isTokens = caseBlock.intermediates.filter((t) => t.value.toLowerCase() === 'is');
+      assert.strictEqual(isTokens.length, 1, 'case intermediates should contain exactly one is (the case header is)');
+    });
+  });
+
   suite('Regression 2026-05-29: stray else/elsif/then not added to non-if openers intermediates', () => {
     // `else`/`elsif`/`then` are only legitimate intermediates for `if` constructs
     // (and `then` also for `if generate`). When the current stack top is a different
