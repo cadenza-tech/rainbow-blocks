@@ -565,11 +565,15 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Checks if the keyword at position is immediately preceded by a range operator
-  // (.. or ...). Whitespace, including newlines (`\n`, `\r`, `\r\n`), is permitted
-  // between the operator and the keyword: `(1..\n  end)` is also invalid Crystal
-  // because `..` causes implicit line continuation and `end` cannot be the RHS of
-  // a range. Skips characters inside excluded regions.
+  // (.. or ...). Whitespace is permitted between the operator and the keyword.
+  // Newlines are crossed only when the keyword sits inside an unclosed opening
+  // paren/bracket/brace: `(1..\n  end)` is invalid Crystal (the `end` is the
+  // RHS of `..` even across the newline) because the open paren causes implicit
+  // line continuation. Outside any enclosing paren, a newline ends the logical
+  // line and a preceding standalone `..` does not extend across it. Skips
+  // characters inside excluded regions.
   private isPrecededByRangeOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const insideParen = this.isInsideUnclosedParen(source, position, excludedRegions);
     let i = position - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -580,7 +584,18 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      if (ch === '\n' || ch === '\r') {
+        // Newlines are only crossed when the keyword lies inside an open
+        // paren/bracket/brace: those cause implicit line continuation so a
+        // preceding `..` can carry over. On a top-level standalone `..` line
+        // the newline ends the range scope.
+        if (!insideParen) {
+          return false;
+        }
         i--;
         continue;
       }
@@ -617,6 +632,35 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
     // Need at least two consecutive dots to form .. (or ...)
     return i + 1 < source.length && source[i] === '.' && source[i + 1] === '.';
+  }
+
+  // Scans backward from `position` to detect whether `position` lies inside an
+  // unclosed `(`, `[`, or `{`. Excluded regions (comments, strings, etc.) are
+  // skipped so that brackets inside them are ignored. Used to decide whether
+  // a newline next to the keyword can be crossed by the range-operator scan.
+  private isInsideUnclosedParen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ')' || ch === ']' || ch === '}') {
+        depth++;
+      } else if (ch === '(' || ch === '[' || ch === '{') {
+        if (depth === 0) {
+          return true;
+        }
+        depth--;
+      }
+      i--;
+    }
+    return false;
   }
 
   // Checks whether the keyword at `position` is the value of a case/when branch on the
