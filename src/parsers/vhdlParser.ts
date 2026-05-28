@@ -342,14 +342,15 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
-    // Reject reserved-word block openers that appear directly after a type indication `:`
-    // (e.g., `signal x : view;`, `variable v : units;`). The reserved word here is being
-    // used (illegally) as a type name, not as a block opener. Without this guard the
-    // keyword is tokenized as a stray block_open and absorbs the surrounding architecture's
-    // `begin` into its (orphan) intermediates. attribute_specification (`: view is ...`)
-    // is already excluded by the entity_class check above, so the remaining `:` cases are
-    // type indications that should never open a block.
-    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isPrecededByTypeIndicationColon(source, position, excludedRegions)) {
+    // Reject reserved-word block openers that appear as a type mark in any type-indication
+    // context (LRM 6.4.2). Covers signal/variable/constant/file declarations
+    // (`signal x : view;`), record field declarations (`fld : view;` inside `record`),
+    // subtype/alias declarations (`subtype x is view;` / `alias x is view;`), and array
+    // element types (`type t is array (...) of view;`). Without rejecting these, the reserved
+    // word is tokenized as a stray block_open and absorbs the surrounding architecture's
+    // `begin` into its (orphan) intermediates. attribute_specification (`: view is ...`) is
+    // already excluded by the entity_class check above.
+    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isReservedWordAsTypeMark(source, position, excludedRegions)) {
       return false;
     }
 
@@ -559,6 +560,171 @@ export class VhdlBlockParser extends BaseBlockParser {
     while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
     const word3 = source.slice(i + 1, word3End).toLowerCase();
     return word3 === 'architecture' || word3 === 'configuration';
+  }
+
+  // Walks backward from `start` past whitespace, newlines, and excluded regions
+  // (comments, strings). Returns the offset of the first non-whitespace, non-excluded
+  // character, or -1 if no such character exists.
+  private skipBackwardWsAndExcluded(source: string, start: number, excludedRegions: ExcludedRegion[]): number {
+    let i = start;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    return i;
+  }
+
+  // Reads the identifier-like word ending at `end` (inclusive). Returns the word's
+  // lowercased form and the offset of the character before the word's start (i.e.,
+  // the position to resume backward scanning from). If no identifier is at `end`,
+  // returns null.
+  private readBackwardWord(source: string, end: number): { word: string; before: number } | null {
+    if (end < 0 || !/[a-zA-Z0-9_]/.test(source[end])) return null;
+    let i = end;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const word = source.slice(i + 1, end + 1).toLowerCase();
+    return { word, before: i };
+  }
+
+  // Detects whether the keyword at `position` is being used as a type mark in any
+  // type-indication context (LRM 6.4.2). Returns true for:
+  //   - `signal/variable/constant/file <name> : <reserved>` (object declaration)
+  //   - `fld : <reserved>` inside `record ... end record` (record field declaration)
+  //   - `subtype <name> is <reserved>` (subtype declaration, LRM 6.3)
+  //   - `alias <name> is <reserved>` (alias declaration, LRM 6.6)
+  //   - `... array (...) of <reserved>` (array element type, LRM 5.3.2.1)
+  // Caller must have already excluded attribute_specification (`: view is ...`) via
+  // isInAttributeSpecification.
+  private isReservedWordAsTypeMark(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.isPrecededByTypeIndicationColon(source, position, excludedRegions)) return true;
+    if (this.isRecordFieldTypeMark(source, position, excludedRegions)) return true;
+    if (this.isSubtypeOrAliasTypeMark(source, position, excludedRegions)) return true;
+    if (this.isArrayElementTypeMark(source, position, excludedRegions)) return true;
+    return false;
+  }
+
+  // Detects `fld : <reserved>` inside a record body. The immediate prefix is `<identifier> :`
+  // (like isPrecededByTypeIndicationColon), but the preceding token is NOT a declaration
+  // keyword (signal/variable/constant/file). Instead, we walk back further and confirm
+  // the field belongs to an open `record ... end record` body by finding a `record`
+  // keyword without an intervening `end record` or `;` that closes a sibling declaration.
+  private isRecordFieldTypeMark(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step 1: confirm immediate prefix is `<identifier> :`.
+    let i = this.skipBackwardWsAndExcluded(source, position - 1, excludedRegions);
+    if (i < 0 || source[i] !== ':') return false;
+    i = this.skipBackwardWsAndExcluded(source, i - 1, excludedRegions);
+    const ident = this.readBackwardWord(source, i);
+    if (!ident) return false;
+    // Step 2: walk further back, scanning for `record` keyword without crossing
+    // `end record`. The record body uses `;` to separate fields, so we accept those.
+    // Hard stop on `end record` (record body closed before reaching this declaration).
+    let j = this.skipBackwardWsAndExcluded(source, ident.before, excludedRegions);
+    let scanLimit = 4096;
+    while (j >= 0 && scanLimit > 0) {
+      scanLimit--;
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[j];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === ';' || ch === ',') {
+        j--;
+        continue;
+      }
+      if (!/[a-zA-Z0-9_]/.test(ch)) {
+        // Other punctuation (`:`, `(`, etc.) means we left the record field context.
+        return false;
+      }
+      const w = this.readBackwardWord(source, j);
+      if (!w) return false;
+      if (w.word === 'record') return true;
+      // `end` before `record` would be `end record` (body terminator) – but we walk back,
+      // so we'd see `record` first if walking left within an open body. If we encounter
+      // `end` first, the record body has already closed.
+      if (w.word === 'end') return false;
+      // Any other declaration keyword that opens a new construct stops the scan.
+      if (w.word === 'signal' || w.word === 'variable' || w.word === 'constant' || w.word === 'file' || w.word === 'type' || w.word === 'subtype') {
+        return false;
+      }
+      // architecture / process / block / etc. stop the scan: we've left the record body.
+      if (
+        w.word === 'architecture' ||
+        w.word === 'process' ||
+        w.word === 'block' ||
+        w.word === 'entity' ||
+        w.word === 'package' ||
+        w.word === 'begin'
+      ) {
+        return false;
+      }
+      j = w.before;
+    }
+    return false;
+  }
+
+  // Detects `subtype <name> is <reserved>` / `alias <name> is <reserved>`. The immediate
+  // prefix is `is` (case-insensitive), the next non-ws token before that is an identifier
+  // (the subtype/alias name), and the next token is the `subtype`/`alias` keyword.
+  private isSubtypeOrAliasTypeMark(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = this.skipBackwardWsAndExcluded(source, position - 1, excludedRegions);
+    const isWord = this.readBackwardWord(source, i);
+    if (!isWord || isWord.word !== 'is') return false;
+    i = this.skipBackwardWsAndExcluded(source, isWord.before, excludedRegions);
+    const nameWord = this.readBackwardWord(source, i);
+    if (!nameWord) return false;
+    i = this.skipBackwardWsAndExcluded(source, nameWord.before, excludedRegions);
+    const declWord = this.readBackwardWord(source, i);
+    if (!declWord) return false;
+    return declWord.word === 'subtype' || declWord.word === 'alias';
+  }
+
+  // Detects `... array (...) of <reserved>` (LRM 5.3.2.1 unconstrained_array_definition,
+  // 5.3.2.2 constrained_array_definition). The immediate prefix is `of` (case-insensitive);
+  // the next non-ws token before that is `)` closing an index constraint or index subtype.
+  private isArrayElementTypeMark(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = this.skipBackwardWsAndExcluded(source, position - 1, excludedRegions);
+    const ofWord = this.readBackwardWord(source, i);
+    if (!ofWord || ofWord.word !== 'of') return false;
+    i = this.skipBackwardWsAndExcluded(source, ofWord.before, excludedRegions);
+    if (i < 0 || source[i] !== ')') return false;
+    // Walk back through matching parens. Each ) increments depth, each ( decrements.
+    let depth = 1;
+    i--;
+    let scanLimit = 4096;
+    while (i >= 0 && depth > 0 && scanLimit > 0) {
+      scanLimit--;
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ')') depth++;
+      else if (ch === '(') depth--;
+      i--;
+    }
+    if (depth !== 0) return false;
+    // i now points to char before matching `(`. Walk back and expect `array`.
+    i = this.skipBackwardWsAndExcluded(source, i, excludedRegions);
+    const arrayWord = this.readBackwardWord(source, i);
+    if (!arrayWord || arrayWord.word !== 'array') return false;
+    return true;
   }
 
   // Detects whether the keyword at `position` is part of a type indication (declaration)
