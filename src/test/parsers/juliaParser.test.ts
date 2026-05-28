@@ -4461,6 +4461,95 @@ end`;
     });
   });
 
+  suite('Regression: nested block openers inside leading-for indexing brackets', () => {
+    // hasUnmatchedBlockOpenerBetweenInIndexing previously activated comprehension context
+    // on the leading-for itself (matching its `for ... in` tail), making nested `for`/`if`
+    // keywords in the body invisible to depth tracking. Combined with the
+    // allUnmatchedOpenersAreFilteredBegins "prefer non-begin first" cancellation, an inner
+    // `end` matched against the wrong opener and the outer real `end` was misclassified
+    // as lastindex. Each nested opener should be counted as a block-form opener so the
+    // outer `end` pairs with the leading-for and the inner `end` pairs with its own opener.
+    test('should pair nested for-end inside leading-for indexing bracket', () => {
+      // arr[for x in 1:n\nfor y in 1:n\nend\nend]: outer for at 4 pairs with outer end at 34;
+      // nested for at 17 pairs with inner end at 30.
+      const source = 'arr[for x in 1:n\nfor y in 1:n\nend\nend]';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 4);
+      assert.ok(outer);
+      assert.strictEqual(outer.openKeyword.value, 'for');
+      assert.strictEqual(outer.closeKeyword?.startOffset, 34);
+      const inner = pairs.find((p) => p.openKeyword.startOffset === 17);
+      assert.ok(inner);
+      assert.strictEqual(inner.openKeyword.value, 'for');
+      assert.strictEqual(inner.closeKeyword?.startOffset, 30);
+    });
+
+    test('should pair nested if-end inside leading-for indexing bracket', () => {
+      // arr[for x in 1:n\nif y > 0\nend\nend]: outer for pairs with the trailing `end`,
+      // inner `if` pairs with the inner `end`. Previously inComprehensionContext was set by
+      // the leading-for, so the nested `if` was treated as a comprehension filter and the
+      // outer end was lost.
+      const source = 'arr[for x in 1:n\nif y > 0\nend\nend]';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.startOffset, 4);
+      assert.strictEqual(forBlock.closeKeyword?.startOffset, 30);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.openKeyword.startOffset, 17);
+      assert.strictEqual(ifBlock.closeKeyword?.startOffset, 26);
+    });
+
+    test('should pair nested begin-end inside leading-for indexing bracket', () => {
+      // arr[for x in 1:n; begin; y=x; end; end]: the inner `begin` is in openersWithoutFor,
+      // but previously the allUnmatchedOpenersAreFilteredBegins "prefer non-begin first"
+      // heuristic let the inner `end` cancel the outer `for` instead of the matching
+      // `begin`, so the outer end was misclassified as lastindex.
+      const source = 'arr[for x in 1:n; begin; y=x; end; end]';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.startOffset, 4);
+      assert.strictEqual(forBlock.closeKeyword?.startOffset, 35);
+      const beginBlock = findBlock(pairs, 'begin');
+      assert.strictEqual(beginBlock.openKeyword.startOffset, 18);
+      assert.strictEqual(beginBlock.closeKeyword?.startOffset, 30);
+    });
+
+    test('should pair nested if-else-end inside leading-for indexing bracket', () => {
+      // arr[for x in 1:n; if c; 1; else; 2; end; end]: nested if with else inside leading-
+      // for's body. The else is an intermediate of the if, and the trailing end closes for.
+      const source = 'arr[for x in 1:n; if c; 1; else; 2; end; end]';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.startOffset, 4);
+      assert.strictEqual(forBlock.closeKeyword?.startOffset, 41);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.strictEqual(ifBlock.openKeyword.startOffset, 18);
+      assert.strictEqual(ifBlock.closeKeyword?.startOffset, 36);
+      assertIntermediates(ifBlock, ['else']);
+    });
+
+    test('should pair nested for-end inside leading-let indexing bracket', () => {
+      // arr[let; for y in 1:m; end; end]: leading-let opens depth 1, the nested `for ... in`
+      // inside its body should be block-form (not a generator). Previously the
+      // inComprehensionContext was set by the inner for, but since `for` is in
+      // openersWithoutFor it was not counted as an opener, so the inner end cancelled the
+      // let and the outer end was misclassified as lastindex.
+      const source = 'arr[let; for y in 1:m; end; end]';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const letBlock = findBlock(pairs, 'let');
+      assert.strictEqual(letBlock.openKeyword.startOffset, 4);
+      assert.strictEqual(letBlock.closeKeyword?.startOffset, 28);
+      const forBlock = findBlock(pairs, 'for');
+      assert.strictEqual(forBlock.openKeyword.startOffset, 9);
+      assert.strictEqual(forBlock.closeKeyword?.startOffset, 23);
+    });
+  });
+
   suite('Branch coverage: bare begin filtered as firstindex inside indexing brackets', () => {
     test('should treat bare begin as firstindex in arr[begin x] without colon', () => {
       // allUnmatchedOpenersAreFilteredBegins: inside an indexing bracket, a bare `begin`
