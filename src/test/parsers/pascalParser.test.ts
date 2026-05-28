@@ -3981,5 +3981,95 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-29: asm after case-label colon is a block opener', () => {
+    test('should treat asm after numeric case-label colon as block opener', () => {
+      // `case x of 1: asm ... end` uses `asm` as a statement after a case-label
+      // delimiter `:`. The case-label is the integer literal `1`. Without the fix,
+      // the backward scan from `asm` lands on `:` and unconditionally rejects asm
+      // as expression context, leaving the inner `end` to mispair with `case` and
+      // the outer `end` orphaned.
+      const source = `case x of
+  1: asm
+       mov ax, 1
+     end;
+  2: foo;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const asmPair = pairs.find((p) => p.openKeyword.value === 'asm');
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(asmPair, 'asm block must be detected after numeric case-label colon');
+      assert.ok(casePair, 'case block must be detected; outer `end` must pair with `case`');
+      // The case block's `end` must be the trailing end (last `end` in source),
+      // not the inner asm-closing `end`.
+      assert.strictEqual(casePair?.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat asm after identifier case-label colon as block opener', () => {
+      // `case x of Red: asm ... end` uses an enum identifier as the case-label.
+      const source = `case x of
+  Red: asm
+         mov ax, 1
+       end;
+  Green: bar;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const asmPair = pairs.find((p) => p.openKeyword.value === 'asm');
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(asmPair, 'asm block must be detected after identifier case-label colon');
+      assert.ok(casePair, 'case block must be detected');
+    });
+
+    test('should treat asm after char-constant case-label colon as block opener', () => {
+      // `case x of 'a': asm ... end` uses a char constant as the case-label.
+      const source = `case x of
+  'a': asm
+         mov ax, 1
+       end;
+  'b': foo;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const asmPair = pairs.find((p) => p.openKeyword.value === 'asm');
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(asmPair, 'asm block must be detected after char-constant case-label colon');
+      assert.ok(casePair, 'case block must be detected');
+    });
+
+    test('should treat asm after range case-label colon as block opener', () => {
+      // `case x of 1..5: asm ... end` uses a range as the case-label.
+      const source = `case x of
+  1..5: asm
+          mov ax, 1
+        end;
+  6: foo;
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const asmPair = pairs.find((p) => p.openKeyword.value === 'asm');
+      const casePair = pairs.find((p) => p.openKeyword.value === 'case');
+      assert.ok(asmPair, 'asm block must be detected after range case-label colon');
+      assert.ok(casePair, 'case block must be detected');
+    });
+
+    test('should add asm excluded region for case-label asm block', () => {
+      // The `addAsmExcludedRegions` backward scan must also accept case-label colons,
+      // otherwise the asm body is not added as an excluded region and asm-body words
+      // (like `mov`, `case`) are tokenised as Pascal keywords.
+      const source = `case x of
+  1: asm
+       mov ax, 1
+     end;
+end`;
+      const regions = parser.getExcludedRegions(source);
+      // At minimum the asm body region between `asm` and the matching `end` must exist.
+      const asmKeywordPos = source.indexOf('asm');
+      const asmEndPos = source.indexOf('end', asmKeywordPos);
+      const asmRegion = regions.find((r) => r.start === asmKeywordPos + 3 && r.end === asmEndPos);
+      assert.ok(asmRegion, 'asm body must be added as an excluded region');
+    });
+  });
+
   generateCommonTests(config);
 });
