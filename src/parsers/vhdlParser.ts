@@ -1896,6 +1896,18 @@ export class VhdlBlockParser extends BaseBlockParser {
                 stack[stack.length - 1].intermediates.push(token);
               }
               // Otherwise drop (stray control-flow keyword for non-if/non-generate opener).
+            } else if (middleKw === 'begin') {
+              // Each block opener that has a declarative part transitions to its statement
+              // part with exactly one `begin` (LRM 11.3 process_statement; LRM 4.3 entity
+              // statement part; etc.). A duplicate `begin` written in the body is malformed
+              // code; without deduplication it appears as a spurious second intermediate
+              // (e.g. `[begin, begin]`), polluting the surrounding block's structure.
+              // Other intermediates like `when` legitimately repeat (case branches), so the
+              // dedup is gated on `begin` specifically.
+              const hasBegin = stack[stack.length - 1].intermediates.some((t) => t.value.toLowerCase() === 'begin');
+              if (!hasBegin) {
+                stack[stack.length - 1].intermediates.push(token);
+              }
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
