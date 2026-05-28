@@ -6767,5 +6767,44 @@ fi`;
     });
   });
 
+  suite('Regression: ASCII shell metacharacters <, >, | must not fuse with keyword', () => {
+    // The Unicode Symbol category (\p{S}) includes ASCII shell metacharacters
+    // like `<`, `>`, `|`, `\``, which DO terminate words in POSIX shell. They
+    // are not word-fusion characters. Limit the \p{S} fusion check to
+    // non-ASCII so emoji/currency/etc. still fuse, while `fi|cat`, `done<file`,
+    // `done<<EOF`, `if<file`, `fi||cmd` keep the keyword intact.
+    test('should pair if-fi when fi is followed by pipe without space', () => {
+      const pairs = parser.parse('if true; then echo; fi|cat');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should pair if-fi when fi is followed by || without space', () => {
+      const pairs = parser.parse('if true; then echo; fi||cmd');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should pair for-done when done is followed by < redirection without space', () => {
+      const pairs = parser.parse('for i in 1 2; do\n  echo $i\ndone<file');
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should pair for-done when done is followed by > redirection without space', () => {
+      const pairs = parser.parse('for i in 1 2; do\n  echo $i\ndone>file');
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should pair for-done when done is followed by heredoc operator without space', () => {
+      const pairs = parser.parse('for i in 1 2; do\n  echo $i\ndone<<EOF\nhi\nEOF');
+      assertSingleBlock(pairs, 'for', 'done');
+    });
+
+    test('should pair if-fi when if is followed by < redirection without space', () => {
+      // `if<file; then echo; fi` is `if (read from file); then echo; fi` in
+      // real bash. `<file` is a redirection operand of the `if` command.
+      const pairs = parser.parse('if<file; then echo; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+  });
+
   generateCommonTests(config);
 });
