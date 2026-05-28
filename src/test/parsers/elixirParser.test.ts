@@ -5365,5 +5365,58 @@ end`;
     });
   });
 
+  suite('Bug: middle keyword after word operator (and/or/not/in/when) should not attach as intermediate', () => {
+    // A middle keyword (else/rescue/catch/after) directly after a word operator is an
+    // operand in expression position, not a clause head: e.g. `x and else` places `else`
+    // as the RHS of `and`. Without this guard the keyword is wrongly attached as an
+    // intermediate of the enclosing if/try/receive opener. Symmetric with the existing
+    // symbolic-operator guard (EXPRESSION_OPERATOR_LEAD_CHARS), but applied to word ops.
+    test('should not attach else as intermediate when used as RHS of and (x and else)', () => {
+      const source = 'if true do\n  x and else\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach else as intermediate when used as RHS of or (x or else)', () => {
+      const source = 'if true do\n  x or else\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach rescue as intermediate when used as RHS of not (not rescue)', () => {
+      const source = 'try do\n  not rescue\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach catch as intermediate when used as RHS of in (x in catch)', () => {
+      const source = 'try do\n  x in catch\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach after as intermediate when used as RHS of when (x when after)', () => {
+      const source = 'receive do\n  x when after\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach else as intermediate when preceded by identifier ending in word-operator letters (whenor else)', () => {
+      // `whenor` is an identifier, not the word operator `when` or `or`. The following
+      // `else` must remain a valid clause head of `if`. This validates the word-boundary
+      // check in the new guard. Note: `whenor else` here is an identifier followed by a
+      // clause-head `else` on the same line, which is what we want to keep working.
+      const source = 'if true do\n  whenor\nelse\n  :no\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   generateCommonTests(config);
 });
