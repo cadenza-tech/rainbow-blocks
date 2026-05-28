@@ -5030,5 +5030,23 @@ end`;
     });
   });
 
+  suite('Regression: shift operator detection with Unicode identifier prefix', () => {
+    test('should treat << after Unicode identifier as shift operator, not heredoc', () => {
+      // Bug: matchHeredoc shift detection used ASCII-only regex /[a-zA-Z0-9_)\]}]/
+      // to find the preceding char. With `メソッド<<EOF`, the preceding char `ド` is a
+      // non-ASCII identifier char and was not recognized, so the heredoc path was taken.
+      // The heredoc body then searched for EOF terminator across the rest of source,
+      // swallowing the inner if/end and the outer end. Result: 0 pair.
+      // Expected: 2 pairs (def/end and if/end) since `メソッド<<EOF` is a shift.
+      const source = 'def m\n  メソッド<<EOF\n  if true\n    1\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
