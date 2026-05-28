@@ -5063,5 +5063,42 @@ end`;
     });
   });
 
+  suite('Regression: loop keyword with Unicode identifier prefix', () => {
+    test('should not detect while in αwhile as a loop keyword for following do', () => {
+      // Bug: isLoopDo's loopPattern uses /\b(while|until|for)\b/g which matches `while` in
+      // `αwhile` because ASCII \b does not consider Unicode identifier chars as word chars.
+      // The match position becomes index 1 (right after `α`), and there's no preceding-char
+      // identifier check. Then `do` is detected as the loop separator and rejected as
+      // block_open. Result: 0 pair (do is not a block opener, end is orphan).
+      // Expected: 1 pair (do/end), since `αwhile` is an identifier, not a loop keyword.
+      const source = 'αwhile do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not detect while in fooαwhile as loop keyword for following do', () => {
+      // Same bug, but with non-ASCII identifier char preceding `while` from inside a
+      // longer identifier (e.g. `fooαwhile`). loopPattern's ASCII \b would still match
+      // `while` at the index after `α`, missing the leading `foo` identifier prefix.
+      const source = 'fooαwhile do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not detect until in αuntil as a loop keyword', () => {
+      // Same as while case, applied to `until`.
+      const source = 'αuntil do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should not detect for in αfor as a loop keyword', () => {
+      // Same as while case, applied to `for`.
+      const source = 'αfor do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
