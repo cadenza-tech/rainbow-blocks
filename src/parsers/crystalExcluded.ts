@@ -661,6 +661,73 @@ function findLogicalLineStart(source: string, position: number, excludedRegions:
   return lineStart;
 }
 
+// Returns true when the line at lineStart..lineEnd (exclusive of the line ending)
+// ends with an operator/punctuation that triggers implicit line continuation in
+// Crystal. Trailing binary operators (`&&`, `||`, `,`, `+`, `-`, `*`, `/`, `%`,
+// `<`, `>`, `=`, `?`, `:`, `.`, `&`, `|`, `^`) and opening brackets (`(`, `[`,
+// `{`) cause the next physical line to be parsed as part of the same logical
+// statement. The check ignores trailing whitespace and skips over excluded
+// regions adjacent to the end of the line so that a trailing operator inside a
+// string or comment is not detected as a continuation marker. Single-char
+// operators that double as something else when paired (e.g. `=>`, `==`) are
+// still continuation indicators because the leading char alone disqualifies
+// the line from being a terminating statement.
+function endsWithImplicitContinuation(source: string, lineStart: number, lineEnd: number, excludedRegions: ExcludedRegion[]): boolean {
+  let i = lineEnd - 1;
+  // Skip trailing spaces/tabs
+  while (i >= lineStart && (source[i] === ' ' || source[i] === '\t')) {
+    i--;
+  }
+  if (i < lineStart) {
+    return false;
+  }
+  // Skip over an excluded region that ends at i (e.g. a trailing line comment).
+  // A line ending inside a comment does not provide an operator-based
+  // continuation; the line ends just before the comment.
+  if (isInExcludedRegion(i, excludedRegions)) {
+    const region = findRegionAt(i, excludedRegions);
+    if (region) {
+      i = region.start - 1;
+      while (i >= lineStart && (source[i] === ' ' || source[i] === '\t')) {
+        i--;
+      }
+      if (i < lineStart) {
+        return false;
+      }
+    }
+  }
+  const ch = source[i];
+  // Two-char continuation markers (`&&`, `||`). Single `&` or `|` is also a
+  // binary operator (bitwise-and / bitwise-or) so the two-char form is
+  // already covered by the single-char check below; this branch exists for
+  // clarity.
+  if ((ch === '&' || ch === '|') && i > lineStart && source[i - 1] === ch) {
+    return true;
+  }
+  // Single-char operators / opening brackets that trigger implicit continuation.
+  // Closing brackets (`)`, `]`, `}`) terminate an expression and do not continue.
+  return (
+    ch === ',' ||
+    ch === '(' ||
+    ch === '[' ||
+    ch === '{' ||
+    ch === '+' ||
+    ch === '-' ||
+    ch === '*' ||
+    ch === '/' ||
+    ch === '%' ||
+    ch === '<' ||
+    ch === '>' ||
+    ch === '=' ||
+    ch === '?' ||
+    ch === ':' ||
+    ch === '.' ||
+    ch === '&' ||
+    ch === '|' ||
+    ch === '^'
+  );
+}
+
 // Checks if a conditional is postfix (e.g., "return value if condition")
 export function isPostfixConditional(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   // Find logical line start (handles backslash continuations)
@@ -889,12 +956,20 @@ function isLoopDoAcrossPhysicalLines(source: string, position: number, excludedR
       cursor = prevLineStart;
       continue;
     }
-    // Found the previous non-blank physical line: check it starts with a loop keyword
-    const loopHeader = /^[ \t]*(while|until|for)\b/.exec(source.slice(prevLineStart, prevLineEnd));
-    if (!loopHeader) {
-      return false;
-    }
-    const loopKeywordPos = prevLineStart + loopHeader[0].length - loopHeader[1].length;
+    return checkLoopHeaderLine(source, prevLineStart, prevLineEnd, excludedRegions);
+  }
+  return false;
+}
+
+// Verifies the physical line at [lineStart, lineEnd) starts with a loop keyword
+// (`while`/`until`/`for`) that is not a method call or variable reference.
+// When the line ends with an implicit-continuation operator (e.g. `&&`, `||`,
+// `,`) the loop header may span multiple physical lines (`while x &&\n  y`);
+// in that case the scan walks back one more physical line and retries.
+function checkLoopHeaderLine(source: string, lineStart: number, lineEnd: number, excludedRegions: ExcludedRegion[]): boolean {
+  const loopHeader = /^[ \t]*(while|until|for)\b/.exec(source.slice(lineStart, lineEnd));
+  if (loopHeader) {
+    const loopKeywordPos = lineStart + loopHeader[0].length - loopHeader[1].length;
     if (isInExcludedRegion(loopKeywordPos, excludedRegions)) {
       return false;
     }
@@ -913,12 +988,71 @@ function isLoopDoAcrossPhysicalLines(source: string, position: number, excludedR
     }
     return true;
   }
-  return false;
+  // The current physical line does not start with a loop keyword. If the
+  // line *before* this one ends with an implicit-continuation operator, the
+  // current line is actually a continuation of that earlier line. Walk back
+  // to the prior physical line and retry, but only when the prior line ends
+  // with a continuation operator. Without this fallback, multi-line loop
+  // headers like `while x &&\n  y do` are missed.
+  if (lineStart === 0) {
+    return false;
+  }
+  let priorLineEnd = lineStart - 1;
+  if (source[priorLineEnd] === '\n' && priorLineEnd > 0 && source[priorLineEnd - 1] === '\r') {
+    priorLineEnd--;
+  }
+  const priorLineStart = findPhysicalLineStart(source, priorLineEnd);
+  if (priorLineStart === lineStart) {
+    return false;
+  }
+  if (!endsWithImplicitContinuation(source, priorLineStart, priorLineEnd, excludedRegions)) {
+    return false;
+  }
+  return checkLoopHeaderLine(source, priorLineStart, priorLineEnd, excludedRegions);
+}
+
+// Like findLogicalLineStart but additionally walks back across implicit
+// line continuations (lines that end with an operator triggering implicit
+// continuation in Crystal: `&&`, `||`, `,`, `+`, `-`, etc.). Used by
+// isLoopDo so the `do` separator on a continuation line of a multi-line
+// loop header (e.g. `while x &&\n  y do`) is correctly detected. Only the
+// loop-header recognition needs this extension; postfix conditional / rescue
+// / for-in detection deliberately keep the stricter physical-line semantics.
+function findLogicalLineStartWithImplicit(source: string, position: number, excludedRegions: ExcludedRegion[]): number {
+  let lineStart = findLogicalLineStart(source, position, excludedRegions);
+  // Loop back across implicit-continuation physical lines. Each iteration
+  // moves `lineStart` to the start of the previous physical line when that
+  // line ends with a continuation operator.
+  while (lineStart > 0) {
+    let priorLineEnd = lineStart - 1;
+    if (source[priorLineEnd] === '\n' && priorLineEnd > 0 && source[priorLineEnd - 1] === '\r') {
+      priorLineEnd--;
+    }
+    if (priorLineEnd < 0 || (source[priorLineEnd] !== '\n' && source[priorLineEnd] !== '\r')) {
+      // The character just before lineStart isn't a newline (e.g. start of
+      // source), so there is no prior physical line to merge.
+      if (source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+        break;
+      }
+    }
+    const priorLineStart = findPhysicalLineStart(source, priorLineEnd);
+    if (priorLineStart >= lineStart) {
+      break;
+    }
+    if (!endsWithImplicitContinuation(source, priorLineStart, priorLineEnd, excludedRegions)) {
+      break;
+    }
+    lineStart = priorLineStart;
+    // After moving back, allow further backslash continuations to be picked
+    // up by another call to findLogicalLineStart.
+    lineStart = findLogicalLineStart(source, lineStart, excludedRegions);
+  }
+  return lineStart;
 }
 
 // Checks if 'do' is a loop separator (while/until/for ... do), not a block opener
 export function isLoopDo(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-  const lineStart = findLogicalLineStart(source, position, excludedRegions);
+  const lineStart = findLogicalLineStartWithImplicit(source, position, excludedRegions);
 
   const rawBeforeDo = source.slice(lineStart, position);
   let lastValidSemicolon = -1;
