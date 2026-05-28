@@ -3804,6 +3804,50 @@ end if`;
     });
   });
 
+  suite('Bug AS3: excluded-region filtering must not be O(N^2) with many regions', () => {
+    // Previously several validation paths (isAtPhysicalLineStart, isAtLogicalLineStart,
+    // the compound block_open set/copy guard, and the helper isKeywordAsVariableName)
+    // walked the entire excludedRegions array via `excludedRegions.filter(...)` for every
+    // keyword they validated. With N blocks each carrying a comment (~2N excluded regions),
+    // each filter is O(N), and the work is repeated for each of the ~2N keywords, making
+    // tokenize O(N^2). 1000 if/end if pairs with trailing `-- comment` produced ~7 seconds
+    // of parse time. After replacing the linear filter with binary-search slicing into the
+    // sorted excludedRegions array, the same input completes in well under 500ms.
+    test('should parse 1000 if/end if pairs with trailing comments in linear time', () => {
+      const N = 1000;
+      const lines: string[] = [];
+      for (let i = 0; i < N; i++) {
+        lines.push(`if x then -- open ${i}`);
+      }
+      for (let i = 0; i < N; i++) {
+        lines.push(`end if -- close ${i}`);
+      }
+      const source = lines.join('\n');
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.strictEqual(pairs.length, N, `expected ${N} pairs, got ${pairs.length}`);
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression in excludedRegions.filter)`);
+    });
+
+    test('should parse 1000 tell/end tell pairs with trailing comments in linear time', () => {
+      const N = 1000;
+      const lines: string[] = [];
+      for (let i = 0; i < N; i++) {
+        lines.push(`tell app${i} -- open ${i}`);
+      }
+      for (let i = 0; i < N; i++) {
+        lines.push(`end tell -- close ${i}`);
+      }
+      const source = lines.join('\n');
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.strictEqual(pairs.length, N, `expected ${N} pairs, got ${pairs.length}`);
+      assert.ok(elapsed < 2000, `expected parse to complete in <2000ms, took ${elapsed}ms (likely O(N^2) regression in excludedRegions.filter)`);
+    });
+  });
+
   suite('Regression: tell/if/repeat must not open a block as right operand of and/or/not/when', () => {
     // AppleScript Boolean operators (`and`, `or`, `not`) and the `when` modifier take
     // an expression as their right operand. A bare `tell`/`if`/`repeat` following one
