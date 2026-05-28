@@ -62,13 +62,6 @@ const COMPOUND_END_PATTERN = new RegExp(
 // Keywords that can be followed by 'generate'
 const GENERATE_PREFIX_KEYWORDS = ['for', 'while', 'if', 'case'];
 
-// Block openers that introduce a declaration body (not a control-flow / statement body).
-// Control-flow intermediates (`else`/`elsif`/`then`) belong to `if` / `when else` constructs
-// inside an EXPRESSION; they must not be absorbed as an intermediate of a declaration block
-// like `record` or `units` when the body's contents include a conditional expression in a
-// field default (e.g., `x : integer when y => 1 else 0;` inside a `record`).
-const DECLARATION_BLOCK_OPENERS: ReadonlySet<string> = new Set(['record', 'units']);
-
 // Block-opener keywords whose immediate identifier-like token can legally be the prefix
 // of an attribute reference (LRM §16.3). These keywords name a declarative item
 // (entity/architecture/package/etc.) whose attribute can be referenced as
@@ -1870,20 +1863,31 @@ export class VhdlBlockParser extends BaseBlockParser {
               } else if (topOpener === 'generate' && stack.length >= 2 && stack[stack.length - 2].token.value.toLowerCase() === 'case') {
                 stack[stack.length - 2].intermediates.push(token);
               }
-            } else if ((middleKw === 'else' || middleKw === 'elsif' || middleKw === 'then') && DECLARATION_BLOCK_OPENERS.has(topOpener)) {
-              // Control-flow intermediates (`else`/`elsif`/`then`) belong to `if` / `when /
-              // else` constructs. They never apply to declaration blocks such as `record` or
-              // `units`. A conditional expression inside a field default (e.g.,
-              // `x : integer when y => 1 else 0;` inside a `record`) would otherwise be
-              // absorbed as the record's intermediate. Drop the token instead.
-            } else if ((middleKw === 'else' || middleKw === 'elsif') && topOpener === 'if' && !this.hasSeenThen(stack[stack.length - 1])) {
-              // Inside an `if` block's condition before `then`: a `when ... else ...`
-              // conditional expression (VHDL-2008 LRM 9.2.6) contains `else` tokens that
-              // belong to the inner conditional expression, NOT to the surrounding `if`.
-              // Without dropping them, the if-block's intermediates would absorb a stray
-              // `else`/`elsif` (e.g. `[else, then]` instead of `[then]`), polluting the
-              // structure visible to consumers. The `then` token itself is always retained
-              // (it marks the actual transition into the if-body).
+            } else if (middleKw === 'else' || middleKw === 'elsif' || middleKw === 'then') {
+              // `else`/`elsif`/`then` are control-flow intermediates that legitimately apply
+              // ONLY to `if ... then ... end if` (top = `if`) and `if ... generate ...
+              // [elsif ... generate ...] [else generate ...] end generate` (top = `generate`,
+              // with an `if`/`generate` chain underneath). For any other top opener
+              // (architecture/process/block/record/units/case/loop/etc.), the keyword is from
+              // malformed or in-progress code (e.g., a stray `else x;` written as a statement
+              // in an architecture body); absorbing it would pollute the surrounding block's
+              // intermediates and visibly break structure. Drop it instead.
+              if (topOpener === 'if') {
+                // Inside an `if` block's condition before `then`: a `when ... else ...`
+                // conditional expression (VHDL-2008 LRM 9.2.6) contains `else` tokens that
+                // belong to the inner conditional expression, NOT to the surrounding `if`.
+                // Drop those; retain `then` (which marks the actual transition into the body).
+                if ((middleKw === 'else' || middleKw === 'elsif') && !this.hasSeenThen(stack[stack.length - 1])) {
+                  // Drop
+                } else {
+                  stack[stack.length - 1].intermediates.push(token);
+                }
+              } else if (topOpener === 'generate') {
+                // Generate chain: attach to top generate's intermediates (existing behavior
+                // for `if X generate ... elsif Y generate ... else generate ... end generate`).
+                stack[stack.length - 1].intermediates.push(token);
+              }
+              // Otherwise drop (stray control-flow keyword for non-if/non-generate opener).
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
