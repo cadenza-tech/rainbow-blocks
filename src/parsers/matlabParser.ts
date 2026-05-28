@@ -744,7 +744,61 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isKeywordUsedAsFunctionCall(source, position, keyword)) {
       return false;
     }
+    // Reject `function` used as the function NAME in another `function` header.
+    // `function function()` has a reserved word in the name position; MATLAB rejects
+    // it at parse time. When the leading identifier of the logical line is `function`
+    // and this keyword is a LATER `function` on the same line, the later occurrence
+    // is the identifier (name) — not a real block opener. Without this, the inner
+    // header consumes two `end`s in a row, leaving the outer function orphan.
+    if (keyword === 'function' && this.isFunctionUsedAsIdentifierOnSameLine(source, position, excludedRegions)) {
+      return false;
+    }
     return true;
+  }
+
+  // Returns true when `function` at `position` sits AFTER a leading `function` keyword
+  // on the same logical line (after horizontal whitespace and `...`/`\` line continuations
+  // at line start). Such forms (`function function()`, `function [a] = function(x)`) use
+  // the reserved word `function` as the function name — invalid MATLAB but recoverable
+  // by rejecting the LATER `function` as the block opener and keeping outer pairing.
+  private isFunctionUsedAsIdentifierOnSameLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (this.statementStartAtPos === null) {
+      return false;
+    }
+    const clamped = position < 0 ? 0 : position >= this.statementStartAtPos.length ? this.statementStartAtPos.length - 1 : position;
+    const lineStart = this.statementStartAtPos[clamped];
+    // Scan forward from lineStart through leading whitespace and `...`/`\` continuation
+    // regions to reach the first significant identifier on the logical line.
+    let i = lineStart;
+    while (i < position) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region && (source[region.start] === '.' || source[region.start] === '\\') && region.end > region.start + 1) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\v' || ch === '\f') {
+        i++;
+        continue;
+      }
+      break;
+    }
+    if (i >= position) {
+      return false;
+    }
+    // The leading run must be an identifier; otherwise the line does not start with `function`.
+    if (!/[a-zA-Z_]/.test(source[i])) {
+      return false;
+    }
+    const identStart = i;
+    while (i < position && /[a-zA-Z0-9_]/.test(source[i])) {
+      i++;
+    }
+    const leading = source.slice(identStart, i);
+    // Only reject when the leading identifier is `function` AND the current position
+    // is strictly AFTER that identifier. The first `function` on the line keeps lineStart
+    // equal to its own offset, so identStart === position and we correctly accept it.
+    return leading === 'function' && identStart < position;
   }
 
   // Returns true when a block-opener keyword is being used as a standalone identifier on
