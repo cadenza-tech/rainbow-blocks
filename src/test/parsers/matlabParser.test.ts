@@ -3790,5 +3790,24 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-29: pendingSkipDepths must check remainingCloses before consuming end', () => {
+    test('should pair classdef-methods-function with all three ends when nested methods is dropped', () => {
+      // Lines: 0=classdef, 1=methods (real), 2=methods (nested, dropped), 3=function,
+      // 4=function-end, 5=nested-methods-end (extra/stray), 6=classdef-end.
+      // Without the remainingCloses guard, the nested `methods` at line 2 pushes
+      // pendingSkipDepth and the function-end on line 4 is consumed by the skip,
+      // leaving classdef orphan (only 2 pairs instead of 3).
+      const source = 'classdef A\nmethods\n  methods\n    function f()\n    end\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      const classdef = findBlock(pairs, 'classdef');
+      const methods = findBlock(pairs, 'methods');
+      const func = findBlock(pairs, 'function');
+      assert.strictEqual(func.closeKeyword.line, 4, 'function must pair with end on line 4');
+      assert.strictEqual(methods.closeKeyword.line, 5, 'methods must pair with end on line 5');
+      assert.strictEqual(classdef.closeKeyword.line, 6, 'classdef must pair with end on line 6');
+    });
+  });
+
   generateCommonTests(config);
 });
