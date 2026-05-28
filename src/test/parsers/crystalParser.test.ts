@@ -1427,6 +1427,39 @@ end`;
       const doPair = findBlock(pairs, 'do');
       assert.strictEqual(doPair.closeKeyword.value, 'end');
     });
+
+    test('should treat do as loop separator when while condition has implicit continuation by && across lines', () => {
+      // `while x &&` is an implicit-continuation line in Crystal (a trailing
+      // binary operator `&&` joins the next physical line into the same
+      // logical statement). The `do` on the next physical line is therefore
+      // the optional loop separator, not a method-block opener. Without
+      // this fix, the parser pairs `do/end` as a separate block, breaking
+      // the surrounding while/end.
+      const pairs = parser.parse('while x &&\n  y do\n  z = 1\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should treat do as loop separator when until condition has implicit continuation by || across lines', () => {
+      const pairs = parser.parse('until x ||\n  y do\n  z = 1\nend');
+      assertSingleBlock(pairs, 'until', 'end');
+    });
+
+    test('should treat do as loop separator when for-in has implicit continuation by trailing comma', () => {
+      // `(a,` trailing comma is an implicit continuation in Crystal; the `do`
+      // on the next physical line is still the loop separator of the outer
+      // `for in` loop.
+      const pairs = parser.parse('for x in [1,\n  2] do\n  body\nend');
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should treat do as loop separator when do is on its own line after multi-line loop header', () => {
+      // Loop header spans three physical lines via `&&`, then `do` sits on its
+      // own physical line. The implicit continuation must be carried through
+      // the intermediate `y` line so the `do` is still recognized as the
+      // loop separator.
+      const pairs = parser.parse('while x &&\n  y\ndo\n  z = 1\nend');
+      assertSingleBlock(pairs, 'while', 'end');
+    });
   });
 
   suite('Rescue modifier', () => {
