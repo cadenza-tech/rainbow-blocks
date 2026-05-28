@@ -3453,5 +3453,42 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: REPLACE context must reset at statement-boundary verb', () => {
+    // Bug: getPseudoTextStarts's `inReplaceContext` flag was set when REPLACE was
+    // seen, but it was only reset on `.` (period). If a period was missing after
+    // the REPLACE ==a== BY ==b== group and the next statement was a block verb
+    // (IF, PERFORM, MOVE, ...), inReplaceContext leaked into the next statement
+    // and later `==` pairs were wrongly classified as pseudo-text, swallowing
+    // real code.
+    test('should reset REPLACE context at statement-boundary verb when period is missing', () => {
+      // No period after the REPLACE pair. The IF X / END-IF / IF Y / END-IF
+      // following it are valid code: both IF blocks should be paired.
+      // Without the fix, inReplaceContext remains true past END-IF, so the
+      // subsequent `==IF Y\nEND-IF==` is classified as a pseudo-text region
+      // and the inner IF Y/END-IF disappears.
+      const source = 'REPLACE ==a== BY ==b==\nIF X\nEND-IF\n==IF Y\nEND-IF==';
+      const pairs = parser.parse(source);
+      // After the fix, the IF Y/END-IF inside the trailing == should still be
+      // visible as a real block pair because the `==` is no longer pseudo-text.
+      assertBlockCount(pairs, 2);
+      const ifBlocks = pairs.filter((p) => p.openKeyword.value.toUpperCase() === 'IF');
+      assert.strictEqual(ifBlocks.length, 2);
+      for (const ifBlock of ifBlocks) {
+        assert.strictEqual(ifBlock.closeKeyword?.value, 'END-IF');
+      }
+    });
+
+    test('should still classify == as pseudo-text within the same REPLACE statement (no boundary verb)', () => {
+      // Guard: the original use-case of REPLACE ==a== BY ==b==.\n... must still
+      // treat the `==` as pseudo-text. With a period after, the flag is reset
+      // correctly, and the subsequent IF/END-IF (which has no enclosing `==`) is
+      // a normal code block.
+      const source = 'REPLACE ==a== BY ==b==.\nIF X\nEND-IF';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
+    });
+  });
+
   generateCommonTests(config);
 });
