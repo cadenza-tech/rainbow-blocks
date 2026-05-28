@@ -823,23 +823,34 @@ export class BashBlockParser extends BaseBlockParser {
         // `{ (echo)}`), not a `var=(...)` array literal (`{ x=(1)}` is invalid bash).
         const closeParenIsSeparator = source[j] === ')' && !this.isArrayLiteralCloseParen(j);
         if (j >= 0 && source[j] !== ';' && source[j] !== '\n' && source[j] !== '\r' && source[j] !== '&' && !closeParenIsSeparator) {
-          // Check if preceded by block close keywords (fi, done, esac)
-          const blockCloseKeywords = ['fi', 'done', 'esac', '}'];
+          // Block close keywords (fi, done, esac, }) only count as a separator
+          // when at least one whitespace/tab sits between them and the `}`.
+          // Without a separator the keyword fuses into the preceding word
+          // (e.g. `fi}` is a single POSIX word, not the `fi` keyword followed by
+          // a structural `}`), so isFollowedByHyphen above has already rejected
+          // the keyword and the `}` must stay orphan too for consistency. The
+          // `i - 1 > j` check is true exactly when the whitespace-skip loop
+          // moved `j` (i.e. at least one space/tab existed between predecessor
+          // and `}`); mirrors the `isAfterDoubleBracketWithSep` rule below.
+          const hasWhitespaceBefore = i - 1 > j;
           let isAfterBlockClose = false;
-          for (const kw of blockCloseKeywords) {
-            const start = j - kw.length + 1;
-            if (start >= 0 && source.slice(start, j + 1) === kw) {
-              // Verify word boundary before keyword and that the keyword is NOT inside an excluded region
-              if ((start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) && !this.isInExcludedRegion(start, excludedRegions)) {
-                isAfterBlockClose = true;
-                break;
+          if (hasWhitespaceBefore) {
+            const blockCloseKeywords = ['fi', 'done', 'esac', '}'];
+            for (const kw of blockCloseKeywords) {
+              const start = j - kw.length + 1;
+              if (start >= 0 && source.slice(start, j + 1) === kw) {
+                // Verify word boundary before keyword and that the keyword is NOT inside an excluded region
+                if ((start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) && !this.isInExcludedRegion(start, excludedRegions)) {
+                  isAfterBlockClose = true;
+                  break;
+                }
               }
             }
           }
           // Allow `}` after a closing `]]` ONLY when a separator (space/tab) sits between them,
           // e.g. `{ [[ $x -gt 0 ]] }`. A stray bracket without a separator (`foo]}`, `]]}`,
           // `foo[0]}`) is not a command group close and must keep `{` orphan.
-          const isAfterDoubleBracketWithSep = source[j] === ']' && source[j - 1] === ']' && i - 1 > j;
+          const isAfterDoubleBracketWithSep = source[j] === ']' && source[j - 1] === ']' && hasWhitespaceBefore;
           if (!isAfterBlockClose && !isAfterDoubleBracketWithSep) {
             continue;
           }
