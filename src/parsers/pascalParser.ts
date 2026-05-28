@@ -369,8 +369,17 @@ export class PascalBlockParser extends BaseBlockParser {
       }
     }
 
-    // Must be '=' but not ':=' (assignment operator)
-    if (!(i >= 0 && source[i] === '=' && (i === 0 || ![':', '>', '<', '+', '-', '*', '/'].includes(source[i - 1])))) {
+    // Must be '=' but not a compound operator like ':=', '<=', '+=', '-=', '*=', '/='.
+    // '>' immediately preceding '=' is normally a '>=' comparison operator and disqualifies
+    // the '=' as a type-definition marker, but when the '>' is a generic close bracket
+    // (i.e. it has a matching '<' on the same statement) the '=' is still a type
+    // definition. Example: `TList<T>=class ... end` has no whitespace between the generic
+    // close and the type-definition `=`. Distinguish these two by searching backward for a
+    // matching '<'.
+    if (!(i >= 0 && source[i] === '=' && (i === 0 || ![':', '<', '+', '-', '*', '/'].includes(source[i - 1])))) {
+      return false;
+    }
+    if (i > 0 && source[i - 1] === '>' && !this.hasMatchingGenericOpen(source, i - 1, excludedRegions)) {
       return false;
     }
 
@@ -756,6 +765,56 @@ export class PascalBlockParser extends BaseBlockParser {
           return this.hasMatchingGenericClose(source, i, position, excludedRegions);
         }
         depth--;
+      }
+      i--;
+    }
+    return false;
+  }
+
+  // Backward-validates a candidate generic closing '>' at closePos: scans backward
+  // balancing nested '< >' and returns true when a matching '<' is found before any
+  // statement boundary. Skips '<=' / '>=' comparison operators and excluded regions.
+  // Stops at ';' (statement boundary) so an unrelated earlier '<' in a previous
+  // statement is not mistaken for the generic open.
+  //
+  // Used to disambiguate `TList<T>=class` (where the '>' immediately preceding '=' is a
+  // generic close) from `if x >= class then` (where the '>' has no matching '<' and is
+  // therefore a comparison operator). Without this check, the `>` prefix on `=` was
+  // rejected unconditionally and `class` after `>=` was never detected as a block
+  // opener, even when '>' was a legitimate generic close.
+  private hasMatchingGenericOpen(source: string, closePos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 1;
+    let i = closePos - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ';') {
+        // Statement boundary: an earlier '<' belongs to a different statement.
+        return false;
+      }
+      if (ch === '>') {
+        // Skip '>=' comparison; treat '>>' as two independent generic closes.
+        if (i > 0 && source[i - 1] === '=') {
+          i -= 2;
+          continue;
+        }
+        depth++;
+      } else if (ch === '<') {
+        // Skip '<=' comparison; treat '<<' as two independent generic opens.
+        if (i + 1 < source.length && source[i + 1] === '=') {
+          i--;
+          continue;
+        }
+        depth--;
+        if (depth === 0) {
+          return true;
+        }
       }
       i--;
     }
