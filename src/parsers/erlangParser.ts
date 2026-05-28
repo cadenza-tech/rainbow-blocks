@@ -708,12 +708,27 @@ export class ErlangBlockParser extends BaseBlockParser {
         i++;
         continue;
       }
-      if (/[a-z]/i.test(ch) && (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1]))) {
+      // Per the Erlang Reference Manual, atom syntax is [a-z][a-zA-Z0-9_@]* and variable
+      // syntax is [A-Z_][a-zA-Z0-9_@]*, so '@' is an identifier continuation character.
+      // Tokens like `begin@host` or `node@end` are single atoms, not the keyword `begin`/`end`.
+      // The word boundary check (preceding char) and the word-extending loop (continuation)
+      // both include '@' to match the existing token filter (line ~584-589).
+      if (/[a-z]/i.test(ch) && (i === 0 || !/[a-zA-Z0-9_@]/.test(source[i - 1]))) {
         let wordEnd = i;
         while (wordEnd < source.length && /[a-zA-Z0-9_]/.test(source[wordEnd])) {
           wordEnd++;
         }
         const word = source.slice(i, wordEnd);
+        // If the word is followed by '@', it is an identifier with a '@'-suffix continuation
+        // (e.g. `begin@host`) and is not a keyword. Skip past the entire identifier.
+        if (wordEnd < source.length && source[wordEnd] === '@') {
+          let idEnd = wordEnd + 1;
+          while (idEnd < source.length && /[a-zA-Z0-9_@]/.test(source[idEnd])) {
+            idEnd++;
+          }
+          i = idEnd;
+          continue;
+        }
         if (nestedBraceDepth === 0) {
           if (BLOCK_OPENER_KEYWORDS.has(word) && !this.isMapKeyKeyword(source, wordEnd)) {
             // `fun` may be a fun-reference (fun Mod:Func/N, fun Func/N, fun 'q'/N) which is
@@ -778,13 +793,29 @@ export class ErlangBlockParser extends BaseBlockParser {
         }
         continue;
       }
-      // Block opener keyword reached at depth 0: keyword is a top-level intermediate
+      // Block opener keyword reached at depth 0: keyword is a top-level intermediate.
+      // Per the Erlang Reference Manual, atom syntax is [a-z][a-zA-Z0-9_@]* and variable
+      // syntax is [A-Z_][a-zA-Z0-9_@]*, so '@' is an identifier continuation character.
+      // Skip identifiers that have '@'-suffix continuation (e.g. `begin@host`) so they are
+      // not misread as the keyword `begin`/`end`. This matches the token filter (line ~584).
       if (depth === 0 && /[a-z]/i.test(ch)) {
         let wordStart = i;
         while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
           wordStart--;
         }
+        // If preceded by '@', the word is part of a longer '@'-containing identifier
+        // (e.g. `node@host` where 'host' would be backward-matched); not a keyword.
+        if (wordStart > 0 && source[wordStart - 1] === '@') {
+          i = wordStart;
+          continue;
+        }
         const word = source.slice(wordStart, i + 1);
+        // If followed by '@', the word continues as an '@'-suffix identifier
+        // (e.g. `begin@host`); not a keyword.
+        if (i + 1 < source.length && source[i + 1] === '@') {
+          i = wordStart;
+          continue;
+        }
         if (BLOCK_OPENER_KEYWORDS.has(word)) {
           return false;
         }
