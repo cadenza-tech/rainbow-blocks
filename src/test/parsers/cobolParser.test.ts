@@ -3381,5 +3381,49 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: PERFORM <reserved-word>. paragraph call', () => {
+    // Bug: `PERFORM IF.\nEND-IF` was treated as a structured PERFORM block where
+    // IF became a block opener (PERFORM with inline IF statement), so the IF
+    // wrongly paired with the trailing END-IF and produced one block pair.
+    // A paragraph-call PERFORM (PERFORM <name>.) ends at the period: the
+    // reserved-word "paragraph name" must not be tokenised as a block opener,
+    // and the following END-IF should stay orphan.
+    test('should not tokenise reserved-word paragraph name as block opener in PERFORM IF.', () => {
+      const source = 'PERFORM IF.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not tokenise reserved-word paragraph name as block opener in PERFORM EVALUATE.', () => {
+      const source = 'PERFORM EVALUATE.\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not tokenise reserved-word paragraph name as block opener in PERFORM PERFORM.', () => {
+      const source = 'PERFORM PERFORM.\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not tokenise reserved-word paragraph name as block opener in PERFORM READ.', () => {
+      const source = 'PERFORM READ.\nEND-READ';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still accept block PERFORM with inline IF statement followed by END-IF and END-PERFORM', () => {
+      // Guard: PERFORM IF X\n...END-IF\nEND-PERFORM is a structured PERFORM with
+      // an inline IF statement — this must keep pairing both IF/END-IF and
+      // PERFORM/END-PERFORM. The reserved-word check must only fire when the
+      // next non-blank token is `.` (paragraph-call form).
+      const source = 'PERFORM IF X\n  DISPLAY "Hi"\nEND-IF\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
+      assert.strictEqual(findBlock(pairs, 'PERFORM').closeKeyword?.value, 'END-PERFORM');
+    });
+  });
+
   generateCommonTests(config);
 });
