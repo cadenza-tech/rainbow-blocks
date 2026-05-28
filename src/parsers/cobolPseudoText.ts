@@ -358,6 +358,25 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
         inReplaceContext = true;
       } else if (word === 'REPLACING' && sawCopy) {
         inReplaceContext = true;
+      } else if (
+        inReplaceContext &&
+        word !== 'BY' &&
+        word !== 'ALSO' &&
+        (COPY_TERMINATING_VERBS.has(word) ||
+          COPY_TERMINATING_NONBLOCK_VERBS.has(word) ||
+          COPY_TERMINATING_CLOSE_VERBS.has(word) ||
+          COPY_TERMINATING_MIDDLE_VERBS.has(word))
+      ) {
+        // A statement-boundary verb (block-open, non-block, close, middle) appearing
+        // inside a REPLACE context with no terminating period is best-effort handled
+        // as the start of a new statement: the period-less REPLACE has run off and
+        // the verb begins the next statement. Without this reset, inReplaceContext
+        // leaks indefinitely and later `==` pairs (which are real code edges) are
+        // wrongly classified as pseudo-text, swallowing the inner block keywords.
+        // BY/ALSO are continuations of REPLACE and must NOT trigger the reset.
+        // Mirrors the same statement-boundary handling that sawCopy uses to drop
+        // a period-less COPY at the first statement verb.
+        inReplaceContext = false;
       } else if (sawCopy) {
         // Words inside an in-progress COPY statement. word 0 is the copybook
         // name; `OF`/`IN <lib>` may qualify it. Any statement verb past the
