@@ -4654,5 +4654,73 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-29: reserved-word type marks in type indication contexts', () => {
+    // VHDL reserved words like `view`, `units`, `block`, `protected`, `context` cannot legally
+    // be type names, but editor-in-progress code may place them in type-indication contexts
+    // beyond the signal/variable/constant/file declarations covered by
+    // isPrecededByTypeIndicationColon. The four remaining contexts are:
+    //   1. record field declaration:  `fld : <reserved>;` (inside `record ... end record`)
+    //   2. subtype declaration:       `subtype x is <reserved>;`
+    //   3. alias declaration:         `alias x is <reserved>;`
+    //   4. array element type:        `type t is array (...) of <reserved>;`
+    // Without rejecting the reserved word as a block opener, it absorbs the surrounding
+    // architecture's `begin` into its (orphan) intermediates and silently breaks pairing.
+    test('should not treat view as block opener in record field declaration', () => {
+      const source = 'architecture a of e is\n  type t is record\n    fld : view;\n  end record;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate, not have it absorbed by stray view opener');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in record field declaration should not pair as a block opener');
+    });
+
+    test('should not treat view as block opener in subtype declaration', () => {
+      const source = 'architecture a of e is\n  subtype x is view;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in subtype declaration should not pair as a block opener');
+    });
+
+    test('should not treat view as block opener in alias declaration', () => {
+      const source = 'architecture a of e is\n  alias x is view;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in alias declaration should not pair as a block opener');
+    });
+
+    test('should not treat view as block opener in array element type', () => {
+      const source = 'architecture a of e is\n  type ports is array (0 to 3) of view bus_view;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view in array element type should not pair as a block opener');
+    });
+
+    test('should not treat units as block opener in record field declaration', () => {
+      const source = 'architecture a of e is\n  type t is record\n    fld : units;\n  end record;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+    });
+
+    test('should not treat block as block opener in subtype declaration', () => {
+      const source = 'architecture a of e is\n  subtype x is block;\nbegin\nend architecture;';
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      const beginIntermediate = archBlock.intermediates.find((t) => t.value.toLowerCase() === 'begin');
+      assert.ok(beginIntermediate, 'architecture should retain its begin intermediate');
+    });
+  });
+
   generateCommonTests(config);
 });
