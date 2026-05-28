@@ -664,6 +664,21 @@ export class ElixirBlockParser extends BaseBlockParser {
           if (before === '=' || before === '"' || before === "'" || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) {
             return false;
           }
+          // Word-based operator RHS: middle keyword directly after `and`/`or`/`not`/`in`/
+          // `when` (e.g., `x and else`, `not rescue`). The previous non-space char must
+          // close a word that is one of these operators, and that word must be a standalone
+          // identifier (word boundary before it) so identifiers ending in operator letters
+          // like `whenor` are not misclassified.
+          if (/[a-z]/.test(before)) {
+            let wordStart = q;
+            while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+              wordStart--;
+            }
+            const word = source.slice(wordStart, q + 1);
+            if (RHS_EXPECTING_WORD_OPERATORS.has(word)) {
+              return false;
+            }
+          }
         }
       }
       return true;
