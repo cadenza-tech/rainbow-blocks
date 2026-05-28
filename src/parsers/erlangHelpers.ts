@@ -201,7 +201,32 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
     // Hit a structural boundary at top level without finding -> it's an expression prefix.
     // Only '.' is treated as a definitive boundary; ';' can appear as guard separator before
     // the top-level '->' (e.g. catch X when g1; g2 -> body), so we must keep scanning past ';'.
-    if (depth === 0 && bracketDepth === 0 && ch === '.') return false;
+    // Float decimal points (e.g. 1.5), range operators (..), and record field accesses
+    // (Rec#r.field) all contain '.' but are NOT declaration terminators. Mirror the same
+    // exemptions that findDeclarationEndingPeriod uses, plus a record-field exemption for
+    // expression context (record field access does not appear in -spec declarations).
+    if (depth === 0 && bracketDepth === 0 && ch === '.') {
+      const prev = k > 0 ? source[k - 1] : '';
+      const next = k + 1 < source.length ? source[k + 1] : '';
+      // Float decimal point: digit on both sides
+      if (/[0-9]/.test(prev) && /[0-9]/.test(next)) {
+        k++;
+        continue;
+      }
+      // Range operator: . preceded or followed by another .
+      if (prev === '.' || next === '.') {
+        k++;
+        continue;
+      }
+      // Record field access: . between identifier characters (e.g. Rec#state.field).
+      // A real declaration terminator is followed by whitespace/EOL/EOF/EOL, not by an
+      // identifier-leading character.
+      if (/[a-zA-Z0-9_]/.test(prev) && /[a-zA-Z_]/.test(next)) {
+        k++;
+        continue;
+      }
+      return false;
+    }
     // Check for structural keywords
     if (/[a-z]/i.test(ch)) {
       let wEnd = k + 1;
