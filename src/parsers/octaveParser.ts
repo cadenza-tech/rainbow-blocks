@@ -331,6 +331,35 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (j < source.length && source[j] === "'") {
         return false;
       }
+      // Reject `do <unexpected-char>` on the SAME physical line — `?`, `!`, `@`, `+`, `-`,
+      // `~`, or an identifier (letter or `_`) directly after `do` (skipping only horizontal
+      // whitespace, NOT line continuations) indicates `do` is being used as a variable, an
+      // expression typo, or a command-syntax form — never a do/until opener. Treating it as
+      // block_open leaves an orphan that consumes the enclosing block's `end`, destroying
+      // outer pairing. We must check BEFORE consuming any continuation because legitimate
+      // do/until forms keep the body on a separate physical line via `...`/`\` continuation
+      // (where the probe stops at `.` of `...` or `\`, neither matching the rejection set).
+      //
+      // Accepted same-line forms (already handled above): comment, `...`/`\` continuation
+      // (which moves on to next physical line), EOF.
+      {
+        let probe = position + keyword.length;
+        while (probe < source.length && isHorizontalWhitespace(source[probe])) probe++;
+        if (probe < source.length) {
+          const ch = source[probe];
+          if (ch === '?' || ch === '!' || ch === '@' || ch === '+' || ch === '-' || ch === '~') {
+            return false;
+          }
+          // Identifier following `do` on the same physical line (`do x;`, `do foo`, etc.).
+          // Includes ASCII letters/_ and Unicode letters for symmetry with the rest of the
+          // parser. Do NOT skip across line continuations here — `do ...<NL>body` is a
+          // legitimate continuation-based do/until form (probe stops at `.` of `...` which
+          // is not an identifier char, so this branch is not entered).
+          if (/[a-zA-Z_]/.test(ch) || /\p{L}/u.test(ch)) {
+            return false;
+          }
+        }
+      }
       // Reject `do` used as a command-syntax argument (`disp do` → `disp('do')`).
       // The pattern is `<identifier> <whitespace> do` at statement start where the
       // identifier is not a recognized keyword. Treating such `do` as a block open
