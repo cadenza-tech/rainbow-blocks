@@ -5,6 +5,7 @@ import { BaseBlockParser } from './baseParser';
 import { matchHeredoc, matchMultiLineComment } from './rubyExcluded';
 import type { HeredocState, InterpolationHandlers } from './rubyFamilyHelpers';
 import {
+  endsWithIdentifierChar,
   isRegexStart,
   matchBacktickString,
   matchInterpolatedString,
@@ -123,29 +124,6 @@ const RHS_EXPECTING_KEYWORD_OPERATORS: ReadonlySet<string> = new Set([
 function isRubyInterpolatingPercent(_specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
   return !/[qwis]/.test(_specifier);
-}
-
-// Unicode identifier-continuation character class: Letter (L), Mark (M), Number (N),
-// and Connector Punctuation (Pc). Ruby permits non-ASCII characters in identifiers.
-const UNICODE_IDENT_CONTINUE_PATTERN = /[\p{L}\p{M}\p{N}\p{Pc}]/u;
-
-// Checks whether the character ending at index `pos` (inclusive) is an identifier
-// character: an ASCII identifier char ([a-zA-Z0-9_]) or a Unicode identifier-continuation
-// character (handling surrogate pairs for codepoints outside the BMP). Used to decide
-// whether a 'def' substring is a standalone keyword or part of a larger identifier.
-function endsWithIdentifierChar(source: string, pos: number): boolean {
-  if (pos < 0) return false;
-  const ch = source[pos];
-  if (/[a-zA-Z0-9_]/.test(ch)) return true;
-  if (/\w/.test(ch)) return false;
-  // Low surrogate: combine with preceding high surrogate to test the full codepoint
-  if (pos >= 1 && ch >= '\uDC00' && ch <= '\uDFFF') {
-    const cp = source.codePointAt(pos - 1);
-    if (cp !== undefined && cp > 0xffff) {
-      return UNICODE_IDENT_CONTINUE_PATTERN.test(String.fromCodePoint(cp));
-    }
-  }
-  return UNICODE_IDENT_CONTINUE_PATTERN.test(ch);
 }
 
 export class RubyBlockParser extends BaseBlockParser {

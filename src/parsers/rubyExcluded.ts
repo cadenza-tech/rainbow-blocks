@@ -2,6 +2,7 @@
 
 import type { ExcludedRegion } from '../types';
 import { findLineCommentAndStringRegions, isInsideRegion } from './parserUtils';
+import { endsWithIdentifierChar } from './rubyFamilyHelpers';
 
 // Ruby reserved words that cannot be heredoc terminators.
 // Uppercase identifiers (BEGIN, END, __ENCODING__, __LINE__, __FILE__) are
@@ -89,7 +90,11 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
       i--;
       skippedSpace = true;
     }
-    if (i >= 0 && /[a-zA-Z0-9_)\]}]/.test(source[i])) {
+    // The preceding char is an identifier-like char if it is a closing bracket
+    // (`)`, `]`, `}`) or an identifier-continuation char (ASCII or Unicode). Ruby
+    // permits non-ASCII identifiers (e.g. `メソッド<<EOF` is a shift), so use the
+    // Unicode-aware helper instead of an ASCII-only regex.
+    if (i >= 0 && (/[)\]}]/.test(source[i]) || endsWithIdentifierChar(source, i))) {
       // After ), ], } always allow bare heredoc (e.g., method() <<HEREDOC)
       // After identifier/number with space before <<, allow heredoc if the following
       // word is not a Ruby keyword (method call: puts <<EOF, but not 1 <<if)

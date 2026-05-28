@@ -28,6 +28,27 @@ const DIVISION_PRECEDERS_PATTERN = /[a-zA-Z0-9_)\]}"'`$\p{L}\p{M}\p{N}\p{Pc}]/u;
 // Unicode identifier-continue character class for surrogate-pair codepoint checks.
 const UNICODE_IDENT_CONTINUE_PATTERN = /[\p{L}\p{M}\p{N}\p{Pc}]/u;
 
+// Checks whether the character ending at index `pos` (inclusive) is an identifier
+// character: an ASCII identifier char ([a-zA-Z0-9_]) or a Unicode identifier-continuation
+// character (handling surrogate pairs for codepoints outside the BMP). Ruby permits
+// non-ASCII characters in identifiers (e.g. `メソッド`, `日本語`), so any backward scan
+// that decides whether a substring is a standalone keyword (or part of a larger
+// identifier) must consult this helper instead of an ASCII-only regex.
+export function endsWithIdentifierChar(source: string, pos: number): boolean {
+  if (pos < 0) return false;
+  const ch = source[pos];
+  if (/[a-zA-Z0-9_]/.test(ch)) return true;
+  if (/\w/.test(ch)) return false;
+  // Low surrogate: combine with preceding high surrogate to test the full codepoint
+  if (pos >= 1 && ch >= '\uDC00' && ch <= '\uDFFF') {
+    const cp = source.codePointAt(pos - 1);
+    if (cp !== undefined && cp > 0xffff) {
+      return UNICODE_IDENT_CONTINUE_PATTERN.test(String.fromCodePoint(cp));
+    }
+  }
+  return UNICODE_IDENT_CONTINUE_PATTERN.test(ch);
+}
+
 // Returns true when the character at index `pos` is a division-preceder. Handles
 // surrogate pairs: when `source[pos]` is a low surrogate (U+DC00-U+DFFF) and is
 // preceded by a high surrogate, combine the pair into a codepoint and test the
