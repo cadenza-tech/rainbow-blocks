@@ -3441,6 +3441,34 @@ foo() ->
     });
   });
 
+  suite('Regression: isCatchFollowedByClausePattern must not treat float/range/record dot as terminator', () => {
+    // Bug: isCatchFollowedByClausePattern stops the forward scan at the first '.' at top
+    // level. A float decimal point (e.g. `1.5`), a range operator (`..`), or a record
+    // field reference (`Rec#r.field`) all contain '.' and must NOT be interpreted as a
+    // declaration-ending period. The same rule that findDeclarationEndingPeriod uses
+    // (look at the surrounding characters before terminating) applies here.
+    test('should treat catch as intermediate when guard contains a float literal', () => {
+      const source = 'f() -> try foo() catch error:R when R > 1.5 -> ok end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should treat catch as intermediate when guard contains a range operator', () => {
+      const source = 'f() -> try foo() catch error:R when R =:= 1..5 -> ok end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+
+    test('should treat catch as intermediate when guard contains a record field access', () => {
+      const source = 'f() -> try foo() catch error:R when R =:= Rec#state.field -> ok end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+    });
+  });
+
   suite('Regression: analyzeDefineBody must skip comments between fun and (', () => {
     // Bug: analyzeDefineBody scans only [ \t\r\n] when checking for a '(' after the 'fun'
     // keyword. A %comment between `fun` and `(` defeats the lookahead, so `fun` is treated
