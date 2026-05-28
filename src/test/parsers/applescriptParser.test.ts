@@ -3399,6 +3399,41 @@ end try`;
     });
   });
 
+  suite('Bug AS2: bare end inside multi-line record literal should not pair as block_close', () => {
+    // The compound `end tell`/`end if` block_close path checks isAtRecordKeyPosition
+    // (applescriptParser.ts lines 511-513), but the bare `end` path lacked the same
+    // guard. A bare `end` used as a property name inside a record literal that spans
+    // multiple physical lines was being treated as a real block close keyword,
+    // pairing with an outer block opener and leaving the genuine closer orphan.
+    test('should not detect bare end as block_close when used as multi-line record key', () => {
+      const source = 'tell application "Finder"\n  set r to {\n    end: 5\n  }\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end tell at line 4, not the bare end record key at line 2');
+    });
+
+    test('should not detect bare end as block_close when used as multi-line record key after preceding entry', () => {
+      const source = 'tell application "Finder"\n  set r to {a: 1,\n    end: 5\n  }\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end tell at line 4, not the bare end record key at line 2');
+    });
+
+    test('should not detect bare end as block_close in record key inside on-handler body', () => {
+      const source = 'on myHandler()\n  set r to {\n    end: 5\n  }\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'on', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end at line 4, not the bare end record key at line 2');
+    });
+
+    test('should not detect bare end as block_close in record key inside if-block', () => {
+      const source = 'if true then\n  set r to {\n    end: 5\n  }\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'close should be the outer end if at line 4, not the bare end record key at line 2');
+    });
+  });
+
   suite('Bug AS-LOW-2: handler probe should skip single-line comments after continuation', () => {
     test('should recognize on followed by continuation + single-line comment', () => {
       const source = 'on ¬ -- comment about this handler\n  myHandler()\n  beep\nend';
