@@ -1,6 +1,7 @@
 // Ruby block validation helpers for isValidBlockOpen keyword checks
 
 import type { ExcludedRegion } from '../types';
+import { endsWithIdentifierChar } from './rubyFamilyHelpers';
 
 // Callbacks for base parser methods needed by validation functions
 export interface RubyValidationCallbacks {
@@ -657,7 +658,10 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
     }
 
     // Reject loop keywords preceded by dot (method calls like obj.while),
-    // :: (scope resolution), @ or $ (variable prefixes)
+    // :: (scope resolution), @ or $ (variable prefixes), or a Unicode identifier
+    // char (e.g. `αwhile`, `fooαwhile` is an identifier, not a loop keyword). ASCII
+    // \b in loopPattern does not consider non-ASCII letters as word chars, so the
+    // boundary check must be repeated here with the Unicode-aware helper.
     if (loopAbsolutePos > 0) {
       const prevChar = source[loopAbsolutePos - 1];
       if (prevChar === '$' || prevChar === '@') {
@@ -667,6 +671,9 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
         continue;
       }
       if (prevChar === '.' && !(loopAbsolutePos > 1 && source[loopAbsolutePos - 2] === '.')) {
+        continue;
+      }
+      if (endsWithIdentifierChar(source, loopAbsolutePos - 1)) {
         continue;
       }
     }
@@ -682,7 +689,10 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
       if (callbacks.isInExcludedRegion(doAbsolutePos, excludedRegions)) {
         continue;
       }
-      // Skip 'do' preceded by dot (method call), :: (scope resolution), @ or $ (variable prefix)
+      // Skip 'do' preceded by dot (method call), :: (scope resolution), @ or $ (variable
+      // prefix), or a Unicode identifier char (e.g. `αdo` is an identifier). ASCII \b in
+      // /\bdo\b/g does not handle non-ASCII letters, so apply the Unicode-aware boundary
+      // check here as well.
       if (doAbsolutePos > 0) {
         const prevChar = source[doAbsolutePos - 1];
         if (prevChar === '$' || prevChar === '@') {
@@ -692,6 +702,9 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
           continue;
         }
         if (prevChar === '.' && !(doAbsolutePos > 1 && source[doAbsolutePos - 2] === '.')) {
+          continue;
+        }
+        if (endsWithIdentifierChar(source, doAbsolutePos - 1)) {
           continue;
         }
       }
