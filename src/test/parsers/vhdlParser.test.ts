@@ -4654,6 +4654,23 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-29: duplicate begin in process body not duplicated as intermediate', () => {
+    // A process (or any single-begin block opener like architecture/block/function/procedure
+    // /package body/etc.) should have exactly one `begin` intermediate marking the transition
+    // from the declarative part to the statement part (LRM 11.3). A second `begin` written
+    // inside the body is malformed code; without deduplication it appears as a spurious
+    // second intermediate, e.g. `[begin, begin]` instead of `[begin]`, polluting the
+    // surrounding block's structure visible to consumers.
+    test('should not add duplicate begin intermediate to process', () => {
+      const source = 'process is\nbegin\n  null;\nbegin\n  null;\nend process;';
+      const pairs = parser.parse(source);
+      const procBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.ok(procBlock, 'process should be paired');
+      const beginTokens = procBlock.intermediates.filter((t) => t.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginTokens.length, 1, 'process intermediates should contain exactly one begin');
+    });
+  });
+
   suite('Regression 2026-05-29: stray is after => in case branch not added to case intermediates', () => {
     // VHDL `case x is ... when v => ... end case;` (LRM 10.9). A stray `is` written as the
     // first statement of a `when` branch (e.g., `when 1 => is;`) is malformed code; the
