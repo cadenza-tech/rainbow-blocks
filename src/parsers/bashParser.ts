@@ -458,12 +458,19 @@ export class BashBlockParser extends BaseBlockParser {
   // whose parentheses live only inside expansions (`$(...)`, `$((...))`, `${...}` —
   // all excluded regions, skipped here), so any bare `(`/`)` or a `;;`/`;&`/`;;&`
   // separator before `case` marks an arm boundary and means this `in` is an argument
-  // word, not the header (e.g. `a) cmd in esac`).
+  // word, not the header (e.g. `a) cmd in esac`). At least one subject character
+  // (excluded-region content like `${x}`, or any non-whitespace character) must sit
+  // between `case` and `in` — `case in esac` without a subject is a syntax error and
+  // must not pair.
   private isCaseHeaderIn(source: string, inStart: number, excludedRegions: ExcludedRegion[]): boolean {
     let k = inStart - 1;
+    let sawSubject = false;
     while (k >= 0) {
       if (this.isInExcludedRegion(k, excludedRegions)) {
         const region = this.findExcludedRegionAt(k, excludedRegions);
+        // An excluded region (`${...}`, `$(...)`, quoted string, etc.) is a valid
+        // subject word, e.g. `case ${x} in esac`.
+        sawSubject = true;
         k = region ? region.start - 1 : k - 1;
         continue;
       }
@@ -482,7 +489,19 @@ export class BashBlockParser extends BaseBlockParser {
         (k - 4 < 0 || !/[\p{L}\p{N}_]/u.test(source[k - 4])) &&
         (k + 1 >= source.length || !/[\p{L}\p{N}_]/u.test(source[k + 1]))
       ) {
-        return true;
+        // `case in esac` (no subject between the keyword and the header `in`)
+        // is a syntax error; require at least one subject character.
+        return sawSubject;
+      }
+      // Any non-whitespace character that is not the `case` keyword itself
+      // counts as subject content (`case x in esac`, `case $x in esac`, etc.).
+      // Backslashes are treated as content too because `case \\... in esac`
+      // is valid (the subject is the escaped value); the `case \<newline> in`
+      // edge case (line continuation with no subject) is rare enough to leave
+      // permissive — false positives here only affect cosmetic pairing, never
+      // crash safety.
+      if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') {
+        sawSubject = true;
       }
       k--;
     }
