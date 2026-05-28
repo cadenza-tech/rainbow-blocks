@@ -962,6 +962,15 @@ export class VerilogBlockParser extends BaseBlockParser {
   // matching opener at depth 0 in the backward scan, its `: label` is an
   // end-label suffix (LRM §9.3.1), not a case_item label name, so the check
   // returns false so the close keyword stays tokenized.
+  //
+  // For close keywords specifically, an additional discriminator separates the
+  // case_item label-name misuse (`<close> : <name> = <expr>;`) from an invalid
+  // end-label suffix attempt (`<close> : <name>` not followed by `=`). The
+  // case_item form always has an assignment after `<name>` because the colon
+  // introduces a case_item statement body. If `<name>` is NOT followed by `=`
+  // (after trivia), the `: <name>` cannot be a case_item label colon — it is
+  // an end-label suffix attempt (illegal for `endcase` per LRM §12.5 but the
+  // close keyword itself is still a real close keyword and must pair).
   private isCaseItemLabelName(
     source: string,
     position: number,
@@ -972,7 +981,71 @@ export class VerilogBlockParser extends BaseBlockParser {
     if (!isFollowedByLabelColon(source, position, keywordLength, excludedRegions)) {
       return false;
     }
+    // For close keywords, additionally require `<name>` to be followed by `=`
+    // (true case_item label-name misuse). When it is not, the `: <name>` is an
+    // invalid end-label suffix attempt — the close keyword stays tokenized so
+    // the outer block can still pair with it.
+    if (closeKeywordValidOpeners !== undefined && !this.isLabelColonFollowedByAssignment(source, position + keywordLength, excludedRegions)) {
+      return false;
+    }
     return isEnclosingBlockCase(source, position - 1, excludedRegions, this.keywords, this.validationCallbacks, closeKeywordValidOpeners);
+  }
+
+  // For a token starting just after a close keyword whose next non-trivia
+  // character is the label colon (`<close_kw> : <name> ...`), returns true when
+  // the `<name>` after the colon is itself followed by `=` (assignment operator,
+  // not `==`/`<=`/etc. comparison). This is the discriminator between the two
+  // interpretations of `<close_kw> : <name>`:
+  //   - true  → case_item label-name misuse pattern `endcase : x = 1;`
+  //             where `x = 1;` is the case_item body. Suppress.
+  //   - false → invalid end-label suffix attempt `endcase : my_label` or
+  //             `endcase : my_label;`. Keep the close keyword tokenized.
+  //
+  // `searchStart` is the offset immediately after the close keyword's last
+  // character. The scan skips whitespace, line comments, and block comments to
+  // find the colon, then the label name, then the next non-trivia character.
+  // When the label name or the trailing `=` cannot be located, returns false
+  // (treat as not-an-assignment so the close keyword stays tokenized — the
+  // safer default per best-effort parsing).
+  private isLabelColonFollowedByAssignment(source: string, searchStart: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = this.skipForwardTrivia(source, searchStart, excludedRegions);
+    if (i >= source.length || source[i] !== ':') return false;
+    if (i + 1 < source.length && source[i + 1] === ':') return false;
+    i++;
+    i = this.skipForwardTrivia(source, i, excludedRegions);
+    // Label name must be a simple identifier (start with letter or `_`).
+    if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) return false;
+    while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+    i = this.skipForwardTrivia(source, i, excludedRegions);
+    if (i >= source.length || source[i] !== '=') return false;
+    // Exclude `==` / `===` comparison operators (they are not assignment).
+    if (i + 1 < source.length && source[i + 1] === '=') return false;
+    return true;
+  }
+
+  // Walks `pos` forward over whitespace, line comments (`//...`), and block
+  // comments (`/* ... */`). Returns the first offset that is none of these.
+  // Used by isLabelColonFollowedByAssignment to skip trivia between tokens.
+  private skipForwardTrivia(source: string, pos: number, excludedRegions: ExcludedRegion[]): number {
+    let i = pos;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        const isBlockComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '*';
+        const isLineComment = source[region.start] === '/' && region.start + 1 < source.length && source[region.start + 1] === '/';
+        if (isBlockComment || isLineComment) {
+          i = region.end;
+          continue;
+        }
+      }
+      break;
+    }
+    return i;
   }
 
   // Validates block open: control keywords need a following 'begin' to be valid
