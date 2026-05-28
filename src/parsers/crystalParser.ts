@@ -609,11 +609,15 @@ export class CrystalBlockParser extends BaseBlockParser {
   }
 
   // Checks if the keyword that ends at endOffset is immediately followed by a range
-  // operator (.. or ...). Whitespace, including newlines (`\n`, `\r`, `\r\n`), is
-  // permitted between the keyword and the operator. Skips characters inside excluded
-  // regions. Symmetric to isPrecededByRangeOperator and used to filter `end` on the
-  // LHS of a range (`end..N`, including the multi-line form `end\n  ..N`).
+  // operator (.. or ...). Whitespace is permitted between the keyword and the
+  // operator. Newlines are crossed only when the keyword sits inside an unclosed
+  // opening paren/bracket/brace; outside any enclosing paren, a newline ends the
+  // logical line and the keyword is not on the LHS of a multi-line range. Skips
+  // characters inside excluded regions. Symmetric to isPrecededByRangeOperator and
+  // used to filter `end` on the LHS of a range (`end..N`, including the multi-line
+  // form `end\n  ..N` inside parens).
   private isFollowedByRangeOperator(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
+    const insideParen = this.isInsideUnclosedParen(source, endOffset, excludedRegions);
     let i = endOffset;
     while (i < source.length) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
@@ -624,7 +628,17 @@ export class CrystalBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (ch === ' ' || ch === '\t') {
+        i++;
+        continue;
+      }
+      if (ch === '\n' || ch === '\r') {
+        // Newlines are only crossed when the keyword lies inside an open
+        // paren/bracket/brace. On a stand-alone `end` line, a `..` on a
+        // later line is not its range operator.
+        if (!insideParen) {
+          return false;
+        }
         i++;
         continue;
       }
