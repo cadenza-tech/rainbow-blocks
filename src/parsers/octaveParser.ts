@@ -360,6 +360,29 @@ export class OctaveBlockParser extends MatlabBlockParser {
       }
       octaveSaysArgumentsIsBlock = true;
     }
+    // Reject `methods(obj);` / `properties(obj);` / `events(obj);` / `enumeration(obj);`
+    // statement-call form (the `<section_kw>(...)` is followed by `;`). This is a function
+    // call (reflection helper) rather than a section opener — the parent's check accepts
+    // these at line-start because `(` is in the allowed nextChar set, but the trailing `;`
+    // disambiguates the statement-call form from a real section attribute list like
+    // `properties (Access = public)\n`. Without this guard the keyword opens a spurious
+    // block that consumes an inner `end` and orphans the enclosing methods/end pair.
+    // `arguments` is excluded here because it has its own richer detector above
+    // (isArgumentsFunctionCall) that also handles the attribute pattern.
+    if (
+      keyword !== 'arguments' &&
+      OctaveBlockParser.OCTAVE_SECTION_KEYWORDS.has(keyword) &&
+      this.isSectionKeywordStatementCall(source, position, keyword, excludedRegions)
+    ) {
+      // Phantom tracking: mirrors the arguments(obj); case above. When the user wrote a
+      // stray `end` for the rejected section call, matchBlocks must absorb it via
+      // octavePhantomSectionPositions; otherwise the inner `end` consumes the enclosing
+      // function's `end` and destroys outer block pairing.
+      if (this.isAtSectionKeywordLineStart(source, position) && !this.isInsideParensOrBrackets(source, position, excludedRegions)) {
+        this.octavePhantomSectionPositions.push(position);
+      }
+      return false;
+    }
     // Section-keyword rejection when followed by an operator across a line continuation,
     // e.g. `properties ...<NL>+ 1` or `methods \<NL>* 2`. The parent's section-keyword
     // operator-rejection check only skips ASCII whitespace and falls through when it sees
@@ -719,6 +742,42 @@ export class OctaveBlockParser extends MatlabBlockParser {
       i = j;
     }
     return false;
+  }
+
+  // Returns true when a non-`arguments` section keyword (methods / properties / events /
+  // enumeration) at `position` is in `<keyword>(...);` statement-call form — i.e., the
+  // keyword is directly followed by `(`, the parens contain any content, and the closing
+  // `)` is followed by `;`. Such forms are reflection-helper function calls (Octave allows
+  // calling methods/properties/events/enumeration as built-in introspection functions),
+  // NOT real section openers. The trailing `;` is the disambiguator: bare attribute lists
+  // (`properties (Access = public)\n`) are followed by a newline, not `;`. Skips horizontal
+  // whitespace and line continuations between the keyword and `(`, and between `)` and `;`,
+  // so multi-line forms like `properties(x) ...<NL>;` and `methods\<NL>(x);` are detected.
+  private isSectionKeywordStatementCall(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
+    // Step 1: must be followed by `(` after horizontal whitespace + line continuations.
+    const j = skipHorizontalWhitespaceAndContinuations(source, position + keyword.length);
+    if (j >= source.length || source[j] !== '(') return false;
+    // Step 2: find the matching `)` ignoring excluded regions and tracking nesting.
+    let depth = 1;
+    let k = j + 1;
+    while (k < source.length && depth > 0) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        if (region) {
+          k = region.end;
+          continue;
+        }
+      }
+      const ch = source[k];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (depth === 0) break;
+      k++;
+    }
+    if (depth !== 0) return false;
+    // Step 3: check for trailing `;` after `)` (skipping horizontal whitespace + continuations).
+    const after = skipHorizontalWhitespaceAndContinuations(source, k + 1);
+    return after < source.length && source[after] === ';';
   }
 
   // Returns true when `arguments(...)` looks like a function call rather than an
