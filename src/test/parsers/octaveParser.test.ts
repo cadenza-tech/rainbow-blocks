@@ -3082,5 +3082,43 @@ end`;
     });
   });
 
+  suite('Bug: parent phantom-end mechanism for empty headers in Octave', () => {
+    test('should absorb stray end from empty if header inside function', () => {
+      // `function f\n  if;\n  end\nend` — the empty-header `if;` is rejected as a block
+      // opener by the parent which records a phantom position. Octave's matchBlocks must
+      // read this phantom set (mirroring its own octavePhantomSectionPositions logic) so
+      // the inner `end` is absorbed as the phantom's matching close and the outer
+      // function/end pair survives. Without the fix, the inner `end@2:2` is paired with
+      // the function and the outer `end@3:0` becomes orphan.
+      const source = 'function f\n  if;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const fn = pairs[0];
+      assert.strictEqual(fn.closeKeyword?.line, 3, 'function must close at the outer end@3:0');
+      assert.strictEqual(fn.closeKeyword?.column, 0, 'function must close at the outer end@3:0');
+    });
+
+    test('should absorb stray end from empty while header inside function', () => {
+      const source = 'function f\n  while;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.line, 3);
+    });
+
+    test('should absorb stray end from empty for header inside function', () => {
+      const source = 'function f\n  for;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.line, 3);
+    });
+
+    test('should absorb stray end from empty switch header inside function', () => {
+      const source = 'function f\n  switch;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.line, 3);
+    });
+  });
+
   generateCommonTests(config);
 });
