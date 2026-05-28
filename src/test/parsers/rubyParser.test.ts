@@ -5100,5 +5100,21 @@ end`;
     });
   });
 
+  suite('Regression: Unicode hash key followed by end', () => {
+    test('should filter end after Unicode hash key colon', () => {
+      // Bug: isEndInExpressionPosition's hash label colon check uses /[a-zA-Z0-9_]/
+      // ASCII regex to check for identifier char immediately before the colon. With
+      // `{αβγ: end}`, the char `γ` is non-ASCII, so the regex fails and the `end` token
+      // is NOT recognized as the value of a hash label, so it is not filtered out.
+      // The inner end then closes the def, leaving outer end as orphan. Expected: 1 pair
+      // (def at line 0 / outer end at line 2), since `{αβγ: end}` is a hash literal whose
+      // `end` after the label colon is invalid as a block close.
+      const source = 'def m\n  x = {αβγ: end}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'def should pair with the outer end on line 2');
+    });
+  });
+
   generateCommonTests(config);
 });
