@@ -3441,6 +3441,27 @@ foo() ->
     });
   });
 
+  suite('Regression: analyzeDefineBody must skip comments between fun and (', () => {
+    // Bug: analyzeDefineBody scans only [ \t\r\n] when checking for a '(' after the 'fun'
+    // keyword. A %comment between `fun` and `(` defeats the lookahead, so `fun` is treated
+    // as a fun-reference (not a real opener) and the matching `end` becomes orphan. The
+    // whitespace-skip loops must also skip %-comments via the excluded-region map.
+    test('should detect fun-end pair when comment appears between fun and ( in -define body', () => {
+      const source = '-define(WRAP, [fun %comment\n() -> ok end]).';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fun', 'end');
+    });
+
+    test('should detect block-opener with comment after keyword in -define body', () => {
+      // After `begin` keyword, the bare-opener check looks at the next significant character.
+      // A comment between `begin` and the actual expression must be skipped, otherwise a
+      // genuine block opener is misclassified as bare.
+      const source = '-define(M, begin %trailing\nok end).';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: hasUnclosedOpenerInMapScope must treat @ as identifier continuation', () => {
     // Bug: hasUnclosedOpenerInMapScope counts '@'-suffix atoms (e.g. `begin@host`) as a
     // real opener because the forward scan uses /[a-zA-Z0-9_]/ as the identifier continuation
