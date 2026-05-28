@@ -682,12 +682,12 @@ export class ErlangBlockParser extends BaseBlockParser {
       return false;
     }
     // Forward scan from #{ to the 'end' token: count real openers vs block-closing 'end's
-    // within the immediate map scope only. Nested '{' (including inner maps and tuples)
-    // bumps nestedBraceDepth so that openers/closers found inside the nested scope are
-    // excluded from this map's count: those keywords belong to the inner scope, not the
-    // outer map.
+    // within the immediate map scope only. Nested brackets (inner maps/tuples '{}', lists
+    // '[]', call parens '()', and binary syntax '<<>>') all bump nestedDepth so that openers
+    // and closers found inside any nested scope are excluded from this map's count: those
+    // keywords belong to the inner scope, not the outer map.
     let depth = 0;
-    let nestedBraceDepth = 0;
+    let nestedDepth = 0;
     let i = mapStart;
     while (i < endOffset) {
       const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -696,14 +696,28 @@ export class ErlangBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[i];
-      if (ch === '{') {
-        nestedBraceDepth++;
+      // Binary syntax open '<<' (must be checked before single '<' depth tracking is added)
+      if (ch === '<' && i + 1 < source.length && source[i + 1] === '<') {
+        nestedDepth++;
+        i += 2;
+        continue;
+      }
+      // Binary syntax close '>>'
+      if (ch === '>' && i + 1 < source.length && source[i + 1] === '>') {
+        if (nestedDepth > 0) {
+          nestedDepth--;
+        }
+        i += 2;
+        continue;
+      }
+      if (ch === '{' || ch === '[' || ch === '(') {
+        nestedDepth++;
         i++;
         continue;
       }
-      if (ch === '}') {
-        if (nestedBraceDepth > 0) {
-          nestedBraceDepth--;
+      if (ch === '}' || ch === ']' || ch === ')') {
+        if (nestedDepth > 0) {
+          nestedDepth--;
         }
         i++;
         continue;
@@ -729,7 +743,7 @@ export class ErlangBlockParser extends BaseBlockParser {
           i = idEnd;
           continue;
         }
-        if (nestedBraceDepth === 0) {
+        if (nestedDepth === 0) {
           if (BLOCK_OPENER_KEYWORDS.has(word) && !this.isMapKeyKeyword(source, wordEnd)) {
             // `fun` may be a fun-reference (fun Mod:Func/N, fun Func/N, fun 'q'/N) which is
             // NOT a block opener. Match the same logic as isValidBlockOpen so that a map like
