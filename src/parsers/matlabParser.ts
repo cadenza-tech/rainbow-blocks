@@ -1090,7 +1090,15 @@ export class MatlabBlockParser extends BaseBlockParser {
           // Skip the `end` only when the current stack depth matches the depth
           // recorded for a rejected opener — this preserves legitimate inner block
           // pairings even when an enclosing classdef section keyword was rejected.
-          if (pendingSkipDepths.length > 0 && pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length) {
+          // The remainingCloses guard mirrors the phantom-skip below: it ensures the
+          // skip does not starve the still-open block stack of its closing `end`s.
+          // Without this guard, a nested-section drop (e.g. `methods` inside `methods`)
+          // can consume a legitimate inner block's close, leaving an outer block orphan.
+          if (
+            pendingSkipDepths.length > 0 &&
+            pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length &&
+            remainingCloses[idx + 1] >= stack.length
+          ) {
             pendingSkipDepths.pop();
             break;
           }
