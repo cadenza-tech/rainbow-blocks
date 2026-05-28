@@ -4585,5 +4585,51 @@ end if;`;
     });
   });
 
+  suite('Regression: isExtendedReturn comment between := and do does not validate body', () => {
+    test('should reject extended-return when only a comment separates := and do (malformed)', () => {
+      // `return X : Integer := -- comment\n  do ... end return;` is malformed:
+      // a comment is not an expression, so there is no value between the
+      // assignment operator `:=` and the body separator `do`. The backward
+      // scan from `do` must treat a comment region as transparent (the
+      // assignment still has no expression) rather than as a real expression
+      // that would block the malformed-form detection. Without this guard the
+      // stray `return` registers as a block opener and produces an extra pair.
+      const source = 'function F return Integer is\nbegin\n  return X : Integer := -- comment\n  do\n    R := 1;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'return'),
+        '`:= <comment> do` is malformed and must not be paired as extended return'
+      );
+      // Only the function body pair should survive.
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject extended-return when a multi-line block of comments separates := and do', () => {
+      // Multiple consecutive comment lines between `:=` and `do` form a
+      // chain of excluded regions; none of them is an expression, so the
+      // malformed-form detection must continue past every comment region
+      // and still find the bare `:=` token before any string/character
+      // literal could intervene.
+      const source = 'function F return Integer is\nbegin\n  return X : Integer := -- one\n    -- two\n  do\n    R := 1;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      assert.ok(
+        !pairs.some((p) => p.openKeyword.value.toLowerCase() === 'return'),
+        '`:= <multi-line comments> do` must not be paired as extended return'
+      );
+    });
+
+    test('should still accept extended-return when a real expression separates := and do (no regression)', () => {
+      // A string literal between `:=` and `do` is a real expression; the
+      // backward scan must mark the literal as a non-comment excluded region
+      // so the `:= do` malformed-detection does not fire. This guards
+      // against regressing the earlier `:= "expr" do` fix.
+      const source = 'function F return String is\nbegin\n  return X : String := "hello" do\n    null;\n  end return;\nend F;';
+      const pairs = parser.parse(source);
+      const returnPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'return');
+      assert.ok(returnPair, 'extended-return with `:= "expr" do` is still valid and must be paired');
+      assert.strictEqual(returnPair?.closeKeyword.value.toLowerCase(), 'end return');
+    });
+  });
+
   generateCommonTests(config);
 });
