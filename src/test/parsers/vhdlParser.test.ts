@@ -4654,6 +4654,26 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-05-29: conditional expression else inside if condition not added to if intermediates', () => {
+    // `if <conditional_expression> then ... end if;` — the conditional_expression
+    // (VHDL-2008, LRM 9.2.6) can contain `when ... else ...` clauses that compute the
+    // overall boolean value. Those `else` tokens belong to the inner conditional
+    // expression, NOT to the surrounding `if`. Without suppressing them, the
+    // if-block's intermediates absorb a spurious `else` (e.g. `[then, else]` instead
+    // of `[then]`), polluting the structure visible to consumers.
+    test('should not absorb else of when-else conditional expression into if intermediates', () => {
+      const source =
+        'architecture a of e is\nbegin\n  p: process is\n  begin\n    if a when b else c then\n      null;\n    end if;\n  end process p;\nend architecture;';
+      const pairs = parser.parse(source);
+      const ifBlock = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'if');
+      assert.ok(ifBlock, 'if should be paired');
+      const elseTokens = ifBlock.intermediates.filter((t) => t.value.toLowerCase() === 'else');
+      assert.strictEqual(elseTokens.length, 0, 'if intermediates should not contain else from when-else inside condition');
+      const thenTokens = ifBlock.intermediates.filter((t) => t.value.toLowerCase() === 'then');
+      assert.strictEqual(thenTokens.length, 1, 'if intermediates should contain exactly one then');
+    });
+  });
+
   suite('Regression 2026-05-29: reserved-word type marks in type indication contexts', () => {
     // VHDL reserved words like `view`, `units`, `block`, `protected`, `context` cannot legally
     // be type names, but editor-in-progress code may place them in type-indication contexts
