@@ -245,6 +245,13 @@ export function isPrecededByBinaryOperator(source: string, position: number, exc
 // Like hasUnmatchedBlockOpenerBetween, but treats `end` followed by a binary
 // operator (e.g., `end!=`, `end+`, `end<`) as lastindex rather than block close.
 // Used inside indexing brackets where lastindex expressions are common.
+//
+// Block-form vs comprehension disambiguation: a `for` at the very start of the bracket
+// content is block-form (a comprehension generator must be preceded by a value expression).
+// When the leading `for` is recognized as block-form, subsequent `for`/`if` keywords inside
+// its body (depth > 0) are also block-form (nested loops, nested conditionals). Only at
+// depth 0 (no active block scope) does `<expr> for <var> in <iter>` switch the scan into
+// comprehension mode, in which case `for` does not open a block and `if` becomes a filter.
 export function hasUnmatchedBlockOpenerBetweenInIndexing(
   source: string,
   start: number,
@@ -269,12 +276,14 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
     if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') break;
     firstNonWhite++;
   }
+  let leadingForRecognized = false;
   if (firstNonWhite + 3 <= end && source.slice(firstNonWhite, firstNonWhite + 3) === 'for') {
     const before = firstNonWhite > 0 ? source[firstNonWhite - 1] : ' ';
     const after = firstNonWhite + 3 < source.length ? source[firstNonWhite + 3] : ' ';
     if (!/[a-zA-Z0-9_]/.test(before) && !/[a-zA-Z0-9_]/.test(after)) {
       if (!callbacks.isAdjacentToUnicodeLetter(source, firstNonWhite, 3) && before !== '.') {
         depth++;
+        leadingForRecognized = true;
       }
     }
   }
@@ -289,7 +298,12 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
       if (bracketDepth > 0) bracketDepth--;
       continue;
     }
+    // Comprehension-context detection: `<value> for <var> in <iter>` switches subsequent
+    // `if` into a filter. Only activates at depth 0 (no active block scope). Inside a
+    // block body (e.g. the body of a leading block-form `for`), a `for ... in` is a
+    // nested block-form loop and `if` is a nested conditional, not a comprehension.
     if (
+      depth === 0 &&
       !inComprehensionContext &&
       source[i] === 'f' &&
       i + 3 <= end &&
@@ -336,8 +350,13 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
         }
       }
     }
-    // Check for block openers
-    for (const keyword of openersWithoutFor) {
+    // Block opener loop. Inside a block body (depth > 0), `for` is a nested block-form
+    // loop and is counted as an opener. At depth 0, `for` is either the leading block-form
+    // for (already counted above) or a comprehension generator that opens no block, so it
+    // is excluded from the opener list. The leading-for keyword position itself is skipped
+    // here because the pre-loop check already incremented depth for it.
+    const openers = depth > 0 ? blockOpen : openersWithoutFor;
+    for (const keyword of openers) {
       if (i + keyword.length <= end && source[i] === keyword[0] && source.slice(i, i + keyword.length) === keyword) {
         const before = i > 0 ? source[i - 1] : ' ';
         const after = i + keyword.length < source.length ? source[i + keyword.length] : ' ';
@@ -348,6 +367,12 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
         if (keyword === 'abstract' || keyword === 'primitive') {
           const afterKeyword = source.slice(i + keyword.length);
           if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+        }
+        // Skip the leading-for keyword position: it was already counted by the pre-loop
+        // detection, so re-counting it here would double-count.
+        if (keyword === 'for' && leadingForRecognized && i === firstNonWhite) {
+          i += keyword.length - 1;
+          break;
         }
         depth++;
         i += keyword.length - 1;
@@ -363,6 +388,11 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
 // any bare `begin` inside indexing brackets (regardless of whether it is followed by `:`),
 // so this method counts ALL bare `begin`s as filtered. Other block openers (if/for/let/...)
 // are real block expressions in indexing brackets, and would NOT be filtered.
+//
+// Openers and closes are matched in LIFO order, mirroring Julia's parser: each `end`
+// cancels the most recently opened block. This is the only correct way to know which
+// opener remains unmatched at the end of the range (a non-LIFO heuristic would let an
+// inner `end` belonging to one opener cancel a different opener, distorting the result).
 export function allUnmatchedOpenersAreFilteredBegins(
   source: string,
   start: number,
@@ -371,8 +401,9 @@ export function allUnmatchedOpenersAreFilteredBegins(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
-  let nonBeginDepth = 0;
-  let beginDepth = 0;
+  // Stack of opener types in source order. 'begin' tracks bare begin (filtered as
+  // firstindex inside indexing brackets); 'other' tracks every other block opener.
+  const openerStack: ('begin' | 'other')[] = [];
   let bracketDepth = 0;
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
@@ -413,12 +444,8 @@ export function allUnmatchedOpenersAreFilteredBegins(
               i += 2;
               continue;
             }
-            // Prefer canceling non-begin openers first (they are real blocks).
-            if (nonBeginDepth > 0) {
-              nonBeginDepth--;
-            } else if (beginDepth > 0) {
-              beginDepth--;
-            }
+            // LIFO close: pop the most recently opened block.
+            openerStack.pop();
           }
           i += 2;
           continue;
@@ -437,17 +464,13 @@ export function allUnmatchedOpenersAreFilteredBegins(
           const afterKeyword = source.slice(i + kw.length);
           if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
         }
-        if (kw === 'begin') {
-          beginDepth++;
-        } else {
-          nonBeginDepth++;
-        }
+        openerStack.push(kw === 'begin' ? 'begin' : 'other');
         i += kw.length - 1;
         break;
       }
     }
   }
-  return nonBeginDepth === 0;
+  return openerStack.every((kind) => kind === 'begin');
 }
 
 // Like allUnmatchedOpenersAreFilteredBegins, but also requires there to be an enclosing
