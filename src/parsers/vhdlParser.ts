@@ -1837,6 +1837,16 @@ export class VhdlBlockParser extends BaseBlockParser {
     });
   }
 
+  // Returns true if the open block's intermediates already include a `then` token
+  // (case-insensitive). Used to detect whether an upcoming `else`/`elsif` lies inside
+  // the `if`'s condition (before `then`) or in the body (after `then`).
+  private hasSeenThen(openBlock: OpenBlock): boolean {
+    for (const t of openBlock.intermediates) {
+      if (t.value.toLowerCase() === 'then') return true;
+    }
+    return false;
+  }
+
   // Custom matching to handle compound end keywords
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
@@ -1866,6 +1876,14 @@ export class VhdlBlockParser extends BaseBlockParser {
               // `units`. A conditional expression inside a field default (e.g.,
               // `x : integer when y => 1 else 0;` inside a `record`) would otherwise be
               // absorbed as the record's intermediate. Drop the token instead.
+            } else if ((middleKw === 'else' || middleKw === 'elsif') && topOpener === 'if' && !this.hasSeenThen(stack[stack.length - 1])) {
+              // Inside an `if` block's condition before `then`: a `when ... else ...`
+              // conditional expression (VHDL-2008 LRM 9.2.6) contains `else` tokens that
+              // belong to the inner conditional expression, NOT to the surrounding `if`.
+              // Without dropping them, the if-block's intermediates would absorb a stray
+              // `else`/`elsif` (e.g. `[else, then]` instead of `[then]`), polluting the
+              // structure visible to consumers. The `then` token itself is always retained
+              // (it marks the actual transition into the if-body).
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
