@@ -4395,6 +4395,27 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
     });
+
+    test('should pair def with end when .. is on a separate line outside parens', () => {
+      // The `..` here is on a standalone statement after `def foo` (a no-op range
+      // literal). It must not extend implicit line continuation across the newline
+      // to capture the closing `end` of the def block on the next line. The def
+      // block must pair with its proper `end`.
+      const source = 'def foo\n  ..\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should pair def with end when .. is followed by a comment then end outside parens', () => {
+      // Outside parens, a standalone `..` followed by a comment and then `end`
+      // on a later line must not be treated as a single range expression. The
+      // def block must pair with its proper `end`.
+      const source = 'def foo\n  ..\n  # comment\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: end in ternary value position should not be tokenized as block_close', () => {
