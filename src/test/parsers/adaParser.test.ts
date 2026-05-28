@@ -4552,5 +4552,38 @@ end if;`;
     });
   });
 
+  suite('Regression: isValidForOpen identifier scan recognizes Unicode letters', () => {
+    test('should reject for representation clause whose identifier starts with non-ASCII letter', () => {
+      // Per Ada LRM 2.3, identifiers may contain non-ASCII letters
+      // (e.g., Ñ U+00D1). `isValidForOpen` must walk past such characters
+      // when skipping the identifier so the trailing `use` keyword is
+      // recognized and the `for ... use ...;` representation clause is
+      // rejected as a block opener. Without Unicode-aware identifier
+      // skipping, the scanner stalls at the first non-ASCII letter, the
+      // `use` keyword is missed, the `for` is accepted as a loop opener,
+      // and the enclosing subprogram body is orphaned.
+      const source = 'procedure P is\n  for ÑameT use 32;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should reject for representation clause whose identifier contains non-ASCII letters', () => {
+      // Mixed ASCII/Unicode identifier `MyÑameT`: the skip loop must
+      // continue past `Ñ` to reach the trailing `use` keyword.
+      const source = 'procedure P is\n  for MyÑameT use 32;\nbegin\n  null;\nend P;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+
+    test('should reject dotted name with non-ASCII letter followed by use', () => {
+      // Selected_component `Pkg.ÑameT` continues across the dot. The
+      // dotted-name skip loop also walks identifier characters; it must
+      // handle non-ASCII letters the same way as the initial identifier.
+      const source = "procedure P is\n  for Pkg.ÑameT'Size use 32;\nbegin\n  null;\nend P;";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
