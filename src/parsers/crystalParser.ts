@@ -734,14 +734,19 @@ export class CrystalBlockParser extends BaseBlockParser {
   //      `%`, `?`, `:`, `)`, `}`, `]`. Any of these immediately after the keyword means the
   //      keyword is the left operand of a binary expression, a hash/tuple element, or sits
   //      inside an expression that has just ended — never an opener position.
-  // Spaces and tabs between the keyword and the following symbol are permitted, but newlines
-  // are not crossed: a keyword alone on its line (e.g. `enum\n  Red`, `struct Point`) keeps
-  // its block role because real openers are followed by a name/newline, never by any of the
-  // symbols above on the same line. Excluded regions are skipped. Used to suppress the seven
+  //   6. Method-chain continuation `KEYWORD\n  .method`. A leading `.` on the next non-blank
+  //      physical line continues a method-call chain on `KEYWORD`. Crystal allows this
+  //      cross-line dot form, so the keyword is acting as a receiver value.
+  // Spaces and tabs between the keyword and the following symbol are permitted. Newlines are
+  // crossed only to detect the cross-line method-chain form (#6); when the first non-blank
+  // token after the newline is anything other than a leading `.`, the keyword keeps its
+  // block role because real openers are followed by a name/newline (e.g. `enum\n  Red`,
+  // `struct Point`). Excluded regions are skipped. Used to suppress the seven
   // receiver-like openers (`select`, `union`, `enum`, `struct`, `lib`, `macro`, `annotation`)
   // when used as values.
   private isReceiverOrAssignmentUsage(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = endOffset;
+    let crossedNewline = false;
     while (i < source.length) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
         const region = this.findExcludedRegionAt(i, excludedRegions);
@@ -755,6 +760,11 @@ export class CrystalBlockParser extends BaseBlockParser {
         i++;
         continue;
       }
+      if (ch === '\n' || ch === '\r') {
+        crossedNewline = true;
+        i++;
+        continue;
+      }
       break;
     }
     if (i >= source.length) {
@@ -762,8 +772,20 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
     const ch = source[i];
     // Method-call receiver: a single dot, not a range operator (`..`/`...`).
+    // This covers both same-line `KEYWORD.method` and cross-line method-chain
+    // continuation `KEYWORD\n  .method` because Crystal allows a leading `.`
+    // on the next physical line to continue the chain on the receiver.
     if (ch === '.' && source[i + 1] !== '.') {
       return true;
+    }
+    // After a newline, the only token that can turn the keyword into a value
+    // is a leading `.` (method-chain continuation, handled above). Anything
+    // else on the next physical line — identifiers, constants, `when`, etc. —
+    // is the body of the genuine block opener, so the keyword stays in its
+    // opener role. Bail out before the same-line punctuation checks below so
+    // that constructs like `enum\n  Color\nend` are not misclassified.
+    if (crossedNewline) {
+      return false;
     }
     // Value usage with `=`-led operator: assignment (`=`), comparison (`==`, `===`,
     // `=~`), or hash rocket (`=>`). In every case the keyword is the left-hand
