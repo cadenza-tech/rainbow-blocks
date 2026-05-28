@@ -1379,21 +1379,18 @@ export class ErlangBlockParser extends BaseBlockParser {
           }
         } else if (word === 'fun') {
           // A real anonymous fun is always written `fun(`; otherwise it is a fun reference.
-          let k = wordEnd;
-          while (k < bodyEnd && /[ \t\r\n]/.test(source[k])) {
-            k++;
-          }
+          // Comments between `fun` and `(` must be skipped via the excluded-region map so
+          // that e.g. `fun %comment\n() -> ok end` is correctly classified as a real opener.
+          const k = this.skipDefineBodyWhitespaceAndComments(source, wordEnd, bodyEnd, excludedRegions);
           if (k < bodyEnd && source[k] === '(') {
             openerStack.push(i);
           }
         } else if (BLOCK_OPENER_KEYWORDS.has(word)) {
           // begin/if/case/receive/try/maybe: a bare reserved word is immediately followed
           // by a separator (',' or a closing bracket); a real block opener is followed by
-          // an expression or guard.
-          let k = wordEnd;
-          while (k < bodyEnd && /[ \t\r\n]/.test(source[k])) {
-            k++;
-          }
+          // an expression or guard. Comments between the keyword and the following character
+          // must be skipped so that e.g. `begin %trailing\nok end` is treated as a real opener.
+          const k = this.skipDefineBodyWhitespaceAndComments(source, wordEnd, bodyEnd, excludedRegions);
           const next = k < bodyEnd ? source[k] : '';
           if (next !== ',' && next !== ')' && next !== ']' && next !== '}' && next !== '') {
             openerStack.push(i);
@@ -1405,6 +1402,25 @@ export class ErlangBlockParser extends BaseBlockParser {
       i++;
     }
     return { realOffsets, unclosedOpeners: new Set(openerStack) };
+  }
+
+  // Skip whitespace and excluded regions (comments) forward from `start` up to `end`.
+  // Returns the offset of the first non-whitespace, non-comment character (or `end` if
+  // none found). Used by analyzeDefineBody to robustly look past trailing %-comments.
+  private skipDefineBodyWhitespaceAndComments(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): number {
+    let k = start;
+    while (k < end) {
+      const region = this.findExcludedRegionAt(k, excludedRegions);
+      if (region) {
+        k = region.end;
+        continue;
+      }
+      if (!/[ \t\r\n]/.test(source[k])) {
+        break;
+      }
+      k++;
+    }
+    return k;
   }
 
   // Binary-search for the attribute span enclosing `position` (openParen < position < endParen).
