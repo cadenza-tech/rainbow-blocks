@@ -3945,5 +3945,41 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-29: generic type definition without space before =', () => {
+    test('should recognize class after generic close `>` directly preceding `=` as block opener', () => {
+      // `TList<T>=class` has no whitespace between the generic close `>` and the
+      // type-definition `=`. The `>` here is the generic-close bracket (matching the
+      // earlier `<`), not a comparison operator, so the `=` is a type definition and
+      // the following `class` opens a block. Without the fix the `>` immediately
+      // before `=` is treated as a comparison-operator prefix (like `>=`) and the
+      // class is not detected as a block opener.
+      const source = 'TList<T>=class\n  X: Integer;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'class', 'end');
+    });
+
+    test('should recognize object after generic close `>` directly preceding `=`', () => {
+      // Same scenario but with `object` instead of `class`.
+      const source = 'TPair<A,B>=object\n  X: A;\n  Y: B;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'object', 'end');
+    });
+
+    test('should recognize interface after generic close `>` directly preceding `=`', () => {
+      // Same scenario but with `interface`.
+      const source = 'IList<T>=interface\n  procedure Add(x: T);\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'interface', 'end');
+    });
+
+    test('should still reject class after `>=` comparison operator', () => {
+      // The existing `>=` test must continue to pass: `>` followed by `=` (where the
+      // `>` is NOT a generic close because no matching `<` exists) is a comparison
+      // operator, so the trailing `class` is not a block opener.
+      const pairs = parser.parse('begin\n  if x >= class then\nend');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
