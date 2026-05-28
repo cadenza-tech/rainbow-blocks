@@ -115,7 +115,9 @@ export function matchHeredoc(source: string, pos: number): { contentStart: numbe
         if (precedingIdent === 'class' || precedingIdent === 'module') {
           // Ensure the preceding identifier is a standalone keyword (not `myclass`,
           // `subclass`, etc.). The character before it must not be an identifier char.
-          if (identStart === 0 || !/[a-zA-Z0-9_]/.test(source[identStart - 1])) {
+          // Ruby permits non-ASCII identifier chars (e.g. `αclass` is an identifier,
+          // not the standalone keyword `class`), so use the Unicode-aware helper.
+          if (identStart === 0 || !endsWithIdentifierChar(source, identStart - 1)) {
             return null;
           }
         }
