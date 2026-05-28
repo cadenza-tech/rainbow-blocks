@@ -5330,5 +5330,61 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: endcase with invalid end-label suffix not suppressed', () => {
+    test('should pair case with endcase when followed by `: <name>` not followed by `=`', () => {
+      // Bug: `endcase : my_label` (an invalid end-label suffix on endcase, which
+      // SystemVerilog does not permit for case statements per LRM §12.5 — only
+      // begin/fork support `end : label` / `join* : label` end-label suffixes)
+      // was being treated as `endcase` used as a case_item label name. The
+      // case_item label-name suppression fired because `endcase :` matched
+      // `isFollowedByLabelColon` and an enclosing case was found, so `endcase`
+      // was suppressed and the outer `case` was left orphan.
+      //
+      // The case_item label-name pattern is `<reserved_word> : <expr>;` where
+      // `<expr>` is an assignment / statement body. The discriminator between
+      // the two interpretations is whether `=` follows the `<name>` after the
+      // colon:
+      //   - `endcase : <name> = ...;` → case_item label-name misuse (suppress).
+      //   - `endcase : <name>` not followed by `=` → invalid end-label suffix;
+      //     `endcase` is still a real close keyword and must pair with `case`.
+      const source = 'case (sel)\n  1: x = 1;\nendcase : my_label';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should pair case with endcase when followed by `: <name>;` (statement-terminator)', () => {
+      // Sanity: when `endcase : <name>` is followed by a semicolon (no
+      // assignment), the `:` cannot be the case_item label colon either, so the
+      // endcase remains a real close keyword.
+      const source = 'case (sel)\n  1: x = 1;\nendcase : my_label;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should pair case with endcase when followed by `: <name>` then end-of-file (no trailing chars)', () => {
+      // Sanity: identical behaviour at EOF with no trailing characters after
+      // the label name.
+      const source = 'case (sel)\n  default: x = 1;\nendcase : end_label';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should still suppress endcase used as case_item label name (preserved existing behavior, alt)', () => {
+      // Sanity: the original case_item label-name suppression must still fire
+      // when `endcase : <name> = <expr>;` is the case_item statement form. The
+      // assignment after `<name>` is the discriminator.
+      const source = 'module m;\n  initial case (sel)\n    endcase: x = 1;\n    default: y = 0;\n  endcase\nendmodule';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assert.ok(casePair.closeKeyword, 'case must have a closing endcase');
+      const trailingEndcaseOffset = source.lastIndexOf('endcase');
+      assert.strictEqual(
+        casePair.closeKeyword.startOffset,
+        trailingEndcaseOffset,
+        'case must pair with the trailing endcase, not the case_item label `endcase`'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
