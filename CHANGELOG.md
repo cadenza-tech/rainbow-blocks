@@ -5,6 +5,39 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.61] - 2026-05-31
+
+### Fixed
+
+- Ada: Skip `exception` intermediate on openers without a handled body
+- Ada: Skip `exit when` modifier from `select` intermediates
+- AppleScript: Treat comma-missing multi-line record key `end` as a key, not a block close
+- AppleScript: Skip colon-suffixed block middle keyword from intermediates
+- Bash: Remove phantom `do` intermediate overlapping a split `done`
+- Bash: Precompute last `]]` position to avoid `O(n²)` scan on many unclosed `[[`
+- Bash: Enforce subshell scope barrier for middle keyword attribution
+- COBOL: Skip close keyword used as a `PERFORM` paragraph reference
+- Elixir: Treat `end` as a block close after a bitstring close `>>` and `?>` char literal
+- Elixir: Keep middle keyword after a space-separated string or charlist close
+- Erlang: Recognize `catch` clause separator past a guard `catch`
+- Erlang: Skip record-field dot when finding spec declaration end
+- Fortran: Handle `;` statement separator after a `where`/`forall` construct header
+- Julia: Pair value-returning block `end` before a postfix marker via tentative close
+- Julia: Allow a block comment between `abstract`/`primitive` and `type`
+- MATLAB: Treat `end` inside an unclosed bracket on the same line as an array index
+- Octave: Guard header-required openers from `case`/`elseif` value context
+- Octave: Reject `do` followed by a numeric or string literal as a block opener
+- Pascal: Skip `record` in a comparison context inside a record
+- Pascal: Skip `record` used as a field name inside a record
+- Pascal: Skip `repeat` on the left of a `:=` assignment
+- Pascal: Skip `record` on the right of a `:=` assignment
+- Ruby: Keep the sole closing `end` after expression-position content
+- Ruby: Collect `else` after `rescue` in `def`/`class`/`module`/`do` blocks
+- Ruby: Stop attaching `then` as an intermediate in `while`/`until` blocks
+- VHDL: Correct nest level of blocks inside a single `generate` begin body
+- VHDL: Keep `process`/`block` `is` intermediate under an enclosing block-opener line
+- VHDL: Drop stray `then`/`else`/`elsif` in `for`/`while` `generate`
+
 ## [1.1.60] - 2026-05-29
 
 ### Fixed
@@ -2443,6 +2476,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.61]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.60...v1.1.61
 [1.1.60]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.59...v1.1.60
 [1.1.59]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.58...v1.1.59
 [1.1.58]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.57...v1.1.58
