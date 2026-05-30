@@ -224,6 +224,15 @@ export class PascalBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Assignment-RHS 'record': `x := record;` uses `record` as a right-hand-side
+    // expression identifier (a record type definition uses `=`, never `:=`). The
+    // comparison check above does not fire for `:=` because `:=` is not a comparison `=`,
+    // so this dedicated check is needed. Without it the spurious `record` is pushed onto
+    // the stack and the surrounding `end` closes it instead of the real enclosing block.
+    if (keyword === 'record' && this.isPrecededByAssignment(source, position, excludedRegions)) {
+      return false;
+    }
+
     // 'interface', 'class', 'object' are only block opens after '=' (type definitions)
     // e.g. TMyClass = class(TObject) ... end;
     // Not: class function Create, class procedure Destroy (modifiers)
@@ -622,6 +631,16 @@ export class PascalBlockParser extends BaseBlockParser {
       break;
     }
     return j + 1 < source.length && source[j] === ':' && source[j + 1] === '=';
+  }
+
+  // Returns true when the keyword at `position` is immediately preceded (past whitespace,
+  // newlines, and excluded regions) by a `:=` assignment operator. Used to detect a
+  // keyword used as the right-hand-side of an assignment (e.g. `x := record`) where the
+  // keyword names an expression identifier rather than opening a block.
+  private isPrecededByAssignment(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    const i = this.skipBackwardWhitespace(source, position - 1, excludedRegions);
+    // `:=` ends with `=` preceded by `:`.
+    return i >= 1 && source[i] === '=' && source[i - 1] === ':';
   }
 
   // Returns true when the first non-whitespace, non-comment character at or after `from`
