@@ -1885,6 +1885,21 @@ export class VhdlBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // With a `generate` on top of the stack, determines whether the enclosing generate construct
+  // is an if-generate. An if-generate chain stacks the control keyword once with one generate
+  // per branch ([if, generate, generate, ...]) because each `elsif/else generate` opens a fresh
+  // generate, so the control keyword is found by skipping the contiguous run of generates beneath
+  // the top. Returns true only when that underlying opener is `if`; for `for`/`while`-generate
+  // there are no `then`/`else`/`elsif` keywords (LRM 11.8) so the run resolves to `for`/`while`.
+  private isIfGenerateOnStack(stack: OpenBlock[]): boolean {
+    for (let i = stack.length - 2; i >= 0; i--) {
+      const opener = stack[i].token.value.toLowerCase();
+      if (opener === 'generate') continue;
+      return opener === 'if';
+    }
+    return false;
+  }
+
   // Custom matching to handle compound end keywords
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
@@ -1928,9 +1943,15 @@ export class VhdlBlockParser extends BaseBlockParser {
                   stack[stack.length - 1].intermediates.push(token);
                 }
               } else if (topOpener === 'generate') {
-                // Generate chain: attach to top generate's intermediates (existing behavior
-                // for `if X generate ... elsif Y generate ... else generate ... end generate`).
-                stack[stack.length - 1].intermediates.push(token);
+                // `then`/`else`/`elsif` only appear in an if-generate (LRM 11.8); for/while-generate
+                // have no such control-flow keywords. Attach the intermediate only when the enclosing
+                // generate construct is an if-generate (its control keyword is `if`). For a
+                // for/while-generate the keyword is stray (malformed/in-progress code) and absorbing
+                // it would pollute the generate's intermediates and break structure; drop it. This
+                // mirrors the `when` handling above (which checks the underlying opener is `case`).
+                if (this.isIfGenerateOnStack(stack)) {
+                  stack[stack.length - 1].intermediates.push(token);
+                }
               }
               // Otherwise drop (stray control-flow keyword for non-if/non-generate opener).
             } else if (middleKw === 'begin') {
