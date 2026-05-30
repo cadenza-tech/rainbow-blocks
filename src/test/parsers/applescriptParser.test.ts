@@ -3891,5 +3891,31 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: comma-missing multi-line record key should not pair as block_close', () => {
+    // A record entry separated by a newline alone (the preceding entry has no
+    // trailing comma) still places the keyword inside the record literal. The
+    // record-key probe previously only recognized a key when the most recent
+    // token at the keyword's brace level was a ',' or the opening '{'. When a
+    // bare/compound `end` followed a value-only entry across a newline
+    // (e.g. `{a: 1\n  end: 2}`), the probe returned false and the keyword was
+    // treated as a real block close, stealing the outer block's closer and
+    // leaving the genuine end orphan. The keyword must instead be recognized as
+    // a record key whenever the enclosing '{' is reachable at the same brace
+    // level, so the outer block keeps its closer.
+    test('should not detect bare end as block_close when used as multi-line record key without preceding comma', () => {
+      const source = 'tell app\nset r to {a: 1\nend: 2}\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'close should be the outer end tell at line 3, not the bare end record key at line 2');
+    });
+
+    test('should not detect end if as block_close when used as multi-line record key without preceding comma', () => {
+      const source = 'if true then\nset r to {a: 1\nend if: 2}\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'close should be the outer end if at line 3, not the end if record key at line 2');
+    });
+  });
+
   generateCommonTests(config);
 });
