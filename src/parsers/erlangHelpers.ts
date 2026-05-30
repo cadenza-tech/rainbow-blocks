@@ -232,7 +232,14 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       let wEnd = k + 1;
       while (wEnd < source.length && /[a-z0-9_]/i.test(source[wEnd])) wEnd++;
       const w = source.slice(k, wEnd);
-      if (depth === 0 && bracketDepth === 0 && (w === 'catch' || w === 'after' || w === 'end')) return false;
+      // 'end' at top level is a definitive boundary (it closes the enclosing try without
+      // a clause arrow, so the candidate 'catch' was an expression prefix).
+      if (depth === 0 && bracketDepth === 0 && w === 'end') return false;
+      // 'catch'/'after' do NOT bail out here: before the clause arrow '->' is reached we are
+      // still inside the clause head/guard, where 'catch' (e.g. `when catch h(R)`) is an
+      // expression prefix, not the next try section. Keep scanning so the top-level '->' that
+      // confirms the clause pattern is still found. A real next-section 'catch'/'after' only
+      // appears after the '->' (which already returned true above), so it is never reached.
       // Track block nesting: openers increase depth, end decreases depth
       if (w === 'if' || w === 'case' || w === 'receive' || w === 'try' || w === 'begin' || w === 'fun' || w === 'maybe') {
         depth++;
