@@ -76,6 +76,9 @@ export class BashBlockParser extends BaseBlockParser {
   // start. Populated by findExcludedRegions so isInsideDoubleBracket answers in
   // O(log N) via binary search instead of walking the source backward each call.
   private doubleBracketRegions: ExcludedRegion[] = [];
+  // Start offset of the last `]]` in the most recently parsed source, or -1.
+  // Lets hasDoubleBracketClose answer in O(1) instead of scanning to EOF per `[[`.
+  private lastDoubleBracketCloseStart = -1;
   // Per-parse cache: innermost enclosing unmatched `(` offset for every position.
   // Populated by tokenize() before super.tokenize() so isInsideExtglob and the
   // array-literal check in isAtCommandPosition answer in O(1) instead of O(N).
@@ -111,6 +114,17 @@ export class BashBlockParser extends BaseBlockParser {
     // Track [[ ]] depth: # is not a comment character inside [[ ]] conditional expressions
     let doubleBracketDepth = 0;
 
+    // Pre-compute the last `]]` start once (O(N)) so the per-`[[`
+    // hasDoubleBracketClose check is O(1). Scanning to EOF for every `[[`
+    // made a file with many unclosed `[[` O(N^2).
+    this.lastDoubleBracketCloseStart = -1;
+    for (let k = source.length - 2; k >= 0; k--) {
+      if (source[k] === ']' && source[k + 1] === ']') {
+        this.lastDoubleBracketCloseStart = k;
+        break;
+      }
+    }
+
     while (i < source.length) {
       // Track [[ and ]] to maintain doubleBracketDepth
       // Only track [[ at command position to avoid false positives (e.g., echo [[ would poison # detection)
@@ -121,7 +135,7 @@ export class BashBlockParser extends BaseBlockParser {
         i + 1 < source.length &&
         source[i + 1] === '[' &&
         this.isDoubleBracketCommand(source, i) &&
-        this.hasDoubleBracketClose(source, i + 2)
+        this.hasDoubleBracketClose(i + 2)
       ) {
         // Record the content region start only when entering double-bracket mode
         // from depth 0 (the common, non-nested case).
@@ -637,14 +651,11 @@ export class BashBlockParser extends BaseBlockParser {
 
   // Checks whether a matching `]]` exists at or after `from`.
   // findExcludedRegions uses this so an unclosed `[[` does not poison `#`/string
-  // detection for the rest of the source.
-  private hasDoubleBracketClose(source: string, from: number): boolean {
-    for (let k = from; k + 1 < source.length; k++) {
-      if (source[k] === ']' && source[k + 1] === ']') {
-        return true;
-      }
-    }
-    return false;
+  // detection for the rest of the source. Reads the pre-computed last-`]]` offset
+  // (see findExcludedRegions) for an O(1) answer; a per-`[[` scan to EOF made a
+  // file with many unclosed `[[` O(N^2).
+  private hasDoubleBracketClose(from: number): boolean {
+    return this.lastDoubleBracketCloseStart >= from;
   }
 
   // Checks if position is inside [[ ... ]] conditional expression
