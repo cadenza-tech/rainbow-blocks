@@ -2569,6 +2569,40 @@ end package;`;
     });
   });
 
+  suite('Regression: process/block is intermediate under a block-opener-with-is line', () => {
+    // `process is` (LRM 11.3) and `block is` (LRM 11.2) open the block declarative part. When an
+    // enclosing block-opener line (e.g. `architecture ... is`) sits above, the bare-word upward scan
+    // wrongly skipped this `is`, dropping it from the process/block intermediates. The `is` must
+    // remain alongside `begin`.
+    test('should keep is intermediate for process is inside architecture', () => {
+      const source = 'architecture a of t is\nbegin\n  process is\n  begin\n    null;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const processBlock = findBlock(pairs, 'process');
+      assertIntermediates(processBlock, ['is', 'begin']);
+    });
+
+    test('should keep is intermediate for labeled process is inside architecture', () => {
+      const source = 'architecture a of t is\nbegin\n  proc1: process is\n  begin\n    null;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const processBlock = findBlock(pairs, 'process');
+      assertIntermediates(processBlock, ['is', 'begin']);
+    });
+
+    test('should keep is intermediate for labeled block is inside architecture', () => {
+      const source = 'architecture a of t is\nbegin\n  b: block is\n  begin\n    null;\n  end block;\nend architecture;';
+      const pairs = parser.parse(source);
+      const blockBlock = findBlock(pairs, 'block');
+      assertIntermediates(blockBlock, ['is', 'begin']);
+    });
+
+    test('should not add is intermediate for process with sensitivity list and no is', () => {
+      const source = 'architecture a of t is\nbegin\n  process(clk)\n  begin\n    null;\n  end process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const processBlock = findBlock(pairs, 'process');
+      assertIntermediates(processBlock, ['begin']);
+    });
+  });
+
   suite('Regression: component instantiation vs declaration', () => {
     test('should not treat component instantiation with label as block opener', () => {
       // Bug: 'inst: component ...' with simple 'end' causes component/end pairing,
