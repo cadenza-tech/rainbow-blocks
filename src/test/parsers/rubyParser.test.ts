@@ -5219,5 +5219,25 @@ end`;
     });
   });
 
+  suite('Regression: then must not attach as intermediate in while/until blocks', () => {
+    test('should not collect then as intermediate in a while block', () => {
+      const source = 'while c then\n  body\nend';
+      const pairs = parser.parse(source);
+      assertIntermediates(findBlock(pairs, 'while'), []);
+    });
+
+    test('should not collect then as intermediate in an until block', () => {
+      const source = 'until c then\n  body\nend';
+      const pairs = parser.parse(source);
+      assertIntermediates(findBlock(pairs, 'until'), []);
+    });
+
+    test('should still collect then as intermediate in an if block', () => {
+      const source = 'if c then\n  a\nend';
+      const pairs = parser.parse(source);
+      assertIntermediates(findBlock(pairs, 'if'), ['then']);
+    });
+  });
+
   generateCommonTests(config);
 });
