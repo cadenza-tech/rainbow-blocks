@@ -50,6 +50,13 @@ const COMPOUND_END_TYPES = [
   'view'
 ];
 
+// Block openers whose `is` directly opens the block's declarative part, with the opener keyword
+// standing alone on the statement (no name/header in between). `process is` (LRM 11.3, sensitivity
+// list omitted) and `block is` (LRM 11.2) both take an optional `is` that begins the declarative
+// part; that `is` is a legitimate block intermediate. Neither keyword is an attribute entity_class
+// (LRM 7.2), so a bare-word match here never collides with attribute_specification detection.
+const STANDALONE_IS_BLOCK_OPENERS = new Set(['process', 'block']);
+
 // Pattern to match compound end keywords (case insensitive)
 // Only allow spaces/tabs between 'end' and the type keyword (same line only)
 // Pattern includes 'postponed process' for 'end postponed process' syntax,
@@ -1615,7 +1622,17 @@ export class VhdlBlockParser extends BaseBlockParser {
         if (!isSubprogramHeaderIs && this.isPrecededByMultiLineSubprogramHeader(source, startOffset, excludedRegions)) {
           isSubprogramHeaderIs = true;
         }
-        if (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore) || /^\w+\s*$/.test(stmtBefore)) {
+        // `process is` / `block is` (optionally label-prefixed: `b: block is`): the opener keyword
+        // stands alone immediately before this `is`, which opens the block's declarative part
+        // (LRM 11.2/11.3). This `is` is a legitimate block intermediate, so it must skip the bare-word
+        // upward scan below. Without this guard the scan can hit an enclosing block-opener line carrying
+        // its own `is` (e.g. `architecture ... is`) and wrongly drop this `is` from the intermediates.
+        const stmtAfterLabel = stmtBefore.replace(/^\w+\s*:\s*/, '').trimEnd();
+        const isStandaloneBlockOpenerIs = STANDALONE_IS_BLOCK_OPENERS.has(stmtAfterLabel);
+        if (
+          !isStandaloneBlockOpenerIs &&
+          (stmtBefore.length === 0 || /^\(/.test(stmtBefore) || /:\s*\w+\s*$/.test(stmtBefore) || /^\w+\s*$/.test(stmtBefore))
+        ) {
           let skipThisIs = false;
           let scanPos = lineStart - 1;
           if (scanPos >= 0 && source[scanPos] === '\n') scanPos--;
