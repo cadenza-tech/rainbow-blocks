@@ -89,6 +89,15 @@ export class PascalBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Field declaration: `record: Integer;` inside a record uses `record` as a field
+    // name, not a nested record opener. Detect `record:` (followed by ':' that is not
+    // ':=') and reject the open. A real record opener is followed by field declarations,
+    // 'case', or 'end' — never an immediate ':' — so a general "`record:` is never a
+    // block opener" rule is safe. Mirrors the `end:` field-declaration close guard.
+    if (keyword === 'record' && this.isFollowedByColonNotAssign(source, position + keyword.length, excludedRegions)) {
+      return false;
+    }
+
     // Case label: case X of begin: Foo; end / case X of try: Foo; end
     // A keyword used as a case-label has '...of'/'...;'/'...,' before and ':' after.
     // (Excluding ':=' assignment.)
