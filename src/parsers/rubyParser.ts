@@ -74,10 +74,11 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
 const METHOD_LIKE_REGEX_KEYWORDS = new Set(['p', 'pp', 'puts', 'print', 'warn', 'fail', 'abort', 'raise']);
 
 // Open keywords whose blocks can take a `then` clause separator.
-// `then` is only a section boundary for if/unless/while/until/case. In
-// def/class/module/begin/for/do/while-until bodies a bare `then` is not a
-// syntactic element, so it must not be collected as an intermediate.
-const THEN_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 'while', 'until', 'case']);
+// `then` is only a section boundary for if/unless/case. while/until use `do`/`;`/
+// newline as the body separator (not `then`), and def/class/module/begin/for/do
+// bodies have no bare `then`, so in all those a `then` must not be collected as an
+// intermediate.
+const THEN_TAKING_OPEN_KEYWORDS: ReadonlySet<string> = new Set(['if', 'unless', 'case']);
 
 // Open keywords whose blocks can take a `when` branch. `when` belongs to `case`
 // only. A bare `when` inside a do/loop/def/... body is not a syntactic element,
