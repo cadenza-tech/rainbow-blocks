@@ -364,6 +364,19 @@ export class ErlangBlockParser extends BaseBlockParser {
         if (j > 0 && source[j - 1] === '.') {
           continue;
         }
+        // Record-field access dot: '.' between identifier characters (e.g. Rec#state.field
+        // or atom.atom inside a type expression). A real declaration terminator is followed
+        // by whitespace/EOL/EOF, not by an identifier-leading character. Mirror the same
+        // exemption that isCatchFollowedByClausePattern uses so a record-field dot does not
+        // end the -spec prematurely (which would expose a following type-expression
+        // `fun() -> ... end` as a spurious real block).
+        if (j > 0) {
+          const prev = source[j - 1];
+          const next = j + 1 < source.length ? source[j + 1] : '';
+          if (/[a-zA-Z0-9_]/.test(prev) && /[a-zA-Z_]/.test(next)) {
+            continue;
+          }
+        }
         return j;
       }
       // Boundary detection: a line break at the top level (not inside a string/comment)
