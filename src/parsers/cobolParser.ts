@@ -398,14 +398,17 @@ export class CobolBlockParser extends BaseBlockParser {
         }
       }
       const isClose = match[0].length > lowerKeyword.length;
-      // Skip reserved-word opener used as a paragraph name in `PERFORM <reserved>.`.
-      // The reserved word is the operand of a paragraph-call PERFORM; the period
-      // terminates the statement. Without this skip, the inner reserved word (IF
-      // in `PERFORM IF.`) is pushed onto the opener stack here and steals the
-      // matching END-IF from the real opener (or, when no real opener exists,
-      // produces a phantom block pair with the trailing END-IF). The PERFORM
-      // verb itself is rejected by the perform-handling block below.
-      if (!isClose && this.isPerformParagraphName(source, pos, match[0].length)) {
+      // Skip a reserved-word opener OR closer used as a paragraph name in
+      // `PERFORM <reserved>.`. The reserved word is the operand of a
+      // paragraph-call PERFORM; the period terminates the statement. On the
+      // opener side, `PERFORM IF.` would otherwise push the inner IF onto the
+      // opener stack and steal the matching END-IF from the real opener (or
+      // produce a phantom pair with the trailing END-IF). The close side is
+      // symmetric: `PERFORM END-IF.` uses END-IF as the paragraph reference, so
+      // it must not be added to the closer set — otherwise a preceding IF pairs
+      // with it (phantom IF/END-IF pair). The PERFORM verb itself is rejected by
+      // the perform-handling block below.
+      if (this.isPerformParagraphName(source, pos, match[0].length)) {
         continue;
       }
       if (isClose) {
@@ -740,6 +743,14 @@ export class CobolBlockParser extends BaseBlockParser {
       }
       if (token.type === 'block_open' || token.type === 'block_close') {
         if (this.isPrecedingWordDataNameVerbSameLine(source, token.startOffset)) return false;
+        // Drop a reserved-word opener / closer used as the paragraph reference of
+        // a paragraph-call PERFORM (`PERFORM IF.`, `PERFORM END-IF.`). The period
+        // terminates the statement, so the keyword is an operand, not a block
+        // boundary. computeValidPositions already excludes these from the
+        // opener/closer sets; this mirrors that exclusion in the token stream so
+        // a `PERFORM END-IF.` close keyword does not survive to matchBlocks and
+        // pair with a preceding opener.
+        if (this.isPerformParagraphName(source, token.startOffset, token.value.length)) return false;
       }
       return true;
     });
