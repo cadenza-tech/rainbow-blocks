@@ -178,8 +178,15 @@ export class RubyBlockParser extends BaseBlockParser {
             if (token.value === 'when' && !WHEN_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
               break;
             }
-            if (token.value === 'else' && !ELSE_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
-              break;
+            // 'else' is a clause separator for if/unless/case/begin directly. For
+            // def/class/module/do bodies it is valid only after a 'rescue' clause (the
+            // begin-less rescue's else, which runs when no exception was raised); a bare
+            // 'else' without a preceding rescue there is a syntax error and is dropped.
+            if (token.value === 'else') {
+              const elseAllowed =
+                ELSE_TAKING_OPEN_KEYWORDS.has(topKeyword) ||
+                (RESCUE_ENSURE_TAKING_OPEN_KEYWORDS.has(topKeyword) && stack[stack.length - 1].intermediates.some((t) => t.value === 'rescue'));
+              if (!elseAllowed) break;
             }
             if (token.value === 'elsif' && !ELSIF_TAKING_OPEN_KEYWORDS.has(topKeyword)) {
               break;
