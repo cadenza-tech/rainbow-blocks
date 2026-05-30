@@ -3423,6 +3423,42 @@ END-PERFORM`;
       assert.strictEqual(findBlock(pairs, 'IF').closeKeyword?.value, 'END-IF');
       assert.strictEqual(findBlock(pairs, 'PERFORM').closeKeyword?.value, 'END-PERFORM');
     });
+
+    // Bug: the opener-side reject (`PERFORM IF.` treats IF as a paragraph name)
+    // was not mirrored on the close side. `PERFORM END-IF.` used the END-IF as a
+    // paragraph reference (the period terminates the paragraph-call PERFORM), but
+    // the parser still tokenised END-IF as a live block close, so a preceding IF
+    // wrongly paired with it (phantom IF/END-IF pair). The close keyword used as a
+    // PERFORM paragraph operand must be left orphan, symmetric to the opener side.
+    test('should not tokenise reserved-word paragraph name as block close in PERFORM END-IF.', () => {
+      const source = 'IF X\n  DISPLAY A\nPERFORM END-IF.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair preceding EVALUATE with END-EVALUATE used as PERFORM paragraph reference', () => {
+      const source = 'EVALUATE X\nPERFORM END-EVALUATE.';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair IF with END-IF when PERFORM is on a separate line', () => {
+      // Guard: `IF X\nPERFORM\nEND-IF` has the END-IF on its own line, so it is a
+      // real block close (not a PERFORM paragraph operand). The IF must still pair
+      // with END-IF — the close-side reject must only fire when PERFORM and the
+      // close keyword sit on the same line ending in `.`.
+      const source = 'IF X\nPERFORM\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should still pair PERFORM with END-PERFORM for an empty inline PERFORM', () => {
+      // Guard: `PERFORM\nEND-PERFORM` is an empty inline PERFORM with END-PERFORM on
+      // its own line. The close-side reject must not consume it.
+      const source = 'PERFORM\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
   });
 
   suite('Regression: ALSO walk-back must verify REPLACE prefix', () => {
