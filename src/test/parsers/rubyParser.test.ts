@@ -5205,5 +5205,19 @@ end`;
     });
   });
 
+  suite('Regression: else after rescue in def/class/module/do blocks', () => {
+    test('should collect else as intermediate after rescue in a def block', () => {
+      const source = 'def m\n  body\nrescue E\n  h\nelse\n  ok\nensure\n  c\nend';
+      const pairs = parser.parse(source);
+      assertIntermediates(findBlock(pairs, 'def'), ['rescue', 'else', 'ensure']);
+    });
+
+    test('should not collect a bare else without a preceding rescue in a def block', () => {
+      const source = 'def m\n  else\nend';
+      const pairs = parser.parse(source);
+      assertIntermediates(findBlock(pairs, 'def'), []);
+    });
+  });
+
   generateCommonTests(config);
 });
