@@ -3459,6 +3459,37 @@ end package;`;
       assert.strictEqual(beginPair.nestLevel, 1, 'synthetic begin body should be nestLevel 1');
       assertNestLevel(pairs, 'while', 0);
     });
+
+    // An ordinary block (process/case/loop) nested inside a synthetic begin/end body of a
+    // single generate must be exactly one level deeper than the body. The control prefix
+    // (if/for/while) and the generate share the same `end generate` token, so the base
+    // recalculation double-counts the prefix and reports the inner block one level too deep.
+    test('should give nestLevel 2 to process inside if generate begin body', () => {
+      const source = 'g: if c generate\nbegin\n  process begin null; end process;\nend;\nend generate;';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      assert.strictEqual(beginPair.nestLevel, 1, 'synthetic begin body should be nestLevel 1');
+      const processPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.ok(processPair, 'should have a process block');
+      assert.strictEqual(processPair.nestLevel, 2, 'process inside begin body should be nestLevel 2');
+      assertNestLevel(pairs, 'if', 0);
+      const generatePair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'generate');
+      assert.ok(generatePair);
+      assert.strictEqual(generatePair.nestLevel, 1, 'generate sibling of if should be nestLevel 1');
+    });
+
+    test('should give nestLevel 2 to process inside for generate begin body', () => {
+      const source = 'g: for i in 0 to 3 generate\nbegin\n  process begin null; end process;\nend;\nend generate;';
+      const pairs = parser.parse(source);
+      const beginPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.ok(beginPair, 'should have a begin/end body pair');
+      assert.strictEqual(beginPair.nestLevel, 1, 'synthetic begin body should be nestLevel 1');
+      const processPair = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'process');
+      assert.ok(processPair, 'should have a process block');
+      assert.strictEqual(processPair.nestLevel, 2, 'process inside begin body should be nestLevel 2');
+      assertNestLevel(pairs, 'for', 0);
+    });
   });
 
   suite('Regression 2026-05-15: component instantiation across newlines and comments', () => {
