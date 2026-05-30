@@ -4097,5 +4097,24 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-31: `record:` field declaration inside record', () => {
+    test('should not treat record-body `record:` field declaration as block opener', () => {
+      // `record: Integer;` inside a record uses `record` as a field name, not a nested
+      // record block opener. Without an isValidBlockOpen guard the inner `record` is
+      // pushed onto the stack and the surrounding `end` closes it instead of the outer
+      // record, leaving the outer `record` orphan.
+      const source = `type T = record
+  record: Integer;
+end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      // The outer record must pair with the `end`, and it is the only record token left.
+      const outerRecordOffset = source.indexOf('record');
+      assert.strictEqual(recordPairs[0].openKeyword.startOffset, outerRecordOffset, 'the outer record must be the paired opener');
+      assert.strictEqual(recordPairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
