@@ -3254,5 +3254,30 @@ end`;
     });
   });
 
+  suite('Value-context guard for header-required openers after case/elseif', () => {
+    test('should not treat for after case as a block opener', () => {
+      // `case for x` uses `for x` as a (invalid) value operand of the case label;
+      // `for` is not a block opener here, so the outer switch must keep its end.
+      const source = 'switch x\n  case for x\n    body\nend';
+      const pairs = parser.parse(source);
+      const switchPair = findBlock(pairs, 'switch');
+      assertIntermediates(switchPair, ['case']);
+    });
+
+    test('should not treat while after case as a block opener', () => {
+      const source = 'switch x\n  case while x\n    body\nend';
+      const pairs = parser.parse(source);
+      const switchPair = findBlock(pairs, 'switch');
+      assertIntermediates(switchPair, ['case']);
+    });
+
+    test('should still treat a genuine for loop in a case body as a block opener', () => {
+      const source = 'switch x\n  case 1\n    for i = 1:3\n      body\n    end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertSingleBlock([findBlock(pairs, 'for')], 'for', 'end', 1);
+    });
+  });
+
   generateCommonTests(config);
 });
