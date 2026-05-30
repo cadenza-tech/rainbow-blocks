@@ -808,6 +808,20 @@ unterminated heredoc`;
       assert.doesNotThrow(() => parser.parse(source));
     });
 
+    test('should scan many unclosed [[ in linear time, not quadratic', () => {
+      // Each command-position `[[` with no matching `]]` previously triggered a
+      // scan to EOF in hasDoubleBracketClose, making findExcludedRegions O(N^2)
+      // (50000 unclosed `[[` took ~20s). The pre-computed last-`]]` offset keeps
+      // it linear. Pure performance fix: the BlockPair set is unchanged (there
+      // are no block keywords in this input, so zero pairs either way).
+      const source = '; [[ a '.repeat(50000);
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.strictEqual(pairs.length, 0, 'unclosed [[ with no block keywords must produce no pairs');
+      assert.ok(elapsed < 2500, `parsing 50000 unclosed [[ took ${elapsed}ms; expected < 2500ms (linear, not quadratic)`);
+    });
+
     test('should not stack overflow on a long run of environment variable prefixes', () => {
       // isAtCommandPosition recurses once per `VAR=value` assignment prefix.
       let prefixes = '';
