@@ -808,6 +808,14 @@ export function isBlockWhereOrForall(source: string, position: number, keyword: 
       continue;
     }
 
+    // Semicolon = statement separator completing the construct header (block form).
+    // Fortran 2008+ accepts `where (mask); ...; end where` and `forall (idx); ...; end forall`,
+    // mirroring `if (x) then; ...; end if`. A bare space-separated single-line form
+    // (`where (mask) a = b`) still falls through to the rejection below.
+    if (ch === ';') {
+      return true;
+    }
+
     // Non-whitespace content after condition = single-line form
     return false;
   }
