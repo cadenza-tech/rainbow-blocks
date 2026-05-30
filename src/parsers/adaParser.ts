@@ -1342,6 +1342,20 @@ export class AdaBlockParser extends BaseBlockParser {
               ) {
                 stack[stack.length - 1].intermediates.push(token);
               }
+            } else if (middleKw === 'exception') {
+              // Ada LRM 11.2: an exception handler section can only terminate a
+              // handled_sequence_of_statements, i.e. the body of a begin block,
+              // an `accept ... do` body, or an extended `return ... do` body.
+              // if / loop / for / while / case / select / record bodies cannot
+              // carry a handler, so an `exception` keyword observed while one of
+              // those is the open block is not a handler section and must not be
+              // recorded as that block's intermediate. In valid Ada the stack
+              // top when a real handler section appears is always one of these
+              // openers; keeping the whitelist tight avoids painting a stray
+              // `exception` declaration / raise target as a handler.
+              if (topOpener === 'begin' || topOpener === 'accept' || topOpener === 'return') {
+                stack[stack.length - 1].intermediates.push(token);
+              }
             } else {
               stack[stack.length - 1].intermediates.push(token);
             }
