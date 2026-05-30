@@ -199,14 +199,18 @@ export class JuliaBlockParser extends BaseBlockParser {
       return this.hasMatchingOpenerInsideBracket(filtered, token, enclosing.open, enclosing.close, matchingOpener);
     });
 
-    // Record block_close `end` tokens followed by a binary operator (e.g. `end + 1`).
-    // These stay block_close candidates but are only used by matchBlocks to rescue an
-    // otherwise-unmatched opener (see tentativeCloseOffsets). Indexing-bracket `end`s
-    // (lastindex) are already filtered out by isValidBlockClose, so any block_close `end`
-    // reaching here that is followed by an operator is an outside-brackets block terminator.
+    // Record "tentative" block_close `end` tokens: those followed by a binary operator
+    // (e.g. `end + 1`) or by a postfix marker (e.g. `end.foo`, `end(x)`, `end[1]`, `end{T}`,
+    // `end?`). These stay block_close candidates but are only used by matchBlocks to rescue
+    // an otherwise-unmatched opener (see tentativeCloseOffsets): a value-returning block
+    // (`begin x end.foo()`) closes its opener with this `end`, while an invalid bare
+    // `end.foo`/`end[x]` (no preceding unmatched opener that needs it) is left orphaned.
+    // Indexing-bracket `end`s (lastindex) are already filtered out by isValidBlockClose, so
+    // any block_close `end` reaching here is an outside-brackets block terminator.
     this.tentativeCloseOffsets = new Set<number>();
     for (const token of filteredBracketAware) {
-      if (token.type === 'block_close' && this.isFollowedByBinaryOperator(source, token.startOffset, excludedRegions)) {
+      if (token.type !== 'block_close') continue;
+      if (this.isFollowedByBinaryOperator(source, token.startOffset, excludedRegions) || isFollowedByPostfixIndexMarker(source, token.startOffset)) {
         this.tentativeCloseOffsets.add(token.startOffset);
       }
     }
@@ -477,20 +481,23 @@ export class JuliaBlockParser extends BaseBlockParser {
     if (this.isPrecededByBinaryOperator(source, position, excludedRegions)) {
       return false;
     }
-    // `end` immediately followed by a postfix index marker (`?`, `(`, `[`, `,`, or
-    // `.<letter>` field access) is being used as a value (lastindex-style). Outside
-    // indexing brackets this is invalid Julia syntax, but treating it as block_close
-    // would mis-pair the surrounding block's real `end`. See isFollowedByPostfixIndexMarker
-    // for the broadcast-vs-field-access distinction (`.+` stays a block-close marker).
-    if (isFollowedByPostfixIndexMarker(source, position)) {
-      return false;
-    }
-    // Note: `end` followed by a binary operator outside indexing brackets is NOT rejected
-    // here. A block-terminating `end` whose block returns a value (e.g. `begin...end + 1`,
-    // `if c a else b end - 1`, `let...end * 2`) is a legitimate operand and must stay a
-    // block_close candidate so it can pair with its opener. The invalid bare-`end` form
-    // (`if a\n end!=2\nend`) is distinguished in matchBlocks: such an operator-followed
-    // `end` is only used to close an opener that would otherwise be left unmatched.
+    // Note: `end` immediately followed by a postfix marker (`(`, `[`, `{`, `?`, or
+    // `.<letter>` field access) outside indexing brackets is NOT rejected here. When the
+    // block it terminates returns a value (e.g. `begin x end.foo()`, `if c 1 else 2 end[1]`,
+    // `let x=1; x end[1]`, `map(xs) do x; x; end[1]`), the postfix marker applies to that
+    // value `(begin x end).foo()`, so the `end` is the block's real close and must stay a
+    // block_close candidate. The invalid bare-`end` form (`function f()\n end[x]\nend`,
+    // where no preceding unmatched opener needs this `end`) is distinguished in matchBlocks:
+    // such a postfix-followed `end` is only used to close an opener that would otherwise be
+    // left unmatched. See isFollowedByPostfixIndexMarker for the broadcast-vs-field-access
+    // distinction (`.+` stays a plain block-close marker handled below).
+    //
+    // Likewise, `end` followed by a binary operator outside indexing brackets is NOT
+    // rejected here. A block-terminating `end` whose block returns a value (e.g.
+    // `begin...end + 1`, `if c a else b end - 1`, `let...end * 2`) is a legitimate operand
+    // and must stay a block_close candidate so it can pair with its opener. The invalid
+    // bare-`end` form (`if a\n end!=2\nend`) is distinguished in matchBlocks the same way:
+    // such an operator-followed `end` is only used to close an otherwise-unmatched opener.
     return true;
   }
 
