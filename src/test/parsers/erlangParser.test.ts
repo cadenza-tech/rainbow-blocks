@@ -3568,5 +3568,31 @@ foo() ->
     });
   });
 
+  suite('Regression: findDeclarationEndingPeriod must not treat record-field dot as terminator', () => {
+    // Bug: findDeclarationEndingPeriod stops the forward scan at the first top-level '.'.
+    // A record-field access dot inside a type expression (e.g. `a.b` for Rec#r.field-style
+    // or atom.atom in macros) has identifier characters on both sides and is NOT a
+    // declaration-ending period. Treating it as a terminator ends the -spec prematurely, so
+    // a `fun() -> ok end` that follows is wrongly parsed as a real anonymous-function block
+    // instead of being skipped as part of the spec type expression. The same surrounding-
+    // character exemption that isCatchFollowedByClausePattern uses applies here.
+    test('should not terminate spec at a record-field dot between identifier characters', () => {
+      const source = '-spec f() -> a.b, fun() -> ok end.';
+      const pairs = parser.parse(source);
+      // The whole -spec is one declaration terminated by the final '.', so the fun/end inside
+      // it is a type expression, not a real block. No block pair must be produced.
+      assertNoBlocks(pairs);
+    });
+
+    test('should still terminate spec at a real period followed by a function head', () => {
+      // Guard against over-broad exemption: a true declaration-ending '.' (followed by a
+      // newline + function head) must still terminate the spec so the following real
+      // begin/end block is detected.
+      const source = '-spec f() -> integer().\ng() -> begin ok end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
