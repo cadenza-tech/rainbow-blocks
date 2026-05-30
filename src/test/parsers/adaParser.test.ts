@@ -4736,5 +4736,21 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-31: exit-when modifier must not attach as a select intermediate', () => {
+    test('should not record an exit-when when as a select alternative guard', () => {
+      const source = 'select\n  accept A;\n  exit when X;\nor\n  accept B;\nend select;';
+      const pairs = parser.parse(source);
+      const selectBlock = findBlock(pairs, 'select');
+      assertIntermediates(selectBlock, ['or']);
+    });
+
+    test('should still record a genuine select alternative guard when', () => {
+      const source = 'select\n  when Cond => accept A;\nor\n  accept B;\nend select;';
+      const pairs = parser.parse(source);
+      const selectBlock = findBlock(pairs, 'select');
+      assertIntermediates(selectBlock, ['when', 'or']);
+    });
+  });
+
   generateCommonTests(config);
 });
