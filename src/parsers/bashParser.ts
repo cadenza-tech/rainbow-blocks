@@ -740,6 +740,13 @@ export class BashBlockParser extends BaseBlockParser {
     // super.tokenize() misses these because the keyword text is not contiguous.
     const splitTokens = this.findSplitKeywordTokens(source, excludedRegions);
     if (splitTokens.length > 0) {
+      // A split keyword such as `do\<newline>ne` (the `done` close) starts with the
+      // shorter keyword `do`, which the regex tokenizer already matched as a
+      // standalone token sharing the split token's start offset. That partial token
+      // physically overlaps the synthesized split token, producing a duplicate
+      // (e.g. a phantom `do` intermediate on top of the `done` close span). Drop any
+      // existing token fully contained within a split token's source span.
+      tokens = tokens.filter((token) => !this.isContainedInSplitToken(token, splitTokens));
       tokens.push(...splitTokens);
     }
 
@@ -889,6 +896,20 @@ export class BashBlockParser extends BaseBlockParser {
 
     // Sort by position
     return tokens.sort((a, b) => a.startOffset - b.startOffset);
+  }
+
+  // Returns true when `token` lies fully within the source span of any split
+  // keyword token. The regex tokenizer can match a split keyword's leading
+  // sub-keyword as a standalone token (e.g. the `do` of a `do\<newline>ne`
+  // close), which then overlaps the synthesized split token; such partial
+  // tokens are dropped so the split token alone represents the keyword.
+  private isContainedInSplitToken(token: Token, splitTokens: Token[]): boolean {
+    for (const split of splitTokens) {
+      if (token.startOffset >= split.startOffset && token.endOffset <= split.endOffset) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Detects keywords split across `\<newline>` line continuations and returns
