@@ -3279,5 +3279,24 @@ end`;
     });
   });
 
+  suite('do followed by numeric or string literal is not a block opener', () => {
+    test('should not treat do followed by a number as a block opener', () => {
+      // `do 5` is an implicit-multiplication operand / command-syntax argument, not a
+      // do/until opener; the real do/until and the enclosing function must still pair.
+      const source = 'function f\n  do 5\n  do\n    body\n  until x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertSingleBlock([findBlock(pairs, 'do')], 'do', 'until', 1);
+      assertSingleBlock([findBlock(pairs, 'function')], 'function', 'end');
+    });
+
+    test('should not treat do followed by a double-quoted string as a block opener', () => {
+      const source = 'function f\n  do "s"\n  do\n    body\n  until x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertSingleBlock([findBlock(pairs, 'do')], 'do', 'until', 1);
+    });
+  });
+
   generateCommonTests(config);
 });
