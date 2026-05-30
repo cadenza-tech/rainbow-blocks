@@ -84,6 +84,62 @@ export function computeBracketDepthAtPos(source: string, excludedRegions: Exclud
   return depthAtPos;
 }
 
+// Pre-computes, for every position in source, the number of currently-open
+// brackets ((), [], {}) that were opened earlier on the SAME logical line as that
+// position and are still unclosed at it. Unlike computeBracketDepthAtPos (which
+// counts only balanced pairs), this counts UNCLOSED openers: an `end` inside `A(end`
+// is an array-index `end(operand)` even though the `(` is never closed, so it must
+// not be treated as a block close. Restricting the count to openers on the same
+// logical line keeps the next-line case (`foo(\nend`) — where the `end` is the real
+// block close — unaffected. Brackets inside excluded regions are ignored.
+// Single forward pass with an opener stack: O(source.length).
+export function computeUnclosedBracketDepthOnLine(source: string, excludedRegions: ExcludedRegion[], statementStarts: Int32Array): Int32Array {
+  const len = source.length;
+  const depthAtPos = new Int32Array(len + 1);
+  // Stack of opener offsets, monotonically increasing. baseIndex is the first stack
+  // index whose opener lies on the current logical line; entries below it were opened
+  // on an earlier logical line and never count toward the current line's depth.
+  const openerStack: number[] = [];
+  let baseIndex = 0;
+  let lineStartForCount = -1;
+  let i = 0;
+  while (i < len) {
+    const lineStart = statementStarts[i];
+    if (lineStart !== lineStartForCount) {
+      lineStartForCount = lineStart;
+      // Drop openers opened before this logical line: offsets only increase, so they
+      // can never re-enter the same-line window. Advancing baseIndex is O(1) amortized.
+      while (baseIndex < openerStack.length && openerStack[baseIndex] < lineStart) {
+        baseIndex++;
+      }
+    }
+    if (isInExcludedRegion(i, excludedRegions)) {
+      const region = findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        const depth = openerStack.length - baseIndex;
+        for (let p = i; p < region.end && p < len; p++) {
+          depthAtPos[p] = depth;
+        }
+        i = region.end;
+        continue;
+      }
+    }
+    depthAtPos[i] = openerStack.length - baseIndex;
+    const ch = source[i];
+    if (ch === '(' || ch === '[' || ch === '{') {
+      openerStack.push(i);
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      openerStack.pop();
+      if (baseIndex > openerStack.length) {
+        baseIndex = openerStack.length;
+      }
+    }
+    i++;
+  }
+  depthAtPos[len] = openerStack.length - baseIndex;
+  return depthAtPos;
+}
+
 // Returns true when the physical line break at position `nlPos` is immediately
 // preceded by a `...` (or Octave `\`) line continuation. matchSingleLineComment
 // ends a `...` excluded region at the newline start, so a region whose `end`

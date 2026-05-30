@@ -3,7 +3,7 @@
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
 import { BaseBlockParser } from './baseParser';
 import type { LogicalLineInfo } from './matlabCacheHelpers';
-import { computeBracketDepthAtPos, computeLogicalLineInfo, computeStatementStarts } from './matlabCacheHelpers';
+import { computeBracketDepthAtPos, computeLogicalLineInfo, computeStatementStarts, computeUnclosedBracketDepthOnLine } from './matlabCacheHelpers';
 import { isBlockCommentStart, matchBlockComment, matchDoubleQuotedString, matchMatlabString } from './matlabExcluded';
 import {
   isAtLineStartForSectionKeyword,
@@ -47,6 +47,14 @@ export class MatlabBlockParser extends BaseBlockParser {
   // is in progress (defensive: callers fall back to the slow source walk in that case).
   // Avoids the O(N^2) regression when many `end` tokens appear without enclosing brackets.
   private bracketDepthAtPos: Int32Array | null = null;
+  // Per-position UNCLOSED-bracket depth cache restricted to the current logical line:
+  // unclosedBracketDepthOnLineAtPos[p] is the number of `(`/`[`/`{` opened earlier on
+  // the same logical line as p and still unclosed at p. Populated by tokenize() before
+  // any isValidBlockClose call. Lets isInsideParensOrBrackets also reject an array-index
+  // `end` whose enclosing bracket is never closed (`A(end`) — which the balanced-only
+  // bracketDepthAtPos cache misses — without affecting the next-line `foo(\nend` case.
+  // null when no parse is in progress.
+  private unclosedBracketDepthOnLineAtPos: Int32Array | null = null;
   // Per-position logical-line start cache: statementStartAtPos[p] is the start
   // offset of the logical line (statement) containing position p. A logical line
   // begins at file start, just after a `;`/`,` separator outside excluded regions,
@@ -930,6 +938,10 @@ export class MatlabBlockParser extends BaseBlockParser {
     // logical-line-scanning validators run in O(1) instead of O(line length) per call.
     // Must also run before super.tokenize() for the same reason as the bracket cache.
     this.statementStartAtPos = this.computeStatementStarts(source, excludedRegions);
+    // Pre-compute same-logical-line unclosed-bracket depth so isInsideParensOrBrackets
+    // can reject an array-index `end` inside an unclosed `(`/`[`/`{` (`A(end`). Depends on
+    // statementStartAtPos, so it must run after computeStatementStarts above.
+    this.unclosedBracketDepthOnLineAtPos = computeUnclosedBracketDepthOnLine(source, excludedRegions, this.statementStartAtPos);
     this.logicalLineInfoCache = new Map<number, LogicalLineInfo>();
     const tokens = super.tokenize(source, excludedRegions);
     return tokens.filter((token) => {
@@ -1198,12 +1210,23 @@ export class MatlabBlockParser extends BaseBlockParser {
   }
 
   // Checks if position is inside parentheses, square brackets, or curly braces.
-  // Uses the bracketDepthAtPos cache (populated by tokenize()) for O(1) lookup. The
-  // cache only counts BALANCED bracket pairs, matching the original semantics where
-  // unmatched openers do not flag the position as "inside".
+  // Uses the bracketDepthAtPos cache (populated by tokenize()) for O(1) lookup. That
+  // cache counts only BALANCED bracket pairs. The unclosedBracketDepthOnLineAtPos cache
+  // additionally flags a position enclosed by a bracket opened earlier on the SAME
+  // logical line that is never closed (`A(end`): such `end` is still array-index context,
+  // so it must not be treated as a block close. The same-line restriction leaves the
+  // next-line form (`foo(\nend`, where `end` is the real block close) untouched.
   protected isInsideParensOrBrackets(_source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
-    if (this.bracketDepthAtPos !== null && position >= 0 && position < this.bracketDepthAtPos.length) {
-      return this.bracketDepthAtPos[position] > 0;
+    if (this.bracketDepthAtPos !== null && position >= 0 && position < this.bracketDepthAtPos.length && this.bracketDepthAtPos[position] > 0) {
+      return true;
+    }
+    if (
+      this.unclosedBracketDepthOnLineAtPos !== null &&
+      position >= 0 &&
+      position < this.unclosedBracketDepthOnLineAtPos.length &&
+      this.unclosedBracketDepthOnLineAtPos[position] > 0
+    ) {
+      return true;
     }
     return false;
   }
