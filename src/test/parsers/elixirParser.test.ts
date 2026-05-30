@@ -5418,5 +5418,45 @@ end`;
     });
   });
 
+  suite('Bug: end after >> (bitstring close) or ?> (char literal) should still be block_close', () => {
+    // `>` is in EXPRESSION_OPERATOR_LEAD_CHARS, so the isValidBlockClose RHS guard rejected
+    // `end` whenever the previous non-whitespace char was `>`. But `>>` closes a bitstring
+    // literal (`<<...>>`) and `?>` is the character literal for `>`; in both cases the value
+    // before `end` is a complete operand, so `end` is a real block close, not an
+    // expression-RHS identifier. Two distinct rescues: (1) the `>` sits inside an excluded
+    // region (the `?>` char literal), so operator detection must be skipped there; (2) the
+    // `>` is the second `>` of a `>>` bitstring close (previous char is also `>`).
+    test('should treat end as block_close after >> bitstring close (def f do x = <<1, 2>> end)', () => {
+      const source = 'def f do x = <<1, 2>> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end as block_close after >> bitstring close (fn x -> <<x>> end)', () => {
+      const source = 'fn x -> <<x>> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end as block_close after ?> char literal (fn -> ?> end)', () => {
+      const source = 'fn -> ?> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still reject end as block_close after single > comparison (x = a > b)', () => {
+      // A lone `>` (comparison operator) before `end` must still reject `end`: it is the RHS
+      // operand of the comparison, not a block close. Only `>>` (double) and `?>` (excluded
+      // region) are rescued, never a single comparison `>`.
+      const source = 'def foo do\n  x = a > end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
