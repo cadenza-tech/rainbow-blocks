@@ -1112,7 +1112,11 @@ export class BashBlockParser extends BaseBlockParser {
           if (stack.length > 0) {
             const topOpener = stack[stack.length - 1].token.value;
             const allowedOpeners = INTERMEDIATE_TO_OPENERS.get(token.value);
-            if (allowedOpeners?.has(topOpener)) {
+            // Subshell scope barrier: a middle keyword inside `(...)` must not
+            // attach to an opener outside it (mirrors the block_close scope check
+            // below). The enclosing-paren cache is O(1) per position.
+            const middleScope = this.getEnclosingParen(token.startOffset);
+            if (allowedOpeners?.has(topOpener) && this.isOpenerInSameOrOuterScope(stack[stack.length - 1].token.startOffset, middleScope)) {
               stack[stack.length - 1].intermediates.push(token);
             }
           }
