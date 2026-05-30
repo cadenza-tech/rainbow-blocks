@@ -1639,6 +1639,40 @@ end`;
     });
   });
 
+  suite('Regression: index end inside unclosed bracket on same line is not block close', () => {
+    test('should treat end inside unclosed ( on same line as array index, pairing function with outer end', () => {
+      const source = 'function f\n  y = A(end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      const fnPair = findBlock(pairs, 'function');
+      assert.strictEqual(fnPair.closeKeyword?.line, 2, 'function should close at the L2 end, not the index end inside A(');
+    });
+    test('should treat end inside unclosed [ on same line as array index', () => {
+      const source = 'function f\n  y = A[end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+    test('should treat end inside unclosed { on same line as array index', () => {
+      const source = 'function f\n  y = C{end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+    test('should treat end inside unclosed ( after a balanced ( on same line as array index', () => {
+      const source = 'function f\n  y = A(1) + B(end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+    test('should still pair end inside balanced ( as array index without consuming outer end', () => {
+      const source = 'function f\n  y = A(end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(findBlock(pairs, 'function').closeKeyword?.line, 2);
+    });
+  });
+
   suite('Regression: arguments block inside function body (R2019b+)', () => {
     test('should detect arguments block inside function', () => {
       const source = 'function r = myFunc(x)\n  arguments\n    x (1,1) double\n  end\n  r = x;\nend';
