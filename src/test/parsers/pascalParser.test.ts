@@ -4071,5 +4071,31 @@ end`;
     });
   });
 
+  suite('Regression 2026-05-31: comparison-context record inside record', () => {
+    test('should not treat record in `X = record` comparison as block opener', () => {
+      // `if X = record then` inside a record-embedded begin..end uses `record` as a
+      // comparison-context operand, not a record block opener. Mirrors the existing
+      // class/object/interface comparison-context-inside-record regressions. Without the
+      // fix the spurious `record` steals the begin..end closing `end`, the outer record is
+      // orphaned, and the variant `case` is no longer suppressed.
+      const source = `type
+  TRec = record
+    procedure M;
+    begin
+      if X = record then DoY;
+    end;
+    case Integer of
+      0: (V: Integer);
+  end;`;
+      const pairs = parser.parse(source);
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 1, 'expected exactly one record..end pair');
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, 'variant case inside a record must not produce its own pair');
+    });
+  });
+
   generateCommonTests(config);
 });
