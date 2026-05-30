@@ -5145,5 +5145,65 @@ end`;
     });
   });
 
+  suite('Regression: sole end after expression-position content should still close the block', () => {
+    // Bug: isEndInExpressionPosition filters `end` that follows an operator, a bare value,
+    // or an RHS-expecting keyword (`break`, `return`, ...) on the same logical line. This is
+    // correct when a later, legitimate `end` remains (the 2-end form `def m\n break end\nend`).
+    // But when the filtered `end` is the ONLY close keyword, dropping it deletes the whole
+    // block: `loop do break end`, `begin x = 42 end`, `while c do x + 1 end`, etc. are all
+    // valid Ruby with exactly one block. Per cost-minimization, keeping the sole `end` (1 pair,
+    // 0 orphans) beats dropping it (0 pairs, 1 orphan open). The 2-end forms must keep dropping
+    // their inner `end`.
+    test('should pair loop do with sole end after break (loop do break end)', () => {
+      const source = 'loop do break end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should pair begin with sole end after numeric value (begin x = 42 end)', () => {
+      const source = 'begin x = 42 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair while with sole end after binary operator value (while c do x + 1 end)', () => {
+      // `do` here is the loop separator of `while ... do`, so the surviving pair is while/end
+      // (not do/end). The point is that the sole `end` after the value `x + 1` must not be
+      // dropped, which would erase the block entirely.
+      const source = 'while c do x + 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should pair if-then with sole end after assignment value (if c then x = 1 end)', () => {
+      const source = 'if c then x = 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should pair def with sole end after assignment value across lines (def m\\n a = 1\\n b = 2 end)', () => {
+      const source = 'def m\n  a = 1\n  b = 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should still drop inner end and keep outer end in the 2-end form (def m\\n break end\\nend)', () => {
+      // Guard: the fallback must NOT resurrect the inner end when a legitimate outer end
+      // already remains. The def pairs with the OUTER end on line 2.
+      const source = 'def m\n  break end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should still drop inner end and keep outer end after value in the 2-end form (def m\\n 42 end\\nend)', () => {
+      const source = 'def m\n  42 end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
