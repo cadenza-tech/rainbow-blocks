@@ -1311,6 +1311,43 @@ end case;`;
     });
   });
 
+  suite('Stray then/else/elsif in for/while-generate', () => {
+    // `then`/`else`/`elsif` only appear in an if-generate (LRM 11.8). A stray one inside a
+    // for/while-generate body is malformed/in-progress code and must be dropped, not absorbed
+    // into the generate's intermediates (which would pollute its structure).
+    test('should drop stray then in for-generate', () => {
+      const source = 'g: for i in 0 to 3 generate\n  then;\nend generate;';
+      const pairs = parser.parse(source);
+      const generateBlock = findBlock(pairs, 'generate');
+      assertIntermediates(generateBlock, []);
+    });
+
+    test('should drop stray else in while-generate', () => {
+      const source = 'g: while c generate\n  else;\nend generate;';
+      const pairs = parser.parse(source);
+      const generateBlock = findBlock(pairs, 'generate');
+      assertIntermediates(generateBlock, []);
+    });
+
+    test('should drop stray elsif in for-generate', () => {
+      const source = 'g: for i in 0 to 3 generate\n  elsif;\nend generate;';
+      const pairs = parser.parse(source);
+      const generateBlock = findBlock(pairs, 'generate');
+      assertIntermediates(generateBlock, []);
+    });
+
+    test('should still keep elsif and else in if-generate chain', () => {
+      const source = 'g: if c1 generate\n  null;\nelsif c2 generate\n  null;\nelse generate\n  null;\nend generate;';
+      const pairs = parser.parse(source);
+      // The if-generate chain stacks one `if` with one generate per branch; `elsif`/`else`
+      // attach to the generate that opened that branch. Both must be retained somewhere.
+      const generatePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'generate');
+      const allIntermediates = generatePairs.flatMap((p) => p.intermediates.map((t) => t.value.toLowerCase()));
+      assert.ok(allIntermediates.includes('elsif'), 'elsif should be retained in if-generate chain');
+      assert.ok(allIntermediates.includes('else'), 'else should be retained in if-generate chain');
+    });
+  });
+
   suite('Bug fixes', () => {
     test('Bug 13: use configuration should not create false block opener', () => {
       const source = `configuration cfg of test is
