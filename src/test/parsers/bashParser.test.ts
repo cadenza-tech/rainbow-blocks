@@ -5874,6 +5874,28 @@ fi`;
       assertSingleBlock(pairs, 'for', 'done');
     });
 
+    test('should not emit a phantom do intermediate overlapping a split done', () => {
+      // `do\<newline>ne` is the split `done` close. The base regex tokenizer also
+      // sees its leading `do` as a separate intermediate, which then physically
+      // overlaps the synthesized `done` token (both start at the same offset),
+      // causing the intermediate decoration to overlap the close decoration.
+      const source = 'for i in 1 2; do\n  echo $i\ndo\\\nne';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      // Only the real `do` (the loop body opener) is an intermediate; the leading
+      // `do` of the split `done` must not be one.
+      assertIntermediates(pairs[0], ['do']);
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, 14);
+      // No intermediate may overlap the close keyword's span.
+      const close = pairs[0].closeKeyword;
+      for (const inter of pairs[0].intermediates) {
+        assert.ok(
+          inter.endOffset <= close.startOffset || inter.startOffset >= close.endOffset,
+          `intermediate ${inter.value}@${inter.startOffset}-${inter.endOffset} overlaps close ${close.value}@${close.startOffset}-${close.endOffset}`
+        );
+      }
+    });
+
     test('should not detect a split that crosses a non-keyword character', () => {
       // `if x` where x is split: i\<newline>f x is `if x`, but `i\<newline>fx` is `ifx`
       // which is not the if keyword. Make sure the second pass doesn't over-match.
