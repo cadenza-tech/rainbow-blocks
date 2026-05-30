@@ -55,13 +55,13 @@ export class PascalBlockParser extends BaseBlockParser {
       }
     }
     // Keyword used as left-hand-side of `:=` assignment: `try := 5;`, `record := 5;`,
-    // `case := 5;`, `begin := 5;`. Without this guard the keyword is pushed onto the
-    // stack and the surrounding `end` closes it instead of the real enclosing block,
-    // leaving the outer block orphan. The `asm` keyword already has its own forward
-    // check earlier; the `repeat` keyword's lhs use does not corrupt the BlockPair
-    // set (no matching `until` follows), so it is not listed here.
+    // `case := 5;`, `begin := 5;`, `repeat := 5;`. Without this guard the keyword is
+    // pushed onto the stack and the surrounding `end`/`until` closes it instead of the
+    // real enclosing block, leaving the outer block orphan. For `repeat`, a stray `until`
+    // later in the source would otherwise pair with the spurious `repeat`. The `asm`
+    // keyword already has its own forward check earlier.
     if (
-      (keyword === 'try' || keyword === 'record' || keyword === 'case' || keyword === 'begin') &&
+      (keyword === 'try' || keyword === 'record' || keyword === 'case' || keyword === 'begin' || keyword === 'repeat') &&
       this.isFollowedByAssignment(source, position + keyword.length, excludedRegions)
     ) {
       return false;
