@@ -5632,5 +5632,37 @@ end`;
     });
   });
 
+  suite('Regression: block comment between abstract/primitive and type', () => {
+    test('should detect abstract type with an intervening block comment', () => {
+      const source = 'abstract #= c =# type T end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'abstract', 'end');
+    });
+
+    test('should detect primitive type with an intervening block comment', () => {
+      const source = 'primitive #= c =# type Int8 8 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'primitive', 'end');
+    });
+
+    test('should pair both blocks for an abstract type with comment nested in a module', () => {
+      const source = 'module M\n  abstract #= c =# type T end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertSingleBlock([findBlock(pairs, 'abstract')], 'abstract', 'end', 1);
+      assertSingleBlock([findBlock(pairs, 'module')], 'module', 'end');
+    });
+
+    test('should still reject abstract followed by a newline before type', () => {
+      const source = 'abstract\ntype T end';
+      const pairs = parser.parse(source);
+      assert.strictEqual(
+        pairs.some((p) => p.openKeyword.value === 'abstract'),
+        false,
+        'a newline (outside a comment) between abstract and type is not an abstract-type declaration'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
