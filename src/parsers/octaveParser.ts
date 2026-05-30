@@ -92,10 +92,23 @@ const OCTAVE_VALUE_CONTEXT_MIDDLE_KEYWORDS = new Set(['case', 'elseif']);
 
 // Block-open keywords whose acceptance must be guarded against `case <kw>` / `elseif <kw>`
 // value-context misclassification. Section keywords (methods/properties/events/enumeration/
-// arguments) and HEADER_REQUIRED_KEYWORDS (if/while/switch/for/parfor) are already covered by
-// the parent's checks (line-start section detection, empty-header rejection, etc.). `do` is
-// covered separately by isDoInConditionContext above.
-const OCTAVE_BLOCK_OPENERS_NEEDING_VALUE_CONTEXT_GUARD = new Set(['function', 'try', 'unwind_protect', 'classdef', 'spmd']);
+// arguments) are covered by the parent's line-start section detection. The parent's
+// empty-header rejection only catches HEADER_REQUIRED_KEYWORDS (if/while/switch/for/parfor)
+// when they have NO header, so a value operand with a header such as `case for x` (header
+// `x` present) slips through and must be guarded here as well. `do` is covered separately by
+// isDoInConditionContext above.
+const OCTAVE_BLOCK_OPENERS_NEEDING_VALUE_CONTEXT_GUARD = new Set([
+  'function',
+  'try',
+  'unwind_protect',
+  'classdef',
+  'spmd',
+  'if',
+  'while',
+  'switch',
+  'for',
+  'parfor'
+]);
 
 export class OctaveBlockParser extends MatlabBlockParser {
   // Mirror of MatlabBlockParser.phantomSectionPositions for Octave's overridden matchBlocks.
