@@ -363,6 +363,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
           if (ch === '?' || ch === '!' || ch === '@' || ch === '+' || ch === '-' || ch === '~') {
             return false;
           }
+          // `do 5` / `do "s"` — a numeric literal or double-quoted string after `do` on the
+          // same line is an implicit-multiplication operand or command-syntax argument, not a
+          // do/until block body. (`do .5` is rejected by the field-access `.` check and
+          // `do 's'` by the transpose-vs-string check elsewhere, so only `[0-9]` and `"` are
+          // missing from the rejection set here.)
+          if (/[0-9]/.test(ch) || ch === '"') {
+            return false;
+          }
           // Identifier following `do` on the same physical line (`do x;`, `do foo`, etc.).
           // Includes ASCII letters/_ and Unicode letters for symmetry with the rest of the
           // parser. Do NOT skip across line continuations here — `do ...<NL>body` is a
