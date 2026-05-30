@@ -15,7 +15,13 @@ import {
   isLoneEndInArrayConstruction
 } from './juliaBracketHelpers';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
-import { isPrecededByCommandMacroPrefix, isSymbolStart, isTransposeOperator, skipJuliaInterpolation } from './juliaHelpers';
+import {
+  isPrecededByCommandMacroPrefix,
+  isSymbolStart,
+  isTransposeOperator,
+  isTypeKeywordAfterAbstractOrPrimitive,
+  skipJuliaInterpolation
+} from './juliaHelpers';
 import {
   isFollowedByBinaryOperator,
   isFollowedByPostfixIndexMarker,
@@ -405,7 +411,7 @@ export class JuliaBlockParser extends BaseBlockParser {
     // abstract/primitive must be followed by 'type' keyword
     if (keyword === 'abstract' || keyword === 'primitive') {
       const afterKeyword = source.slice(position + keyword.length);
-      return /^[ \t]+type\b/.test(afterKeyword);
+      return isTypeKeywordAfterAbstractOrPrimitive(afterKeyword);
     }
 
     // Keywords inside curly brace type parameters are not blocks (e.g., Dict{begin, end})

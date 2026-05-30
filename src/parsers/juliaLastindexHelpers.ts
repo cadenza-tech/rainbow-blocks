@@ -2,7 +2,7 @@
 
 import type { ExcludedRegion } from '../types';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
-import { isIndexingBracket, isTransposeOperator } from './juliaHelpers';
+import { isIndexingBracket, isTransposeOperator, isTypeKeywordAfterAbstractOrPrimitive } from './juliaHelpers';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
 // Checks whether the character at `pos` is the start of a binary or postfix operator
@@ -366,7 +366,7 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
         if (inComprehensionContext && keyword === 'if') continue;
         if (keyword === 'abstract' || keyword === 'primitive') {
           const afterKeyword = source.slice(i + keyword.length);
-          if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+          if (!isTypeKeywordAfterAbstractOrPrimitive(afterKeyword)) continue;
         }
         // Skip the leading-for keyword position: it was already counted by the pre-loop
         // detection, so re-counting it here would double-count.
@@ -462,7 +462,7 @@ export function allUnmatchedOpenersAreFilteredBegins(
         if (callbacks.isAdjacentToUnicodeLetter(source, i, kw.length)) continue;
         if (kw === 'abstract' || kw === 'primitive') {
           const afterKeyword = source.slice(i + kw.length);
-          if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+          if (!isTypeKeywordAfterAbstractOrPrimitive(afterKeyword)) continue;
         }
         openerStack.push(kw === 'begin' ? 'begin' : 'other');
         i += kw.length - 1;

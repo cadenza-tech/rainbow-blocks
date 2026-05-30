@@ -378,6 +378,45 @@ function runInterpolationEngine(source: string, blockKeywords: ReadonlySet<strin
   return lastDone;
 }
 
+// Returns true when `afterKeyword` (the source immediately following an
+// `abstract`/`primitive` keyword) reaches the `type` keyword, treating Julia
+// block comments `#= ... =#` (which may nest and may contain internal newlines)
+// as separators in addition to horizontal whitespace. A newline OUTSIDE a comment
+// is rejected (`abstract\ntype` is not an abstract-type declaration), matching the
+// original `/^[ \t]+type\b/` behavior while treating comments as trivia.
+export function isTypeKeywordAfterAbstractOrPrimitive(afterKeyword: string): boolean {
+  const n = afterKeyword.length;
+  let i = 0;
+  while (i < n) {
+    const ch = afterKeyword[i];
+    if (ch === ' ' || ch === '\t') {
+      i++;
+      continue;
+    }
+    // Julia block comment `#= ... =#` (nestable); internal newlines are trivia.
+    if (ch === '#' && afterKeyword[i + 1] === '=') {
+      let depth = 1;
+      i += 2;
+      while (i < n && depth > 0) {
+        if (afterKeyword[i] === '#' && afterKeyword[i + 1] === '=') {
+          depth++;
+          i += 2;
+        } else if (afterKeyword[i] === '=' && afterKeyword[i + 1] === '#') {
+          depth--;
+          i += 2;
+        } else {
+          i++;
+        }
+      }
+      continue;
+    }
+    break;
+  }
+  if (!afterKeyword.startsWith('type', i)) return false;
+  const after = afterKeyword[i + 4];
+  return after === undefined || !/[a-zA-Z0-9_]/.test(after);
+}
+
 // Checks if colon at position starts a symbol (not ternary or type annotation)
 export function isSymbolStart(source: string, pos: number): boolean {
   const nextChar = source[pos + 1];
@@ -588,7 +627,7 @@ export function hasUnmatchedBlockOpenerBetween(
         // abstract/primitive are only block openers when followed by 'type'
         if (keyword === 'abstract' || keyword === 'primitive') {
           const afterKeyword = source.slice(i + keyword.length);
-          if (!/^[ \t]+type\b/.test(afterKeyword)) continue;
+          if (!isTypeKeywordAfterAbstractOrPrimitive(afterKeyword)) continue;
         }
         depth++;
         i += keyword.length - 1;
