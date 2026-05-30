@@ -6915,5 +6915,30 @@ fi`;
     });
   });
 
+  suite('Subshell scope barrier for middle keywords', () => {
+    test('should not attach a subshell-scoped do to an outer for loop', () => {
+      // The bare `do` inside `(...)` is a syntax error, but it must not be
+      // recorded as an intermediate of the outer for loop: a middle keyword
+      // inside a subshell cannot belong to an opener outside it.
+      const pairs = parser.parse('for i in 1; (echo; do); do echo; done');
+      const forPair = findBlock(pairs, 'for');
+      assert.deepStrictEqual(
+        forPair.intermediates.map((t) => t.value),
+        ['do'],
+        'only the loop do (outside the subshell) should be an intermediate'
+      );
+    });
+
+    test('should not attach a subshell-scoped then to an outer if', () => {
+      const pairs = parser.parse('if x; (echo; then); then real; fi');
+      const ifPair = findBlock(pairs, 'if');
+      assert.deepStrictEqual(
+        ifPair.intermediates.map((t) => t.value),
+        ['then'],
+        'only the real then (outside the subshell) should be an intermediate'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
