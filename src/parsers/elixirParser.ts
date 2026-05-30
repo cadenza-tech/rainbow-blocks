@@ -647,21 +647,22 @@ export class ElixirBlockParser extends BaseBlockParser {
       // or composite like `==`/`!=`/`<=`/`>=`/`=~`), or any expression operator lead char
       // (`+ - * / < > | ^ & ~`). A real clause head sits at a statement boundary (newline,
       // `;`, or start of source after the opener's body), never directly after an operator.
-      // Also reject when directly preceded by `"` or `'` (closing quote of a string/charlist
-      // literal): `"a"else"b"` places `else` as an expression-continuation identifier after
-      // the literal LHS value, not as a clause head.
+      // The closing `"`/`'` of a string/charlist literal is rejected ONLY when the keyword
+      // sits flush against it (`"a"else"b"` is an expression continuation). A whitespace gap
+      // (`if c do "a" else "b" end`) makes the literal a complete clause body and `else` a
+      // real clause head, so the quote rejection must not fire across whitespace — unlike the
+      // operator rejections above, which apply regardless of an intervening gap.
       if (token.type === 'block_middle' && token.startOffset > 0) {
         let q = token.startOffset - 1;
         while (q >= 0 && (source[q] === ' ' || source[q] === '\t')) q--;
         if (q >= 0) {
           const before = source[q];
+          const immediatelyBefore = source[token.startOffset - 1];
+          const isQuoteFlush = immediatelyBefore === '"' || immediatelyBefore === "'";
           // `=` covers assignment and compound operators (==, !=, <=, >=, =~, =>, etc.).
           // `>` covers `->` arrow body position too (`pattern -> else_expr`), but in that
           // case `else` is also an expression value (body), so rejecting it is correct.
-          // `"`/`'` cover the closing quote of a string/charlist literal: when the middle
-          // keyword sits flush against the closing quote, the literal is the LHS value
-          // and the keyword is in expression position (e.g. `"a"else"b"`).
-          if (before === '=' || before === '"' || before === "'" || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) {
+          if (isQuoteFlush || before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) {
             return false;
           }
           // Word-based operator RHS: middle keyword directly after `and`/`or`/`not`/`in`/
