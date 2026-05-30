@@ -5584,5 +5584,53 @@ end`;
     });
   });
 
+  suite('Regression: value-returning block end followed by postfix marker rescues its opener', () => {
+    test('should pair both blocks when nested value block end is followed by .field()', () => {
+      // `begin x end.foo()` returns a value via the block, then applies field access + call:
+      // `(begin x end).foo()`. The inner `end` is `begin`'s real close (begin needs it), so
+      // begin/end pairs and the trailing `end` pairs with `function`. Previously the postfix
+      // marker `.foo` rejected the inner `end` from block_close, letting `begin` steal the
+      // outer `end` and orphaning `function`.
+      const source = 'function g()\n  begin x end.foo()\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword?.startOffset, source.indexOf('end'));
+      const functionPair = findBlock(pairs, 'function');
+      assert.strictEqual(functionPair.closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should pair standalone begin block when end is followed by ( (call)', () => {
+      // `begin f end()` is `(begin f end)()` — the block returns a callable, then is called.
+      // The `end` is `begin`'s real close, so the pair must be detected.
+      const source = 'begin f end()';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should pair standalone if block when end is followed by [ (indexing)', () => {
+      // `r = if c 1 else 2 end[1]` is `r = (if c 1 else 2 end)[1]` — the if-expression value
+      // is indexed. The `end` is the if's real close.
+      const source = 'r = if c 1 else 2 end[1]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should pair standalone let block when end is followed by [ (indexing)', () => {
+      // `r = let x=1; x end[1]` is `r = (let x=1; x end)[1]`. The `end` is the let's real close.
+      const source = 'r = let x=1; x end[1]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'let', 'end');
+    });
+
+    test('should pair do block when end is followed by [ (indexing)', () => {
+      // `map(xs) do x; x; end[1]` is `(map(xs) do x; x; end)[1]`. The `end` is the do's close.
+      const source = 'map(xs) do x; x; end[1]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
