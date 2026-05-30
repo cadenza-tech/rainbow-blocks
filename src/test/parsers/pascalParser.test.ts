@@ -4136,5 +4136,25 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-31: `record` on right of `:=` assignment', () => {
+    test('should not treat `record` on right of `:=` as block opener', () => {
+      // `x := record;` uses `record` as a right-hand-side expression identifier, not a
+      // record type opener (a record type definition uses `=`, not `:=`). Without this
+      // guard the spurious `record` is pushed onto the stack and the surrounding `end`
+      // closes it instead of `begin`, leaving the outer `begin` orphan.
+      const source = `begin
+  x := record;
+end;`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      // `record` on rhs of `:=` must not produce a block pair.
+      const recordPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'record');
+      assert.strictEqual(recordPairs.length, 0, '`record` on rhs of `:=` must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
