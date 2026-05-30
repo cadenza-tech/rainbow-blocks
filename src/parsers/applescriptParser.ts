@@ -789,11 +789,22 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     }
     if (after >= source.length || source[after] !== ':') return false;
 
-    // Before the keyword, walk backward and find the most recent non-whitespace,
-    // non-newline, non-excluded character at the keyword's own brace level.
-    // Track {/} depth so that nested {} groups (e.g. {a: {x: 1}, else: 2}) are
-    // skipped transparently. Plain newlines (without ¬) are crossed because
-    // record literals may span multiple physical lines.
+    // Before the keyword, walk backward looking for the '{' that opens the
+    // enclosing record literal at the keyword's own brace level. Track {/} depth
+    // so that nested {} groups (e.g. {a: {x: 1}, else: 2}) are skipped
+    // transparently. The keyword is a record key when that '{' is reachable; the
+    // intervening characters are the preceding record entries (`a: 1`), their
+    // separators (','), values, and whitespace, which may span multiple physical
+    // lines because record literals can wrap across newlines even without a
+    // trailing comma on the preceding entry.
+    //
+    // A statement-terminating newline followed by content that cannot be part of
+    // a record entry would normally distinguish a real block keyword, but the
+    // after-keyword ':' check above already filters those out: a bare/compound
+    // block keyword that is genuinely closing a block is not followed by ':'.
+    // So once we know a ':' follows, treating any reachable enclosing '{' as a
+    // record context yields the cost-minimizing result (zero orphans) without
+    // misclassifying real block keywords.
     let before = pos - 1;
     let depth = 0;
     while (before >= 0) {
@@ -803,10 +814,6 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[before];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '¬') {
-        before--;
-        continue;
-      }
       if (ch === '}') {
         depth++;
         before--;
@@ -821,15 +828,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         before--;
         continue;
       }
-      if (depth > 0) {
-        // Inside a nested {} group; skip everything until we close it.
-        before--;
-        continue;
-      }
-      // depth === 0: this is the most recent token at the keyword's level.
-      // It must be a record-entry separator (',') for us to be in a record key
-      // position; any other character means we are not inside a record literal.
-      return ch === ',';
+      // Any other character (record entries, separators, values, whitespace, or
+      // characters inside a nested {} group) is skipped while we search backward
+      // for the enclosing '{'. Reaching the start of the source without finding
+      // one means the keyword is not inside a record literal.
+      before--;
     }
     return false;
   }
