@@ -3500,6 +3500,28 @@ foo() ->
     });
   });
 
+  suite('Regression: isCatchFollowedByClausePattern must scan past catch/after inside guard', () => {
+    // Bug: isCatchFollowedByClausePattern bails out (returns false) at the first 'catch',
+    // 'after', or 'end' word it sees at top level, treating it as a structural boundary.
+    // When the clause-separator 'catch' is followed by a guard that itself mentions 'catch'
+    // as an expression prefix (e.g. `catch error:R when catch h(R) -> ok`), the forward scan
+    // hits the guard-internal 'catch' before reaching the clause-arrow '->' and wrongly
+    // concludes there is no clause pattern. The separator 'catch' is then dropped from the
+    // try block intermediates. The scan must keep going past a guard-internal 'catch' (a
+    // catch-expression prefix in the guard) and only stop at a 'catch'/'after'/'end' that
+    // actually opens the next try section.
+    test('should treat catch as intermediate when guard body contains a catch expression', () => {
+      const source = 'try f() catch error:R when catch h(R) -> ok end';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assert.strictEqual(tryBlock.openKeyword.startOffset, 0);
+      assert.strictEqual(tryBlock.closeKeyword.startOffset, source.lastIndexOf('end'));
+      assertIntermediates(tryBlock, ['catch']);
+      // The registered catch must be the clause-separator catch@8, not the guard catch@27
+      assert.strictEqual(tryBlock.intermediates[0].startOffset, 8);
+    });
+  });
+
   suite('Regression: analyzeDefineBody must skip comments between fun and (', () => {
     // Bug: analyzeDefineBody scans only [ \t\r\n] when checking for a '(' after the 'fun'
     // keyword. A %comment between `fun` and `(` defeats the lookahead, so `fun` is treated
