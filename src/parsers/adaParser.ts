@@ -1122,6 +1122,37 @@ export class AdaBlockParser extends BaseBlockParser {
     return false;
   }
 
+  // Returns true when the `when` token at `whenStart` is the modifier of an
+  // `exit when` statement (Ada LRM 5.7) rather than a select-alternative /
+  // case-arm / entry guard. `exit` is a loop-control statement and is never
+  // tokenized as a block keyword, so an `exit when X;` inside a select
+  // alternative body would otherwise have its `when` misattributed to the
+  // enclosing select as an intermediate. Scans backward skipping whitespace,
+  // comments and excluded regions; if the immediately preceding word is
+  // `exit`, the `when` is a loop-exit modifier and must be ignored.
+  private isExitWhen(whenStart: number): boolean {
+    const source = this.currentSource;
+    const excluded = this.currentExcludedRegions;
+    const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
+    let p = whenStart - 1;
+    while (p >= 0) {
+      if (this.isInExcludedRegion(p, excluded)) {
+        const region = this.findExcludedRegionAt(p, excluded);
+        p = region ? region.start - 1 : p - 1;
+        continue;
+      }
+      if (isAdaWhitespace(source[p])) {
+        p--;
+        continue;
+      }
+      break;
+    }
+    if (p < 0 || !isWordChar(source[p])) return false;
+    let wordStart = p;
+    while (wordStart > 0 && isWordChar(source[wordStart - 1])) wordStart--;
+    return source.slice(wordStart, p + 1).toLowerCase() === 'exit';
+  }
+
   // Decides whether an `or` token that starts its own physical line delimits a
   // select alternative (true) rather than being a boolean operator (false).
   //
@@ -1282,7 +1313,12 @@ export class AdaBlockParser extends BaseBlockParser {
               //     `exception` intermediate (otherwise it is an `exit when`
               //     or similar modifier and must be ignored)
               if (topOpener === 'case' || topOpener === 'select' || topOpener === 'entry') {
-                stack[stack.length - 1].intermediates.push(token);
+                // A genuine guard `when` heads a case arm / select alternative /
+                // entry guard. An `exit when X;` inside an alternative body is a
+                // loop-exit modifier (LRM 5.7), not a guard, so skip it.
+                if (!this.isExitWhen(token.startOffset)) {
+                  stack[stack.length - 1].intermediates.push(token);
+                }
               } else if (topOpener === 'accept' || topOpener === 'return' || topOpener === 'begin') {
                 const intermediates = stack[stack.length - 1].intermediates;
                 const hasException = intermediates.some((t) => t.value.toLowerCase() === 'exception');
