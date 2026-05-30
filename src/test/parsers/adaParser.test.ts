@@ -4673,5 +4673,68 @@ end if;`;
     });
   });
 
+  suite('Regression 2026-05-31: exception must not attach as intermediate to openers without a handled body', () => {
+    // Ada LRM 11.2: only handled_sequence_of_statements (the body of begin,
+    // accept ... do, and an extended return) can carry an exception handler.
+    // if / loop / for / while / case / select / record bodies cannot, so an
+    // `exception` keyword observed while one of those is the open block is not
+    // a handler section and must not be recorded as that block's intermediate.
+    test('should not attach exception as intermediate to an if-block', () => {
+      const source = 'if A then\n  null;\nexception\n  when others => null;\nend if;';
+      const pairs = parser.parse(source);
+      const ifPair = findBlock(pairs, 'if');
+      const intermediateValues = ifPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('exception'), 'if-block must not list exception as an intermediate');
+    });
+
+    test('should not attach exception as intermediate to a loop-block', () => {
+      const source = 'loop\n  null;\nexception\n  when others => null;\nend loop;';
+      const pairs = parser.parse(source);
+      const loopPair = findBlock(pairs, 'loop');
+      const intermediateValues = loopPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('exception'), 'loop-block must not list exception as an intermediate');
+    });
+
+    test('should not attach exception as intermediate to a for-loop block', () => {
+      const source = 'for I in 1 .. 10 loop\n  null;\nexception\n  when others => null;\nend loop;';
+      const pairs = parser.parse(source);
+      const forPair = findBlock(pairs, 'for');
+      const intermediateValues = forPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('exception'), 'for-loop block must not list exception as an intermediate');
+    });
+
+    test('should not attach exception as intermediate to a case-block', () => {
+      const source = 'case X is\n  when 1 => null;\nexception\n  when others => null;\nend case;';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      const intermediateValues = casePair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('exception'), 'case-block must not list exception as an intermediate');
+    });
+
+    test('should not attach exception as intermediate to a select-block', () => {
+      const source = 'select\n  accept A;\nexception\n  when others => null;\nend select;';
+      const pairs = parser.parse(source);
+      const selectPair = findBlock(pairs, 'select');
+      const intermediateValues = selectPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('exception'), 'select-block must not list exception as an intermediate');
+    });
+
+    test('should not attach exception as intermediate to a record-block', () => {
+      const source = 'type R is record\n  F : Integer;\nexception\n  when others => null;\nend record;';
+      const pairs = parser.parse(source);
+      const recordPair = findBlock(pairs, 'record');
+      const intermediateValues = recordPair.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(!intermediateValues.includes('exception'), 'record-block must not list exception as an intermediate');
+    });
+
+    test('should still attach exception as intermediate to a begin-block', () => {
+      // Regression guard: the begin-block body *can* carry an exception
+      // handler, so the legitimate case must keep working.
+      const source = 'begin\n  null;\nexception\n  when others => null;\nend;';
+      const pairs = parser.parse(source);
+      assertIntermediates(pairs[0], ['exception', 'when']);
+    });
+  });
+
   generateCommonTests(config);
 });
