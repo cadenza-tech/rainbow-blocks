@@ -5458,5 +5458,36 @@ end`;
     });
   });
 
+  suite('Bug: middle keyword after a closing quote with intervening whitespace should attach as intermediate', () => {
+    // A middle keyword (else) following a string/charlist literal must attach as an
+    // intermediate when separated by whitespace: `if c do "a" else "b" end` has `else` as a
+    // real clause head (the literal `"a"` is the complete then-body). The quote rejection
+    // must only fire when the keyword sits flush against the closing quote (`"a"else"b"`),
+    // where it is an expression continuation. Without limiting the quote rejection to the
+    // flush case, the post-whitespace keyword is wrongly dropped and the intermediate lost.
+    test('should attach else as intermediate after double-quoted literal with space (if c do "a" else "b" end)', () => {
+      const source = 'if c do "a" else "b" end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test("should attach else as intermediate after charlist literal with space (if c do 'a' else 'b' end)", () => {
+      const source = "if c do 'a' else 'b' end";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should still NOT attach else when flush against closing quote (no space: "a"else"b")', () => {
+      // The flush case stays rejected: `else` directly after the closing quote is an
+      // expression continuation, not a clause head. Guards against over-relaxing the fix.
+      const source = 'if c do "a"else"b" end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   generateCommonTests(config);
 });
