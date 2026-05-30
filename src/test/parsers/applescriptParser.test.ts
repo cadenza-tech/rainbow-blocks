@@ -3917,5 +3917,33 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: colon-suffixed block_middle must not attach as an intermediate', () => {
+    // `else: 5` is not valid AppleScript (`else` takes no colon); the colon makes
+    // the keyword a record property name or invalid code, never an intermediate of
+    // the enclosing `if`. The middle keyword must be dropped whenever it is directly
+    // followed by a record-key colon, even outside an enclosing record literal.
+    test('should not attach else as intermediate when followed by a colon', () => {
+      const source = 'if x then\nbeep\nelse: 5\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.deepStrictEqual(
+        pairs[0].intermediates.map((t) => t.value),
+        [],
+        'a colon-suffixed else must not be recorded as an intermediate'
+      );
+    });
+
+    test('should still attach a genuine else as intermediate', () => {
+      const source = 'if x then\nbeep\nelse\nbeep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assert.deepStrictEqual(
+        pairs[0].intermediates.map((t) => t.value),
+        ['else'],
+        'a genuine else clause must still be recorded as an intermediate'
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
