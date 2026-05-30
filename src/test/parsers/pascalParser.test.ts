@@ -4116,5 +4116,25 @@ end;`;
     });
   });
 
+  suite('Regression 2026-05-31: `repeat` on left of `:=` assignment', () => {
+    test('should not treat `repeat` on left of `:=` as block opener', () => {
+      // `repeat := 5;` uses `repeat` as the left-hand-side identifier of an assignment.
+      // When a stray `until` follows, the spurious `repeat` pairs with it, corrupting
+      // the BlockPair set. The enclosing `begin..end` must be the only pair.
+      const source = `begin
+  repeat := 5;
+  until x;
+end;`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      const outerEndOffset = source.lastIndexOf('end');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, outerEndOffset);
+      // `repeat` on lhs of `:=` must not produce a repeat..until pair.
+      const repeatPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'repeat');
+      assert.strictEqual(repeatPairs.length, 0, '`repeat` on lhs of `:=` must not produce a block pair');
+    });
+  });
+
   generateCommonTests(config);
 });
