@@ -214,6 +214,26 @@ export class VhdlBlockParser extends BaseBlockParser {
       for (const count of closeOffsetCounts.values()) {
         if (count > 1) overCount += count - 1;
       }
+      // A synthetic begin/end body anchored to its generate (handled above) sits at the same
+      // nestLevel as that generate. When such a begin body also encloses this ordinary block,
+      // the base recalculation counts BOTH the generate and the begin body as parents even
+      // though they share one visual depth, so the block is reported one level too deep. The
+      // generate-without-begin form (the block sits directly in the generate body) has no such
+      // begin pair and must be left untouched, so this correction is gated on the presence of
+      // an enclosing synthetic begin body. Subtract one per enclosing begin body.
+      for (const other of pairs) {
+        if (other === body) continue;
+        if (other.openKeyword.value.toLowerCase() !== 'begin') continue;
+        const enclosesBody =
+          other.openKeyword.startOffset < body.openKeyword.startOffset && other.closeKeyword.startOffset >= body.closeKeyword.startOffset;
+        if (!enclosesBody) continue;
+        // Only begin bodies that are themselves inside a generate were anchored (collapsed onto
+        // the generate's level); an ordinary begin body keeps its own depth and is a real parent.
+        const beginInsideGenerate = containingGenerates.some(
+          (gen) => gen.openKeyword.startOffset < other.openKeyword.startOffset && gen.closeKeyword.startOffset >= other.closeKeyword.startOffset
+        );
+        if (beginInsideGenerate) overCount += 1;
+      }
       body.nestLevel = Math.max(0, body.nestLevel - overCount);
     }
   }
