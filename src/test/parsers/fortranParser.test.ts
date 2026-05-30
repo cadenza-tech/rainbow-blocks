@@ -1016,6 +1016,26 @@ end where`;
       // No opening paren, so rejected as invalid
       assertNoBlocks(pairs);
     });
+
+    test('should accept where with semicolon statement separator after condition', () => {
+      // `;` after `where (mask)` is a statement separator completing the construct header,
+      // mirroring `if (x) then; ...; end if`. The construct must form a block pair.
+      const source = 'where (a > 0); b = 1.0; end where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
+
+    test('should accept forall with semicolon statement separator after condition', () => {
+      const source = 'forall (i = 1:5); a(i) = 0; end forall';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'forall', 'end forall');
+    });
+
+    test('should accept where with semicolon then body on following lines', () => {
+      const source = 'where (a);\nb = 1\nend where';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'where', 'end where');
+    });
   });
 
   suite('Coverage: continuation lines with whitespace', () => {
