@@ -728,6 +728,17 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return { nextPos: endPos };
       }
 
+      // Reject a block_middle keyword immediately followed by a record-key colon
+      // (e.g., `else: 5`, `on error: ...`). AppleScript has no `else:`/`on error:`
+      // syntax, so the colon makes the keyword a record property name (or invalid
+      // code), never an intermediate of the enclosing block. Unlike the record-key
+      // guard above, this fires regardless of whether an enclosing record literal
+      // is reachable, since a colon-suffixed middle keyword is never a real
+      // section delimiter.
+      if (type === 'block_middle' && this.isFollowedByRecordKeyColon(source, endPos, excludedRegions)) {
+        return { nextPos: endPos };
+      }
+
       // `else` is only a valid block_middle when it appears at the start of a
       // logical line. Mid-line occurrences (e.g., `set y to else`, `display dialog else`,
       // `beep else`, `(1)else`) are identifier/value usages, not intermediates of
@@ -756,17 +767,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     return null;
   }
 
-  // Checks if the keyword at [pos, endPos) is in a record-key position, e.g.
-  // `{else: 5}`, `{a: 1, else: 5}`, or a multi-line record:
-  //   {
-  //     end if: 5
-  //   }
-  // Such positions use the keyword as a property name in a record literal,
-  // not as a block keyword. Brace depth is tracked so that nested {} groups
-  // are skipped transparently and we only consider the most recent token at
-  // the keyword's own brace level.
-  private isAtRecordKeyPosition(source: string, pos: number, endPos: number, excludedRegions: ExcludedRegion[]): boolean {
-    // After the keyword, skip whitespace/¬continuations and require ':' (not '::').
+  // Returns true when the keyword ending at `endPos` is immediately followed
+  // (skipping spaces/tabs, `¬` line continuations, and excluded regions) by a
+  // record-key colon `:`. Shared by isAtRecordKeyPosition (record literal key
+  // detection) and the block_middle colon-suffix guard.
+  private isFollowedByRecordKeyColon(source: string, endPos: number, excludedRegions: ExcludedRegion[]): boolean {
     let after = endPos;
     while (after < source.length) {
       const ch = source[after];
@@ -787,7 +792,21 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
       break;
     }
-    if (after >= source.length || source[after] !== ':') return false;
+    return after < source.length && source[after] === ':';
+  }
+
+  // Checks if the keyword at [pos, endPos) is in a record-key position, e.g.
+  // `{else: 5}`, `{a: 1, else: 5}`, or a multi-line record:
+  //   {
+  //     end if: 5
+  //   }
+  // Such positions use the keyword as a property name in a record literal,
+  // not as a block keyword. Brace depth is tracked so that nested {} groups
+  // are skipped transparently and we only consider the most recent token at
+  // the keyword's own brace level.
+  private isAtRecordKeyPosition(source: string, pos: number, endPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    // A record-key colon must follow the keyword; otherwise it is not a key.
+    if (!this.isFollowedByRecordKeyColon(source, endPos, excludedRegions)) return false;
 
     // Before the keyword, walk backward looking for the '{' that opens the
     // enclosing record literal at the keyword's own brace level. Track {/} depth
