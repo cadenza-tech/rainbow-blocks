@@ -250,7 +250,11 @@ export class RubyBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     const tokens = super.tokenize(source, excludedRegions);
 
-    return tokens.filter((token) => {
+    // First pass: apply every filter EXCEPT the expression-position `end` check. That check
+    // is applied separately in applyExpressionPositionEndFilter so a sole `end` (the only
+    // close keyword of a one-block source like `loop do break end`) is not deleted along
+    // with the whole block. The remaining filters here are unconditional.
+    const filtered = tokens.filter((token) => {
       // Filter out keywords in heredoc identifiers (<<end, <<-do, <<~if, <<'end', <<"do", etc.)
       // Only filter when the << is actually a heredoc, not a shift operator. We confirm by
       // re-running matchHeredoc at the << position rather than guessing from neighbouring
@@ -314,15 +318,8 @@ export class RubyBlockParser extends BaseBlockParser {
       if (token.value === 'end' && this.isEndInTernaryValuePosition(source, token.startOffset, excludedRegions)) {
         return false;
       }
-      // Filter out `end` directly preceded by an opening bracket or a binary operator
-      // on the same physical line (skipping whitespace and excluded regions like comments
-      // or regex literals). `end` is a reserved word and cannot be in expression position,
-      // so cases like `def foo(end)` or `x = /pat/ end` are invalid Ruby. Treating them
-      // as block_close mis-pairs surrounding blocks; per the anchor-set principle, drop
-      // the stray `end` so blocks pair correctly.
-      if (token.value === 'end' && this.isEndInExpressionPosition(source, token.startOffset, excludedRegions)) {
-        return false;
-      }
+      // (Expression-position `end` filtering is handled separately, after this pass, by
+      // applyExpressionPositionEndFilter — see the note at the top of tokenize.)
       // Filter out keywords used as method names after 'def' (e.g., def do, def begin, def end)
       if (this.isAfterDefKeyword(source, token.startOffset, excludedRegions)) {
         return false;
@@ -380,6 +377,53 @@ export class RubyBlockParser extends BaseBlockParser {
       }
       return true;
     });
+
+    return this.applyExpressionPositionEndFilter(filtered, source, excludedRegions);
+  }
+
+  // Removes `end` tokens that sit in expression value position (directly after an opening
+  // bracket, a binary operator, a bare value, an RHS-expecting keyword like `break`/`return`,
+  // etc.), since `end` is a reserved word and cannot be a value -- such occurrences are
+  // invalid Ruby (`def foo(end)`, `x = /pat/ end`, `def m\n break end\nend`). Treating them
+  // as block_close mis-pairs surrounding blocks, so per the anchor-set principle they are
+  // dropped so blocks pair correctly.
+  //
+  // Fallback (cost-minimization): dropping is correct only when a legitimate `end` remains
+  // to close the block. When ALL close keywords would be removed yet a block opener is
+  // present -- as in the valid one-block sources `loop do break end`, `begin x = 42 end`,
+  // `while c do x + 1 end` -- deleting the sole `end` would erase the whole block (0 pairs,
+  // 1 orphan open). Keeping the last such `end` instead yields 1 pair and 0 orphans, the
+  // lower-cost parse. The 2-end form keeps dropping its inner `end` because the outer `end`
+  // still survives as a close keyword.
+  private applyExpressionPositionEndFilter(tokens: Token[], source: string, excludedRegions: ExcludedRegion[]): Token[] {
+    // Indices of `end` tokens that the expression-position check would remove.
+    const expressionEndIndices: number[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token.value === 'end' && this.isEndInExpressionPosition(source, token.startOffset, excludedRegions)) {
+        expressionEndIndices.push(i);
+      }
+    }
+    if (expressionEndIndices.length === 0) {
+      return tokens;
+    }
+
+    const removed = new Set(expressionEndIndices);
+    // Would any block_open survive with no surviving block_close? If so, resurrect the last
+    // flagged `end` (closest to source end -- the most likely closer of the outermost open)
+    // so the block is not erased.
+    let hasOpen = false;
+    let hasSurvivingClose = false;
+    for (let i = 0; i < tokens.length; i++) {
+      if (removed.has(i)) continue;
+      if (tokens[i].type === 'block_open') hasOpen = true;
+      else if (tokens[i].type === 'block_close') hasSurvivingClose = true;
+    }
+    if (hasOpen && !hasSurvivingClose) {
+      removed.delete(expressionEndIndices[expressionEndIndices.length - 1]);
+    }
+
+    return tokens.filter((_token, i) => !removed.has(i));
   }
 
   // Checks if keyword is used as a method name after 'def' (e.g., def do, def begin, def end).
