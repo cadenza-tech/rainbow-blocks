@@ -46,6 +46,14 @@ export const STATEMENT_CONTEXT_SCOPE_KEYWORDS = new Set(['begin', 'try', 'repeat
 // Declaration-context scope keywords (cross-`;` scope decides type definition).
 export const DECLARATION_CONTEXT_SCOPE_KEYWORDS = new Set(['type', 'var', 'const']);
 
+// Block-close keywords used by the cross-`;` scan to detect already-closed blocks.
+const CROSS_SCAN_CLOSE_KEYWORDS = new Set(['end', 'until']);
+
+// Block-open keywords (closed by `end`/`until`) used to balance closed blocks during the
+// cross-`;` scan. `case`/`record` are openers too but are not statement-context scopes,
+// so they are listed here purely for depth balancing.
+const CROSS_SCAN_OPEN_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm', 'case', 'record']);
+
 // Returns true if the `=` that precedes the keyword at `keywordStart` (with optional
 // type modifiers between) is a comparison operator, not a type definition. Implements
 // the same scan as PascalBlockParser.isValidBlockOpen but as a standalone helper so
@@ -125,8 +133,15 @@ export function isPrecededByComparisonEquals(
   }
 
   // Cross-`;` scope scan: if we hit `;` first, the enclosing scope decides.
+  // A block that was already closed before the `=` (its `end`/`until` appears while
+  // scanning backward) is NOT the enclosing scope, so its opener must be skipped.
+  // Track close depth: each `end`/`until` opens a closed block, balanced by the matching
+  // opener. Only an opener seen at depth 0 is the genuine enclosing scope.
+  // Without this, `try ... end; TFoo = record` reads the closed `try` as the enclosing
+  // scope and misclassifies the type-definition `=` as a comparison.
   if (hitSemicolon && !hitDeclarationKeyword) {
     let si = ci - 1;
+    let closeDepth = 0;
     while (si >= 0) {
       if (callbacks.isInExcludedRegion(si, excludedRegions)) {
         const region = callbacks.findExcludedRegionAt(si, excludedRegions);
@@ -143,10 +158,14 @@ export function isPrecededByComparisonEquals(
         // would resolve to ASCII `begin` and force the wrong scope decision.
         if (!callbacks.isAdjacentToUnicodeLetter(source, si, wordEnd + 1 - si)) {
           const word = source.slice(si, wordEnd + 1).toLowerCase();
-          if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+          if (CROSS_SCAN_CLOSE_KEYWORDS.has(word)) {
+            closeDepth++;
+          } else if (CROSS_SCAN_OPEN_KEYWORDS.has(word) && closeDepth > 0) {
+            // Opener of an already-closed block: balance the close and keep scanning.
+            closeDepth--;
+          } else if (closeDepth === 0 && STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
             return true;
-          }
-          if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+          } else if (closeDepth === 0 && DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
             return false;
           }
         }
@@ -263,14 +282,24 @@ function recordContextKeywordRole(
     case 'try':
     case 'asm':
       return 'open-block';
-    case 'record':
+    case 'record': {
       // Skip 'record' used as field access (e.g. `Foo.record`). Without this guard, a
       // member-access expression spelled `.record` pushes 'record' on the context stack
       // and the following inner `end` pops it instead of the surrounding case block.
       if (isPrecededByFieldDotForRecordContext(source, keywordStart, excludedRegions, callbacks)) {
         return 'ignore';
       }
+      // `=` followed by `record` can be either a type definition (`TFoo = record`) or a
+      // comparison expression (`if X = record then`). Reuse the comparison-context scan so
+      // the keyword is classified as 'ignore' for the latter; otherwise the spurious
+      // 'open-record' lets a following inner `end` pop the wrong stack entry and the
+      // surrounding record loses its end pairing.
+      const ri = skipWsExcludedBackward(source, keywordStart - 1, excludedRegions, callbacks);
+      if (ri >= 0 && source[ri] === '=' && isPrecededByComparisonEquals(source, keywordStart, excludedRegions, callbacks)) {
+        return 'ignore';
+      }
       return 'open-record';
+    }
     case 'object': {
       // Skip 'object' used as field access (e.g. `Foo.object`). Without this guard, a
       // member-access expression spelled `.object` pushes 'record' on the context stack

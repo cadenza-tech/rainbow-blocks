@@ -10,6 +10,7 @@ import {
   DECLARATION_CONTEXT_SCOPE_KEYWORDS,
   isIfThenElse,
   isInsideParens,
+  isPrecededByComparisonEquals,
   isTypeDeclarationOf,
   isVariantRecordCase,
   STATEMENT_CONTEXT_SCOPE_KEYWORDS,
@@ -202,6 +203,16 @@ export class PascalBlockParser extends BaseBlockParser {
         }
       }
       return true;
+    }
+
+    // Comparison-context 'record': `if X = record then` uses `record` as a comparison
+    // operand, not a type definition. Mirrors the class/object/interface comparison check
+    // below. Without this guard the spurious `record` is pushed onto the stack and the
+    // surrounding `end` closes it instead of the real enclosing block. A type-definition
+    // `TFoo = record` is unaffected because isPrecededByComparisonEquals only fires when
+    // the preceding `=` is a comparison operator.
+    if (keyword === 'record' && isPrecededByComparisonEquals(source, position, excludedRegions, this.validationCallbacks)) {
+      return false;
     }
 
     // 'interface', 'class', 'object' are only block opens after '=' (type definitions)
