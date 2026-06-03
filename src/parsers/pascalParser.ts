@@ -133,8 +133,11 @@ export class PascalBlockParser extends BaseBlockParser {
 
     // 'asm' must be at statement position (not used as identifier/field/parameter).
     if (keyword === 'asm') {
-      // Reject when followed by ':' (type annotation like 'asm: Integer') or
-      // ':=' (assignment), or '.' (field access), or '(' (function call), or ','.
+      // Reject when followed by a character that proves `asm` is an identifier rather than
+      // a block opener: ':' (type annotation 'asm: Integer'), ':=' (assignment), '.'
+      // (field access), '(' (function call), ',', ')', '=', ';', '[' (array indexing
+      // 'asm[0]'), '<'/'>' (comparison or generic param 'asm < b' / 'asm > begin'), ']'.
+      // This set must stay in sync with the forward check in addAsmExcludedRegions.
       {
         let fp = position + 3;
         while (fp < source.length) {
@@ -153,7 +156,19 @@ export class PascalBlockParser extends BaseBlockParser {
         }
         if (fp < source.length) {
           const next = source[fp];
-          if (next === ':' || next === '.' || next === ',' || next === ')' || next === '=' || next === ';' || next === '(') {
+          if (
+            next === ':' ||
+            next === '.' ||
+            next === ',' ||
+            next === ')' ||
+            next === '=' ||
+            next === ';' ||
+            next === '(' ||
+            next === '[' ||
+            next === '<' ||
+            next === '>' ||
+            next === ']'
+          ) {
             return false;
           }
         }
@@ -1063,7 +1078,9 @@ export class PascalBlockParser extends BaseBlockParser {
 
       // Skip asm used as an identifier (variable, field, parameter, etc.).
       // Forward check: reject when followed by ':' (type annotation like 'asm: Integer'),
-      // ':=' (assignment), '.', ',', ')', '=', or '(' (function call).
+      // ':=' (assignment), '.', ',', ')', '=', ';', '(' (function call), '[' (array
+      // indexing 'asm[0]'), '<'/'>' (comparison or generic param 'asm < b' / 'asm > x'),
+      // or ']'. This set must stay in sync with the forward check in isValidBlockOpen.
       // Skip excluded regions (comments) and whitespace consistent with isValidBlockOpen.
       {
         let fp = asmStart + 3;
@@ -1091,6 +1108,8 @@ export class PascalBlockParser extends BaseBlockParser {
             next === '=' ||
             next === ';' ||
             next === '(' ||
+            next === '[' ||
+            next === '<' ||
             next === '>' ||
             next === ']'
           ) {
