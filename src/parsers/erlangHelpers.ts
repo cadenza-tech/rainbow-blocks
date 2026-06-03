@@ -161,39 +161,53 @@ export function hasTopLevelCommaBetween(source: string, start: number, end: numb
 // Also tracks bracket depth (parens (), brackets [], braces {}, and Erlang binary << >>)
 // so that ';' inside guard sequences (e.g. when is_atom(R); is_list(R)) does not bail out
 // before the top-level '->' is found.
+// An empty catch clause (`try foo() catch end`) reaches `end` with no clause body in between.
+// Such a `catch` is the try's clause separator (not an expression prefix), so it returns true
+// when `end` is reached without having seen any clause-body content. Tracked via `sawContent`,
+// which is set on the first meaningful (non-whitespace, non-comment) character after `catch`.
 export function isCatchFollowedByClausePattern(source: string, afterCatch: number, excludedRegions: ExcludedRegion[]): boolean {
   let k = afterCatch;
   let depth = 0;
   let bracketDepth = 0;
+  let sawContent = false;
   while (k < source.length) {
     if (isInExcludedRegion(k, excludedRegions)) {
       k++;
       continue;
     }
     const ch = source[k];
+    // Whitespace between `catch` and the next token is not clause-body content.
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      k++;
+      continue;
+    }
     // Only match -> at top level (not inside nested blocks or brackets)
     if (depth === 0 && bracketDepth === 0 && ch === '-' && k + 1 < source.length && source[k + 1] === '>') {
       return true;
     }
     // Binary open: << (must check before '<' depth tracking and before checking '->')
     if (ch === '<' && k + 1 < source.length && source[k + 1] === '<' && !isInExcludedRegion(k + 1, excludedRegions)) {
+      sawContent = true;
       bracketDepth++;
       k += 2;
       continue;
     }
     // Binary close: >>
     if (ch === '>' && k + 1 < source.length && source[k + 1] === '>' && !isInExcludedRegion(k + 1, excludedRegions)) {
+      sawContent = true;
       bracketDepth = Math.max(0, bracketDepth - 1);
       k += 2;
       continue;
     }
     // Bracket depth tracking
     if (ch === '(' || ch === '[' || ch === '{') {
+      sawContent = true;
       bracketDepth++;
       k++;
       continue;
     }
     if (ch === ')' || ch === ']' || ch === '}') {
+      sawContent = true;
       bracketDepth = Math.max(0, bracketDepth - 1);
       k++;
       continue;
@@ -210,11 +224,13 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       const next = k + 1 < source.length ? source[k + 1] : '';
       // Float decimal point: digit on both sides
       if (/[0-9]/.test(prev) && /[0-9]/.test(next)) {
+        sawContent = true;
         k++;
         continue;
       }
       // Range operator: . preceded or followed by another .
       if (prev === '.' || next === '.') {
+        sawContent = true;
         k++;
         continue;
       }
@@ -222,6 +238,7 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       // A real declaration terminator is followed by whitespace/EOL/EOF/EOL, not by an
       // identifier-leading character.
       if (/[a-zA-Z0-9_]/.test(prev) && /[a-zA-Z_]/.test(next)) {
+        sawContent = true;
         k++;
         continue;
       }
@@ -232,9 +249,12 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       let wEnd = k + 1;
       while (wEnd < source.length && /[a-z0-9_]/i.test(source[wEnd])) wEnd++;
       const w = source.slice(k, wEnd);
-      // 'end' at top level is a definitive boundary (it closes the enclosing try without
-      // a clause arrow, so the candidate 'catch' was an expression prefix).
-      if (depth === 0 && bracketDepth === 0 && w === 'end') return false;
+      // 'end' at top level closes the enclosing try. If no clause body appeared between
+      // `catch` and this `end`, the catch starts an empty clause (e.g. `try foo() catch end`)
+      // and is a clause separator. Otherwise the candidate 'catch' was an expression prefix
+      // whose value was the expression ending at this 'end'.
+      if (depth === 0 && bracketDepth === 0 && w === 'end') return !sawContent;
+      sawContent = true;
       // 'catch'/'after' do NOT bail out here: before the clause arrow '->' is reached we are
       // still inside the clause head/guard, where 'catch' (e.g. `when catch h(R)`) is an
       // expression prefix, not the next try section. Keep scanning so the top-level '->' that
@@ -249,6 +269,8 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       k = wEnd;
       continue;
     }
+    // Any other character (operators, ':', ';', digits, etc.) is clause-body content.
+    sawContent = true;
     k++;
   }
   return false;
