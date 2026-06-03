@@ -3038,6 +3038,18 @@ endmodule`;
       assert.strictEqual(alwaysPair?.closeKeyword.value, 'endcase');
     });
 
+    test('should pair always with endcase when randcase is the body of always', () => {
+      const source = 'always randcase\n  1: x = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const alwaysPair = findBlock(pairs, 'always');
+      assert.strictEqual(alwaysPair.closeKeyword.value, 'endcase');
+      assert.strictEqual(alwaysPair.nestLevel, 0);
+      const randcasePair = findBlock(pairs, 'randcase');
+      assert.strictEqual(randcasePair.closeKeyword.value, 'endcase');
+      assert.strictEqual(randcasePair.nestLevel, 1);
+    });
+
     test('should pair always with begin/end when unique if is the body', () => {
       const source = 'always @(posedge clk) unique if (a) begin\n  x <= 1;\nend';
       const pairs = parser.parse(source);
