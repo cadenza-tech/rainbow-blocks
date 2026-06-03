@@ -1022,7 +1022,12 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       // Boolean operators (`and`, `or`, `not`) and the `when` modifier are also excluded:
       // they take an expression as right operand, so `set x to a and tell` treats the
       // trailing `tell` as an identifier value, not a block opener.
-      const allowedPrecedingKeywords = new Set(['if', 'else', 'while', 'until', 'then', 'considering', 'ignoring', 'try']);
+      // `then` is excluded because a block keyword after `then` on the same physical line is
+      // the action of a single-line `if ... then <action>` (e.g., `if x then tell app`), not a
+      // new multi-line block opener — admitting it would let the action `tell`/`if`/`repeat`
+      // steal a following `end`/`end tell` and produce a spurious block. The condition-context
+      // `if tell then` (keyword before `then`) is unaffected, handled by isInsideIfCondition.
+      const allowedPrecedingKeywords = new Set(['if', 'else', 'while', 'until', 'considering', 'ignoring', 'try']);
       if (allowedPrecedingKeywords.has(word)) {
         return false;
       }
