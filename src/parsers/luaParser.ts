@@ -163,6 +163,11 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isAdjacentToUnicodeLetter(source, pos, match[0].length)) continue;
       if (this.isPrecededByDotOrColon(source, pos, excludedRegions)) continue;
       if (this.isAfterGoto(source, pos, excludedRegions)) continue;
+      // A while/for after `..` is invalid Lua (a reserved word cannot be the
+      // concat operator's right operand). tokenize() already drops it; mirror
+      // that here so it never enters the loop stack and a following standalone
+      // `do` is not misclassified as the loop's `do`.
+      if (this.isPrecededByConcatOperator(source, pos, excludedRegions)) continue;
       positions.push(pos);
       lengths.push(match[0].length);
     }
@@ -202,6 +207,14 @@ export class LuaBlockParser extends BaseBlockParser {
       if (this.isAfterGoto(source, pos, excludedRegions)) continue;
 
       const word = match[1];
+      // A reserved word after `..` is invalid Lua and is dropped by tokenize()
+      // (the lone exception is `function`, which starts an expression-valued
+      // anonymous-function literal). Mirror that filter here so a `..for` /
+      // `..while` never pushes a loop opener onto the classification stack,
+      // which would otherwise misclassify a following standalone `do` as the
+      // loop's `do` and drop the valid do/end pair.
+      if (word !== 'function' && this.isPrecededByConcatOperator(source, pos, excludedRegions)) continue;
+
       if (word === 'for' || word === 'while') {
         stack.push({ kind: 'loop', hasDo: false });
       } else if (word === 'function' || word === 'if' || word === 'repeat') {
