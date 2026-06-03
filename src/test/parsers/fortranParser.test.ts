@@ -1,6 +1,7 @@
 import * as assert from 'node:assert';
 import { collapseContinuationLines, isAfterDoubleColon, isPrecedingContinuationKeyword, isTypeSpecifier } from '../../parsers/fortranHelpers';
 import { FortranBlockParser } from '../../parsers/fortranParser';
+import { isInsideParentheses } from '../../parsers/fortranValidation';
 import { assertBlockCount, assertIntermediates, assertNestLevel, assertNoBlocks, assertSingleBlock, findBlock } from '../helpers/parserTestHelpers';
 import type { CommonTestConfig } from '../helpers/sharedTestGenerators';
 import { generateCommonTests, generateEdgeCaseTests, generateExcludedRegionTests, generateNestedBlockTests } from '../helpers/sharedTestGenerators';
@@ -6197,7 +6198,35 @@ end associate`;
     });
   });
 
-  suite('Performance: opener validation does not blow up to O(N^2)', () => {
+  suite('Performance: isInsideParentheses backward scan does not blow up to O(N^2)', () => {
+    test('should bound the isInsideParentheses backward scan on a long unclosed-paren line', function () {
+      // isInsideParentheses scans backward from `position` looking for an unmatched `(`.
+      // On a single logical line carrying many block keywords inside an unclosed `(`, the
+      // parser calls it once per keyword, and pre-fix each call scanned all the way back
+      // to the `(` at the line start: O(line-length) per call, O(N^2) for the line. The
+      // MAX_PAREN_SCAN_CHARS cap bounds every call to a constant number of characters.
+      //
+      // Exercise the function directly so the measurement isolates the backward scan (the
+      // full parser has separate, unrelated linear-per-token costs). An unclosed `(` at
+      // offset 0 forces the scan to either find it (pre-fix, after scanning the whole
+      // line) or hit the cap (post-fix). Calling it once per character of a long line is
+      // O(L^2) pre-fix and O(L) post-fix; the 20s timeout fails the quadratic version
+      // with a wide margin while passing the bounded version. The cap is 20s (not 10s) so
+      // the test also passes under c8 instrumentation in `yarn test:coverage`.
+      this.timeout(20000);
+      const lineLength = 2000000;
+      // `(` at offset 0 (never closed) followed by filler identifier characters.
+      const source = `(${'a'.repeat(lineLength)}`;
+      // Call from positions near the far end of the line. Pre-fix each call scans back
+      // ~lineLength chars to the `(` (O(lineLength) per call, ~1e10 total); post-fix each
+      // call stops after MAX_PAREN_SCAN_CHARS (~1e7 total).
+      const callCount = 5000;
+      for (let k = 0; k < callCount; k++) {
+        const pos = lineLength - k;
+        isInsideParentheses(source, pos);
+      }
+    });
+
     // Builds N independent `do i=1,10` / `end do` blocks (2*N physical lines).
     function makeDoBlocks(blockCount: number): string {
       const lines: string[] = [];
