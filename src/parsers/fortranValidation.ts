@@ -3,6 +3,16 @@
 import type { ExcludedRegion } from '../types';
 import { findInlineCommentIndex, findLineEnd } from './fortranHelpers';
 
+// Upper bound on how many characters isInsideParentheses scans backward looking for an
+// unmatched `(`. A real enclosing paren (function argument list / if-condition) sits at
+// most a few lines back even across `&` continuations, so a generous 2048-char cap never
+// rejects genuine code. Without it, a single logical line carrying many keywords inside
+// an unclosed `(` degrades to O(N^2) (every keyword scanning back to the line start).
+// Bounding the scan keeps it O(1) per call. Mirrors MAX_OR_BOUNDARY_SCAN_CHARS in
+// adaParser.ts. Exceeding the cap returns false (treat as not inside parentheses): the
+// cost-minimal default that avoids phantom block suppression on pathological input.
+const MAX_PAREN_SCAN_CHARS = 2048;
+
 // Scans backward from pos looking for an unclosed 'interface' block.
 // Returns true when the nearest enclosing unclosed block is 'interface'.
 function isInsideInterfaceBlock(
@@ -195,6 +205,14 @@ function findLineCodePortionEnd(source: string, lineStart: number): number {
   return codeEnd;
 }
 
+// Returns true when `lineStart` is a genuine physical-line boundary: offset 0 or the
+// character just before it is a line terminator. Used to avoid following a (bogus)
+// continuation when the backward paren scan stopped at the MAX_PAREN_SCAN_CHARS floor
+// mid-line rather than at a real boundary.
+function isLineBoundary(source: string, lineStart: number): boolean {
+  return lineStart === 0 || source[lineStart - 1] === '\n' || source[lineStart - 1] === '\r';
+}
+
 // Checks if a position is inside parentheses by scanning backward for unmatched '('
 // Also treats `[` / `]` (Fortran 2003+ array constructors and coarray image selectors)
 // the same as `(` / `)` so a keyword inside `[expr, ...]` or `x[expr]` is recognized as
@@ -203,17 +221,27 @@ function findLineCodePortionEnd(source: string, lineStart: number): number {
 // and comments (! to end of line)
 // Follows & continuation lines backward to handle multi-line expressions
 export function isInsideParentheses(source: string, position: number): boolean {
-  // Find start of current physical line
+  // Floor for every backward scan in this call. A genuine enclosing `(` sits at most a
+  // few lines back, so refusing to look past MAX_PAREN_SCAN_CHARS never rejects real
+  // code while keeping the call O(1) instead of O(position). This bounds BOTH the
+  // line-start search below and the main paren-depth loop; a `(` farther back than the
+  // floor is treated as unreachable (the cost-minimal `not inside parentheses` default).
+  const scanFloor = position - MAX_PAREN_SCAN_CHARS > 0 ? position - MAX_PAREN_SCAN_CHARS : 0;
+
+  // Find start of current physical line (bounded by scanFloor)
   let lineStart = position;
-  while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+  while (lineStart > scanFloor && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
     lineStart--;
   }
 
   let depth = 0;
   let depthBeforeLine = 0;
   let i = position - 1;
-  // Pre-check: if keyword is at column 0 of a continuation line, extend backward
-  if (i < lineStart && lineStart > 0) {
+  // Pre-check: if keyword is at column 0 of a continuation line, extend backward.
+  // Only follow a continuation when lineStart is a genuine line boundary; when it was
+  // clamped to scanFloor mid-line (long line beyond the cap) there is no boundary to
+  // cross and the scan simply ends.
+  if (i < lineStart && isLineBoundary(source, lineStart)) {
     const prevLineStart = findContinuationLineStart(source, lineStart);
     if (prevLineStart >= 0) {
       // Resume scanning at the last code character of the continuation line so any
@@ -223,6 +251,11 @@ export function isInsideParentheses(source: string, position: number): boolean {
     }
   }
   while (i >= lineStart) {
+    // Cap the backward scan so a long logical line with many keywords stays O(1) per
+    // call instead of O(line-length). A genuine enclosing `(` is only a few lines back.
+    if (position - i > MAX_PAREN_SCAN_CHARS) {
+      return false;
+    }
     const char = source[i];
     // Skip backward over string literals (look for closing quote and find opening quote)
     if (char === "'" || char === '"') {
@@ -241,7 +274,7 @@ export function isInsideParentheses(source: string, position: number): boolean {
         i--;
       }
       // If opening quote not found, extend search across continuation lines
-      while (!foundOpenQuote && lineStart > 0) {
+      while (!foundOpenQuote && isLineBoundary(source, lineStart) && lineStart > 0) {
         const prevLineStart = findContinuationLineStart(source, lineStart);
         if (prevLineStart < 0) break;
         depthBeforeLine = depth;
@@ -292,7 +325,7 @@ export function isInsideParentheses(source: string, position: number): boolean {
       depth = depthBeforeLine - rescanDepth;
       i = lineStart - 1;
       // When reaching line start, check if previous line has & continuation
-      if (i < lineStart && lineStart > 0) {
+      if (i < lineStart && isLineBoundary(source, lineStart)) {
         const prevLineStart = findContinuationLineStart(source, lineStart);
         if (prevLineStart >= 0) {
           depthBeforeLine = depth;
@@ -308,7 +341,7 @@ export function isInsideParentheses(source: string, position: number): boolean {
     if (char === '&') {
       i--;
       // Check if we've crossed the line boundary after skipping &
-      if (i < lineStart && lineStart > 0) {
+      if (i < lineStart && isLineBoundary(source, lineStart)) {
         const prevLineStart = findContinuationLineStart(source, lineStart);
         if (prevLineStart >= 0) {
           depthBeforeLine = depth;
@@ -327,7 +360,7 @@ export function isInsideParentheses(source: string, position: number): boolean {
     }
     i--;
     // When reaching line start, check if previous line has & continuation
-    if (i < lineStart && lineStart > 0) {
+    if (i < lineStart && isLineBoundary(source, lineStart)) {
       const prevLineStart = findContinuationLineStart(source, lineStart);
       if (prevLineStart >= 0) {
         depthBeforeLine = depth;
