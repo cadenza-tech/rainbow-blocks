@@ -536,6 +536,17 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         return { nextPos: flexMatch };
       }
 
+      // Reject a compound block_middle keyword immediately followed by a record-key
+      // colon (e.g., `else if: 5`, `on error: 5`). AppleScript has no `else if:`/
+      // `on error:` section syntax, so the colon makes the keyword a record property
+      // name (or invalid code), never an intermediate of the enclosing block. Mirrors
+      // the single-keyword guard at tryMatchSingleKeywordToken: it fires regardless of
+      // whether an enclosing record literal is reachable, since a colon-suffixed middle
+      // keyword is never a real section delimiter.
+      if (type === 'block_middle' && this.isFollowedByRecordKeyColon(source, flexMatch, excludedRegions)) {
+        return { nextPos: flexMatch };
+      }
+
       // 'on error' is only a keyword at logical line start (like single-word 'on')
       if (type === 'block_middle' && keyword === 'on error') {
         if (!this.isAtLogicalLineStart(source, i, excludedRegions)) {
