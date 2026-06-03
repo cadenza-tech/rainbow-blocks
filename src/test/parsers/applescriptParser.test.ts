@@ -3891,6 +3891,43 @@ end if`;
     });
   });
 
+  suite('Bug AS1: isAtRecordKeyPosition backward brace scan must not be O(N^2)', () => {
+    // isAtRecordKeyPosition walks backward looking for the enclosing record '{'.
+    // When a '{' opens a record that is never closed and many colon-suffixed close
+    // keywords (`end if: ...`) follow, every keyword's backward scan runs all the
+    // way back to the unmatched '{' (or to offset 0). With N such keywords the work
+    // is O(N) per keyword and the whole tokenize pass degrades to O(N^2). Bounding
+    // the backward scan to a fixed character cap keeps each call O(1) and the pass
+    // linear, so the same input completes in tens of milliseconds.
+    test('should parse colon-suffixed close keywords after an unclosed brace in linear time', () => {
+      // Compare parse time at N and 2N close keywords. A bounded (O(1) per call) backward
+      // scan keeps the whole pass linear, so doubling N roughly doubles the time (ratio ~2);
+      // an unbounded O(N^2) scan roughly quadruples it (ratio ~4). Assert on the ratio rather
+      // than an absolute wall-clock budget so the test is robust to machine speed and to c8
+      // coverage instrumentation (which inflates absolute times ~10x under `yarn test:coverage`).
+      const build = (n: number): string => {
+        const lines: string[] = ['set r to {a: 1'];
+        for (let i = 0; i < n; i++) {
+          lines.push(`end if: ${i}`);
+        }
+        return lines.join('\n');
+      };
+      const measure = (n: number): number => {
+        const source = build(n);
+        const start = Date.now();
+        parser.parse(source);
+        return Date.now() - start;
+      };
+      measure(4000); // warm up the JIT so the two timed runs are comparable
+      const small = Math.max(measure(8000), 1);
+      const large = measure(16000);
+      assert.ok(
+        large <= small * 3,
+        `expected near-linear scaling, but 16000 close keywords took ${large}ms vs 8000 ${small}ms (ratio ${(large / small).toFixed(1)}x, likely O(N^2) backward brace scan in isAtRecordKeyPosition)`
+      );
+    });
+  });
+
   suite('Bug AS-LOW: comma-missing multi-line record key should not pair as block_close', () => {
     // A record entry separated by a newline alone (the preceding entry has no
     // trailing comma) still places the keyword inside the record literal. The
