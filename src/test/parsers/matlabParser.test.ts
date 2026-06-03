@@ -2573,6 +2573,84 @@ end`;
     });
   });
 
+  suite('Regression: block_middle after a value token on the same logical line is not an intermediate', () => {
+    test('should not treat otherwise as intermediate after a function call value (A(1) otherwise)', () => {
+      // `A(1) otherwise` places `otherwise` in operand position after the value `A(1)` with
+      // no operator between — invalid MATLAB. The fake `otherwise` must not register as an
+      // intermediate; doing so also wrongly causes the real `case 1` below to be rejected
+      // as a "case after otherwise". Only the genuine `case 1` is an intermediate.
+      const source = 'switch x\n  A(1) otherwise\n  case 1\n    y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case']);
+    });
+
+    test('should not treat else as intermediate after a matrix value ([1] else)', () => {
+      const source = 'if x\n  [1] else\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else after a matrix value is not an intermediate');
+    });
+
+    test('should not treat else as intermediate after a cell value ({1} else)', () => {
+      const source = 'if x\n  {1} else\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else after a cell value is not an intermediate');
+    });
+
+    test('should not treat else as intermediate after a numeric decimal point (10. else)', () => {
+      const source = 'if x\n  10. else\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else after a numeric decimal point is not an intermediate');
+    });
+
+    test('should not treat else as intermediate after a string value ("ab" else)', () => {
+      const source = 'if x\n  "ab" else\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'else after a string value is not an intermediate');
+    });
+
+    test('should not treat elseif as intermediate after a numeric value (42 elseif b)', () => {
+      const source = 'if x\n  42 elseif b\n  y = 1;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'elseif after a numeric value is not an intermediate');
+    });
+
+    test('should not treat catch as intermediate after a numeric value (42 catch)', () => {
+      const source = 'try\n  42 catch\n  x = 1;\ncatch\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should still treat else at statement start as an intermediate (sanity)', () => {
+      const source = 'if x\n  y = 1;\nelse\n  y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should still treat case and otherwise at statement start as intermediates (sanity)', () => {
+      const source = 'switch x\n  case 1\n    y = 1;\n  otherwise\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assertIntermediates(pairs[0], ['case', 'otherwise']);
+    });
+
+    test('should still treat else after ; on same line as an intermediate (one-liner)', () => {
+      // `if x; y = 1; else y = 2; end` — `else` is after `;`, a new logical line, so it
+      // must remain an intermediate even though it shares a physical line with `y = 1;`.
+      const source = 'if x; y = 1; else y = 2; end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+  });
+
   suite('Regression 2026-05-09: command-syntax argument is not block_open', () => {
     test('should treat clear if as command-syntax (if is string argument)', () => {
       // `clear if` is command-syntax: `clear` is a command and `if` is its string argument.
