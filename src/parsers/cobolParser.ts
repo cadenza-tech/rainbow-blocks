@@ -833,6 +833,20 @@ export class CobolBlockParser extends BaseBlockParser {
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
+    // Skip excluded-region detection in the fixed-format identification area
+    // (visual cols 72-79, 0-based 72+). That area is compiler-ignored free text,
+    // so an EXEC / string / pseudo-text delimiter starting there must NOT open an
+    // excluded region (which would run to END-EXEC / the closing quote and swallow
+    // the real area-B code below it). tokenize() and computeValidPositions() apply
+    // the same column-72 guard to block keywords; without it here those two passes
+    // were asymmetric and an EXEC region opening in the identification area wrongly
+    // covered subsequent real blocks. The guard only matches when the leading 6
+    // columns look like a fixed-format sequence area, so free-format sources (which
+    // have no sequence area) are unaffected even past visual column 72.
+    if (this.isInFixedFormatIdentificationArea(source, pos)) {
+      return null;
+    }
+
     // Inline comment: *>
     if (char === '*' && pos + 1 < source.length && source[pos + 1] === '>') {
       return this.matchSingleLineComment(source, pos);
@@ -910,6 +924,27 @@ export class CobolBlockParser extends BaseBlockParser {
   // Calculates the visual column of a position, expanding tabs to 8-character stops
   private getVisualColumn(source: string, lineStart: number, pos: number): number {
     return getVisualColumn(source, lineStart, pos);
+  }
+
+  // Returns true when `pos` sits in the fixed-format identification area (visual
+  // cols 72-79, 0-based 72+) of a line whose leading 6 columns look like a
+  // fixed-format sequence area ([ \t\d]{6}). Mirrors the column-72 exclusion used
+  // by tokenize() and computeValidPositions() so excluded-region detection agrees
+  // with keyword tokenisation about which columns are compiler-ignored free text.
+  // Returns false in free format (no sequence area), leaving such sources unaffected.
+  private isInFixedFormatIdentificationArea(source: string, pos: number): boolean {
+    let lineStart = pos;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    if (lineStart + 6 > source.length) {
+      return false;
+    }
+    if (this.getVisualColumn(source, lineStart, pos) < 72) {
+      return false;
+    }
+    const sequenceArea = source.slice(lineStart, lineStart + 6);
+    return /^[ \t\d]{6}$/.test(sequenceArea);
   }
 
   // Returns true when `pos` is the first non-blank token on its line — the
