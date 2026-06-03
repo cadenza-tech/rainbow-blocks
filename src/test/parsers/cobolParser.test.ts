@@ -2081,6 +2081,58 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: fixed-format identification area exclusion in tryMatchExcludedRegion', () => {
+    test('should not start an EXEC excluded region from the identification area (col>=72)', () => {
+      // Bug: tryMatchExcludedRegion lacked the column-72 guard that tokenize() and
+      // computeValidPositions() apply. An EXEC SQL sitting in the fixed-format
+      // identification area (visual cols 72-79, compiler-ignored free text) opened
+      // an EXEC excluded region that ran to END-EXEC, swallowing the real IF/END-IF
+      // statements in area B and dropping the pair. The EXEC at col>=72 must be
+      // ignored so the real IF (col<72) still pairs with its END-IF.
+      const sequenceArea = '000100';
+      const filler = ' '.repeat(72 - sequenceArea.length);
+      const source = `${sequenceArea}${filler}EXEC SQL FOO\nMOVE 1 TO X\nIF Y\nEND-IF\nEND-EXEC`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should not start a string excluded region from the identification area (col>=72)', () => {
+      // Guard: the column-72 guard applies symmetrically to all excluded-region
+      // kinds, not just EXEC. A quote opening in the identification area must not
+      // open a string region (the area is compiler-ignored free text). Here the
+      // identification-area `"` and the lone `"` on the last line both sit outside
+      // area B, so the real IF/END-IF on the intervening lines must still pair.
+      const sequenceArea = '000200';
+      const filler = ' '.repeat(72 - sequenceArea.length);
+      const source = `${sequenceArea}${filler}"opaque text\nIF Y\nEND-IF\n"`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('should still open an EXEC excluded region in area B (col<72) in fixed format', () => {
+      // Guard: a real EXEC SQL beginning in area B (col<72) must still open an
+      // excluded region so keywords inside it stay opaque. The guard only fires
+      // for col>=72, leaving normal fixed-format EXEC blocks unaffected.
+      const sequenceArea = '000300';
+      const source = `${sequenceArea} EXEC SQL\nIF Y\nEND-IF\nEND-EXEC`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still open an EXEC excluded region in free format past column 72', () => {
+      // Guard: free-format sources have no fixed-format sequence area, so the
+      // guard must not fire even past visual column 72. A line whose first 6
+      // columns contain non-blank, non-digit text (here a real statement) is not
+      // a fixed-format sequence area, so an EXEC pushed past col 72 by padding must
+      // still open the excluded region and keep the inner IF/END-IF opaque.
+      const lead = 'MOVE A';
+      const filler = ' '.repeat(72 - lead.length);
+      const source = `${lead}${filler}EXEC SQL\nIF Y\nEND-IF\nEND-EXEC`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: EXEC pseudo-text content is opaque', () => {
     test('should keep IF inside ==END-EXEC IF X END-IF== as part of EXEC region', () => {
       const source = 'EXEC SQL\nCOPY ABC REPLACING ==END-EXEC IF X END-IF== BY ==NEW==\nEND-EXEC\nDISPLAY OK';
