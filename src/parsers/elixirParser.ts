@@ -756,16 +756,20 @@ export class ElixirBlockParser extends BaseBlockParser {
         const before = source[q];
         // A preceding `>` is ambiguous: it may be a comparison operator (`a > end`, RHS
         // operand — reject), the closing `>>` of a bitstring literal (`<<1, 2>> end` — a
-        // complete value, keep), or the `>` of a `?>` character literal (`?> end` — also a
-        // complete value, keep). Distinguish: (1) `>` inside an excluded region is the body
-        // of a char literal, so `end` is a real close; (2) `>` whose previous char is also
-        // `>` closes a `>>` bitstring, so `end` is a real close. Any other lone `>` falls
-        // through to the comparison-operator rejection below.
-        const isBitstringOrCharLiteralClose = before === '>' && (this.isInExcludedRegion(q, excludedRegions) || (q > 0 && source[q - 1] === '>'));
+        // complete value, keep), the `>` of a `?>` character literal (`?> end` — also a
+        // complete value, keep), or the `>` of a clause arrow `->` (`fn -> end`, `_ -> end`
+        // — the empty body of the final clause, so `end` is a real close, keep). Distinguish:
+        // (1) `>` inside an excluded region is the body of a char literal, so `end` is a real
+        // close; (2) `>` whose previous char is also `>` closes a `>>` bitstring, so `end` is
+        // a real close; (3) `>` whose previous char is `-` is the `->` arrow, so the trailing
+        // `end` is an empty clause body and a real close. Any other lone `>` falls through to
+        // the comparison-operator rejection below.
+        const isBitstringCharLiteralOrArrowClose =
+          before === '>' && (this.isInExcludedRegion(q, excludedRegions) || (q > 0 && (source[q - 1] === '>' || source[q - 1] === '-')));
         // `=` covers assignment and compound operators (==, !=, <=, >=, =~, =>, etc.).
         // EXPRESSION_OPERATOR_LEAD_CHARS covers `+ - * / < > | ^ & ~` (binary operators).
         // `..` (range) is handled separately above as a preceding-`..` rejection.
-        if (!isBitstringOrCharLiteralClose && (before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before))) {
+        if (!isBitstringCharLiteralOrArrowClose && (before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before))) {
           return false;
         }
         // Word-based operator RHS: `end` directly after `and`/`or`/`not`/`in`/`when`
