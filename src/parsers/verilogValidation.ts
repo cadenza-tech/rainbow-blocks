@@ -918,8 +918,9 @@ export function scanForBeginAfterControl(
 
     // Check for `case` keyword (case_statement is a valid statement body for control
     // keywords like always/initial/if). Continue scanning so the trailing endcase can
-    // chain-consume back to the control keyword.
-    for (const caseKw of ['casez', 'casex', 'case']) {
+    // chain-consume back to the control keyword. `randcase` (randcase_statement, LRM
+    // IEEE 1800-2017 §18.16) is also a valid statement body and closes with endcase.
+    for (const caseKw of ['randcase', 'casez', 'casex', 'case']) {
       if (source.slice(i, i + caseKw.length) === caseKw) {
         const after = source[i + caseKw.length];
         if (after === undefined || !/[a-zA-Z0-9_$]/.test(after)) {
