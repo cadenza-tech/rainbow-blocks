@@ -5489,5 +5489,77 @@ end`;
     });
   });
 
+  suite('Bug: end after -> (empty-body final clause) should still be block_close', () => {
+    // `>` is in EXPRESSION_OPERATOR_LEAD_CHARS, so the isValidBlockClose RHS guard rejected
+    // `end` whenever the previous non-whitespace char was `>`. But the `>` of a clause arrow
+    // `->` is not a comparison operator: an `end` directly after `->` is the empty body of the
+    // final clause (`fn -> end`, `_ -> end`), so it is a real block close, not an
+    // expression-RHS identifier. The `>` whose previous char is `-` (the `->` arrow) must be
+    // rescued, while a lone comparison `>` (`a > end`) stays rejected.
+    test('should treat end as block_close for empty-body anonymous function (fn -> end)', () => {
+      const source = 'fn -> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end as block_close for fn with param and empty body (fn x -> end)', () => {
+      const source = 'fn x -> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should tokenize the -> empty-body end as block_close in case (case status do _ -> end end)', () => {
+      // The `end` directly after `->` is the empty body of the final clause. It must be
+      // tokenized as a block_close, not dropped; the trailing `end` then closes the case.
+      // Without the fix the `->` end is dropped, so only one end token remains.
+      const source = 'case status do\n  :ok -> :good\n  _ -> end\nend';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end' && t.type === 'block_close');
+      assert.strictEqual(endTokens.length, 2);
+    });
+
+    test('should tokenize the -> empty-body end as block_close in cond (cond do true -> end end)', () => {
+      const source = 'cond do\n  true -> end\nend';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end' && t.type === 'block_close');
+      assert.strictEqual(endTokens.length, 2);
+    });
+
+    test('should tokenize the -> empty-body end as block_close in receive (receive do msg -> end end)', () => {
+      const source = 'receive do\n  msg -> end\nend';
+      const tokens = parser.getTokens(source);
+      const endTokens = tokens.filter((t) => t.value === 'end' && t.type === 'block_close');
+      assert.strictEqual(endTokens.length, 2);
+    });
+
+    test('should treat end as block_close for try-rescue with empty-body clause', () => {
+      const source = 'try do\n  :a\nrescue\n  e -> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat end as block_close for with-else empty-body clause', () => {
+      const source = 'with :ok <- f() do\n  :a\nelse\n  err -> end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with', 'end');
+      assertIntermediates(pairs[0], ['else']);
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still reject end as block_close after single > comparison (x = a > end)', () => {
+      // A lone `>` (comparison operator) before `end` must still reject `end`: it is the RHS
+      // operand of the comparison, not a block close. Only `->` (arrow, previous char `-`),
+      // `>>` (bitstring), and `?>` (char literal) are rescued, never a lone comparison `>`.
+      const source = 'def foo do\n  x = a > end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
