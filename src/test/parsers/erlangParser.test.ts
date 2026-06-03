@@ -187,6 +187,24 @@ end`;
       assertSingleBlock(pairs, 'try', 'end');
       assertIntermediates(pairs[0], ['catch']);
     });
+
+    test('should treat catch as intermediate for empty catch clause preceded by closing paren', () => {
+      const pairs = parser.parse('try foo() catch end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch as intermediate for empty catch clause preceded by closing bracket', () => {
+      const pairs = parser.parse('try [x] catch end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should treat catch as intermediate for empty catch clause preceded by closing brace', () => {
+      const pairs = parser.parse('try {x} catch end');
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
   });
 
   suite('Nested blocks', () => {
