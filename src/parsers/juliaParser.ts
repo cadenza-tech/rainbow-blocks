@@ -235,9 +235,15 @@ export class JuliaBlockParser extends BaseBlockParser {
     return null;
   }
 
-  // Returns true if there is at least one block_open token inside the bracket range
-  // (`bracketOpen` < token.startOffset < bracketClose) whose value matches `openerKeyword`.
-  // `else` is treated as compatible with both 'if' and 'try' (Julia 1.8+ try/catch/else).
+  // Returns true if there is at least one block_open token inside the bracket range that
+  // could be the opener this intermediate attaches to: it must lie inside the bracket
+  // (`bracketOpen` < token.startOffset < bracketClose), start BEFORE the middle keyword
+  // (`token.startOffset < middleToken.startOffset`), and match `openerKeyword`. The
+  // before-the-middle requirement mirrors matchBlocks' LIFO ordering: a `block_middle`
+  // only attaches to an opener already on the stack, i.e. one that started earlier. An
+  // opener that appears AFTER the middle inside the same bracket (e.g. `[else, if a 1 end]`)
+  // cannot be the middle's owner, so the middle must be dropped rather than mis-attached to
+  // an outer block. `else` is treated as compatible with both 'if' and 'try' (Julia 1.8+).
   private hasMatchingOpenerInsideBracket(
     tokens: Token[],
     middleToken: Token,
@@ -247,8 +253,9 @@ export class JuliaBlockParser extends BaseBlockParser {
   ): boolean {
     // bracketClose === -1 means the bracket is unclosed; treat the range as open-ended
     // to the end of the source so a block_open before the middle inside an unclosed
-    // bracket still rescues the intermediate.
-    const upperBound = bracketClose === -1 ? Number.POSITIVE_INFINITY : bracketClose;
+    // bracket still rescues the intermediate. The middle's own offset bounds the scan
+    // regardless, since only earlier openers can own it.
+    const upperBound = bracketClose === -1 ? middleToken.startOffset : Math.min(bracketClose, middleToken.startOffset);
     for (const t of tokens) {
       if (t.startOffset <= bracketOpen) continue;
       if (t.startOffset >= upperBound) break;
