@@ -6940,5 +6940,122 @@ fi`;
     });
   });
 
+  suite('Compound command at if/while/until condition or body start', () => {
+    test('should pair inner if used as the while condition', () => {
+      // `while if a; then b; fi; do c; done` -> while@0->done@30 and if@6->fi@20
+      const pairs = parser.parse('while if a; then b; fi; do c; done');
+      assertBlockCount(pairs, 2);
+      const whilePair = findBlock(pairs, 'while');
+      assert.strictEqual(whilePair.closeKeyword.value, 'done');
+      assert.strictEqual(whilePair.closeKeyword.startOffset, 30);
+      assert.strictEqual(whilePair.nestLevel, 0);
+      assertIntermediates(whilePair, ['do']);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.openKeyword.startOffset, 6);
+      assert.strictEqual(ifPair.closeKeyword.value, 'fi');
+      assert.strictEqual(ifPair.closeKeyword.startOffset, 20);
+      assert.strictEqual(ifPair.nestLevel, 1);
+      assertIntermediates(ifPair, ['then']);
+    });
+
+    test('should pair inner if used as the outer if condition', () => {
+      // `if if a; then b; fi; then c; fi` -> outer if@0->fi@28, inner if@3->fi@14
+      const pairs = parser.parse('if if a; then b; fi; then c; fi');
+      assertBlockCount(pairs, 2);
+      const outerIf = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outerIf, 'outer if at offset 0 should be paired');
+      assert.strictEqual(outerIf.closeKeyword.value, 'fi');
+      assert.strictEqual(outerIf.closeKeyword.startOffset, 29);
+      assert.strictEqual(outerIf.nestLevel, 0);
+      const innerIf = pairs.find((p) => p.openKeyword.startOffset === 3);
+      assert.ok(innerIf, 'inner if at offset 3 should be paired');
+      assert.strictEqual(innerIf.closeKeyword.value, 'fi');
+      assert.strictEqual(innerIf.closeKeyword.startOffset, 17);
+      assert.strictEqual(innerIf.nestLevel, 1);
+    });
+
+    test('should pair inner for loop used as the until condition', () => {
+      // `until for x in 1; do a; done; do b; done`
+      const pairs = parser.parse('until for x in 1; do a; done; do b; done');
+      assertBlockCount(pairs, 2);
+      const untilPair = findBlock(pairs, 'until');
+      assert.strictEqual(untilPair.openKeyword.startOffset, 0);
+      assert.strictEqual(untilPair.closeKeyword.value, 'done');
+      assert.strictEqual(untilPair.closeKeyword.startOffset, 36);
+      assert.strictEqual(untilPair.nestLevel, 0);
+      const forPair = findBlock(pairs, 'for');
+      assert.strictEqual(forPair.openKeyword.startOffset, 6);
+      assert.strictEqual(forPair.closeKeyword.value, 'done');
+      assert.strictEqual(forPair.closeKeyword.startOffset, 24);
+      assert.strictEqual(forPair.nestLevel, 1);
+    });
+
+    test('should pair inner case used as the if condition', () => {
+      // `if case $x in y) true;; esac; then z; fi`
+      const pairs = parser.parse('if case $x in y) true;; esac; then z; fi');
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.openKeyword.startOffset, 0);
+      assert.strictEqual(ifPair.closeKeyword.value, 'fi');
+      assert.strictEqual(ifPair.closeKeyword.startOffset, 38);
+      assert.strictEqual(ifPair.nestLevel, 0);
+      assertIntermediates(ifPair, ['then']);
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.openKeyword.startOffset, 3);
+      assert.strictEqual(casePair.closeKeyword.value, 'esac');
+      assert.strictEqual(casePair.closeKeyword.startOffset, 24);
+      assert.strictEqual(casePair.nestLevel, 1);
+    });
+
+    test('should pair inner brace group used as the if condition', () => {
+      // `if { true; }; then echo; fi`
+      const pairs = parser.parse('if { true; }; then echo; fi');
+      assertBlockCount(pairs, 2);
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.openKeyword.startOffset, 0);
+      assert.strictEqual(ifPair.closeKeyword.value, 'fi');
+      assert.strictEqual(ifPair.closeKeyword.startOffset, 25);
+      assert.strictEqual(ifPair.nestLevel, 0);
+      assertIntermediates(ifPair, ['then']);
+      const bracePair = findBlock(pairs, '{');
+      assert.strictEqual(bracePair.openKeyword.startOffset, 3);
+      assert.strictEqual(bracePair.closeKeyword.value, '}');
+      assert.strictEqual(bracePair.closeKeyword.startOffset, 11);
+      assert.strictEqual(bracePair.nestLevel, 1);
+    });
+
+    test('should not treat for-loop variable name as a command keyword', () => {
+      // `for x in if; do a; done`: the `if` is the loop word list, not a block opener
+      const pairs = parser.parse('for x in if; do a; done');
+      assertSingleBlock(pairs, 'for', 'done');
+      assertIntermediates(pairs[0], ['do']);
+    });
+
+    test('should not treat for-loop word list keywords as command keywords', () => {
+      // `for x in if while until; do a; done`: all three are word-list items
+      const pairs = parser.parse('for x in if while until; do a; done');
+      assertSingleBlock(pairs, 'for', 'done');
+      assertIntermediates(pairs[0], ['do']);
+    });
+
+    test('should not treat case-pattern keyword as a command keyword', () => {
+      // `case $x in for) echo;; esac`: the `for` is a case pattern, not a loop opener
+      const pairs = parser.parse('case $x in for) echo;; esac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should not treat keyword argument after if/while/until as a command keyword', () => {
+      // `echo if while until`: keywords are plain arguments to echo, no command position
+      assertNoBlocks(parser.parse('echo if while until'));
+    });
+
+    test('should still pair a plain if condition command', () => {
+      // Regression guard: the common `if CMD; then ...; fi` must remain a single pair
+      const pairs = parser.parse('if true; then echo; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
   generateCommonTests(config);
 });
