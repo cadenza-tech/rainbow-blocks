@@ -966,6 +966,20 @@ export class MatlabBlockParser extends BaseBlockParser {
         if (this.isPrecededByBinaryOperator(source, token.startOffset, excludedRegions)) {
           return false;
         }
+        // Reject block_middle keywords that appear in expression context after a value-like
+        // token on the same logical line with no operator between (`A(1) otherwise`,
+        // `[1] else`, `10. else`, `"ab" else`, `42 elseif b`). The keyword is the right
+        // operand of an implicit/missing operator — invalid MATLAB. Registering such a
+        // keyword as an intermediate corrupts the switch/if structure, and worse, a fake
+        // `otherwise` would cause the subsequent genuine `case` to be rejected as a
+        // "case after otherwise". This reuses the same value-token detection as the
+        // block_close side (isValidBlockClose), which already exempts middle keywords that
+        // are themselves the line leader (e.g. `else end`) via getMiddleKeywordsAsLineLeaders,
+        // so genuine statement-start intermediates are preserved. Symmetric with the
+        // binary-operator check above.
+        if (this.isPrecededByValueTokenOnSameLine(source, token.startOffset, excludedRegions)) {
+          return false;
+        }
         // Reject block_middle keywords immediately preceded by `@` (function handle
         // prefix, e.g. `@case`). The `@` puts the keyword in identifier-reference
         // context, so it is not a real intermediate. Symmetric with isValidBlockOpen.
