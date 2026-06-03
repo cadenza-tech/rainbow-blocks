@@ -96,6 +96,15 @@ const INTERMEDIATE_TO_OPENERS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
 // same line, so suppressing these forms does not affect genuine blocks.
 const RECEIVER_LIKE_OPENERS = new Set(['select', 'union', 'enum', 'struct', 'lib', 'macro', 'annotation']);
 
+// Keywords that expect a value/expression to their right. When a receiver-like
+// keyword (`enum`, `struct`, ...) appears immediately after one of these on the
+// same logical line (`return enum`, `yield struct`, `a and enum`), the keyword
+// is that value, not a block opener. A genuine opener is never preceded by these
+// (a real `enum`/`struct` block starts a statement or follows a visibility/
+// abstract modifier like `private enum`, which are NOT in this set), so
+// suppressing the opener role here does not affect genuine blocks.
+const VALUE_EXPECTING_PRECEDING_KEYWORDS = new Set(['return', 'yield', 'and', 'or', 'not', 'in', 'then', 'when', 'else', 'elsif']);
+
 // Crystal interpolation check: %Q, %W, %I, %x, %r and bare % interpolate
 function isCrystalInterpolatingPercent(specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -787,6 +796,15 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (crossedNewline) {
       return false;
     }
+    // Range operator on the right (`KEYWORD..N`, `KEYWORD...N`): the keyword is
+    // the left-hand operand of a range expression and is therefore a value, not
+    // an opener. A genuine opener is followed by a type name or newline, never by
+    // a `..` on the same line. Only the same-line form is treated here; the
+    // method-call single dot is already handled above (it allows the cross-line
+    // chain form, which `..` does not).
+    if (ch === '.' && source[i + 1] === '.') {
+      return true;
+    }
     // Value usage with `=`-led operator: assignment (`=`), comparison (`==`, `===`,
     // `=~`), or hash rocket (`=>`). In every case the keyword is the left-hand
     // operand and is being used as a value, not opening a block. Real opener forms
@@ -831,6 +849,9 @@ export class CrystalBlockParser extends BaseBlockParser {
     //     position. `|` is already handled above (block-arg / bitwise-or).
     //   - `?` — ternary condition (e.g. `struct ? 1 : 2`)
     //   - `:` — type annotation or ternary alternative
+    //   - `;` — statement terminator (e.g. `enum; x = 1`). A genuine opener is
+    //     followed by a type name or newline, never by a bare `;`, so a `;`
+    //     here means the keyword is a standalone value expression.
     // Compound assignment forms `+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=`, `&=`,
     // `|=`, `^=` are subsumed: the leading operator (e.g. `+`) matches above, but
     // for completeness the helper also accepts the bare operator regardless of
@@ -851,9 +872,72 @@ export class CrystalBlockParser extends BaseBlockParser {
       ch === '&' ||
       ch === '^' ||
       ch === '?' ||
-      ch === ':'
+      ch === ':' ||
+      ch === ';'
     ) {
       return true;
+    }
+    return false;
+  }
+
+  // Checks whether the keyword starting at `position` is preceded by a context that
+  // expects a value/expression on its right, meaning the keyword is being used as a
+  // value (identifier/constant) rather than a block opener. Two preceding forms qualify:
+  //   1. An assignment/separator punctuation immediately before (skipping spaces, tabs,
+  //      and excluded regions, but NOT newlines): `=` (covers `=`, `+=`, `==`, `=>`, ...)
+  //      or `,`. After `x = enum` / `{a, enum}` the keyword is the right-hand value.
+  //   2. A value-expecting keyword immediately before (`return enum`, `yield struct`,
+  //      `a and enum`): the keyword is the operand/return value.
+  // Newlines are not crossed: a genuine opener begins its own statement (`enum Color`)
+  // or follows a visibility/abstract modifier (`private enum`, `abstract struct`), and
+  // those modifiers are not value-expecting, so the opener role is preserved. Excluded
+  // regions are skipped. Used together with isReceiverOrAssignmentUsage (which inspects
+  // the text after the keyword) to suppress the receiver-like openers when used as values.
+  private isPrecededByValueContext(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) {
+      return false;
+    }
+    const ch = source[i];
+    // Assignment / separator punctuation directly before the keyword. `=` matches
+    // plain assignment and every `=`-suffixed operator (`+=`, `==`, `=~`, `=>`),
+    // each of which expects a value to its right. `,` is an argument/element
+    // separator whose following item is a value.
+    if (ch === '=' || ch === ',') {
+      return true;
+    }
+    // Value-expecting keyword directly before the keyword (e.g. `return`, `yield`,
+    // `and`). Walk back over the preceding identifier and check it against the set.
+    if (/[A-Za-z0-9_]/.test(ch)) {
+      let wordStart = i;
+      while (wordStart > 0 && /[A-Za-z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.slice(wordStart, i + 1);
+      // The character before the word must be a non-identifier boundary so that
+      // suffixes like `myreturn` / `do_yield` are not mistaken for the keyword.
+      if (wordStart > 0) {
+        const before = source[wordStart - 1];
+        if (/[A-Za-z0-9_.@$]/.test(before)) {
+          return false;
+        }
+      }
+      return VALUE_EXPECTING_PRECEDING_KEYWORDS.has(word);
     }
     return false;
   }
@@ -1215,11 +1299,19 @@ export class CrystalBlockParser extends BaseBlockParser {
       }
     }
 
-    // Reject context-dependent keywords used as ordinary identifiers: method-call
-    // receivers (`select.upcase`, `enum.foo`) or assignment targets (`select = "x"`).
-    // In both forms the keyword is a value/variable, not a block opener.
-    if (RECEIVER_LIKE_OPENERS.has(keyword) && this.isReceiverOrAssignmentUsage(source, position + keyword.length, excludedRegions)) {
-      return false;
+    // Reject context-dependent keywords used as ordinary identifiers. Two views are
+    // combined: text AFTER the keyword (method-call receivers `enum.foo`, assignment
+    // targets `select = "x"`, range `enum..N`, `enum { ... }`, `enum;`, ...) via
+    // isReceiverOrAssignmentUsage, and text BEFORE the keyword (`x = enum`, `return
+    // enum`, `yield struct`) via isPrecededByValueContext. In every such form the
+    // keyword is a value/variable, not a block opener.
+    if (RECEIVER_LIKE_OPENERS.has(keyword)) {
+      if (this.isReceiverOrAssignmentUsage(source, position + keyword.length, excludedRegions)) {
+        return false;
+      }
+      if (this.isPrecededByValueContext(source, position, excludedRegions)) {
+        return false;
+      }
     }
 
     // Reject receiver-like keywords used as case/when branch values (`when enum\n ...`).
