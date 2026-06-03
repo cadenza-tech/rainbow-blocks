@@ -739,6 +739,13 @@ export class CobolBlockParser extends BaseBlockParser {
         if (lower !== 'when' && lower !== 'else') return true;
         if (this.isPrecedingWordDataNameVerb(source, token.startOffset)) return false;
         if (this.isInExpressionContext(source, token.startOffset, excludedRegions)) return false;
+        // Drop a WHEN/ELSE used as the paragraph reference of a paragraph-call
+        // PERFORM (`PERFORM ELSE.`, `PERFORM WHEN.`). The period terminates the
+        // statement, so the keyword is the PERFORM operand, not a control-flow
+        // intermediate. Without this, the WHEN/ELSE survived and was registered as
+        // an intermediate of the enclosing IF/EVALUATE — symmetric to the
+        // block_open / block_close reject below.
+        if (this.isPerformParagraphName(source, token.startOffset, token.value.length)) return false;
         return true;
       }
       if (token.type === 'block_open' || token.type === 'block_close') {
