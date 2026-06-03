@@ -3982,5 +3982,42 @@ end if`;
     });
   });
 
+  suite('Bug AS2: colon-suffixed compound block_middle must not attach as an intermediate', () => {
+    // The single-keyword middle path drops a colon-suffixed keyword (`else: 5`) via
+    // isFollowedByRecordKeyColon, but the compound-keyword path (`else if`, `on error`)
+    // only checked the stricter isAtRecordKeyPosition (which requires a reachable
+    // enclosing '{'). A brace-less `else if: 5` / `on error: 5` therefore slipped
+    // through and was recorded as an intermediate. A colon directly after a compound
+    // middle keyword is never valid AppleScript section syntax, so the keyword must be
+    // dropped regardless of whether an enclosing record literal is reachable.
+    test('should not attach else if as intermediate when followed by a colon', () => {
+      const source = 'if a then\nbeep\nelse if: 5\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not attach on error as intermediate when followed by a colon', () => {
+      const source = 'try\non error: 5\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach a genuine else if as intermediate', () => {
+      const source = 'if x = 1 then\nbeep\nelse if x = 2 then\nbeep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if']);
+    });
+
+    test('should still attach a genuine on error as intermediate', () => {
+      const source = 'try\nriskyOp()\non error errMsg\nbeep\nend try';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end try');
+      assertIntermediates(pairs[0], ['on error']);
+    });
+  });
+
   generateCommonTests(config);
 });
