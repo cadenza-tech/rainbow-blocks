@@ -46,6 +46,14 @@ const COMPOUND_KEYWORDS = [
   'end if'
 ];
 
+// Upper bound on the backward scan in isAtRecordKeyPosition. The scan walks back
+// looking for the record literal's opening '{'. An unclosed '{' followed by many
+// colon-suffixed close keywords would otherwise make each scan O(N), degrading
+// tokenize to O(N^2). A generous 2048-character cap never rejects a real record
+// literal (which fits well within that span) while keeping the call O(1) per use,
+// mirroring the MAX_PAREN_SCAN_CHARS bound in adaValidation.
+const MAX_RECORD_KEY_SCAN_CHARS = 2048;
+
 // Whitespace characters allowed as line-leading indentation. Includes ASCII space/tab
 // and common Unicode whitespace (NBSP U+00A0, ZWSP U+200B, EN/EM/HAIR spaces U+2000-U+200A,
 // LSEP/PSEP U+2028/U+2029, NNBSP U+202F, MMSP U+205F, IDEO SPACE U+3000) so that
@@ -826,7 +834,15 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     // misclassifying real block keywords.
     let before = pos - 1;
     let depth = 0;
+    let scanned = 0;
     while (before >= 0) {
+      // Bound the backward walk so an unclosed '{' far away (or a long run of
+      // colon-suffixed keywords) does not make this scan O(N). Counting every
+      // iteration — including skipped excluded-region characters — keeps the call
+      // O(1) per use. Exceeding the cap means no enclosing record '{' is within a
+      // plausible distance, so the keyword is treated as a real block keyword.
+      scanned++;
+      if (scanned > MAX_RECORD_KEY_SCAN_CHARS) return false;
       const region = this.findExcludedRegionAt(before, excludedRegions);
       if (region) {
         before = region.start - 1;
