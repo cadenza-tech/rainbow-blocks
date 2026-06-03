@@ -1088,8 +1088,11 @@ export class RubyBlockParser extends BaseBlockParser {
     // Scope resolution: ClassName::`
     if (source[i] === ':' && i > 0 && source[i - 1] === ':') return true;
     // Method definition: def `
+    // Ruby permits non-ASCII letters in identifiers, so `αdef` is a single
+    // identifier rather than a standalone `def` keyword. Use the Unicode-aware
+    // boundary check instead of an ASCII-only regex on the preceding character.
     if (i >= 2 && source.slice(i - 2, i + 1) === 'def') {
-      if (i === 2 || !/[a-zA-Z0-9_]/.test(source[i - 3])) {
+      if (i === 2 || !endsWithIdentifierChar(source, i - 3)) {
         return true;
       }
     }
