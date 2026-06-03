@@ -1612,6 +1612,23 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'while', 'end');
     });
+
+    test('should treat next-line do as block do when while is suffix of a Unicode identifier', () => {
+      // `whileα` is a single identifier, not the `while` loop keyword, so the
+      // next-line `do` is a plain block opener pairing with `end`, not a loop-do
+      // that would suppress the do/end pair.
+      const source = 'whileα\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still join next-line do with a real while loop keyword', () => {
+      // Ruby's strict grammar rejects `while x\ndo`, but best-effort parsing pairs
+      // the real `while` with `end` rather than mis-pairing the bare `do`.
+      const source = 'while x\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
   });
 
   suite('Coverage: loopDo semicolon and excluded region branches', () => {
