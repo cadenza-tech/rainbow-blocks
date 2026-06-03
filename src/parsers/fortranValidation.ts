@@ -615,6 +615,12 @@ export function isPrecededByOperator(source: string, position: number): boolean 
 // Detects block_middle keyword in expression context (used as variable, not as block intermediate)
 // Stricter than isPrecededByOperator: excludes ')' since it is a valid predecessor for `then` after `if (...)`
 export function isMiddleInExpressionContext(source: string, position: number): boolean {
+  // A fixed-form column-6 continuation marker (`+`, `$`, `*`, etc.) is a continuation
+  // token, not an arithmetic operator. Without this guard, `if (a)\n     +then` would
+  // read the col-6 `+` as a `+ then` expression and drop the `then` intermediate.
+  if (isAfterFixedFormContinuationMarker(source, position)) {
+    return false;
+  }
   let i = position - 1;
   while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
     i--;
@@ -663,11 +669,85 @@ export function isMiddleInExpressionContext(source: string, position: number): b
   return false;
 }
 
+// Returns true if `position` immediately follows a fixed-form column-6 continuation
+// marker, i.e. `position` is column 7 (offset lineStart + 6) of a physical line whose
+// columns 1-5 are blank or a numeric label and whose column 6 holds a valid fixed-form
+// continuation marker (non-blank, non-letter, non-0, non-comment). Mirrors the rule used
+// by the parser's isFixedFormContinuationMarkerAt / fixedFormContinuationContentStart.
+function isAfterFixedFormContinuationMarker(source: string, position: number): boolean {
+  let lineStart = position;
+  while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+    lineStart--;
+  }
+  const col6 = lineStart + 5;
+  // The keyword must begin in column 7 (just past the column-6 marker).
+  if (position !== col6 + 1 || col6 >= source.length) {
+    return false;
+  }
+  // A comment marker in column 1 (C/c/*/!) disqualifies the line.
+  const col1 = source[lineStart];
+  if (col1 === 'C' || col1 === 'c' || col1 === '*' || col1 === '!') {
+    return false;
+  }
+  // Columns 1-5 must be blank or a numeric label (spaces/digits only).
+  for (let c = lineStart; c < col6; c++) {
+    const ch = source[c];
+    if (ch !== ' ' && !(ch >= '0' && ch <= '9')) {
+      return false;
+    }
+  }
+  const marker = source[col6];
+  if (marker === ' ' || marker === '\t' || marker === '\n' || marker === '\r' || marker === '0' || marker === '!') {
+    return false;
+  }
+  if ((marker >= 'a' && marker <= 'z') || (marker >= 'A' && marker <= 'Z')) {
+    return false;
+  }
+  return true;
+}
+
+// Walks backward from the physical line that begins at `lineStart`, skipping blank and
+// comment-only lines, and returns the index of the last code character (stripping the
+// inline comment, respecting strings) of the first preceding content-bearing line.
+// Returns -1 when no such line exists.
+function findPrevLineLastCodeCharIndex(source: string, lineStart: number): number {
+  let cursor = lineStart;
+  while (cursor > 0) {
+    let lineEnd = cursor - 1;
+    if (source[lineEnd] === '\n' && lineEnd > 0 && source[lineEnd - 1] === '\r') {
+      lineEnd--;
+    }
+    let prevStart = lineEnd;
+    while (prevStart > 0 && source[prevStart - 1] !== '\n' && source[prevStart - 1] !== '\r') {
+      prevStart--;
+    }
+    const codeEnd = findLineCodePortionEnd(source, prevStart);
+    if (codeEnd >= prevStart) {
+      return codeEnd;
+    }
+    // Blank or comment-only line: continue scanning the line before it.
+    cursor = prevStart;
+  }
+  return -1;
+}
+
 // Validates that `then` follows a closing paren `)` from an if-construct header.
 // A bare `then` at line start (with only whitespace/&-continuation before it on its
 // physical line and no `)` reachable through backward continuation) is not a real
 // block_middle - it's a misplaced identifier and must be skipped.
 export function isThenAfterParen(source: string, position: number): boolean {
+  // Fixed-form column-6 continuation: `if (a)` on one line, then `     +then` on the
+  // next where column 6 holds the continuation marker. The if-header `)` is the last
+  // code char of the previous physical line. Recognize this before the same-line scan
+  // so `then` is captured as an intermediate.
+  if (isAfterFixedFormContinuationMarker(source, position)) {
+    let lineStart = position;
+    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+      lineStart--;
+    }
+    const prevEnd = findPrevLineLastCodeCharIndex(source, lineStart);
+    return prevEnd >= 0 && source[prevEnd] === ')';
+  }
   let i = position - 1;
   // Skip same-line whitespace
   while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
