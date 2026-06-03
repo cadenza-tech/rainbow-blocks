@@ -278,8 +278,11 @@ export function isAtCommandPosition(
       if (k < 0 || source[k] === '\n' || source[k] === '\r' || ';|&(){}`'.includes(source[k])) {
         return true;
       }
-      // Check if { is preceded by a command starter keyword or block close keyword
-      const braceContextKws = ['then', 'do', 'else', 'elif', 'time', 'coproc', 'fi', 'done', 'esac'];
+      // Check if { is preceded by a command starter keyword or block close keyword.
+      // `if`/`while`/`until` are included so a `{ ... }` command group used as their
+      // condition/body is recognised (e.g. `if { true; }; then ...`). `for`/`select`/`case`
+      // are excluded for the same reason as in commandStarters: they expect a word, not a command.
+      const braceContextKws = ['then', 'do', 'else', 'elif', 'time', 'coproc', 'fi', 'done', 'esac', 'if', 'while', 'until'];
       for (const kw of braceContextKws) {
         const kwStart = k - kw.length + 1;
         if (kwStart >= 0 && source.slice(kwStart, k + 1) === kw) {
@@ -319,7 +322,12 @@ export function isAtCommandPosition(
 
     // After shell keywords that introduce a new command context
     // The keyword itself must be at a valid position (not a command argument like "echo then")
-    const commandStarters = ['then', 'do', 'else', 'elif', 'time', 'coproc'];
+    // `if`/`while`/`until` are reserved-word openers whose condition (or, for `do`, body)
+    // is itself a command list, so a keyword directly after them sits at command position
+    // (e.g. `while if a; then b; fi; do ...`, `if case $x in ...; then ...`). `for`/`select`/`case`
+    // are deliberately excluded: they are followed by a variable name / subject word, never by a
+    // nested command, so adding them would misread `for if; ...` as a block opener.
+    const commandStarters = ['then', 'do', 'else', 'elif', 'time', 'coproc', 'if', 'while', 'until'];
     for (const kw of commandStarters) {
       const kwStart = i - kw.length + 1;
       if (kwStart >= 0 && source.slice(kwStart, i + 1) === kw) {
