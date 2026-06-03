@@ -2092,6 +2092,30 @@ bar() -> fun() -> ok end.`;
     });
   });
 
+  suite('Regression: incomplete tilde-sigil prefix block keyword leak', () => {
+    test('should not detect begin as block keyword when prefixed by ~ (incomplete sigil)', () => {
+      // ~begin is a sigil prefix with no delimiter, so begin is part of the sigil name,
+      // not a block opener. With no real opener the trailing end is an orphan.
+      const source = '~begin end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not detect case as block keyword when prefixed by ~ (incomplete sigil)', () => {
+      const source = '~case end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still treat a properly delimited sigil with begin prefix as excluded region', () => {
+      // ~begin{...} is a real sigil: the begin prefix and body are one excluded region,
+      // and a following begin/end pair outside it must still be detected.
+      const source = '~begin{ignored},\nbegin\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: multi-line comment between map key and =>', () => {
     test('should reject block keyword followed by => with multi-line comments between', () => {
       const source = '#{begin\n  % comment1\n  % comment2\n  => value},\nbegin\n  ok\nend';
