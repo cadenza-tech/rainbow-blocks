@@ -5440,6 +5440,62 @@ end`;
       assertSingleBlock(pairs, 'if', 'end');
       assertIntermediates(pairs[0], ['else']);
     });
+
+    test('should not attach else inside [] to outer if when bracket opener follows the else', () => {
+      // `if c\n[else, if a 1 end]\nend` — inside the brackets `else` comes BEFORE the
+      // inner `if` opener. The `else` has no matching opener earlier in the same bracket,
+      // so it must be dropped, not attached as an intermediate of the outer `if`. The
+      // inner `if a 1 end` and the outer `if c ... end` each pair with their own `end`.
+      const source = 'if c\n[else, if a 1 end]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outer, 'expected an outer if block opening at offset 0');
+      assertIntermediates(outer, []);
+    });
+
+    test('should not attach elseif inside [] to outer if when bracket opener follows the elseif', () => {
+      // Same as above for `elseif`: the inner `if` opener appears after `elseif` in the
+      // bracket, so `elseif` has no matching opener before it and must be dropped.
+      const source = 'if c\n[elseif, if a 1 end]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outer, 'expected an outer if block opening at offset 0');
+      assertIntermediates(outer, []);
+    });
+
+    test('should not attach catch inside [] to outer try when bracket opener follows the catch', () => {
+      // `try\n[catch, try a 1 end]\nend` — inside the brackets `catch` comes BEFORE the
+      // inner `try` opener, so it has no matching opener before it and must be dropped,
+      // not attached to the outer `try`.
+      const source = 'try\n[catch, try a 1 end]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outer, 'expected an outer try block opening at offset 0');
+      assertIntermediates(outer, []);
+    });
+
+    test('should not attach finally inside [] to outer try when bracket opener follows the finally', () => {
+      // Same as above for `finally`.
+      const source = 'try\n[finally, try a 1 end]\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.startOffset === 0);
+      assert.ok(outer, 'expected an outer try block opening at offset 0');
+      assertIntermediates(outer, []);
+    });
+
+    test('should still attach else inside [] when a matching opener precedes the else in the same bracket', () => {
+      // `[if true 1 else 2 end]` with extra leading content — the `if` opener precedes the
+      // `else` inside the same bracket, so `else` is a legitimate intermediate. This guards
+      // against the position fix over-dropping middles that have a valid earlier opener.
+      const source = '[1, if true 1 else 2 end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
   });
 
   suite('Regression: end followed by binary operator past block comment is lastindex (Bug 5)', () => {
