@@ -590,6 +590,13 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (token.startOffset > 0 && source[token.startOffset - 1] === '#') {
         return false;
       }
+      // Reject keywords preceded by '~' (sigil prefix names like ~begin, ~case). A keyword
+      // immediately after '~' is part of the sigil name, not a block delimiter. A properly
+      // delimited sigil (~begin{...}) is already an excluded region whose prefix never reaches
+      // this filter; only an incomplete sigil (~begin with no delimiter) is caught here.
+      if (token.startOffset > 0 && source[token.startOffset - 1] === '~') {
+        return false;
+      }
       // Reject keywords adjacent to '@' on either side. Per Erlang Reference Manual,
       // atom syntax is [a-z][a-zA-Z0-9_@]* and variable syntax is [A-Z_][a-zA-Z0-9_@]*,
       // so '@' is an identifier continuation character, not a word boundary. JavaScript
