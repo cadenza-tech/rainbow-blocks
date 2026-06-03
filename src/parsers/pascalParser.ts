@@ -67,6 +67,21 @@ export class PascalBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Keyword used as right-hand-side of `:=` assignment: `x := repeat;`, `x := begin;`,
+    // `x := case;`, `x := try;`, `x := record;`. The keyword names an expression
+    // identifier, not a block opener (a record type definition uses `=`, never `:=`).
+    // Without this guard the keyword is pushed onto the stack and the surrounding
+    // `end`/`until` closes it instead of the real enclosing block, leaving the outer
+    // block orphan. For `repeat`, a stray `until` later in the source would otherwise
+    // pair with the spurious `repeat`. The comparison check below does not fire for `:=`
+    // because `:=` is not a comparison `=`, so this dedicated check is needed.
+    if (
+      (keyword === 'try' || keyword === 'record' || keyword === 'case' || keyword === 'begin' || keyword === 'repeat') &&
+      this.isPrecededByAssignment(source, position, excludedRegions)
+    ) {
+      return false;
+    }
+
     // Variant record case: case Tag: Type of (inside a record, no own end)
     // Also handles tagless variant: case Integer of (no colon)
     if (keyword === 'case') {
@@ -221,15 +236,6 @@ export class PascalBlockParser extends BaseBlockParser {
     // `TFoo = record` is unaffected because isPrecededByComparisonEquals only fires when
     // the preceding `=` is a comparison operator.
     if (keyword === 'record' && isPrecededByComparisonEquals(source, position, excludedRegions, this.validationCallbacks)) {
-      return false;
-    }
-
-    // Assignment-RHS 'record': `x := record;` uses `record` as a right-hand-side
-    // expression identifier (a record type definition uses `=`, never `:=`). The
-    // comparison check above does not fire for `:=` because `:=` is not a comparison `=`,
-    // so this dedicated check is needed. Without it the spurious `record` is pushed onto
-    // the stack and the surrounding `end` closes it instead of the real enclosing block.
-    if (keyword === 'record' && this.isPrecededByAssignment(source, position, excludedRegions)) {
       return false;
     }
 
