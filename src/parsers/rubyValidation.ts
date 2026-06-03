@@ -582,8 +582,12 @@ function logicalLineStartsWithLoopKeyword(source: string, logicalLineStart: numb
   }
   for (const kw of ['while', 'until', 'for'] as const) {
     if (source.slice(i, i + kw.length) === kw) {
-      const after = source[i + kw.length];
-      if (after === undefined || !/[a-zA-Z0-9_]/.test(after)) {
+      const afterIndex = i + kw.length;
+      // Ruby permits non-ASCII letters in identifiers, so `whileα` is a single
+      // identifier rather than the `while` loop keyword. Treat end-of-source as a
+      // boundary, and otherwise use the Unicode-aware helper instead of an
+      // ASCII-only regex on the following character.
+      if (afterIndex >= source.length || !endsWithIdentifierChar(source, afterIndex)) {
         return true;
       }
     }
