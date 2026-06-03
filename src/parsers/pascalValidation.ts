@@ -447,8 +447,15 @@ export function buildRecordContextMap(source: string, excludedRegions: ExcludedR
         break;
       }
       map.set(keywordStart, inRecord);
-      // A standalone case has its own matching `end`; a variant case does not.
-      if (!isVariantCase(source, keywordStart, excludedRegions, callbacks)) {
+      // A standalone case has its own matching `end`; a variant case does not. The
+      // classification must match isValidBlockOpen exactly: inside a record use the same
+      // record-aware rule (isVariantCaseInsideRecord) the parser uses, so a malformed
+      // `case Tag` (no `of`) inside a record is treated as a variant (not pushed) rather
+      // than a standalone case. Outside a record fall back to the structural isVariantCase.
+      const isVariant = inRecord
+        ? isVariantCaseInsideRecord(source, keywordStart, excludedRegions, callbacks)
+        : isVariantCase(source, keywordStart, excludedRegions, callbacks);
+      if (!isVariant) {
         stack.push('case');
       }
       continue;
@@ -501,6 +508,21 @@ export function isVariantRecordCase(
   if (!recordContextMap.get(position)) {
     return false;
   }
+  return isVariantCaseInsideRecord(source, position, excludedRegions, callbacks);
+}
+
+// Classifies a `case` keyword that is already known to sit inside a record block as a
+// variant selector (true) or a standalone block opener (false). Factored out of
+// isVariantRecordCase so buildRecordContextMap can reuse the identical decision when it
+// pushes/skips a `case` on the record-context stack; using a divergent rule (e.g. the
+// of-requiring isVariantCase) for a malformed `case Tag` (no `of`) inside a record left a
+// phantom `case` on the context stack that wrongly suppressed a following standalone case.
+function isVariantCaseInsideRecord(
+  source: string,
+  position: number,
+  excludedRegions: ExcludedRegion[],
+  callbacks: PascalValidationCallbacks
+): boolean {
   // Scan forward from after 'case', skipping whitespace and excluded regions, to the
   // selector tag.
   let j = position + 4; // skip 'case'
