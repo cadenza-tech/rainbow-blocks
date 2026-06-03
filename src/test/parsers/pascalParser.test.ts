@@ -4156,6 +4156,43 @@ end;`;
     });
   });
 
+  suite('Regression: asm forward-character check must match between tokenize and excluded regions', () => {
+    test('should not treat `asm` followed by `>` as a block opener', () => {
+      // `asm > begin x end;` uses `asm` as a comparison operand (an identifier), not an
+      // assembly block opener. The asm-excluded-region scan already rejected a trailing
+      // `>`, but isValidBlockOpen did not, so `asm` became a block opener and stole the
+      // `end` from the real `begin..end`. The two forward-character sets must match.
+      const source = 'asm > begin x end;';
+      const pairs = parser.parse(source);
+      const asmPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.strictEqual(asmPairs.length, 0, '`asm` before `>` must not be a block opener');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `asm` followed by `[` as a block opener', () => {
+      // `asm[0] := 1;` indexes an array named `asm`; the `[` makes it an identifier, not
+      // an assembly block. Neither forward set listed `[`, so `asm` fell through to the
+      // backward scan, was treated as a statement-position opener, and produced a spurious
+      // unterminated asm region swallowing the rest of the source.
+      const source = 'begin\n  asm[0] := 1;\nend';
+      const pairs = parser.parse(source);
+      const asmPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.strictEqual(asmPairs.length, 0, '`asm` before `[` must not be a block opener');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `asm` followed by `<` as a block opener', () => {
+      // `asm < b;` uses `asm` as a comparison operand (an identifier). Neither forward set
+      // listed `<`, so `asm` fell through to the backward scan and was treated as a
+      // statement-position opener, producing a spurious unterminated asm region.
+      const source = 'begin\n  asm < b;\nend';
+      const pairs = parser.parse(source);
+      const asmPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'asm');
+      assert.strictEqual(asmPairs.length, 0, '`asm` before `<` must not be a block opener');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: block-open keyword on right of `:=` assignment', () => {
     test('should not treat `repeat` on right of `:=` as block opener', () => {
       // `x := repeat;` uses `repeat` as a right-hand-side expression identifier, not a
