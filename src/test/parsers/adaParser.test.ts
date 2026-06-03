@@ -597,6 +597,31 @@ end;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'procedure', 'end');
     });
+
+    // A comment terminated by a Unicode line terminator (NEL/LS/PS, Ada LRM
+    // 2.2) must end at that terminator so the following `separate` is seen as
+    // a subunit stub. Otherwise the comment swallows `separate` and `procedure`
+    // is wrongly paired with the orphan `end`.
+    test('should not treat procedure with is-separate as block when comment ends at NEL', () => {
+      const nel = String.fromCharCode(0x0085);
+      const source = `procedure P is -- c${nel}separate;${nel}end;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat procedure with is-separate as block when comment ends at LS', () => {
+      const ls = String.fromCharCode(0x2028);
+      const source = `procedure P is -- c${ls}separate;${ls}end;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat procedure with is-separate as block when comment ends at PS', () => {
+      const ps = String.fromCharCode(0x2029);
+      const source = `procedure P is -- c${ps}separate;${ps}end;`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Compound end with multiple spaces', () => {
