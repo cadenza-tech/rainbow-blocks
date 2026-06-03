@@ -6109,6 +6109,17 @@ end select`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end if');
     });
+
+    test('should capture `then` as intermediate across fixed-form col-6 continuation', () => {
+      // The if-header `if (a)` continues onto line 2 via a column-6 `+` marker, where
+      // `then` lives. The if/end if pair forms, but `then` must also be recognized as
+      // a block_middle intermediate. isThenAfterParen previously only handled `&`
+      // continuation and missed the fixed-form col-6 form, dropping `then`.
+      const source = '      if (a)\n     +then\n          x = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
   });
 
   suite('Regression: cross-line empty parens for select case/rank/type', () => {
