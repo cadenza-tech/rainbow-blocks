@@ -155,6 +155,46 @@ export function isValidProcedureOpen(
   return true;
 }
 
+// Returns the index of the last code character on the physical line that begins at
+// `lineStart` (line break / EOF determines the end). The inline comment portion (text
+// after an unquoted `!`) is excluded so a backward paren-depth scan does not count
+// parentheses that live inside a comment. Strings are skipped (Fortran uses doubled
+// quotes as escape) so a `!` inside a string is not treated as a comment start.
+// Returns lineStart - 1 when the line has no code characters (comment-only / blank).
+function findLineCodePortionEnd(source: string, lineStart: number): number {
+  let commentStart = -1;
+  let i = lineStart;
+  while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+    const ch = source[i];
+    if (ch === "'" || ch === '"') {
+      i++;
+      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        if (source[i] === ch) {
+          if (i + 1 < source.length && source[i + 1] === ch) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (ch === '!') {
+      commentStart = i;
+      break;
+    }
+    i++;
+  }
+  const lineEnd = commentStart >= 0 ? commentStart : i;
+  let codeEnd = lineEnd - 1;
+  while (codeEnd >= lineStart && (source[codeEnd] === ' ' || source[codeEnd] === '\t')) {
+    codeEnd--;
+  }
+  return codeEnd;
+}
+
 // Checks if a position is inside parentheses by scanning backward for unmatched '('
 // Also treats `[` / `]` (Fortran 2003+ array constructors and coarray image selectors)
 // the same as `(` / `)` so a keyword inside `[expr, ...]` or `x[expr]` is recognized as
@@ -176,6 +216,9 @@ export function isInsideParentheses(source: string, position: number): boolean {
   if (i < lineStart && lineStart > 0) {
     const prevLineStart = findContinuationLineStart(source, lineStart);
     if (prevLineStart >= 0) {
+      // Resume scanning at the last code character of the continuation line so any
+      // inline comment on that line (which holds the `&` continuation) is skipped.
+      i = findLineCodePortionEnd(source, prevLineStart);
       lineStart = prevLineStart;
     }
   }
@@ -253,6 +296,9 @@ export function isInsideParentheses(source: string, position: number): boolean {
         const prevLineStart = findContinuationLineStart(source, lineStart);
         if (prevLineStart >= 0) {
           depthBeforeLine = depth;
+          // Resume at the last code char of the previous line so its inline comment
+          // (text after `!`, which may hold stray parentheses) is not scanned.
+          i = findLineCodePortionEnd(source, prevLineStart);
           lineStart = prevLineStart;
         }
       }
@@ -266,6 +312,9 @@ export function isInsideParentheses(source: string, position: number): boolean {
         const prevLineStart = findContinuationLineStart(source, lineStart);
         if (prevLineStart >= 0) {
           depthBeforeLine = depth;
+          // Resume at the last code char of the previous line so its inline comment
+          // (text after `!`, which may hold stray parentheses) is not scanned.
+          i = findLineCodePortionEnd(source, prevLineStart);
           lineStart = prevLineStart;
         }
       }
@@ -282,6 +331,9 @@ export function isInsideParentheses(source: string, position: number): boolean {
       const prevLineStart = findContinuationLineStart(source, lineStart);
       if (prevLineStart >= 0) {
         depthBeforeLine = depth;
+        // Resume at the last code char of the previous line so its inline comment
+        // (text after `!`, which may hold stray parentheses) is not scanned.
+        i = findLineCodePortionEnd(source, prevLineStart);
         lineStart = prevLineStart;
       }
     }
