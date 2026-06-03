@@ -3513,6 +3513,47 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: PERFORM <reserved-middle-word>. paragraph call', () => {
+    // Bug: the PERFORM-paragraph-name reject (`PERFORM IF.` treats IF as a
+    // paragraph operand) was applied to block_open / block_close tokens but NOT to
+    // block_middle (ELSE/WHEN). So `PERFORM ELSE.` used ELSE as a paragraph operand
+    // at runtime, yet the parser still kept ELSE as a live block_middle token and
+    // registered it as an intermediate of the enclosing IF. The ELSE/WHEN used as a
+    // PERFORM paragraph operand must be dropped, symmetric to the open/close side.
+    test('should not register ELSE as IF intermediate when used as PERFORM paragraph name', () => {
+      const source = 'IF X\nPERFORM ELSE.\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'ELSE used as PERFORM paragraph name should not register');
+    });
+
+    test('should not register WHEN as EVALUATE intermediate when used as PERFORM paragraph name', () => {
+      const source = 'EVALUATE X\nPERFORM WHEN.\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 0, 'WHEN used as PERFORM paragraph name should not register');
+    });
+
+    test('should still register ELSE as IF intermediate when not a PERFORM paragraph name', () => {
+      // Guard: a real ELSE branch must still register. The reject fires only when
+      // PERFORM sits on the same line and the period immediately follows ELSE.
+      const source = 'IF X\n  DISPLAY A\nELSE\n  DISPLAY B\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'real ELSE branch should register as intermediate');
+      assert.strictEqual(pairs[0].intermediates[0].value, 'ELSE');
+    });
+
+    test('should still register WHEN as EVALUATE intermediate when not a PERFORM paragraph name', () => {
+      // Guard: a real WHEN branch must still register.
+      const source = 'EVALUATE X\nWHEN 1\n  DISPLAY A\nEND-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+      assert.strictEqual(pairs[0].intermediates.length, 1, 'real WHEN branch should register as intermediate');
+      assert.strictEqual(pairs[0].intermediates[0].value, 'WHEN');
+    });
+  });
+
   suite('Regression: ALSO walk-back must verify REPLACE prefix', () => {
     // Bug: isPrecededByReplacingOrReplace fell back to isPrecededByKeyword(..., 'ALSO', ...)
     // without verifying that the ALSO itself was preceded by REPLACE. So a stray ALSO
