@@ -2061,5 +2061,63 @@ end`;
     });
   });
 
+  suite('Regression: .. concat filter must also apply to loop classification, not just tokenize', () => {
+    // Bug: tokenize filtered reserved words after `..` (via
+    // isPrecededByConcatOperator), but getDoClassification and getLoopPositions
+    // did NOT. So `..for`/`..while` were still pushed as loop openers in the
+    // classification pass, causing a following standalone `do` to be misread as
+    // the loop's `do` and dropped (isValidBlockOpen returned false). The valid
+    // standalone do/end pair then disappeared entirely.
+    // Fix: add the same `..`-concat filter (word !== 'function' &&
+    // isPrecededByConcatOperator) to both getDoClassification and
+    // getLoopPositions so a `..for`/`..while` keyword never enters the loop
+    // stack and the following `do` is classified as a standalone block opener.
+
+    test('should pair standalone do/end after an invalid ..for keyword (バグL1)', () => {
+      // `..for` is invalid Lua (a reserved word cannot follow `..`), so it is
+      // left un-coloured. The subsequent `do x=1 end` is a valid standalone
+      // do block and must still produce one do/end pair.
+      const source = 'x="a"..for\ndo x=1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should pair standalone do/end after an invalid ..while keyword (バグL1)', () => {
+      const source = 'x="a"..while\ndo x=1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('should still classify do as the loop do for a legitimate for...do', () => {
+      // Control: a real `for ... do` (not preceded by `..`) must still treat
+      // its `do` as the loop's do (single for/end pair, no separate do block).
+      const source = 'for i = 1, 10 do\n  x = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
+
+    test('should not put a ..for keyword into the cached loop positions (バグL1)', () => {
+      // The `..for` keyword must be filtered out of getLoopPositions too, so the
+      // cache holds zero loop positions for a source whose only `for` follows `..`.
+      const source = 'x="a"..for\ndo x=1 end';
+      parser.parse(source);
+      type CacheT = { source: string; positions: number[]; lengths: number[] } | null;
+      const cache = (parser as unknown as { loopPositionCache: CacheT }).loopPositionCache;
+      assert.ok(cache !== null, 'loopPositionCache must be populated after parse');
+      assert.strictEqual(cache.positions.length, 0, 'a ..for keyword must not be recorded as a loop position');
+    });
+
+    test('should still pair do/end after ..for when a real loop precedes both', () => {
+      // A legitimate for...do...end first, then an invalid ..for, then a
+      // standalone do...end. The real loop pairs as for/end and the trailing
+      // standalone do/end still pairs despite the intervening ..for.
+      const source = 'for i = 1, 2 do end\nx="a"..for\ndo x=1 end';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'for');
+      findBlock(pairs, 'do');
+    });
+  });
+
   generateCommonTests(config);
 });
