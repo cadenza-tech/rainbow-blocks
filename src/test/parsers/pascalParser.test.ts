@@ -4156,5 +4156,32 @@ end;`;
     });
   });
 
+  suite('Regression: malformed variant case (missing `of`) must not suppress later standalone case', () => {
+    test('should not let a malformed `case Tag` (no `of`) inside a record suppress a following standalone case', () => {
+      // `case Tag` (without `of`) inside a record is a malformed variant selector. The
+      // parser's isValidBlockOpen treats it as a non-block opener (variant case), but the
+      // record-context builder used to treat it as a standalone case and push a phantom
+      // `case` onto the context stack. That phantom kept the context "inside a record" for
+      // the following standalone `case Integer of`, wrongly suppressing it and dropping the
+      // outer case..end pair. Both code paths must agree: the malformed `case Tag` produces
+      // no pair, and the following `case Integer of` is a real standalone block.
+      const source = `record
+  case Tag
+end;
+case Integer of
+  0: (X: Integer);
+end`;
+      const pairs = parser.parse(source);
+      // The first `record` closes with the first `end`.
+      const recordPair = findBlock(pairs, 'record');
+      assert.strictEqual(recordPair.closeKeyword?.startOffset, source.indexOf('end'), 'record should close with the first end');
+      // The second `case Integer of` is a standalone block closing with the last `end`.
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 1, 'the standalone `case Integer of` must produce one case..end pair');
+      assert.strictEqual(casePairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'), 'the standalone case should close with the last end');
+      assertBlockCount(pairs, 2);
+    });
+  });
+
   generateCommonTests(config);
 });
