@@ -3982,6 +3982,27 @@ end if`;
     });
   });
 
+  suite('Bug AS3: tell after then in a single-line if must not open a block', () => {
+    // `if x then tell app` is a single-line if whose action is `tell app`. That
+    // trailing `tell` is the one-liner action, not a new multi-line block opener,
+    // so a following `end tell` on the next line has no opener and the source must
+    // yield zero pairs (the `tell` and `end tell` are left uncolored orphans).
+    // Previously `then` sat in the allowed-preceding-keyword set, so a mid-line
+    // `tell` right after `then` was admitted as a block opener and paired with the
+    // next `end tell`, producing a spurious block.
+    test('should not treat tell after then as a block opener (single-line if action)', () => {
+      const source = 'if x then tell app\nend tell';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat if after then as a block opener (single-line if action)', () => {
+      const source = 'if x then if y then beep\nend if';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Bug AS2: colon-suffixed compound block_middle must not attach as an intermediate', () => {
     // The single-keyword middle path drops a colon-suffixed keyword (`else: 5`) via
     // isFollowedByRecordKeyColon, but the compound-keyword path (`else if`, `on error`)
