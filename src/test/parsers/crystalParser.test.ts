@@ -1751,6 +1751,98 @@ end`;
     });
   });
 
+  suite('Receiver-like keywords used as values (assignment/return/range/brace/semicolon)', () => {
+    const receiverKeywords = ['select', 'union', 'enum', 'struct', 'lib', 'macro', 'annotation'];
+
+    for (const kw of receiverKeywords) {
+      test(`should not treat assigned ${kw} at line end as opener and keep both enclosing blocks`, () => {
+        const source = `class C
+  def f
+    x = ${kw}
+  end
+end`;
+        const pairs = parser.parse(source);
+        assertBlockCount(pairs, 2);
+        assertNestLevel(pairs, 'def', 1);
+        assertNestLevel(pairs, 'class', 0);
+      });
+
+      test(`should not treat ${kw} followed by a block brace as opener`, () => {
+        const source = `def f
+  x = ${kw} { |i| i }
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+
+      test(`should not treat ${kw} on the left of a range as opener`, () => {
+        const source = `def f
+  x = ${kw}..foo
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+
+      test(`should not treat ${kw} before a semicolon as opener`, () => {
+        const source = `def f
+  ${kw}; x = 1
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+
+      test(`should not treat returned ${kw} as opener`, () => {
+        const source = `def f
+  return ${kw}
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+
+      test(`should not treat yielded ${kw} as opener`, () => {
+        const source = `def f
+  yield ${kw}
+end`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+      });
+    }
+
+    test('should still parse a genuine enum block when members follow on the next line', () => {
+      const source = `enum Color
+  Red
+  Green
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+
+    test('should still parse a genuine empty enum block', () => {
+      const pairs = parser.parse('enum\nend');
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+
+    test('should still parse a genuine struct block nested in a module', () => {
+      const source = `module M
+  struct Point
+    x : Int32
+  end
+end`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assertNestLevel(pairs, 'struct', 1);
+      assertNestLevel(pairs, 'module', 0);
+    });
+
+    test('should still parse a genuine enum block after a visibility modifier', () => {
+      const source = `private enum Color
+  Red
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'enum', 'end');
+    });
+  });
+
   suite('Coverage: semicolon in postfix rescue check', () => {
     test('should treat rescue after semicolon as postfix', () => {
       const pairs = parser.parse('x = 1; y rescue nil');
