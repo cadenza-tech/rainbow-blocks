@@ -4156,6 +4156,63 @@ end;`;
     });
   });
 
+  suite('Regression: block-open keyword on right of `:=` assignment', () => {
+    test('should not treat `repeat` on right of `:=` as block opener', () => {
+      // `x := repeat;` uses `repeat` as a right-hand-side expression identifier, not a
+      // block opener. With a stray `until` following, the spurious `repeat` pairs with it,
+      // corrupting the BlockPair set. The enclosing `begin..end` must be the only pair.
+      const source = `begin
+  x := repeat;
+  until y;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'expected exactly one begin..end pair');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+      const repeatPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'repeat');
+      assert.strictEqual(repeatPairs.length, 0, '`repeat` on rhs of `:=` must not produce a block pair');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `begin` on right of `:=` as block opener', () => {
+      // `x := begin;` uses `begin` as a right-hand-side identifier. Without the RHS guard
+      // the spurious `begin` is pushed and the surrounding `end` closes it instead of the
+      // real enclosing block, leaving the outer block orphan.
+      const source = `begin
+  x := begin;
+end`;
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'only the outer begin should pair with end');
+      assert.strictEqual(beginPairs[0].openKeyword.startOffset, source.indexOf('begin'), 'the outer begin must be the paired opener');
+      assert.strictEqual(beginPairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not treat `try` on right of `:=` as block opener', () => {
+      // `x := try;` uses `try` as a right-hand-side identifier; without the RHS guard the
+      // spurious `try` is pushed and the surrounding `end` closes it.
+      const source = `begin
+  x := try;
+end`;
+      const pairs = parser.parse(source);
+      const tryPairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'try');
+      assert.strictEqual(tryPairs.length, 0, '`try` on rhs of `:=` must not produce a block pair');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not treat `case` on right of `:=` as block opener', () => {
+      // `x := case;` uses `case` as a right-hand-side identifier; without the RHS guard the
+      // spurious `case` is pushed and the surrounding `end` closes it.
+      const source = `begin
+  x := case;
+end`;
+      const pairs = parser.parse(source);
+      const casePairs = pairs.filter((p) => p.openKeyword.value.toLowerCase() === 'case');
+      assert.strictEqual(casePairs.length, 0, '`case` on rhs of `:=` must not produce a block pair');
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: malformed variant case (missing `of`) must not suppress later standalone case', () => {
     test('should not let a malformed `case Tag` (no `of`) inside a record suppress a following standalone case', () => {
       // `case Tag` (without `of`) inside a record is a malformed variant selector. The
