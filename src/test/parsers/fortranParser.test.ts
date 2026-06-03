@@ -1170,6 +1170,26 @@ end procedure`;
     });
   });
 
+  suite('Parentheses in continuation-line inline comments', () => {
+    test('should not count unbalanced ( inside a continuation-line inline comment when validating end', () => {
+      // The `(((` lives in the inline comment of the continuation line. A backward
+      // paren-depth scan that fails to skip the comment would count those `(` and
+      // wrongly classify `end` as being inside parentheses, dropping the pair.
+      const source = 'subroutine s\n  call foo &  ! note (((\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end');
+    });
+
+    test('should keep else intermediate when continuation-line inline comment holds an unbalanced (', () => {
+      // The trailing `! TODO handle (` is a comment; its `(` must not be counted so
+      // that `else` is recognized as a real block_middle.
+      const source = 'if (a) then\n  x = 1 &  ! TODO handle (\n  else\n  y = 2\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then', 'else']);
+    });
+  });
+
   suite('Select case intermediates', () => {
     test('should preserve case intermediates in select case', () => {
       const source = `select case (x)
