@@ -16,6 +16,15 @@ export function isAdaWhitespace(ch: string): boolean {
   return false;
 }
 
+// Recognizes the Ada LRM 2.2 line terminators (LF, CR, NEL U+0085, LS U+2028,
+// PS U+2029). A `--` comment ends at any of these, matching matchSingleLineComment
+// (adaParser.ts). Recognizing only `\n`/`\r` made an NEL/LS/PS-terminated comment
+// swallow the following code (e.g. `is -- c<NEL>separate;` failed to see `separate`).
+function isAdaLineTerminator(source: string, pos: number): boolean {
+  const code = source.charCodeAt(pos);
+  return code === 0x000a || code === 0x000d || code === 0x0085 || code === 0x2028 || code === 0x2029;
+}
+
 // Matches an Ada double-quoted string with "" escape sequences
 // Ada strings cannot span multiple lines (LRM 2.6). Line terminators are
 // the LRM 2.2 set: LF, CR, NEL (U+0085), LS (U+2028), PS (U+2029).
@@ -91,9 +100,9 @@ export function isOrElseShortCircuit(source: string, orEnd: number, elseStart: n
     if (isInExcluded(i)) continue;
     const ch = source[i];
     if (isAdaWhitespace(ch)) continue;
-    // Ada comment starts with '--', skip to end of line
+    // Ada comment starts with '--', skip to end of line (any LRM 2.2 line terminator)
     if (ch === '-' && i + 1 < source.length && source[i + 1] === '-') {
-      while (i < elseStart && source[i] !== '\n' && source[i] !== '\r') i++;
+      while (i < elseStart && !isAdaLineTerminator(source, i)) i++;
       continue;
     }
     return false;
@@ -143,7 +152,7 @@ export function skipAdaWhitespaceAndComments(source: string, pos: number): numbe
     }
     if (k + 1 < source.length && source[k] === '-' && source[k + 1] === '-') {
       k += 2;
-      while (k < source.length && source[k] !== '\n' && source[k] !== '\r') {
+      while (k < source.length && !isAdaLineTerminator(source, k)) {
         k++;
       }
       continue;
