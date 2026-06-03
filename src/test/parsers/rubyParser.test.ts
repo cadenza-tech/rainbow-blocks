@@ -714,6 +714,23 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should treat backtick as command string when def is suffix of a Unicode identifier', () => {
+      // `αdef` is a single identifier, not a `def` method definition, so the
+      // following backtick opens a command string and must not be treated as a
+      // method-name backtick. The real `def foo...end` below stays intact.
+      const source = 'αdef `echo end`\ndef foo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
+
+    test('should treat backtick as method name in operator method definition', () => {
+      // `def \`(x)\n end` defines the backtick (command) operator method; the
+      // backtick is a method name, not a string opener, so def/end pairs.
+      const source = 'def `(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Excluded regions - Symbol strings', () => {
