@@ -5,6 +5,34 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.62] - 2026-06-05
+
+### Fixed
+
+- Ada: End line comments at NEL/LS/PS line terminators in whitespace-and-comment skip
+- AppleScript: Bound the record-key backward brace scan to avoid `O(n²)` parsing
+- AppleScript: Drop colon-suffixed `else if`/`on error` from intermediates
+- AppleScript: Treat a block keyword after `then` as a single-line `if` action
+- Bash: Recognize compound commands after `if`/`while`/`until`
+- COBOL: Skip excluded-region detection in the fixed-format identification area
+- COBOL: Drop `ELSE`/`WHEN` used as a `PERFORM` paragraph name from intermediates
+- Crystal: Treat receiver-like keywords in value context as identifiers
+- Elixir: Treat `end` after a `->` arrow as a block close in empty-body clauses
+- Erlang: Treat an empty `catch` clause as a clause separator
+- Erlang: Skip a block keyword after `~` in an incomplete sigil prefix
+- Fortran: Skip parentheses inside continuation-line inline comments
+- Fortran: Capture `then` across a fixed-form column-6 continuation
+- Fortran: Cap the `isInsideParentheses` backward scan to avoid `O(n²)` parsing
+- Julia: Drop a bracket intermediate when its matching opener follows it
+- Lua: Skip reserved words after a `..` concatenation in loop classification
+- MATLAB: Skip a middle keyword in operand context after a value token
+- Pascal: Prevent a malformed variant `case` from suppressing a later standalone `case`
+- Pascal: Skip `begin`/`try`/`case`/`repeat` used on the right of a `:=` assignment
+- Pascal: Sync the `asm` forward-character check for brackets and angle brackets
+- Ruby: Treat a backtick as a command string after a Unicode-suffixed `def`
+- Ruby: Treat a next-line `do` as a block `do` after a Unicode-suffixed `while`
+- Verilog: Pair control keywords with `endcase` for a `randcase` body
+
 ## [1.1.61] - 2026-05-31
 
 ### Fixed
@@ -2476,6 +2504,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.62]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.61...v1.1.62
 [1.1.61]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.60...v1.1.61
 [1.1.60]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.59...v1.1.60
 [1.1.59]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.58...v1.1.59
