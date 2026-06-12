@@ -165,7 +165,14 @@ export class AdaBlockParser extends BaseBlockParser {
     const cb = this.validationCallbacks;
 
     if (lowerKeyword === 'entry') {
-      const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions));
+      // Reject when the forward scan reaches another `entry` before `is`. A
+      // well-formed entry body never contains a second `entry` keyword between
+      // its own `entry` and `is`, so hitting one means the current declaration
+      // was left unterminated (its `;` is missing) and the `is` belongs to the
+      // next entry. Scanning on would mis-treat this declaration as a body
+      // opener, mis-pair the enclosing `end`, and orphan the surrounding
+      // protected/task body. This mirrors the `renames` reject used by package.
+      const isPos = scanForwardToIs(source, position + keyword.length, (pos) => this.isInExcludedRegion(pos, excludedRegions), ['entry']);
       if (isPos < 0) return false;
       const k = skipAdaWhitespaceAndComments(source, isPos + 2);
       const afterIs = source.slice(k).match(/^([a-zA-Z_]\w*)/);
