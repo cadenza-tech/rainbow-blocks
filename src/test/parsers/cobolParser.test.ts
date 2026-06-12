@@ -2474,6 +2474,19 @@ END-PERFORM`;
       assertSingleBlock(pairs, 'IF', 'END-IF');
       assert.strictEqual(pairs[0].intermediates.length, 0, 'Real + operator still suppresses ELSE');
     });
+
+    test('should register ELSE as IF intermediate when a multi-line EXEC region separates the operator from ELSE', () => {
+      // Bug: the backward scan in isInExpressionContext jumped over an excluded
+      // region without recording any newline inside it. A multi-line EXEC block
+      // between a same-line `+` and ELSE left crossedNewline=false, so the
+      // dangling `+` (now an incomplete cross-line expression) wrongly suppressed
+      // ELSE. The newline inside the jumped EXEC region must set crossedNewline so
+      // ELSE stays an IF intermediate.
+      const source = 'IF X = Z + EXEC SQL FOO\nEND-EXEC ELSE\nEND-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+      assertIntermediates(pairs[0], ['ELSE']);
+    });
   });
 
   suite('Regression: next-line WHEN/ELSE after a line ending in an operand introducer', () => {
