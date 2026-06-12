@@ -22,13 +22,18 @@ function isInsideInterfaceBlock(
   excludedRegions: ExcludedRegion[]
 ): boolean {
   const beforeLower = source.slice(0, pos).toLowerCase();
-  const pattern = /\b(interface|end\s+interface)\b/g;
+  // `end[ \t]*interface` is listed first so the concatenated `endinterface` and the
+  // spaced `end interface` both match the end-form before the standalone `interface`
+  // alternative is tried. `[ \t]*` (not `\s+`) keeps a stray `end\ninterface` across a
+  // line break from being miscounted as a single end-form, matching the [ \t]* spacing
+  // used by COMPOUND_END_PATTERN in fortranParser.ts.
+  const pattern = /\bend[ \t]*interface\b|\binterface\b/g;
   let depth = 0;
   let match = pattern.exec(beforeLower);
   const matches: { start: number; isEnd: boolean }[] = [];
   while (match !== null) {
     if (!isInExcludedRegion(match.index, excludedRegions)) {
-      matches.push({ start: match.index, isEnd: match[1].startsWith('end') });
+      matches.push({ start: match.index, isEnd: match[0].startsWith('end') });
     }
     match = pattern.exec(beforeLower);
   }
