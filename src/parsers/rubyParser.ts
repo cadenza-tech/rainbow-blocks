@@ -121,6 +121,13 @@ const RHS_EXPECTING_KEYWORD_OPERATORS: ReadonlySet<string> = new Set([
   'defined?'
 ]);
 
+// Full-match pattern for a Ruby numeric literal: hex (0x), binary (0b), octal (0o),
+// decimal-prefixed (0d), or base-10 integer/float with optional decimal point and
+// exponent, plus optional rational (`r`) / imaginary (`i`) suffix. Used by
+// isEndInExpressionPosition to recognize a value before `end` regardless of base.
+const NUMERIC_LITERAL_PATTERN =
+  /^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|0[dD][0-9_]+|[0-9][0-9_]*(?:\.[0-9][0-9_]*)?(?:[eE][+-]?[0-9_]+)?)(?:ri|[ri])?$/;
+
 // Ruby interpolation check: %q, %w, %i, %s do not interpolate
 function isRubyInterpolatingPercent(_specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -727,20 +734,25 @@ export class RubyBlockParser extends BaseBlockParser {
         i = matchPos - 1;
         continue;
       }
-      // Numeric literal: scan back through trailing digits / decimal points / underscores
-      // (Ruby allows `_` as a digit separator) and exponent suffix characters. The
-      // numeric literal is a value -- treat it like a closing bracket and continue
-      // scanning to find what precedes it.
+      // Numeric literal of any base (hex/binary/octal/decimal-prefixed, or base-10 with
+      // optional decimal point, exponent, and rational/imaginary suffix). A literal is a
+      // value -- treat it like a closing bracket and continue scanning to find what
+      // precedes it. `0xFF`, `0b101`, and `1e5` end in characters the lenient digit scan
+      // below misses, so consult the full matcher first.
+      const numStart = this.scanBackNumericLiteral(source, i);
+      if (numStart !== -1) {
+        crossedValueOnLine = true;
+        i = numStart;
+        continue;
+      }
+      // Fallback for digit-led runs the strict matcher rejects (e.g. range `1..5`):
+      // keep the original lenient scan over digits / decimal points / underscores so
+      // existing behavior is unchanged.
       if (ch >= '0' && ch <= '9') {
         crossedValueOnLine = true;
         let n = i;
-        while (n >= 0) {
-          const nc = source[n];
-          if ((nc >= '0' && nc <= '9') || nc === '_' || nc === '.') {
-            n--;
-            continue;
-          }
-          break;
+        while (n >= 0 && ((source[n] >= '0' && source[n] <= '9') || source[n] === '_' || source[n] === '.')) {
+          n--;
         }
         i = n;
         continue;
@@ -870,6 +882,36 @@ export class RubyBlockParser extends BaseBlockParser {
       start--;
     }
     return source.slice(start + 1, endIdx + 1);
+  }
+
+  // Given `i` at the last character of a candidate numeric literal, scans back over the
+  // full literal (any base, optional exponent sign, rational/imaginary suffix) and returns
+  // the index of the character before it. Returns -1 when `source[..i]` is not a numeric
+  // literal ending at a token boundary (e.g. an identifier like `foo123`).
+  private scanBackNumericLiteral(source: string, i: number): number {
+    let runStart = i;
+    while (runStart >= 0) {
+      const c = source[runStart];
+      if (/[0-9A-Za-z_.]/.test(c)) {
+        runStart--;
+        continue;
+      }
+      // Cross an exponent sign (`e+`/`e-`/`E+`/`E-`) so `1e+5` is captured whole.
+      if ((c === '+' || c === '-') && runStart >= 1 && (source[runStart - 1] === 'e' || source[runStart - 1] === 'E')) {
+        runStart -= 2;
+        continue;
+      }
+      break;
+    }
+    const literalStart = runStart + 1;
+    if (literalStart > i) return -1;
+    // Reject when glued to a preceding identifier char, `.`, `@`, or `$` (not a literal).
+    const prev = source[runStart];
+    if (prev !== undefined && (/[A-Za-z0-9_$@]/.test(prev) || (prev === '.' && runStart >= 1 && /[0-9]/.test(source[runStart - 1])))) {
+      return -1;
+    }
+    if (!NUMERIC_LITERAL_PATTERN.test(source.slice(literalStart, i + 1))) return -1;
+    return runStart;
   }
 
   // Finds excluded regions: comments, strings, regex, heredocs, percent literals, symbols
