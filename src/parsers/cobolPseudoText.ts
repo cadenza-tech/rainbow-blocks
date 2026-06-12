@@ -1,7 +1,7 @@
 // COBOL pseudo-text helpers: period positions, COPY REPLACING pseudo-text classification
 
 import type { ExcludedRegion } from '../types';
-import { isFixedFormatCommentLine } from './cobolFixedFormat';
+import { getVisualColumn, isFixedFormatCommentLine } from './cobolFixedFormat';
 import type { CobolHelperCallbacks } from './cobolHelpers';
 import {
   COPY_TERMINATING_CLOSE_VERBS,
@@ -186,6 +186,22 @@ export function findBlockVerbAfterCopybook(
   return -1;
 }
 
+// Returns true when `pos` sits in the fixed-format identification area (visual cols
+// 72+) of a line whose leading 6 columns look like a fixed-format sequence area
+// ([ \t\d]{6}). Mirrors CobolBlockParser.isInFixedFormatIdentificationArea and the
+// column-72 guard used by tokenize() / tryMatchExcludedRegion(): that area is
+// compiler-ignored free text, so a REPLACE / == delimiter starting there must NOT
+// alter pseudo-text scan state. Returns false in free format (no sequence area).
+function isInIdentificationArea(source: string, lineStart: number, pos: number): boolean {
+  if (lineStart + 6 > source.length) {
+    return false;
+  }
+  if (getVisualColumn(source, lineStart, pos) < 72) {
+    return false;
+  }
+  return /^[ \t\d]{6}$/.test(source.slice(lineStart, lineStart + 6));
+}
+
 // Scans the source and returns the set of source offsets that begin a pseudo-text
 // region (`==`) inside a COPY REPLACING / REPLACE / ALSO context. The single forward
 // scan tracks statement boundaries, the active COPY/REPLACE state, and known
@@ -287,6 +303,25 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
         i++;
       }
       continue;
+    }
+    // Fixed-format identification area (visual cols 72+): compiler-ignored free
+    // text. A REPLACE keyword, EXEC, or == delimiter starting here must NOT alter
+    // pseudo-text scan state, mirroring the column-72 guard in tokenize() /
+    // tryMatchExcludedRegion(). Without this guard a REPLACE padded into col 72+
+    // set inReplaceContext=true and the next area-B == pair was mis-registered as
+    // pseudo-text. Only state-mutating token starts (== and word-leading ASCII
+    // letters) need the check, so the per-line visual-column scan runs sparsely.
+    if (ch === '=' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+      let lineStart = i;
+      while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
+        lineStart--;
+      }
+      if (isInIdentificationArea(source, lineStart, i)) {
+        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+          i++;
+        }
+        continue;
+      }
     }
     // EXEC/EXECUTE ... END-EXEC block: skip the whole block. Its body is a
     // foreign sub-language (SQL/CICS/...), so a REPLACE/REPLACING token inside
