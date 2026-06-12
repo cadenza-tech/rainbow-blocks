@@ -569,6 +569,15 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.value === 'end' && this.isEndInTernaryValuePosition(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Filter out `end` placed in the expression position right after an
+      // assignment/comparison operator on the same line (`x = end`, `x == end`,
+      // `x >= end`, ...). `end` is a reserved word and cannot be the RHS of such an
+      // operator, so this is invalid syntax; treating it as block_close mis-pairs
+      // surrounding blocks (the inner `end` would pair with an outer opener, orphaning
+      // the real trailing `end`).
+      if (token.value === 'end' && this.isPrecededByAssignmentOperator(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       return true;
     });
   }
@@ -655,6 +664,46 @@ export class CrystalBlockParser extends BaseBlockParser {
     }
     // Need at least two consecutive dots to form .. (or ...)
     return i + 1 < source.length && source[i] === '.' && source[i + 1] === '.';
+  }
+
+  // Checks if `end` at `position` sits in the expression (right-hand) position of an
+  // assignment or comparison operator on the same line: `x = end`, `x == end`,
+  // `x >= end`, `x <= end`, `x != end`, `x === end`. In every such form the character
+  // immediately before `end` (skipping spaces/tabs and excluded regions) is the final
+  // `=` of the operator, and `end` — a reserved word — cannot be the right-hand value,
+  // so this is invalid syntax. Tokenizing it as block_close would mis-pair surrounding
+  // blocks. The scan is restricted to the same logical line: a newline ends the scan
+  // and returns false, which preserves the valid block-expression assignment
+  // `x = if cond\n  1\nend` (its closing `end` is a genuine block_close because the `=`
+  // is on an earlier line, separated from `end` by the block body). The `=>` hash
+  // rocket is naturally excluded because its last character is `>`, not `=`. Excluded
+  // regions are skipped.
+  private isPrecededByAssignmentOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      // Same-line restriction: a newline ends the scan. A preceding `=` on an earlier
+      // line does not put `end` in an expression position relative to this line.
+      if (ch === '\n' || ch === '\r') {
+        return false;
+      }
+      break;
+    }
+    if (i < 0) {
+      return false;
+    }
+    return source[i] === '=';
   }
 
   // Scans backward from `position` to detect whether `position` lies inside an
