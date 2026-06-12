@@ -4805,5 +4805,45 @@ end if;`;
     });
   });
 
+  suite('Regression: unterminated entry declaration must not absorb the next entry body', () => {
+    test('should not treat an entry declaration missing its semicolon as a block opener', () => {
+      // `entry E1 (X : Integer)` is missing its trailing `;`. The forward scan
+      // for `is` must reject when it reaches the next `entry` keyword, otherwise
+      // it runs on to `entry E2 is` and wrongly treats E1 as a body opener. That
+      // would mis-pair `end Obj` with E1 and orphan the protected body. The
+      // orphan-minimizing outcome keeps two pairs: the E2 entry body and the
+      // protected body.
+      const source = `protected body Obj is
+  entry E1 (X : Integer)
+  entry E2 is
+  begin
+    null;
+  end E2;
+end Obj;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const entryBlock = findBlock(pairs, 'entry');
+      assert.strictEqual(entryBlock.closeKeyword?.value.toLowerCase(), 'end');
+      const protectedBlock = findBlock(pairs, 'protected');
+      assert.strictEqual(protectedBlock.closeKeyword?.value.toLowerCase(), 'end');
+    });
+
+    test('should still treat a properly terminated entry declaration list followed by a body', () => {
+      // Regression guard: when E1 ends with `;`, it is a plain declaration and
+      // the E2 body still pairs normally, alongside the protected body.
+      const source = `protected body Obj is
+  entry E1 (X : Integer);
+  entry E2 is
+  begin
+    null;
+  end E2;
+end Obj;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'entry');
+      findBlock(pairs, 'protected');
+    });
+  });
+
   generateCommonTests(config);
 });
