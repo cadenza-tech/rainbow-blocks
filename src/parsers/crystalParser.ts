@@ -740,9 +740,10 @@ export class CrystalBlockParser extends BaseBlockParser {
   //   4. Function-call form `KEYWORD(args)`, indexed access `KEYWORD[idx]`, or block-arg
   //      syntax `KEYWORD|x|`.
   //   5. Binary operator / separator / expression terminator: `,`, `<`, `>`, `+`, `-`, `*`,
-  //      `%`, `?`, `:`, `)`, `}`, `]`. Any of these immediately after the keyword means the
-  //      keyword is the left operand of a binary expression, a hash/tuple element, or sits
-  //      inside an expression that has just ended — never an opener position.
+  //      `%`, `!` (`!=`/`!~`), `~`, `?`, `:`, `)`, `}`, `]`. Any of these immediately after
+  //      the keyword means the keyword is the left operand of a binary expression, a
+  //      hash/tuple element, or sits inside an expression that has just ended — never an
+  //      opener position.
   //   6. Method-chain continuation `KEYWORD\n  .method`. A leading `.` on the next non-blank
   //      physical line continues a method-call chain on `KEYWORD`. Crystal allows this
   //      cross-line dot form, so the keyword is acting as a receiver value.
@@ -847,6 +848,14 @@ export class CrystalBlockParser extends BaseBlockParser {
     //     `enum && 1`, `enum ^ 1`). These also subsume compound assignments
     //     `&=`, `^=` since the leading operator alone disqualifies the opener
     //     position. `|` is already handled above (block-arg / bitwise-or).
+    //   - `!` — leading char of a negated comparison: `!=` (not-equal) or `!~`
+    //     (pattern not-match), e.g. `enum != 1`, `select !~ /x/`. Both are valid
+    //     binary comparisons whose left operand is the keyword-as-value. A genuine
+    //     opener is never followed by `!` on the same line.
+    //   - `~` — `~` directly after the keyword. There is no valid opener form where
+    //     a `~` follows the keyword (it is a unary bitwise-complement prefix, not a
+    //     binary infix), so a `~` here means the keyword is being used as a value.
+    //     Included as a BlockPair defense to avoid mis-pairing the keyword.
     //   - `?` — ternary condition (e.g. `struct ? 1 : 2`)
     //   - `:` — type annotation or ternary alternative
     //   - `;` — statement terminator (e.g. `enum; x = 1`). A genuine opener is
@@ -871,6 +880,8 @@ export class CrystalBlockParser extends BaseBlockParser {
       ch === '%' ||
       ch === '&' ||
       ch === '^' ||
+      ch === '!' ||
+      ch === '~' ||
       ch === '?' ||
       ch === ':' ||
       ch === ';'
