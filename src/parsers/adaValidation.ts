@@ -29,16 +29,27 @@ function skipIntraLineWhitespaceBackward(source: string, end: number): number {
   return 0;
 }
 
+// Recognizes an Ada identifier character: an ASCII identifier char (letter,
+// digit, underscore) or any non-ASCII code unit that is not Ada whitespace
+// (Ada LRM 2.3 identifiers may contain non-ASCII letters such as `Ñ`). Kept in
+// sync with the word-char definition in isAdaWordAt (adaHelpers.ts) so that
+// reserved-word boundary checks here agree with the keyword matcher used
+// elsewhere in the parser.
+function isAdaWordChar(ch: string): boolean {
+  return /[a-zA-Z0-9_]/.test(ch) || (ch.charCodeAt(0) > 127 && !isAdaWhitespace(ch));
+}
+
 // Returns true if the slice of `source` ending at `end` (exclusive) ends with
-// the word `target` preceded by either start-of-source or a non-word char
-// (treating only ASCII identifier chars as word chars). The match is
-// case-insensitive.
+// the word `target` preceded by either start-of-source or a non-word char.
+// Word chars include non-ASCII Ada identifier characters, so a Unicode-suffixed
+// identifier such as `Ñaccess` is not mistaken for the reserved word `access`.
+// The match is case-insensitive.
 function endsWithWord(source: string, end: number, target: string): boolean {
   if (end < target.length) return false;
   const start = end - target.length;
   if (source.slice(start, end).toLowerCase() !== target) return false;
   if (start === 0) return true;
-  return !/[a-zA-Z0-9_]/.test(source[start - 1]);
+  return !isAdaWordChar(source[start - 1]);
 }
 
 // Callbacks for base parser methods needed by validation functions
