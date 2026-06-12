@@ -5241,6 +5241,17 @@ end`;
       assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
     });
 
+    test('should pair fn with end when end is followed by .() (immediate anonymous function invocation)', () => {
+      // `fn -> :ok end.()` is `(fn -> :ok end).()` — an immediate invocation of the
+      // anonymous function. The `.` after `end` is the call operator, not field access,
+      // because it is immediately followed by `(`. Without the `.(` exception, `end` is
+      // rejected as a field-access receiver and the `fn` opener orphans (0 pairs).
+      const source = 'y = fn -> :ok end.()';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.indexOf('end'));
+    });
+
     test('should still treat end as block_close when followed by .. (range operator, end..x)', () => {
       // `end..x` would be invalid as a block close (the `..` after `end` is a range
       // operator). However, `end..` is not a sensible block close construct anyway. The
