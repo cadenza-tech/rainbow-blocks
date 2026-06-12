@@ -6457,5 +6457,38 @@ end function`;
     });
   });
 
+  suite('Performance: interface span lookup does not blow up to O(N^2)', () => {
+    // Builds one generic interface listing `procedureCount` bare procedure references.
+    // Each `procedure NAME` line invokes isInsideInterfaceBlock, which pre-fix sliced the
+    // whole prefix and re-ran a regex per call: O(N) per procedure, O(N^2) for the block.
+    function makeGenericInterface(procedureCount: number): string {
+      const lines: string[] = ['module m', 'interface op'];
+      for (let i = 0; i < procedureCount; i++) {
+        lines.push(`procedure op${i}`);
+      }
+      lines.push('end interface op');
+      lines.push('end module');
+      return lines.join('\n');
+    }
+
+    test('should parse a generic interface with 100000 procedure references without quadratic blowup', function () {
+      // Pre-fix the per-procedure prefix slice + regex made this O(N^2): each `procedure`
+      // line re-sliced and re-lowercased the whole preceding source, so 100000 references
+      // took ~tens of seconds (20000 already cost ~2s, and the cost grows quadratically).
+      // Precomputing interface spans once and binary-searching makes parsing linear and
+      // finishes in well under a second. The 20s timeout fails the quadratic version with a
+      // wide margin while passing the bounded version, and matches the cap used by the other
+      // perf tests so it also holds under c8 instrumentation in `yarn test:coverage`.
+      this.timeout(20000);
+      const source = makeGenericInterface(100000);
+      const pairs = parser.parse(source);
+      // Only module + interface pair; every `procedure NAME` is a reference (suppressed).
+      assertBlockCount(pairs, 2);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'module');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'interface');
+    });
+  });
+
   generateCommonTests(config);
 });
