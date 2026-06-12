@@ -2793,6 +2793,23 @@ bar() -> fun() -> ok end.`;
       assert.strictEqual(beginPairs.length, 1, 'begin after -opaqueα (user attribute) must be paired with end');
     });
 
+    test('should treat -type@foo as user attribute and not suppress block opener', () => {
+      // type@foo is a valid unquoted atom (atoms may contain @), so -type@foo is a
+      // user-defined attribute, not a -type spec. The spec span must not extend past
+      // the attribute and swallow the begin/end that follows on the same line.
+      const source = '-type@foo(x) begin ok end.\n';
+      const pairs = parser.parse(source);
+      const beginPairs = pairs.filter((p) => p.openKeyword.value === 'begin');
+      assert.strictEqual(beginPairs.length, 1, 'begin after -type@foo (user attribute) must be paired with end');
+    });
+
+    test('should treat -spec@x as user attribute and not suppress block opener', () => {
+      const source = '-spec@x(y) case z of 1 -> ok end.\n';
+      const pairs = parser.parse(source);
+      const casePairs = pairs.filter((p) => p.openKeyword.value === 'case');
+      assert.strictEqual(casePairs.length, 1, 'case after -spec@x (user attribute) must be paired with end');
+    });
+
     test('should treat -specα as user attribute and not suppress block opener', () => {
       const source = '-specα foo() ->\n  case x of 1 -> ok end.\n';
       const pairs = parser.parse(source);
