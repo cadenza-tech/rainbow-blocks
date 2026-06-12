@@ -2091,6 +2091,21 @@ end if;`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should not suppress protected when access is part of a Unicode-suffixed identifier', () => {
+      // `Ñaccess` (leading U+00D1 LATIN CAPITAL LETTER N WITH TILDE) is a single
+      // Ada identifier, not the reserved word `access`. The access-prefix
+      // detection must treat the non-ASCII letter to the left of `access` as an
+      // identifier character so the word boundary fails; otherwise `protected`
+      // is wrongly suppressed and the `protected type Controller is ... end
+      // Controller;` block is lost. U+00D1 is written via String.fromCharCode so
+      // it is explicit in review and cannot be silently normalized.
+      const enye = String.fromCharCode(0x00d1);
+      const source = `type T is ${enye}access protected type Controller is\n  entry Process;\nend Controller;`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      findBlock(pairs, 'protected');
+    });
   });
 
   suite('Regression: isValidLoopOpen position-based pairing', () => {
