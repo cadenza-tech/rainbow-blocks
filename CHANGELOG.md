@@ -5,6 +5,39 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.63] - 2026-06-13
+
+### Fixed
+
+- Ada: Treat `access` ending a Unicode identifier as part of the identifier before `protected`
+- Ada: Treat `null` ending a Unicode identifier as part of the identifier before `record`
+- Ada: Reject a following `entry` in the forward scan for an unterminated `entry` declaration
+- Bash: Treat non-ASCII punctuation as word-fusing characters in keyword detection
+- Bash: Apply the case pattern check to keywords split by a line continuation
+- COBOL: Skip the identification area when scanning pseudo-text starts in fixed format
+- COBOL: Detect newlines inside excluded regions in the expression context scan
+- Crystal: Treat keywords before `!=`/`!~` and `~` operators as values
+- Crystal: Filter `end` in expression position after an assignment operator
+- Elixir: Pair `fn` with `end` in an immediate anonymous function invocation `end.()`
+- Erlang: Accept underscore-prefixed variables as fun reference arity
+- Erlang: Recognize atoms containing an at-sign in attribute and spec detection
+- Fortran: Recognize concatenated `endinterface` in interface block detection
+- Fortran: Precompute interface spans to avoid `O(n²)` procedure validation
+- Julia: Treat brackets after Unicode operators as array construction
+- Lua: Restrict varargs detection to exactly three dots in the concat operator check
+- Octave: Drop parenthesized section keyword calls outside `classdef`
+- Octave: Reject block keywords inside same-line control headers
+- Octave: Reject Unicode digits and symbols after the `do` keyword
+- Ruby: Use a Unicode-aware word boundary for `then` detection in loop `do` validation
+- Ruby: Recognize hex, binary, octal, and exponent literals before an expression-position `end`
+- Verilog: Stop the `default` attachment scan at scope openers
+- Verilog: Stop `disable`/`wait` fork detection at escaped identifiers
+- Verilog: Exclude attribute parentheses from instance name detection
+- VHDL: Recognize a `view` header line in multi-line `is` detection
+- VHDL: Require a preceding `is` for a `units` block opener
+- VHDL: Treat reserved words after `return` as values
+- VHDL: Window-slice entity and configuration validation to avoid `O(n²)` scans
+
 ## [1.1.62] - 2026-06-05
 
 ### Fixed
@@ -2504,6 +2537,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.63]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.62...v1.1.63
 [1.1.62]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.61...v1.1.62
 [1.1.61]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.60...v1.1.61
 [1.1.60]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.59...v1.1.60
