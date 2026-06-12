@@ -508,9 +508,10 @@ function isDoBlockedFromLoopKeyword(
     // variable name (`@then`, `$then`).
     if (ch === 't' && source.slice(i, i + 4) === 'then') {
       const before = source[i - 1];
-      const after = source[i + 4];
-      const wordBefore = before !== undefined && /[a-zA-Z0-9_]/.test(before);
-      const wordAfter = after !== undefined && /[a-zA-Z0-9_]/.test(after);
+      // Unicode-aware boundary check: `αthen`/`thenα` is a single identifier, not the
+      // `then` clause separator. ASCII /[a-zA-Z0-9_]/ would miss non-ASCII letters.
+      const wordBefore = i > 0 && endsWithIdentifierChar(source, i - 1);
+      const wordAfter = i + 4 < source.length && endsWithIdentifierChar(source, i + 4);
       if (!wordBefore && !wordAfter) {
         const prefixed =
           before === '@' ||
