@@ -4566,6 +4566,52 @@ end`;
     });
   });
 
+  suite('Regression: end after assignment operator should not be tokenized as block_close', () => {
+    test('should not pair if with end in assignment value position (= end)', () => {
+      // `end` is a reserved word and cannot be the RHS of an assignment; the `end`
+      // right after `x =` must not be tokenized as block_close. The outer `if` block
+      // must pair with the trailing `end` on the last line, not the in-expression one.
+      const source = 'if cond\n  x = end >= y\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end after == comparison (== end)', () => {
+      // The char immediately before `end` is the final `=` of `==`. `end` cannot be
+      // the RHS of a comparison, so it must not be tokenized as block_close.
+      const source = 'if cond\n  x == end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end after >= comparison (>= end)', () => {
+      const source = 'if cond\n  x >= end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end after assignment with whitespace (=  end)', () => {
+      // Whitespace between `=` and `end` does not change the analysis.
+      const source = 'if cond\n  x =  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still pair x = if-block-expression with its own end across newlines', () => {
+      // `x = if cond\n  1\nend` is a valid block expression assigned to `x`. The
+      // closing `end` is a genuine block_close even though an `=` appears earlier in
+      // the statement, because the `=` is not on the same line as `end`. The same-line
+      // restriction of the filter must keep this `end` tokenized.
+      const source = 'x = if cond\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression: %% should be treated as modulo operator, not percent literal', () => {
     test('should not swallow following blocks when %% appears as modulo operator', () => {
       // `a %% b` is `a % (% b)` (modulo applied twice); the first `%` is a modulo
