@@ -1690,7 +1690,7 @@ export class VhdlBlockParser extends BaseBlockParser {
               // (e.g. `entity counter` then `is`) is the real owner of this `is`, so we
               // do not skip in that case.
               if (
-                /^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units)\b/.test(
+                /^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units|view)\b/.test(
                   prevLine
                 )
               ) {
