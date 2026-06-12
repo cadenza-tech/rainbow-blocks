@@ -1,7 +1,7 @@
 // COBOL pseudo-text helpers: period positions, COPY REPLACING pseudo-text classification
 
 import type { ExcludedRegion } from '../types';
-import { getVisualColumn, isFixedFormatCommentLine } from './cobolFixedFormat';
+import { isFixedFormatCommentLine } from './cobolFixedFormat';
 import type { CobolHelperCallbacks } from './cobolHelpers';
 import {
   COPY_TERMINATING_CLOSE_VERBS,
@@ -186,20 +186,49 @@ export function findBlockVerbAfterCopybook(
   return -1;
 }
 
-// Returns true when `pos` sits in the fixed-format identification area (visual cols
-// 72+) of a line whose leading 6 columns look like a fixed-format sequence area
-// ([ \t\d]{6}). Mirrors CobolBlockParser.isInFixedFormatIdentificationArea and the
-// column-72 guard used by tokenize() / tryMatchExcludedRegion(): that area is
+// Returns the first offset of the fixed-format identification area (visual cols 72+)
+// of the line starting at lineStart, or -1 when the line has none: either its leading
+// 6 columns do not look like a fixed-format sequence area ([ \t\d]{6}) or the line
+// ends before visual column 72. Mirrors CobolBlockParser.isInFixedFormatIdentificationArea
+// and the column-72 guard used by tokenize() / tryMatchExcludedRegion(): that area is
 // compiler-ignored free text, so a REPLACE / == delimiter starting there must NOT
-// alter pseudo-text scan state. Returns false in free format (no sequence area).
-function isInIdentificationArea(source: string, lineStart: number, pos: number): boolean {
+// alter pseudo-text scan state. The scan stops as soon as visual column 72 is reached
+// (tabs only accelerate the visual column), so each call visits at most 72 characters
+// and callers can invoke it once per line without quadratic cost.
+function computeIdentificationAreaStart(source: string, lineStart: number): number {
   if (lineStart + 6 > source.length) {
-    return false;
+    return -1;
   }
-  if (getVisualColumn(source, lineStart, pos) < 72) {
-    return false;
+  if (!/^[ \t\d]{6}$/.test(source.slice(lineStart, lineStart + 6))) {
+    return -1;
   }
-  return /^[ \t\d]{6}$/.test(source.slice(lineStart, lineStart + 6));
+  let visualCol = 0;
+  let i = lineStart;
+  while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+    if (visualCol >= 72) {
+      return i;
+    }
+    if (source[i] === '\t') {
+      visualCol = Math.floor(visualCol / 8 + 1) * 8;
+    } else {
+      visualCol++;
+    }
+    i++;
+  }
+  return -1;
+}
+
+// Advances the tracked line start after the scan jumps from `from` to `to` (multi-line
+// pseudo-text payloads, EXEC blocks): when the skipped range contains a newline the
+// line start moves to just past the last one. Scanning is bounded to the jumped range
+// so the total cost over a whole parse stays O(n).
+function lineStartAfterJump(source: string, from: number, to: number, currentLineStart: number): number {
+  for (let k = to - 1; k >= from; k--) {
+    if (source[k] === '\n' || source[k] === '\r') {
+      return k + 1;
+    }
+  }
+  return currentLineStart;
 }
 
 // Scans the source and returns the set of source offsets that begin a pseudo-text
@@ -224,6 +253,13 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
   let copyWordsSeen = 0;
   let expectCopyLibrary = false;
   let i = 0;
+  // Start offset of the line containing `i`, advanced incrementally (never rescanned
+  // backwards) so the identification-area guard below stays O(1) per token.
+  let currentLineStart = 0;
+  // Lazily computed identification-area start of the current line: -2 = not yet
+  // computed, -1 = the line has none, >= 0 = first offset inside the area. Reset
+  // whenever currentLineStart advances.
+  let identAreaStart = -2;
   while (i < source.length) {
     const ch = source[i];
     // End of statement: period (outside strings/comments — those are handled
@@ -248,6 +284,8 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
     // newlines until either a period or a following statement verb is seen.
     if (ch === '\n' || ch === '\r') {
       i++;
+      currentLineStart = i;
+      identAreaStart = -2;
       continue;
     }
     // *> inline comment: skip to end of line
@@ -309,14 +347,13 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
     // pseudo-text scan state, mirroring the column-72 guard in tokenize() /
     // tryMatchExcludedRegion(). Without this guard a REPLACE padded into col 72+
     // set inReplaceContext=true and the next area-B == pair was mis-registered as
-    // pseudo-text. Only state-mutating token starts (== and word-leading ASCII
-    // letters) need the check, so the per-line visual-column scan runs sparsely.
+    // pseudo-text. The area start is computed lazily once per line (at most 72
+    // characters scanned), keeping the whole scan linear even on long lines.
     if (ch === '=' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
-      let lineStart = i;
-      while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-        lineStart--;
+      if (identAreaStart === -2) {
+        identAreaStart = computeIdentificationAreaStart(source, currentLineStart);
       }
-      if (isInIdentificationArea(source, lineStart, i)) {
+      if (identAreaStart >= 0 && i >= identAreaStart) {
         while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
           i++;
         }
@@ -332,6 +369,11 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
     if (ch === 'E' || ch === 'e') {
       const execRegion = matchExecBlock(source, i, callbacks);
       if (execRegion) {
+        const newLineStart = lineStartAfterJump(source, i, execRegion.end, currentLineStart);
+        if (newLineStart !== currentLineStart) {
+          currentLineStart = newLineStart;
+          identAreaStart = -2;
+        }
         i = execRegion.end;
         continue;
       }
@@ -357,7 +399,13 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
         }
         j++;
       }
-      i = foundClose ? j : i + 2;
+      const afterPayload = foundClose ? j : i + 2;
+      const newLineStart = lineStartAfterJump(source, i, afterPayload, currentLineStart);
+      if (newLineStart !== currentLineStart) {
+        currentLineStart = newLineStart;
+        identAreaStart = -2;
+      }
+      i = afterPayload;
       continue;
     }
     // Identifier / keyword scan: only walk ASCII letter characters that
