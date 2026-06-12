@@ -485,14 +485,21 @@ export function isAtCommandPosition(
 
 // Check if keyword is followed by ) -> case pattern (e.g., for), done))
 // But not inside subshell (...) where ) closes the subshell
-export function isCasePattern(
+//
+// `afterPos` is the index of the first character after the keyword text. For a
+// contiguous keyword it is `position + keyword.length` (the default applied by the
+// public isCasePattern below); split keywords interleaved with `\<newline>` line
+// continuations pass their actual source-span end here, since `keyword.length`
+// would under-count the text and point the forward pattern scan at the wrong char.
+export function isCasePatternAt(
   source: string,
   position: number,
   keyword: string,
+  afterPos: number,
   excludedRegions: ExcludedRegion[],
   callbacks: BashValidationCallbacks
 ): boolean {
-  let j = position + keyword.length;
+  let j = afterPos;
   while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
     j++;
   }
@@ -649,4 +656,17 @@ export function isCasePattern(
     return true;
   }
   return false;
+}
+
+// Contiguous-keyword entry point for isCasePatternAt: the keyword text ends at
+// `position + keyword.length`. Split keywords (with embedded `\<newline>`) must call
+// isCasePatternAt directly with their real source-span end instead.
+export function isCasePattern(
+  source: string,
+  position: number,
+  keyword: string,
+  excludedRegions: ExcludedRegion[],
+  callbacks: BashValidationCallbacks
+): boolean {
+  return isCasePatternAt(source, position, keyword, position + keyword.length, excludedRegions, callbacks);
 }

@@ -22,7 +22,7 @@ import {
   matchProcessSubstitution
 } from './bashStringHelpers';
 import type { BashValidationCallbacks } from './bashValidation';
-import { isAtCommandPosition, isCasePattern } from './bashValidation';
+import { isAtCommandPosition, isCasePattern, isCasePatternAt } from './bashValidation';
 import { findExcludedRegionAt } from './parserUtils';
 
 // Keywords that are closed by `done`
@@ -356,6 +356,13 @@ export class BashBlockParser extends BaseBlockParser {
   // But not inside subshell (...) where ) closes the subshell
   private isCasePattern(source: string, position: number, keyword: string, excludedRegions: ExcludedRegion[]): boolean {
     return isCasePattern(source, position, keyword, excludedRegions, this.validationCallbacks);
+  }
+
+  // Variant of isCasePattern that accepts an explicit afterPos (the first character
+  // index after the keyword text). Used by isValidSplitKeyword because a split
+  // keyword's source span end is not `position + keyword.length`.
+  private isCasePatternAt(source: string, position: number, keyword: string, afterPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    return isCasePatternAt(source, position, keyword, afterPos, excludedRegions, this.validationCallbacks);
   }
 
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
@@ -1032,6 +1039,11 @@ export class BashBlockParser extends BaseBlockParser {
         return false;
       }
     }
+    // A split keyword acting as a case pattern label (e.g. `fo\<newline>r)` after
+    // `case ... in`) must be rejected just like the contiguous path does in
+    // isValidBlock{Open,Close}. The keyword span ends at endInSource, not at
+    // `startOffset + keyword.length`, so the afterPos-aware variant is used.
+    if (this.isCasePatternAt(source, startOffset, keyword, endInSource, excludedRegions)) return false;
     if (this.isFollowedByCharAfter(source, endInSource, 'equals')) return false;
     if (this.isFollowedByFunctionParensAt(source, endInSource)) return false;
     return true;
