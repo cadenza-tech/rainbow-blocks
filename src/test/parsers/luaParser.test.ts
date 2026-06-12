@@ -2059,6 +2059,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should drop an end preceded by four dots (.... lexes as .. ..) (バグL2)', () => {
+      // `a....end` is invalid Lua. Lua's lexer prefers the longest token, so
+      // `....` is `..` `..` (two concat operators), NOT `...` (varargs) + `.`.
+      // The inner `end` is therefore directly preceded by `..` and must be
+      // filtered like any other reserved word after concat. The function then
+      // pairs with the outer end rather than letting the inner end close it.
+      const source = 'function f()\n  x = a....end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: .. concat filter must also apply to loop classification, not just tokenize', () => {
