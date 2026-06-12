@@ -3182,6 +3182,15 @@ end`;
     });
   });
 
+  suite('Bug: parenthesized section keyword call without semicolon outside classdef', () => {
+    test('should treat properties(x) without semicolon as function call inside function', () => {
+      const source = 'function f\n  properties(x)\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.ok(!pairs.some((p) => p.openKeyword.value === 'properties'), 'properties(x) must not open a block');
+    });
+  });
+
   suite('Bug: do followed by unexpected leading characters', () => {
     test('should reject do followed by identifier', () => {
       // `do x;` — `do` followed by an identifier on the same line is `do` used as a
