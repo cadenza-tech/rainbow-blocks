@@ -5454,5 +5454,14 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: default attachment scan stops at scope openers', () => {
+    test('should not attach default to a case below a scope opener (function)', () => {
+      const source = 'case (a)\n  function f;\n    default: x = 1;\n  endfunction\nendcase';
+      const pairs = parser.parse(source);
+      const casePair = findBlock(pairs, 'case');
+      assertIntermediates(casePair, []);
+    });
+  });
+
   generateCommonTests(config);
 });
