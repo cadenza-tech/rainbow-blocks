@@ -305,6 +305,20 @@ export function isInExpressionContext(source: string, position: number, excluded
     if (isInExcludedRegion(i, excludedRegions)) {
       const region = findExcludedRegionAt(i, excludedRegions);
       if (region) {
+        // A multi-line excluded region (e.g. EXEC ... END-EXEC) crossed by the
+        // backward scan still moves to a previous physical line. Record the
+        // newline so the same-line operator policy below treats a dangling
+        // operator before the region as an incomplete cross-line expression and
+        // keeps a following WHEN/ELSE as a real intermediate. Only the portion
+        // actually crossed, [region.start, i], is inspected.
+        if (!crossedNewline) {
+          for (let k = region.start; k <= i; k++) {
+            if (source[k] === '\n' || source[k] === '\r') {
+              crossedNewline = true;
+              break;
+            }
+          }
+        }
         i = region.start - 1;
         continue;
       }
