@@ -511,7 +511,15 @@ export function isIndexingBracket(source: string, bracketPos: number): boolean {
       }
       return true;
     }
-    if (/[)\]}'"`]/.test(prevChar) || prevChar.charCodeAt(0) > 127) return true;
+    if (/[)\]}'"`]/.test(prevChar)) return true;
+    // Non-ASCII char before '[': a Unicode identifier (letter/number) means indexing,
+    // a Unicode operator (e.g. `×`, U+00D7) means array construction. For BMP-outside
+    // chars, prevChar is the low surrogate, so look up the full codepoint at i - 1.
+    if (prevChar >= '\uDC00' && prevChar <= '\uDFFF' && i >= 1) {
+      const cp = source.codePointAt(i - 1);
+      return cp !== undefined && cp > 0xffff && /[\p{L}\p{N}]/u.test(String.fromCodePoint(cp));
+    }
+    if (prevChar.charCodeAt(0) > 127) return /[\p{L}\p{N}]/u.test(prevChar);
     // '[' before '[' means the outer bracket is indexing (e.g., a[[end]])
     // In this context, end still means lastindex, so treat as indexing. Continue
     // the loop with the inner '[' to inspect what stands before it.
