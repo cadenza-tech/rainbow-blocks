@@ -2595,6 +2595,20 @@ bar() -> fun() -> ok end.`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'begin', 'end');
     });
+
+    test('should not pair begin/end across fun reference with underscore-prefixed variable arity', () => {
+      // Underscore-prefixed variables (_Arity) are valid Erlang variables; the
+      // `fun lists:reverse/_Arity` reference must not consume the begin's end.
+      const source = 'foo() ->\n  begin\n    F = fun lists:reverse/_Arity,\n    ok\n  end.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not tokenize fun F/_Var (underscore variable arity without module) as block opener', () => {
+      const tokens = parser.getTokens('foo() ->\n  F = fun reverse/_Arity,\n  ok.');
+      const funTokens = tokens.filter((t) => t.value === 'fun');
+      assert.strictEqual(funTokens.length, 0, 'fun reference with underscore variable arity should not be tokenized');
+    });
   });
 
   suite('Regression: try intermediates must follow of/catch/after order', () => {
