@@ -453,11 +453,12 @@ export class ErlangBlockParser extends BaseBlockParser {
     const spans: AttributeSpan[] = [];
     // Match -name( at line start; capture name and opening paren positions.
     // Tolerates leading whitespace, whitespace between '-' and name, and between name and '('.
-    // Erlang allows Unicode-identifier characters in attribute names, so the pattern matches
-    // \p{L} and \p{N} in addition to ASCII letters/digits/underscore.
+    // Erlang allows Unicode-identifier characters and '@' (valid in unquoted atoms,
+    // e.g. -type@foo) in attribute names, so the pattern matches \p{L}, \p{N} and '@'
+    // in addition to ASCII letters/digits/underscore.
     // Leading whitespace tolerates space, tab, form-feed (\f) and vertical-tab (\v),
     // matching Erlang's lexer (which treats all of these as horizontal whitespace).
-    const pattern = /(^|\r\n|\r|\n)([ \t\f\v]*)-[ \t\f\v]*([a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}]*)[ \t\f\v]*\(/gu;
+    const pattern = /(^|\r\n|\r|\n)([ \t\f\v]*)-[ \t\f\v]*([a-zA-Z_\p{L}][a-zA-Z0-9_\p{L}\p{N}@]*)[ \t\f\v]*\(/gu;
     for (const match of source.matchAll(pattern)) {
       const dashStart = match.index + match[1].length + match[2].length;
       if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
@@ -509,12 +510,14 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (this.isInExcludedRegion(dashStart, excludedRegions)) continue;
       const keywordStart = match.index + match[0].length - match[3].length;
       const keywordEnd = keywordStart + match[3].length;
-      // Reject if the next character is a Unicode identifier-continuation character.
-      // E.g. -typeα, -callbackα should be treated as user attributes, not -type/-callback.
-      // JavaScript \b only handles ASCII word boundaries so we must check explicitly here.
+      // Reject if the next character is an atom-continuation character.
+      // E.g. -typeα, -callbackα, -type@foo should be treated as user attributes,
+      // not -type/-callback. JavaScript \b only handles ASCII word boundaries and
+      // treats '@' (a valid unquoted-atom character in Erlang) as a boundary, so we
+      // must check explicitly here.
       if (keywordEnd < source.length) {
         const cp = source.codePointAt(keywordEnd);
-        if (cp !== undefined && /[\p{L}\p{M}\p{N}\p{Pc}]/u.test(String.fromCodePoint(cp))) {
+        if (cp !== undefined && /[\p{L}\p{M}\p{N}\p{Pc}@]/u.test(String.fromCodePoint(cp))) {
           continue;
         }
       }
