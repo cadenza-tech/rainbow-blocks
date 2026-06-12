@@ -4912,6 +4912,44 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-13: units block opener requires preceding is keyword', () => {
+    // `units` only opens a physical type definition block in `type X is units ... end units;`
+    // (LRM 5.2.4), where it is immediately preceded by `is`. Anywhere else — notably a case
+    // choice `when units =>` — it is an orphan reserved word and must NOT be promoted to a
+    // block opener. Without a dedicated validator `units` reached the unconditional fallback,
+    // was tokenized as block_open, and swallowed the following `when` from the case block.
+    test('should not treat units as block opener in case choice position', () => {
+      const source = `architecture a of e is
+begin
+  process begin
+    case sel is
+      when units => x <= a;
+      when others => x <= b;
+    end case;
+  end process;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.closeKeyword?.value, 'end case');
+      const whenCount = caseBlock.intermediates.filter((t) => t.value.toLowerCase() === 'when').length;
+      assert.strictEqual(whenCount, 2, 'case block should retain both when intermediates, not have one absorbed by stray units opener');
+      const unitsOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'units');
+      assert.ok(!unitsOpener, 'units in case choice position should not pair as a block opener');
+    });
+
+    test('should still pair units block when preceded by is in a physical type definition', () => {
+      const source = `package p is
+  type freq_t is units
+    fs;
+    ps = 1000 fs;
+  end units;
+end package;`;
+      const pairs = parser.parse(source);
+      const unitsBlock = findBlock(pairs, 'units');
+      assert.strictEqual(unitsBlock.closeKeyword?.value, 'end units');
+    });
+  });
+
   suite('Regression 2026-06-13: multi-line view header is intermediate retained', () => {
     // VHDL-2019 view declaration (LRM 6.5.2.2) where the `is` opening the view's mode
     // listing sits on its own line below the `view <name> of <type>` header. The upward
