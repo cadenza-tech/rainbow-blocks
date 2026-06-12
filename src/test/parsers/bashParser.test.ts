@@ -5940,6 +5940,17 @@ fi`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('should not treat a split keyword in a case pattern label as a block opener', () => {
+      // `fo\<newline>r)` after `case ... in` is the pattern label `for)`, not a for
+      // loop. The split-keyword validation must apply the case-pattern check (which
+      // the contiguous isValidBlock{Open,Close} path already does) using the real
+      // source-span end, so the split `for` is rejected and the stray `done` finds
+      // no opener. Only case/esac should pair.
+      const source = 'case $x in\n  fo\\\nr) echo; done ;;\nesac';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
   });
 
   suite('Regression: empty case in subshell on one line closes properly', () => {
