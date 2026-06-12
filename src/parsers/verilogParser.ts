@@ -1341,6 +1341,10 @@ export class VerilogBlockParser extends BaseBlockParser {
     // Check forward: next non-trivia char must be `(`.
     const afterKeyword = this.skipForwardTrivia(source, position + keywordLength, excludedRegions);
     if (afterKeyword >= source.length || source[afterKeyword] !== '(') return false;
+    // An attribute `(* ... *)` opens with `(*`, not an instance port list. The
+    // following `(` is not an instance connection paren, so the keyword is a
+    // real close keyword, not an instance name.
+    if (source[afterKeyword + 1] === '*') return false;
 
     // Check backward: preceding non-trivia token must be a plain identifier.
     // Skip whitespace and block comments backward (line comments and other
