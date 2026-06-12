@@ -576,15 +576,17 @@ export class BashBlockParser extends BaseBlockParser {
     // opener requires a whitespace/newline before it (handled separately during tokenize),
     // so this check only fires when `{`/`}` is immediately glued to the keyword.
     if (ch === '{' || ch === '}') return true;
-    // Any NON-ASCII Unicode Symbol code point (currency like `€`, emoji like `😀`,
-    // math/other symbols) is a valid word constituent in bash and fuses with the
-    // preceding keyword. Restrict to non-ASCII because the Unicode Symbol category
-    // also includes ASCII shell metacharacters (`<`, `>`, `|`, `\``, `=`, `+`, `~`,
-    // `$`) which are POSIX word terminators, not word-fusion characters. ASCII chars
-    // that legitimately fuse (`{`, `}`, `]`, `$`, etc.) are handled explicitly above.
-    // Use a 2-char slice with the `u` flag so supplementary-plane code points
-    // (surrogate pairs) such as emoji are matched correctly.
-    if (ch.charCodeAt(0) > 127 && /^\p{S}/u.test(source.slice(afterPos, afterPos + 2))) return true;
+    // Any NON-ASCII Unicode Symbol (`\p{S}`: currency like `€`, emoji like `😀`,
+    // math/other symbols) or Punctuation (`\p{P}`: ellipsis `…`, ideographic full
+    // stop `。`, corner brackets `」` etc.) code point is a valid word constituent in
+    // bash and fuses with the preceding keyword. Restrict to non-ASCII because both
+    // Unicode categories also include ASCII shell metacharacters (`<`, `>`, `|`,
+    // `\``, `=`, `+`, `~`, `$` are `\p{S}`; `;`, `(`, `)`, `&`, `'`, `"`, `#`, `.`
+    // etc. are `\p{P}`) which are POSIX word terminators or already handled above,
+    // not word-fusion characters. ASCII chars that legitimately fuse (`{`, `}`, `]`,
+    // `$`, `#`, `.`, etc.) are handled explicitly above. Use a 2-char slice with the
+    // `u` flag so supplementary-plane code points (surrogate pairs) are matched.
+    if (ch.charCodeAt(0) > 127 && /^[\p{S}\p{P}]/u.test(source.slice(afterPos, afterPos + 2))) return true;
     // `]` fuses with the preceding word: `done]` is one POSIX word, not the reserved keyword.
     if (ch === ']') return true;
     // `$` fuses with the preceding word for non-brace expansions: `done$var`, `done$1`, `done$$`,
@@ -1047,11 +1049,11 @@ export class BashBlockParser extends BaseBlockParser {
       if (ch === '#' || ch === '.' || ch === ':' || ch === '~' || ch === ',' || ch === '@' || ch === '%' || ch === '^' || ch === '!' || ch === '/') {
         return true;
       }
-      // Glob/pattern modifiers, brace fuses, and non-ASCII Unicode Symbols
-      // (see isFollowedByHyphen for details, including why \p{S} is gated to non-ASCII)
+      // Glob/pattern modifiers, brace fuses, and non-ASCII Unicode Symbols/Punctuation
+      // (see isFollowedByHyphen for details, including why \p{S}/\p{P} is gated to non-ASCII)
       if (ch === '+' || ch === '*' || ch === '?') return true;
       if (ch === '{' || ch === '}') return true;
-      if (ch.charCodeAt(0) > 127 && /^\p{S}/u.test(source.slice(afterPos, afterPos + 2))) return true;
+      if (ch.charCodeAt(0) > 127 && /^[\p{S}\p{P}]/u.test(source.slice(afterPos, afterPos + 2))) return true;
       if (ch === ']' || ch === '$') return true;
       if (ch === '\\') {
         const next = source[afterPos + 1];
