@@ -13,35 +13,78 @@ import { findInlineCommentIndex, findLineEnd } from './fortranHelpers';
 // cost-minimal default that avoids phantom block suppression on pathological input.
 const MAX_PAREN_SCAN_CHARS = 2048;
 
-// Scans backward from pos looking for an unclosed 'interface' block.
-// Returns true when the nearest enclosing unclosed block is 'interface'.
-function isInsideInterfaceBlock(
+// Half-open [start, end) range of source offsets that sit inside an unclosed `interface`
+// block. `isInsideInterfaceSpan(pos, spans)` reports whether `pos` lands in one.
+export interface InterfaceSpan {
+  start: number;
+  end: number;
+}
+
+// Matches interface block delimiters: the open `interface` and the close
+// `end interface` / `endinterface`. `end[ \t]*interface` is listed first so the
+// concatenated `endinterface` and the spaced `end interface` both match the end-form
+// before the standalone `interface` alternative is tried. `[ \t]*` (not `\s+`) keeps a
+// stray `end\ninterface` across a line break from being miscounted as a single end-form,
+// matching the [ \t]* spacing used by COMPOUND_END_PATTERN in fortranParser.ts.
+const INTERFACE_DELIMITER_PATTERN = /\bend[ \t]*interface\b|\binterface\b/g;
+
+// Precomputes, in a single pass over the source, the [start, end) offset ranges that lie
+// inside an unclosed `interface` block. Called once per parse so the per-`procedure`
+// validation can binary-search these spans instead of re-slicing and re-scanning the whole
+// preceding source on every keyword (which degraded to O(N^2) on generic interfaces with
+// thousands of procedure references). The running depth mirrors the previous backward
+// scan exactly: each `interface` adds 1, each `end[ \t]*interface` subtracts 1 (orphan
+// closes may drive it negative), and an offset is "inside" when the cumulative depth
+// through the most recent delimiter ending at or before it is positive.
+export function computeInterfaceSpans(
   source: string,
-  pos: number,
-  isInExcludedRegion: (p: number, regions: ExcludedRegion[]) => boolean,
-  excludedRegions: ExcludedRegion[]
-): boolean {
-  const beforeLower = source.slice(0, pos).toLowerCase();
-  // `end[ \t]*interface` is listed first so the concatenated `endinterface` and the
-  // spaced `end interface` both match the end-form before the standalone `interface`
-  // alternative is tried. `[ \t]*` (not `\s+`) keeps a stray `end\ninterface` across a
-  // line break from being miscounted as a single end-form, matching the [ \t]* spacing
-  // used by COMPOUND_END_PATTERN in fortranParser.ts.
-  const pattern = /\bend[ \t]*interface\b|\binterface\b/g;
+  excludedRegions: ExcludedRegion[],
+  isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean
+): InterfaceSpan[] {
+  const lower = source.toLowerCase();
+  const spans: InterfaceSpan[] = [];
   let depth = 0;
-  let match = pattern.exec(beforeLower);
-  const matches: { start: number; isEnd: boolean }[] = [];
+  let spanStart = -1;
+  INTERFACE_DELIMITER_PATTERN.lastIndex = 0;
+  let match = INTERFACE_DELIMITER_PATTERN.exec(lower);
   while (match !== null) {
     if (!isInExcludedRegion(match.index, excludedRegions)) {
-      matches.push({ start: match.index, isEnd: match[0].startsWith('end') });
+      const tokenEnd = match.index + match[0].length;
+      if (match[0].startsWith('end')) depth--;
+      else depth++;
+      if (depth > 0 && spanStart < 0) {
+        spanStart = tokenEnd;
+      } else if (depth <= 0 && spanStart >= 0) {
+        spans.push({ start: spanStart, end: tokenEnd });
+        spanStart = -1;
+      }
     }
-    match = pattern.exec(beforeLower);
+    match = INTERFACE_DELIMITER_PATTERN.exec(lower);
   }
-  for (const m of matches) {
-    if (m.isEnd) depth--;
-    else depth++;
+  // Unclosed interface at EOF: every remaining offset is inside it.
+  if (spanStart >= 0) {
+    spans.push({ start: spanStart, end: source.length + 1 });
   }
-  return depth > 0;
+  return spans;
+}
+
+// Binary-searches the precomputed interface spans for one containing `pos`
+// (span.start <= pos < span.end). Spans are sorted ascending and non-overlapping.
+export function isInsideInterfaceSpan(pos: number, spans: InterfaceSpan[]): boolean {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const span = spans[mid];
+    if (pos < span.start) {
+      hi = mid - 1;
+    } else if (pos >= span.end) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Checks if position is at line start allowing leading whitespace (for # preprocessor)
@@ -61,7 +104,8 @@ export function isValidProcedureOpen(
   source: string,
   position: number,
   excludedRegions: ExcludedRegion[],
-  isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean
+  isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean,
+  interfaceSpans: InterfaceSpan[]
 ): boolean {
   // Reject 'module procedure NAME' when inside an unclosed 'interface' block.
   // Within a module/submodule body (outside of interface), 'module procedure'
@@ -71,7 +115,7 @@ export function isValidProcedureOpen(
   if (k >= 5) {
     const maybeModule = source.slice(k - 5, k + 1).toLowerCase();
     if (maybeModule === 'module' && (k - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[k - 6]))) {
-      if (isInsideInterfaceBlock(source, position, isInExcludedRegion, excludedRegions)) {
+      if (isInsideInterfaceSpan(position, interfaceSpans)) {
         return false;
       }
     }
@@ -124,7 +168,7 @@ export function isValidProcedureOpen(
   //   end interface op
   // These 'procedure' lines are NOT block openers - they reference existing
   // procedures and have no matching 'end procedure'.
-  if (isInsideInterfaceBlock(source, position, isInExcludedRegion, excludedRegions)) {
+  if (isInsideInterfaceSpan(position, interfaceSpans)) {
     return false;
   }
   // Reject assignment forms: 'procedure = expr' and 'procedure(N) = expr'

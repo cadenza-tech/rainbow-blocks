@@ -17,7 +17,9 @@ import {
   matchElseWhere,
   matchFortranString
 } from './fortranHelpers';
+import type { InterfaceSpan } from './fortranValidation';
 import {
+  computeInterfaceSpans,
   isAtLineStartAllowingWhitespace,
   isInsideParentheses,
   isMiddleInExpressionContext,
@@ -127,6 +129,11 @@ export class FortranBlockParser extends BaseBlockParser {
   // (`select type` vs `select case` vs `select rank`) but the base class API
   // does not pass source to matchBlocks. Reset on each tokenize call.
   private currentSource = '';
+
+  // Interface block spans precomputed once per tokenize() pass so isValidProcedureOpen
+  // can binary-search them instead of re-scanning the whole preceding source on every
+  // `procedure` keyword (which was O(N^2) on generic interfaces). Reset on each tokenize.
+  private currentInterfaceSpans: InterfaceSpan[] = [];
 
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
@@ -298,7 +305,14 @@ export class FortranBlockParser extends BaseBlockParser {
     }
 
     if (lowerKeyword === 'procedure') {
-      return isValidProcedureOpen(keyword, source, position, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
+      return isValidProcedureOpen(
+        keyword,
+        source,
+        position,
+        excludedRegions,
+        (pos, regions) => this.isInExcludedRegion(pos, regions),
+        this.currentInterfaceSpans
+      );
     }
 
     // Single-line where/forall: has (condition) followed by statement on same line
@@ -1022,6 +1036,9 @@ export class FortranBlockParser extends BaseBlockParser {
   protected tokenize(source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Capture source for use in matchBlocks (needed by getSelectSubtype).
     this.currentSource = source;
+    // Precompute interface spans once so isValidProcedureOpen (invoked per `procedure`
+    // keyword while validating block opens below) can binary-search them.
+    this.currentInterfaceSpans = computeInterfaceSpans(source, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
 
     // Find all compound end keywords and their positions
     const compoundEndPositions = new Map<number, { keyword: string; length: number; endType: string }>();
