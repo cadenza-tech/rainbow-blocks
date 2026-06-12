@@ -4807,6 +4807,47 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
     });
 
+    test('should not treat enum != value as a block opener (not-equal comparison)', () => {
+      // `enum != 1` is a not-equal comparison; `enum` is a value (e.g. a variable
+      // named `enum`), not a block opener. The `!` directly after the keyword is the
+      // first char of `!=`. Treating `enum` as an opener pairs it with the inner
+      // `end`, leaving the outer `def` orphaned.
+      const source = 'def foo\n  if enum != 1\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat select !~ regex as a block opener (pattern not-match)', () => {
+      // `select !~ /x/` is a pattern not-match; `select` is a value (variable). The
+      // `!` directly after the keyword is the first char of `!~`.
+      const source = 'def foo\n  if select !~ /x/\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not treat enum ~ value as a block opener (tilde directly after keyword)', () => {
+      // A bare `~` directly after the keyword is never a valid opener form, so the
+      // keyword cannot be a block opener. Without filtering it, `enum` would pair with
+      // the inner `end` and orphan the outer `def`. The keyword is not preceded by a
+      // value context here (`if` precedes it), so the suppression must come from the
+      // text after the keyword (the `~`), keeping the BlockPair set sound.
+      const source = 'def foo\n  if enum ~ 1\n    body\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.value, 'end');
+    });
+
     test('should still open a real enum block when followed by a name (sanity)', () => {
       const source = 'enum Color\n  Red\nend';
       const pairs = parser.parse(source);
