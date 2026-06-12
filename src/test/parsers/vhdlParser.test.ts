@@ -4912,6 +4912,44 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-13: reserved words after return are values, not block openers', () => {
+    // A reserved word appearing as the return type after `return` (e.g. a hand-written /
+    // in-progress `return view is`) is a (malformed) type mark, not a block opener. Without
+    // treating `return` as an expression/value context, the reserved word is tokenized as a
+    // fresh block_open and absorbs the subprogram's `is`/`begin` intermediates, orphaning the
+    // function header. `return` is a value context, so the keyword after it must be rejected.
+    test('should not treat view after return as block opener in a function return type', () => {
+      const source = `package p is
+  function f(x : integer) return view is
+  begin
+    return x;
+  end function;
+end package;`;
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      const intermediateValues = functionBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), 'function should retain its is intermediate');
+      assert.ok(intermediateValues.includes('begin'), 'function should retain its begin intermediate');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view after return should not pair as a block opener');
+    });
+
+    test('should still open a block for a function returning a non-reserved type', () => {
+      const source = `package p is
+  function f(x : integer) return integer is
+  begin
+    return x;
+  end function;
+end package;`;
+      const pairs = parser.parse(source);
+      const functionBlock = findBlock(pairs, 'function');
+      assert.strictEqual(functionBlock.closeKeyword?.value, 'end function');
+      const intermediateValues = functionBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), 'function should retain its is intermediate');
+      assert.ok(intermediateValues.includes('begin'), 'function should retain its begin intermediate');
+    });
+  });
+
   suite('Regression 2026-06-13: units block opener requires preceding is keyword', () => {
     // `units` only opens a physical type definition block in `type X is units ... end units;`
     // (LRM 5.2.4), where it is immediately preceded by `is`. Anywhere else — notably a case
