@@ -200,10 +200,12 @@ export function isValidRecordOpen(source: string, position: number, excludedRegi
     }
     break;
   }
-  // Check if the word ending at j is "null"
+  // Check if the word ending at j is "null". The preceding character is checked
+  // with isAdaWordChar (Unicode-aware) so a Unicode-suffixed identifier such as
+  // `Önull` is treated as a single identifier, not the reserved word `null`.
   if (j >= 3 && source.slice(j - 3, j + 1).toLowerCase() === 'null') {
     const beforeNull = j - 4;
-    if (beforeNull < 0 || !/[a-zA-Z0-9_]/.test(source[beforeNull])) {
+    if (beforeNull < 0 || !isAdaWordChar(source[beforeNull])) {
       if (!callbacks.isInExcludedRegion(j - 3, excludedRegions)) {
         return false;
       }
