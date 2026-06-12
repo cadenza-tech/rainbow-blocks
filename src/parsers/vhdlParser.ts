@@ -494,6 +494,18 @@ export class VhdlBlockParser extends BaseBlockParser {
       break;
     }
     if (i < 0) return false;
+    // `return <reserved>` is a value/type context: `return` introduces the return type of a
+    // function (`return view is`) or a return statement's expression (`return view;`). The
+    // reserved word after it is never a block opener, so treat it like an RHS marker. Read
+    // the identifier-like word ending at `i` and compare against `return` (word-bounded).
+    if (/[a-zA-Z0-9_]/.test(source[i])) {
+      let wordStart = i;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      if (source.slice(wordStart, i + 1).toLowerCase() === 'return') return true;
+      return false;
+    }
     const prev = source[i];
     // `=>` is the association arrow: after `=>` a fresh statement / target begins, where a
     // reserved-word block opener IS legitimate. The arrow ends with `>`, so when we land on
