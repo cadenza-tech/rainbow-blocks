@@ -439,6 +439,13 @@ export class VhdlBlockParser extends BaseBlockParser {
       return this.isValidRecordOpen(source, position, excludedRegions);
     }
 
+    // Reject `units` not preceded by `is` (LRM 5.2.4). The only valid block opener form is
+    // `type X is units ... end units;`. Anywhere else (e.g. a case choice `when units =>`,
+    // `:= units`) is invalid and must not open a block. This also covers `return units`.
+    if (lowerKeyword === 'units') {
+      return this.isValidUnitsOpen(source, position, excludedRegions);
+    }
+
     return true;
   }
 
@@ -829,6 +836,39 @@ export class VhdlBlockParser extends BaseBlockParser {
   // Validates `record` as a block opener: must be preceded by `is` keyword
   // (allowing whitespace and comments between them).
   private isValidRecordOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 1) return false;
+    // Expect `is` immediately before (case-insensitive). The `s` is at position i,
+    // the `i` is at position i-1.
+    const isS = source[i] === 's' || source[i] === 'S';
+    const isI = source[i - 1] === 'i' || source[i - 1] === 'I';
+    if (!isS || !isI) return false;
+    // Ensure the `is` is a standalone word (not part of a longer identifier like `axis`)
+    if (i - 2 >= 0 && /[a-zA-Z0-9_]/.test(source[i - 2])) return false;
+    return true;
+  }
+
+  // Validates `units` as a block opener: must be preceded by `is` keyword (LRM 5.2.4
+  // physical type definition `type X is units ... end units;`), allowing whitespace and
+  // comments between them. Anywhere else (e.g. a case choice `when units =>`, `:= units`)
+  // is not a block opener and must be rejected so it does not swallow surrounding
+  // intermediates. Mirrors isValidRecordOpen (`is record`).
+  private isValidUnitsOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = position - 1;
     while (i >= 0) {
       if (this.isInExcludedRegion(i, excludedRegions)) {
