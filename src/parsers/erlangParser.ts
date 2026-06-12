@@ -20,7 +20,7 @@ const BLOCK_OPENER_KEYWORDS = new Set(['begin', 'if', 'case', 'receive', 'try', 
 // fun 'quoted-atom'/Arity). Shared by isValidBlockOpen and hasUnclosedOpenerInMapScope so
 // that a fun reference is consistently treated as NOT a block opener.
 const FUN_REF_ATOM_OR_IDENT = "(?:\\??[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\??'(?:[^'\\\\\\n\\r]|\\\\.)*')";
-const FUN_REF_ARITY_PATTERN = '(?:\\d+|[A-Z\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\?[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
+const FUN_REF_ARITY_PATTERN = '(?:\\d+|[A-Z_\\p{Lu}][a-zA-Z0-9_\\p{L}\\p{N}]*|\\?[a-zA-Z_\\p{L}][a-zA-Z0-9_\\p{L}\\p{N}]*)';
 const FUN_REF_WITH_MODULE_PATTERN = new RegExp(
   `^\\s+${FUN_REF_ATOM_OR_IDENT}\\s*:\\s*${FUN_REF_ATOM_OR_IDENT}\\s*/\\s*${FUN_REF_ARITY_PATTERN}`,
   'u'
