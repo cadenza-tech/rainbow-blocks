@@ -3082,6 +3082,28 @@ end`;
     });
   });
 
+  suite('Bug: block_open keywords inside same-line control headers', () => {
+    test('should reject function inside same-line if header', () => {
+      const source = 'if x function\nend\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should reject try inside same-line while header', () => {
+      const source = 'while x try\nend\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
+
+    test('should still open function on next line after if header', () => {
+      const source = 'if x\nfunction f\nend\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      findBlock(pairs, 'function');
+      findBlock(pairs, 'if');
+    });
+  });
+
   suite('Bug: parent phantom-end mechanism for empty headers in Octave', () => {
     test('should absorb stray end from empty if header inside function', () => {
       // `function f\n  if;\n  end\nend` — the empty-header `if;` is rejected as a block
