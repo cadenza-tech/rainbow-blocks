@@ -2022,6 +2022,19 @@ end if;`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'record', 'end record');
     });
+
+    test('should accept record when preceded by a Unicode-suffixed identifier ending in null', () => {
+      // `Önull` (leading U+00D6 LATIN CAPITAL LETTER O WITH DIAERESIS) is a
+      // single Ada identifier, not the reserved word `null`. The `null record`
+      // suppression must treat the non-ASCII letter to the left of `null` as an
+      // identifier character so the word boundary fails; otherwise the
+      // `record ... end record` block is wrongly suppressed. U+00D6 is written
+      // via String.fromCharCode so it is explicit in review.
+      const odiaeresis = String.fromCharCode(0x00d6);
+      const source = `type T is ${odiaeresis}null record\n  Field : Integer;\nend record;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end record');
+    });
   });
 
   suite('Branch coverage: isAdaWordAt boundary checks and isOrElseShortCircuit', () => {
