@@ -6439,5 +6439,23 @@ end function`;
     });
   });
 
+  suite('Regression 2026-06-13: concatenated endinterface closes interface block', () => {
+    test('should treat concatenated endinterface as interface close so later module procedure pairs', () => {
+      const source =
+        'submodule (m) sub\ninterface gen\nmodule procedure other\nendinterface\ncontains\nmodule procedure foo\nx = 1\nend procedure\nend submodule';
+      const pairs = parser.parse(source);
+      // submodule + interface(gen)/endinterface + procedure(foo)/end procedure.
+      // The interface closes at endinterface, so `module procedure foo` after contains
+      // is a real procedure block (not suppressed as an interface procedure reference).
+      assertBlockCount(pairs, 3);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'submodule');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'interface');
+      assert.strictEqual(sorted[1].closeKeyword.value.toLowerCase(), 'endinterface');
+      assert.strictEqual(sorted[2].openKeyword.value.toLowerCase(), 'procedure');
+      assert.strictEqual(sorted[2].closeKeyword.value.toLowerCase(), 'end procedure');
+    });
+  });
+
   generateCommonTests(config);
 });
