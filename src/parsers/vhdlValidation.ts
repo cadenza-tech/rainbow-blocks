@@ -28,6 +28,13 @@ const LOOP_PREFIX_KEYWORDS = ['for', 'while'];
 const FOR_OPEN_WINDOW_LINES = 22;
 const LOOP_OPEN_WINDOW_LINES = 20;
 
+// Window size (in lines) for the backward prefix scans of isValidEntityOrConfigOpen. The
+// function inspects the current line plus two `attempt < 5` loops (one for `use`, one for
+// a trailing `:`), each stepping back at most 5 lines. 12 (> 1 + 5) exceeds that bound so
+// the loops always terminate before reaching the window start, keeping the `lastNl > 0` /
+// `prevNl <= 0` source-start checks faithful (see findWindowStart and isValidForOpen).
+const ENTITY_OPEN_WINDOW_LINES = 12;
+
 // Returns the offset of the line start that is `lineCount` newlines before
 // `position` (i.e. the start of the window that includes `position`'s line and
 // the `lineCount` lines above it). Returns 0 when fewer than `lineCount`
@@ -536,7 +543,17 @@ export function isValidComponentOpen(
   return true;
 }
 
-// Validates 'entity'/'configuration': rejects 'use entity', 'label: entity' direct instantiation
+// Validates 'entity'/'configuration': rejects 'use entity', 'label: entity' direct instantiation.
+// Slices only the bounded window the backward scans can reach (current line + two
+// `attempt < 5` loops stepping back at most 5 lines each) instead of the whole source
+// prefix, so the per-keyword cost is O(window) rather than O(position). `textBefore`
+// offsets are window-relative; add `windowStart` to convert any of them to an absolute
+// source offset. ENTITY_OPEN_WINDOW_LINES (12 > 1 + 5) exceeds the strict scan bound, so
+// the loops always terminate before reaching the window edge: a window-relative
+// `lastNl`/`prevNl` is either -1 or >= 1 (never 0) when windowStart > 0, so the
+// `lastNl > 0` / `prevNl <= 0` source-start checks detect the real source start only.
+// When windowStart is 0 (small source) local and absolute offsets coincide and behavior
+// is byte-for-byte identical to scanning the full prefix.
 export function isValidEntityOrConfigOpen(
   lowerKeyword: string,
   source: string,
@@ -544,12 +561,13 @@ export function isValidEntityOrConfigOpen(
   excludedRegions: ExcludedRegion[],
   callbacks: VhdlValidationCallbacks
 ): boolean {
-  const textBefore = source.slice(0, position).toLowerCase();
+  const windowStart = findWindowStart(source, position, ENTITY_OPEN_WINDOW_LINES);
+  const textBefore = source.slice(windowStart, position).toLowerCase();
   const lastNl = Math.max(textBefore.lastIndexOf('\n'), textBefore.lastIndexOf('\r'));
   const rawLineBefore = textBefore.slice(lastNl + 1);
   const lineBefore = rawLineBefore.trimStart();
   const trimOffset = rawLineBefore.length - lineBefore.length;
-  const lineBeforeNoComment = stripTrailingComment(lineBefore, lastNl + 1 + trimOffset, excludedRegions, callbacks);
+  const lineBeforeNoComment = stripTrailingComment(lineBefore, windowStart + lastNl + 1 + trimOffset, excludedRegions, callbacks);
   if (/\buse[ \t]+$/.test(lineBeforeNoComment)) {
     return false;
   }
@@ -572,11 +590,11 @@ export function isValidEntityOrConfigOpen(
         }
         continue;
       }
-      const prevNoComment = stripTrailingComment(trimmedPrev, prevNl + 1 + prevTrimOffset, excludedRegions, callbacks);
+      const prevNoComment = stripTrailingComment(trimmedPrev, windowStart + prevNl + 1 + prevTrimOffset, excludedRegions, callbacks);
       const useMatch = prevNoComment.match(/\buse[ \t]*$/);
       if (useMatch && useMatch.index !== undefined) {
         // Check that the 'use' is not inside an excluded region (e.g., comment)
-        const useOffset = prevNl + 1 + prevTrimOffset + useMatch.index;
+        const useOffset = windowStart + prevNl + 1 + prevTrimOffset + useMatch.index;
         if (!callbacks.isInExcludedRegion(useOffset, excludedRegions)) {
           return false;
         }
@@ -587,7 +605,7 @@ export function isValidEntityOrConfigOpen(
   if (lowerKeyword === 'entity' || lowerKeyword === 'configuration') {
     const colonMatch = lineBeforeNoComment.match(/:[ \t]*$/);
     if (colonMatch) {
-      const colonOffset = lastNl + 1 + trimOffset + (lineBeforeNoComment.length - colonMatch[0].length);
+      const colonOffset = windowStart + lastNl + 1 + trimOffset + (lineBeforeNoComment.length - colonMatch[0].length);
       if (!callbacks.isInExcludedRegion(colonOffset, excludedRegions)) {
         return false;
       }
@@ -614,7 +632,7 @@ export function isValidEntityOrConfigOpen(
         }
         const prevColonMatch = prevLine.match(/:[ \t]*$/);
         if (prevColonMatch) {
-          const prevColonOffset = prevNl + 1 + (prevLine.length - prevColonMatch[0].length);
+          const prevColonOffset = windowStart + prevNl + 1 + (prevLine.length - prevColonMatch[0].length);
           if (!callbacks.isInExcludedRegion(prevColonOffset, excludedRegions)) {
             return false;
           }
