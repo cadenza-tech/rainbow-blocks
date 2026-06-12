@@ -2141,6 +2141,21 @@ END-PERFORM`;
     });
   });
 
+  suite('Regression: identification-area REPLACE does not start pseudo-text', () => {
+    test('should not treat area-B == as pseudo-text when REPLACE sits in col 72+', () => {
+      // Bug: getPseudoTextStarts scanned the fixed-format identification area
+      // (visual cols 72+, compiler-ignored free text) without the column-72 guard
+      // that tokenize/tryMatchExcludedRegion apply. A period-less area-B statement
+      // followed by REPLACE padded into col 72+ wrongly set inReplaceContext, so the
+      // next line's area-B == pair was registered as pseudo-text and the IF inside it
+      // was swallowed, dropping the IF/END-IF pair.
+      const line1 = `${'000400MOVE A TO B'.padEnd(72)}REPLACE`;
+      const source = `${line1}\n000400 ==IF==\n000400 END-IF`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+  });
+
   suite('Regression: WHEN/ELSE used as data names', () => {
     test('should not register ELSE as IF intermediate when used as data name', () => {
       const source = 'IF X\n  MOVE ELSE TO Y\nEND-IF';
