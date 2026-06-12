@@ -5132,6 +5132,14 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'do', 'end');
     });
+
+    test('should treat do as loop separator when then is part of Unicode identifier (while αthen do)', () => {
+      // `αthen` is a single Unicode identifier, not the `then` clause separator, so `do`
+      // is the while loop separator (rejected as block_open) and while/end pair.
+      const source = 'while αthen do\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+    });
   });
 
   suite('Regression: Unicode hash key followed by end', () => {
