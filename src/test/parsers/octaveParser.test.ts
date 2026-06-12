@@ -3329,5 +3329,19 @@ end`;
     });
   });
 
+  suite('Bug: do followed by Unicode digit or symbol is not a block opener', () => {
+    test('should reject do followed by Unicode digit U+0665', () => {
+      const source = 'function f\n  do ٥\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject do followed by Unicode math symbol U+00D7', () => {
+      const source = 'function f\n  do ×\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
