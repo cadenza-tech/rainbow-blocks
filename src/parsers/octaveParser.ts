@@ -388,9 +388,10 @@ export class OctaveBlockParser extends MatlabBlockParser {
           // `do 5` / `do "s"` — a numeric literal or double-quoted string after `do` on the
           // same line is an implicit-multiplication operand or command-syntax argument, not a
           // do/until block body. (`do .5` is rejected by the field-access `.` check and
-          // `do 's'` by the transpose-vs-string check elsewhere, so only `[0-9]` and `"` are
-          // missing from the rejection set here.)
-          if (/[0-9]/.test(ch) || ch === '"') {
+          // `do 's'` by the transpose-vs-string check elsewhere, so only digits and `"` are
+          // missing from the rejection set here.) `\p{Nd}` covers Unicode decimal digits such
+          // as U+0665 (Arabic-Indic five), so `do ٥` is rejected like ASCII `do 5`.
+          if (/\p{Nd}/u.test(ch) || ch === '"') {
             return false;
           }
           // Identifier following `do` on the same physical line (`do x;`, `do foo`, etc.).
@@ -399,6 +400,15 @@ export class OctaveBlockParser extends MatlabBlockParser {
           // legitimate continuation-based do/until form (probe stops at `.` of `...` which
           // is not an identifier char, so this branch is not entered).
           if (/[a-zA-Z_]/.test(ch) || /\p{L}/u.test(ch)) {
+            return false;
+          }
+          // Unicode symbol following `do` on the same physical line (`do ×`, `do ÷`, etc.).
+          // `\p{S}` covers math/currency/modifier/other symbols. The ASCII operators
+          // (`+`/`-`/`~`/etc.) are already rejected above; this extends the same rejection to
+          // Unicode symbols so `do ×` (U+00D7) is treated like `do *` — an operand/expression
+          // form, never a do/until body start. Cost-minimal: leaves `do` orphan rather than
+          // pairing it with a later `until`/`end` and destroying outer block pairing.
+          if (/\p{S}/u.test(ch)) {
             return false;
           }
         }
