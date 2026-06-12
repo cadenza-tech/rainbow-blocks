@@ -5463,5 +5463,13 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: disable/wait fork detection stops at escaped identifiers', () => {
+    test('should pair fork/join after disable of an escaped-identifier target', () => {
+      const source = 'disable \\esc fork\n  a = 1;\njoin';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+  });
+
   generateCommonTests(config);
 });
