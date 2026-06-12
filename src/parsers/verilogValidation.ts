@@ -92,6 +92,11 @@ export function isValidWaitOpen(source: string, position: number, excludedRegion
 // Validates 'fork': rejects 'disable fork' and 'wait fork' statements
 export function isValidForkOpen(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   let j = position - 1;
+  // Set when the backward scan crosses a non-comment excluded region (escaped
+  // identifier or string). Such a region is an operand/name token between
+  // `disable`/`wait` and `fork`, so `fork` is a separate statement (e.g.
+  // `disable \esc fork` disables `\esc`; the following `fork` opens a par_block).
+  let crossedNonComment = false;
   while (j >= 0) {
     // Treat newlines as whitespace (SystemVerilog free-form: a newline between
     // `disable`/`wait` and `fork` is equivalent to a space, so `disable\nfork`
@@ -101,10 +106,13 @@ export function isValidForkOpen(source: string, position: number, excludedRegion
       j--;
       continue;
     }
-    // Skip over excluded regions (comments)
+    // Skip over excluded regions; comments are trivia, but strings and escaped
+    // identifiers are operand tokens that break the `disable/wait fork` form.
     let inExcluded = false;
     for (const region of excludedRegions) {
       if (j >= region.start && j < region.end) {
+        const isComment = source[region.start] === '/';
+        if (!isComment) crossedNonComment = true;
         j = region.start - 1;
         inExcluded = true;
         break;
@@ -113,6 +121,8 @@ export function isValidForkOpen(source: string, position: number, excludedRegion
     if (inExcluded) continue;
     break;
   }
+  // An intervening operand token means `fork` is not bound to `disable`/`wait`.
+  if (crossedNonComment) return true;
   // Check 'disable' (7 chars): ensure it's a word boundary before it
   if (j >= 6 && source.slice(j - 6, j + 1) === 'disable') {
     const beforeDisable = j - 7;
