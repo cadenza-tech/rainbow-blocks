@@ -5245,6 +5245,27 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
     });
+
+    test('should drop inner end after hex literal value in the 2-end form (def m\\n 0xFF end\\nend)', () => {
+      const source = 'def m\n  0xFF end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should drop inner end after binary literal value in the 2-end form (def m\\n 0b101 end\\nend)', () => {
+      const source = 'def m\n  0b101 end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should drop inner end after exponent literal value in the 2-end form (def m\\n 1e5 end\\nend)', () => {
+      const source = 'def m\n  1e5 end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: else after rescue in def/class/module/do blocks', () => {
