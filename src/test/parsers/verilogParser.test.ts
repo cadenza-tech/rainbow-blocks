@@ -5471,5 +5471,13 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: attribute parentheses excluded from instance name detection', () => {
+    test('should pair begin/end when followed by an attribute (* ... *)', () => {
+      const source = 'begin\n  x = 1\nend\n(* keep *) wire y;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
