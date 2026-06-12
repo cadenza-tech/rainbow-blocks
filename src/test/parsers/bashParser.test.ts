@@ -1735,6 +1735,29 @@ esac`;
         assert.strictEqual(pairs[0].closeKeyword.line, 2);
       });
 
+      test('should not treat done in done\u{2026} (horizontal ellipsis punctuation) as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done\u{2026} arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat done in done\u{3002} (ideographic full stop) as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done\u{3002} arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat done in done\u{300D} (right corner bracket punctuation) as block close', () => {
+        const pairs = parser.parse('for i in 1; do\n  done\u{300D} arg\ndone');
+        assertSingleBlock(pairs, 'for', 'done');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2);
+      });
+
+      test('should not treat if in if\u{2026} (horizontal ellipsis punctuation) as block open', () => {
+        const pairs = parser.parse('if\u{2026} true; then echo ok; fi');
+        assertNoBlocks(pairs);
+      });
+
       test('should still recognize if followed by space and { as block open + group', () => {
         // Regression guard: `if { ... }; then` should still detect `if` keyword and `{ }` group
         const source = 'if true; then\n  echo ok\nfi';
