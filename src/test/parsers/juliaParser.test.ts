@@ -2435,6 +2435,18 @@ end`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('brackets after a Unicode operator are array construction', () => {
+      const source = 'y = a × [begin x end]';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('brackets after a Unicode identifier remain indexing', () => {
+      const source = 'α[begin x end]';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Branch coverage: keyword-like identifiers in array construction with end', () => {
