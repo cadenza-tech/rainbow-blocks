@@ -4912,6 +4912,55 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-13: VHDL entity and configuration validation window slicing', () => {
+    test('should still reject entity after use split across many lines above', () => {
+      // Multi-line `use entity`: the `entity` keyword sits on the line after a bare `use`.
+      // The window must reach the `use` line above and keep absolute offsets correct so the
+      // entity is recognized as part of a `use entity` instantiation (not a block opener).
+      const source = ['architecture rtl of comp is', '  use', '    entity work.sub(rtl);', 'begin', 'end architecture;'].join('\n');
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+      const entityOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'entity');
+      assert.ok(!entityOpener, 'entity after multi-line use should not pair as a block opener');
+    });
+
+    test('should still reject entity after a trailing colon on a previous line', () => {
+      // Direct instantiation `label :` with `entity` on the next line. The window must reach
+      // the colon line above; the window-relative colon offset must convert to the correct
+      // absolute offset for the excluded-region check.
+      const source = ['architecture rtl of comp is', 'begin', '  inst :', '    entity work.sub(rtl);', 'end architecture;'].join('\n');
+      const pairs = parser.parse(source);
+      const entityOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'entity');
+      assert.ok(!entityOpener, 'entity after a trailing colon on the previous line should not pair as a block opener');
+    });
+
+    test('should parse 40000 entity openers without quadratic slowdown', () => {
+      // isValidEntityOrConfigOpen runs for every `entity` keyword that is not already
+      // rejected upstream. Each `entity` here sits after a `;` line, so it is NOT caught by
+      // isPrecededByEntityKeyword and reaches the validator. Pre-fix the validator sliced
+      // the whole source prefix (`source.slice(0, position).toLowerCase()`) per keyword,
+      // making parsing O(N^2) (the legacy run measured ~10s at this size). The bounded line
+      // window keeps each scan O(window).
+      //
+      // No `end` keywords, so zero pairs form; that neutralizes the unrelated O(pairs^2)
+      // term in the base recalculateNestLevels and isolates the prefix-scan cost (same
+      // isolation tactic as the for/loop window-slicing suite).
+      const warmUp = ';\nentity\n'.repeat(1000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = ';\nentity\n'.repeat(40000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertNoBlocks(pairs); // openers without any `end` form zero pairs
+      // Linearized parsing finishes in a few hundred ms; a 4000ms ceiling keeps headroom
+      // for coverage instrumentation and CI jitter while still failing by an order of
+      // magnitude if the O(N^2) full-prefix slice returns.
+      assert.ok(elapsed < 4000, `40000 entity parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) prefix-scan regression)`);
+    });
+  });
+
   suite('Regression 2026-06-13: reserved words after return are values, not block openers', () => {
     // A reserved word appearing as the return type after `return` (e.g. a hand-written /
     // in-progress `return view is`) is a (malformed) type mark, not a block opener. Without
