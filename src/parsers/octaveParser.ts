@@ -82,6 +82,14 @@ const OCTAVE_CLOSE_TO_OPEN: Readonly<Record<string, string>> = {
 // do/until opener.
 const DO_CONDITION_KEYWORDS = new Set(['if', 'elseif', 'while', 'switch', 'case', 'until']);
 
+// Block_open keywords that introduce a header expression on their own physical line
+// (`if cond`, `while cond`, `switch expr`, `for v = ...`, `parfor v = ...`). A block_open
+// keyword appearing on the SAME physical line after one of these leaders is part of the
+// header expression (e.g. `if x function`), not a nested block opener — treating it as one
+// consumes a real outer `end` and destroys outer block pairing. Scoped to the same physical
+// line so legitimate `if x\nfunction f` nesting on the next line is preserved.
+const OCTAVE_HEADER_LEADER_KEYWORDS = new Set(['if', 'while', 'switch', 'for', 'parfor']);
+
 // Middle keywords that take a value/condition expression. A block_open keyword appearing on
 // the same logical line *after* one of these (e.g. `case function`, `elseif try`) is being
 // used as a value/condition operand, NOT as a block opener. Treating it as a block_open
@@ -258,6 +266,20 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // already covered by the parent's section-keyword / empty-header rejection paths; `do`
     // is covered by isDoInConditionContext below.
     if (OCTAVE_BLOCK_OPENERS_NEEDING_VALUE_CONTEXT_GUARD.has(keyword) && this.isInValueContextMiddleKeyword(source, position, excludedRegions)) {
+      return false;
+    }
+    // Reject a block_open keyword used inside a control header expression on the same
+    // physical line, e.g. `if x function` / `while x try`. The header leader (if/while/
+    // switch/for/parfor) takes a header expression, so a block_open keyword after it on the
+    // same physical line is an operand, NOT a nested block opener. Treating it as a block_open
+    // consumes a real outer `end` and destroys outer pairing. Scoped to the same physical
+    // line so `if x\nfunction f` (opener on the next line) keeps its legitimate nesting. `do`
+    // is excluded — it is covered by isDoInConditionContext below.
+    if (
+      keyword !== 'do' &&
+      OCTAVE_BLOCK_OPENERS_NEEDING_VALUE_CONTEXT_GUARD.has(keyword) &&
+      this.isInSameLineControlHeader(source, position, excludedRegions)
+    ) {
       return false;
     }
     if (keyword === 'do') {
@@ -666,6 +688,39 @@ export class OctaveBlockParser extends MatlabBlockParser {
         continue;
       }
       // Any other expression character — keep scanning backward.
+      i--;
+    }
+    return false;
+  }
+
+  // Returns true when the block_open keyword at `position` appears on the SAME physical line
+  // after a control header leader (if/while/switch/for/parfor) — i.e. it is part of the
+  // header expression, not a nested block opener. The scan walks backward over the current
+  // physical line only, stopping at any raw `\n`/`\r` (line continuations are intentionally
+  // NOT followed) and at a `;`/`,` statement separator. If any identifier encountered is in
+  // OCTAVE_HEADER_LEADER_KEYWORDS, the keyword is in header-expression context and must be
+  // rejected. Stopping at the physical line boundary preserves legitimate `if x\nfunction f`
+  // nesting where the opener is on the next line.
+  private isInSameLineControlHeader(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      const ch = source[i];
+      // Physical line boundary or statement separator terminates the scan.
+      if (ch === '\n' || ch === '\r' || ch === ';' || ch === ',') return false;
+      // Skip excluded regions (comments / strings) by jumping before their start.
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
+      }
+      // Identifier — read it backward and check if it is a header leader keyword.
+      if (/[a-zA-Z0-9_]/.test(ch)) {
+        const idEnd = i;
+        while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+        const ident = source.slice(i + 1, idEnd + 1).toLowerCase();
+        if (OCTAVE_HEADER_LEADER_KEYWORDS.has(ident)) return true;
+        continue;
+      }
       i--;
     }
     return false;
