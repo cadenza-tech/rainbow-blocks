@@ -318,9 +318,13 @@ export class LuaBlockParser extends BaseBlockParser {
     }
     if (i < 1) return false;
     if (source[i] !== '.' || source[i - 1] !== '.') return false;
-    // `...` (varargs) is not a concat operator. If a third `.` precedes the
-    // pair, treat it as varargs and let the existing handling apply.
-    if (i >= 2 && source[i - 2] === '.') return false;
+    // `...` (exactly three dots, varargs) is not a concat operator: treat it as
+    // varargs and let the existing handling apply. But four or more dots are not
+    // varargs — Lua's lexer prefers the longest token, so `....` is `..` `..`
+    // (two concat operators), not `...` + `.`. Only bail out for exactly three
+    // dots: if a third `.` precedes the pair AND there is no fourth `.` before
+    // it, the run is `...`; otherwise the rightmost two dots are a real `..`.
+    if (i >= 2 && source[i - 2] === '.' && (i < 3 || source[i - 3] !== '.')) return false;
     return true;
   }
 
