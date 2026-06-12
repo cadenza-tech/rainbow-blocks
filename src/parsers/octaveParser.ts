@@ -1309,6 +1309,20 @@ export class OctaveBlockParser extends MatlabBlockParser {
               // MatlabBlockParser.matchBlocks lines 525-532.
               break;
             }
+          } else if (
+            OctaveBlockParser.OCTAVE_SECTION_KEYWORDS.has(token.value.toLowerCase()) &&
+            this.sectionKeywordsWithParen.has(token.startOffset) &&
+            (stack.length === 0 || stack[stack.length - 1].token.value.toLowerCase() !== 'classdef')
+          ) {
+            // Drop a parenthesized section keyword (`properties(x)`, `methods(x)`) whose
+            // closest enclosing block is NOT a classdef. The `(`-form without a trailing `;`
+            // is a reflection function call (`properties(x)` lists handle x's properties),
+            // not a section opener. Octave does accept BARE section keywords as standalone
+            // openers (older OOP convention), so only the parenthesized form recorded in
+            // sectionKeywordsWithParen is dropped here. No phantom-end skip is pushed: a
+            // function call has no stray `end`, so consuming one would orphan an outer block.
+            // Mirrors MatlabBlockParser.matchBlocks lines 1117-1134 for non-arguments sections.
+            break;
           }
           stack.push({ token, intermediates: [] });
           break;
