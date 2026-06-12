@@ -4912,5 +4912,29 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-13: multi-line view header is intermediate retained', () => {
+    // VHDL-2019 view declaration (LRM 6.5.2.2) where the `is` opening the view's mode
+    // listing sits on its own line below the `view <name> of <type>` header. The upward
+    // is-filter scan must recognize the bare `view ... of ...` header line as the owner of
+    // this `is`. Without `view` in the block-opener line pattern, the scan walks past the
+    // view header (treating it as a content line) up to the enclosing `package p is` whose
+    // own standalone `is` makes the scan drop this view `is` as a stray intermediate.
+    test('should retain is intermediate for view header when is is on a separate line', () => {
+      const source = `package p is
+view bus_view of rec_t
+is
+  addr : in std_logic;
+end view;
+end package;`;
+      const pairs = parser.parse(source);
+      const viewBlock = findBlock(pairs, 'view');
+      assert.strictEqual(viewBlock.closeKeyword?.value, 'end view');
+      const isIntermediate = viewBlock.intermediates.find((t) => t.value.toLowerCase() === 'is');
+      assert.ok(isIntermediate, 'view block should retain its multi-line is intermediate');
+      const packageBlock = findBlock(pairs, 'package');
+      assert.strictEqual(packageBlock.closeKeyword?.value, 'end package');
+    });
+  });
+
   generateCommonTests(config);
 });
