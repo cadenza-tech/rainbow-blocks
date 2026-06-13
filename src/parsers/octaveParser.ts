@@ -1,7 +1,7 @@
 // Octave block parser: extends MATLAB with # comments, #{ #} block comments, and Octave-specific end keywords
 
 import type { BlockPair, ExcludedRegion, LanguageKeywords, OpenBlock, Token } from '../types';
-import { isAtStatementStart } from './matlabHelpers';
+import { isAtStatementStart, isPrecededByAtSign } from './matlabHelpers';
 import { MatlabBlockParser } from './matlabParser';
 import { findLastOpenerByType } from './parserUtils';
 
@@ -518,7 +518,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
     // function call. Trust Octave's verdict so the attribute-list-across-continuation
     // form is paired with its inner `end` and the enclosing function/end pair is
     // preserved.
-    if (!result && octaveSaysArgumentsIsBlock) {
+    //
+    // Exclude `@arguments` (function-handle prefix): the parent rejects via
+    // isPrecededByAtSign, which is a genuine identifier-context rejection — the rescue
+    // must NOT override it. `h = @arguments;` puts `arguments` in function-handle
+    // reference context, so it is not a block opener.
+    if (!result && octaveSaysArgumentsIsBlock && !isPrecededByAtSign(source, position)) {
       return true;
     }
     return result;
