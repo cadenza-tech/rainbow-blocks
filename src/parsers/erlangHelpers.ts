@@ -248,11 +248,28 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       }
       return false;
     }
-    // Check for structural keywords
-    if (/[a-z]/i.test(ch)) {
+    // Check for structural keywords. Per the Erlang Reference Manual, atom syntax is
+    // [a-z][a-zA-Z0-9_@]* and variable syntax is [A-Z_][a-zA-Z0-9_@]*, so '@' is an
+    // identifier continuation character. The word-boundary check (preceding char) and
+    // the word-extending loop both treat '@' as identifier-internal so that atoms like
+    // `node@end` or `x@catch` are not split into separate keyword matches.
+    if (/[a-z]/i.test(ch) && (k === 0 || !/[a-zA-Z0-9_@]/.test(source[k - 1]))) {
       let wEnd = k + 1;
       while (wEnd < source.length && /[a-z0-9_]/i.test(source[wEnd])) wEnd++;
       const w = source.slice(k, wEnd);
+      // If the word is followed by '@', it is an identifier with a '@'-suffix continuation
+      // (e.g. `node@end`, `x@catch`) and is not a keyword. Skip past the entire identifier
+      // so the suffix (which may itself contain reserved words like `end`/`catch`) is not
+      // matched as a structural keyword.
+      if (wEnd < source.length && source[wEnd] === '@') {
+        let idEnd = wEnd + 1;
+        while (idEnd < source.length && /[a-zA-Z0-9_@]/.test(source[idEnd])) {
+          idEnd++;
+        }
+        sawContent = true;
+        k = idEnd;
+        continue;
+      }
       // 'end' at top level closes the enclosing try. If no clause body appeared between
       // `catch` and this `end`, the catch starts an empty clause (e.g. `try foo() catch end`)
       // and is a clause separator. Otherwise the candidate 'catch' was an expression prefix
