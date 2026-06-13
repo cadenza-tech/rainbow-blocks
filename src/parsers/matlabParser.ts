@@ -615,6 +615,19 @@ export class MatlabBlockParser extends BaseBlockParser {
       // Without this guard the `arguments` token is paired with an inner `end`, leaving the
       // outer function's `end` orphan and destroying outer block pairing.
       if (keyword === 'arguments' && this.isMatlabArgumentsFunctionCall(source, position, excludedRegions)) {
+        // When the inner content STARTS with a known attribute keyword (Input/Output/Repeating)
+        // the user clearly attempted an attribute form (e.g. `arguments(Input,,Output)` with an
+        // invalid double comma). They likely wrote a stray `end` for the intended block, so
+        // record a phantom position to let matchBlocks skip that `end` instead of consuming an
+        // outer block's legitimate close. A bare function call like `arguments(obj)` does NOT
+        // match this attempted-attribute pattern and gets dropped without a phantom record.
+        if (
+          this.isAtLineStartForSectionKeyword(source, position) &&
+          !this.isInsideParensOrBrackets(source, position, excludedRegions) &&
+          this.isMatlabArgumentsAttemptedAttributeForm(source, position, excludedRegions)
+        ) {
+          this.phantomSectionPositions.push(position);
+        }
         return false;
       }
       // Check if keyword is used as a variable (followed by =, but not ==).
@@ -895,6 +908,45 @@ export class MatlabBlockParser extends BaseBlockParser {
     // Step 4: only the recognised attribute pattern remains a real block opener; otherwise
     // it's a function call.
     return !MatlabBlockParser.ARGUMENTS_ATTRIBUTES_PATTERN.test(inner);
+  }
+
+  // Pattern that matches when the inner content of `arguments(...)` STARTS with a known
+  // attribute keyword (Input/Output/Repeating). Used to detect attempted-attribute forms
+  // even when the rest of the content makes the call invalid (e.g. `Input,,Output`).
+  private static readonly ARGUMENTS_ATTEMPTED_ATTRIBUTE_PATTERN = /^(?:input|output|repeating)\b/i;
+
+  // Returns true when `arguments` at `position` is followed by `(...)` and the inner content
+  // STARTS with one of the known attribute keywords (Input/Output/Repeating). Such forms
+  // (e.g. `arguments(Input,,Output)`, `arguments(Input garbage)`) are clearly attempted
+  // attribute decorations that failed strict validation — the user intended an arguments
+  // block and likely wrote a stray `end` for it. Used by isValidBlockOpen to record a phantom
+  // position so matchBlocks can skip the stray `end`. A pure function-call form like
+  // `arguments(obj)` (where `obj` is not a known attribute keyword) does NOT match and is
+  // dropped without a phantom record. Empty parens `arguments()` likewise do not match.
+  private isMatlabArgumentsAttemptedAttributeForm(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let j = position + 'arguments'.length;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    if (j >= source.length || source[j] !== '(') return false;
+    let depth = 1;
+    let k = j + 1;
+    while (k < source.length && depth > 0) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        if (region) {
+          k = region.end;
+          continue;
+        }
+      }
+      const ch = source[k];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (depth === 0) break;
+      k++;
+    }
+    if (depth !== 0) return false;
+    const inner = this.stripExcludedRegionsAsSpace(source, j + 1, k, excludedRegions).trim();
+    if (inner.length === 0) return false;
+    return MatlabBlockParser.ARGUMENTS_ATTEMPTED_ATTRIBUTE_PATTERN.test(inner);
   }
 
   // Returns the substring source[start, end) with any excluded regions in that range
