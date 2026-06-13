@@ -105,6 +105,19 @@ const RECEIVER_LIKE_OPENERS = new Set(['select', 'union', 'enum', 'struct', 'lib
 // suppressing the opener role here does not affect genuine blocks.
 const VALUE_EXPECTING_PRECEDING_KEYWORDS = new Set(['return', 'yield', 'and', 'or', 'not', 'in', 'then', 'when', 'else', 'elsif']);
 
+// Keywords whose presence immediately before a same-line `end` makes that `end` a
+// legitimate block close, so it must NOT be filtered as a value-expecting `end`.
+// These are the block openers and block-middle markers that can directly precede a
+// closing `end` on the same line:
+//   - begin/do                  : empty block bodies (`begin end`, `arr.each do end`)
+//   - then/else                 : one-line conditional/case bodies (`if a then end`,
+//                                 `... else end`)
+//   - rescue/ensure/when/in/elsif: other inline section markers before a closing end
+// Any other preceding word (a value-expecting keyword like `return`/`yield`, or an
+// ordinary method/variable identifier like `puts`/`foo`) means `end` sits in a value
+// slot and is invalid, so it is suppressed.
+const END_CLOSE_PRECEDING_KEYWORDS = new Set(['do', 'begin', 'then', 'else', 'elsif', 'rescue', 'ensure', 'when', 'in']);
+
 // Crystal interpolation check: %Q, %W, %I, %x, %r and bare % interpolate
 function isCrystalInterpolatingPercent(specifier: string, hasSpecifier: boolean): boolean {
   if (!hasSpecifier) return true;
@@ -578,6 +591,16 @@ export class CrystalBlockParser extends BaseBlockParser {
       if (token.value === 'end' && this.isPrecededByAssignmentOperator(source, token.startOffset, excludedRegions)) {
         return false;
       }
+      // Filter out `end` placed in any other value-expecting position on the same line:
+      // right after a binary operator (`x =~ end`), a separator (`foo(a, end)`), an
+      // opening bracket (`foo(end)`, `arr[end]`, `{end}`), a value-expecting keyword
+      // (`return end`, `yield end`), or a method-call argument slot (`puts end`). `end`
+      // is a reserved word and cannot be a value, so this is invalid syntax; tokenizing
+      // it as block_close mis-pairs surrounding blocks (the inner `end` would pair with
+      // an outer opener, orphaning the real trailing `end`).
+      if (token.value === 'end' && this.isEndInValueExpectingPosition(source, token.startOffset, excludedRegions)) {
+        return false;
+      }
       return true;
     });
   }
@@ -704,6 +727,101 @@ export class CrystalBlockParser extends BaseBlockParser {
       return false;
     }
     return source[i] === '=';
+  }
+
+  // Checks whether `end` at `position` sits in a value-expecting position on the same
+  // logical line, where a reserved-word `end` is invalid and must not be tokenized as
+  // block_close. The scan walks backward from `end`, skipping spaces/tabs and excluded
+  // regions but NOT newlines (a newline ends the scan and returns false, preserving
+  // genuine block-expression `end`s whose value-expecting context is on an earlier
+  // line, e.g. `x = a +\n  if c\n    1\n  end`). The character/word immediately before
+  // `end` qualifies it as a value position when it is:
+  //   - a binary operator: `~` (`=~`/`!~` tail), `+`, `-`, `*`, `/`, `%`, `<`, `>`,
+  //     `&`, `|`, `^` — `end` would be the right operand of an expression.
+  //   - a separator `,` — `end` would be an argument/element value.
+  //   - an opening bracket `(`, `[`, `{` — `end` would be the first expression inside.
+  //   - a value-expecting keyword (`return`, `yield`, `and`, ...) or any ordinary
+  //     identifier (a method/variable name like `puts`/`foo`) — `end` would be the
+  //     return value / operand / call argument.
+  // A preceding block keyword that can legitimately precede a same-line closing `end`
+  // (`begin`/`do`/`then`/`else`/`rescue`/`ensure`/`when`/`in`/`elsif`) is NOT a value
+  // context: there the `end` genuinely closes that block (`begin end`, `arr.each do
+  // end`, `if a then end`), so it is left as a block_close. The `=`-led operators
+  // (`=`, `==`, `=~` reduces to its `~` tail here but `=`/`==` are handled there),
+  // ternary `?`/`:`, and range `..` cases are covered by the dedicated filters above.
+  private isEndInValueExpectingPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      // Same-line restriction: a newline ends the scan. A value-expecting context on
+      // an earlier line does not put this `end` in a value position.
+      if (ch === '\n' || ch === '\r') {
+        return false;
+      }
+      break;
+    }
+    if (i < 0) {
+      return false;
+    }
+    const ch = source[i];
+    // Binary operators, separator, and opening brackets directly before `end`. None of
+    // these can ever precede a legitimate closing `end`, so `end` is in a value slot.
+    if (
+      ch === ',' ||
+      ch === '(' ||
+      ch === '[' ||
+      ch === '{' ||
+      ch === '~' ||
+      ch === '+' ||
+      ch === '-' ||
+      ch === '*' ||
+      ch === '/' ||
+      ch === '%' ||
+      ch === '<' ||
+      ch === '>' ||
+      ch === '&' ||
+      ch === '|' ||
+      ch === '^'
+    ) {
+      return true;
+    }
+    // A preceding word: an identifier or keyword. Walk back over the word and decide by
+    // whether it is a block keyword that may precede a same-line closing `end`.
+    if (/[A-Za-z0-9_]/.test(ch)) {
+      let wordStart = i;
+      while (wordStart > 0 && /[A-Za-z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      // The character before the word must be a non-identifier boundary so suffixes
+      // like `myend`/`do_x` are read as whole words, not a trailing keyword.
+      if (wordStart > 0) {
+        const before = source[wordStart - 1];
+        if (/[A-Za-z0-9_.@$]/.test(before)) {
+          // Preceded by `.`/`@`/`$` the word is a method/variable reference; the `end`
+          // after it (e.g. `obj.foo end`) is still an argument value, so suppress.
+          // Preceded by another identifier char cannot happen (the inner loop would
+          // have consumed it), but treating it as a value slot is safe.
+          return true;
+        }
+      }
+      const word = source.slice(wordStart, i + 1);
+      // Block keywords that may legitimately precede a same-line closing `end` keep the
+      // `end` as a block_close. Any other word (value-expecting keyword or ordinary
+      // method/variable name) puts `end` in a value slot.
+      return !END_CLOSE_PRECEDING_KEYWORDS.has(word);
+    }
+    return false;
   }
 
   // Scans backward from `position` to detect whether `position` lies inside an
