@@ -3595,6 +3595,37 @@ foo() ->
     });
   });
 
+  suite('Regression: expression-prefix catch in clause body must not shadow the real clause-separator catch', () => {
+    // Bug: when a try clause body begins with an expression-prefix catch (e.g. the clause
+    // body `catch bar()` after `->`), isCatchFollowedByClausePattern scans forward past the
+    // expression and reaches the NEXT clause-separator catch's '->' arrow. It then wrongly
+    // concludes the expression-prefix catch itself starts a clause, registering the wrong
+    // catch as the try intermediate. The forward scan must stop at a top-level catch/after
+    // that is reached before any 'when' guard (such a catch is the real next clause
+    // separator), so the expression-prefix catch is correctly excluded.
+    test('should register the real clause-separator catch, not the expression-prefix catch in the of clause body', () => {
+      const source = 'try foo() of ok -> catch bar() catch _:_ -> e end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['of', 'catch']);
+      // intermediates must be of@10 and the clause-separator catch@31, NOT the
+      // expression-prefix catch@19 that opens the `catch bar()` clause body expression.
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, 10);
+      assert.strictEqual(pairs[0].intermediates[1].startOffset, 31);
+    });
+
+    test('should register the real clause-separator catch when expression-prefix catch has no parentheses', () => {
+      const source = 'try X of\n  ok -> catch err\ncatch\n  _:_ -> err\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'try', 'end');
+      assertIntermediates(pairs[0], ['of', 'catch']);
+      // The expression-prefix catch@17 (`catch err`) must be excluded; the clause-separator
+      // catch@27 is the real try intermediate.
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, 6);
+      assert.strictEqual(pairs[0].intermediates[1].startOffset, 27);
+    });
+  });
+
   suite('Regression: analyzeDefineBody must skip comments between fun and (', () => {
     // Bug: analyzeDefineBody scans only [ \t\r\n] when checking for a '(' after the 'fun'
     // keyword. A %comment between `fun` and `(` defeats the lookahead, so `fun` is treated
