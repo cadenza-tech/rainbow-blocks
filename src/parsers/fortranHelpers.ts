@@ -1035,10 +1035,10 @@ export function isAfterDoubleColon(source: string, position: number, excludedReg
 //   3. The identifier at `position` is not `function` / `subroutine`, which are valid
 //      block openers preceded by a type-spec prefix (e.g., `integer function foo()`).
 //
-// Same-line only: continuation across `&` is not handled here because Fortran 77 fixed
-// form used column-6 continuation, which is rarely combined with bare type declarations
-// in the wild and would significantly complicate this check without addressing a
-// observed bug class.
+// Continuation: when the current line carries no statement content (only optional
+// leading `&` and whitespace before `position`), the previous physical line (which
+// must end with `&`) is also considered. Recurses across chained bare-`&` continuation
+// lines, mirroring isPrecedingContinuationKeyword.
 export function isAfterF77TypeDeclaration(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
   // Reject `function` / `subroutine` so `integer function foo()` and `real subroutine bar()`
   // still pair as block openers (the type-spec is a prefix to the procedure declaration).
@@ -1098,6 +1098,87 @@ export function isAfterF77TypeDeclaration(source: string, position: number, excl
   // whitespace; the others are single words.
   const f77TypePattern = /^[ \t]*(integer|real|logical|complex|character|byte|double[ \t]+precision)\b/i;
   if (!f77TypePattern.test(stmtBefore)) {
+    // Same-line check failed. The statement may begin on a previous physical line that
+    // ended with `&` (Fortran free-form continuation), with `position` on a continuation
+    // line carrying the variable name. The current line's stmtBefore must be empty or
+    // just the optional leading `&` continuation marker. Walk back across chained bare-`&`
+    // continuation lines until either an F77 type-spec is found at the head of the
+    // logical statement or a non-continuation line breaks the chain.
+    const stmtBeforeStripped = stmtBefore.trim();
+    const stmtBeforeStrippedLead = stmtBeforeStripped.startsWith('&') ? stmtBeforeStripped.slice(1).trim() : stmtBeforeStripped;
+    if (stmtBeforeStrippedLead.length !== 0) {
+      return false;
+    }
+    if (lineStart === 0) return false;
+    // Walk back through preceding physical lines.
+    let prevLineEnd = lineStart - 1;
+    if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+      prevLineEnd--;
+    }
+    while (prevLineEnd >= 0) {
+      const prevLineStart = findLineStart(source, prevLineEnd);
+      let prevLine = source.slice(prevLineStart, prevLineEnd);
+      if (prevLine.endsWith('\r')) {
+        prevLine = prevLine.slice(0, -1);
+      }
+      // Strip inline comment respecting strings (Fortran doubled-quote escapes).
+      let prevInlineIdx = -1;
+      for (let i = 0; i < prevLine.length; i++) {
+        const ch = prevLine[i];
+        if (ch === "'" || ch === '"') {
+          i++;
+          while (i < prevLine.length) {
+            if (prevLine[i] === ch) {
+              if (i + 1 < prevLine.length && prevLine[i + 1] === ch) {
+                i++;
+              } else {
+                break;
+              }
+            }
+            i++;
+          }
+          continue;
+        }
+        if (ch === '!') {
+          prevInlineIdx = i;
+          break;
+        }
+      }
+      const prevTrimmed = (prevInlineIdx >= 0 ? prevLine.slice(0, prevInlineIdx) : prevLine).trimEnd();
+
+      // Empty / comment-only line: continue scanning further back.
+      if (prevTrimmed.length === 0) {
+        prevLineEnd = prevLineStart - 1;
+        if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+          prevLineEnd--;
+        }
+        continue;
+      }
+
+      // The previous line must end with `&` to be a continuation carrier.
+      if (!prevTrimmed.endsWith('&')) {
+        return false;
+      }
+
+      // Inspect the content before the `&`.
+      const codeBeforeAmp = prevTrimmed.slice(0, -1).trimEnd();
+      const codeStripLeadingAmp = codeBeforeAmp.startsWith('&') ? codeBeforeAmp.slice(1).trimStart() : codeBeforeAmp;
+      // Bare-& continuation (no code): keep walking back.
+      if (codeStripLeadingAmp.length === 0) {
+        prevLineEnd = prevLineStart - 1;
+        if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+          prevLineEnd--;
+        }
+        continue;
+      }
+      // Reject if a `::` already appeared on a previous line of this statement: that is
+      // a Fortran 90+ declaration and isAfterDoubleColon owns the suppression there.
+      if (codeStripLeadingAmp.includes('::')) {
+        return false;
+      }
+      // The line carries the head of the statement. Test for an F77 type-spec at its start.
+      return f77TypePattern.test(codeStripLeadingAmp);
+    }
     return false;
   }
   // The statement begins with a F77 type-spec. The identifier at `position` is either
