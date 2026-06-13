@@ -5572,5 +5572,63 @@ end`;
     });
   });
 
+  suite('Bug: many block-keyword-valued conditions must not parse in quadratic time', () => {
+    // Builds N independent `cond do ... end` blocks. Each `cond` is a block keyword whose
+    // following `do` is on the same statement, so isValidBlockOpen reaches
+    // isValueForPrecedingBlockKeyword -> computeBracketDepthAt for the `do`. Pre-fix,
+    // computeBracketDepthAt re-scanned the source from offset 0 to the keyword position on
+    // every call, making the total work O(N^2). With the bracket-depth prefix precomputed
+    // once per parse, each lookup is O(log N) and the total stays near-linear.
+    function buildCondBlocks(n: number): string {
+      const blocks: string[] = [];
+      for (let i = 0; i < n; i++) {
+        blocks.push('cond do\n  x > 1 -> :a\n  true -> :b\nend');
+      }
+      return blocks.join('\n');
+    }
+
+    test('should parse 2000 cond do blocks without quadratic slowdown', () => {
+      const source = buildCondBlocks(2000);
+      // Warm-up to stabilize against JIT and module init.
+      parser.parse(source);
+      const t0 = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - t0;
+      assert.strictEqual(pairs.length, 2000, 'should pair all 2000 cond blocks');
+      // Pre-fix computeBracketDepthAt scanned from offset 0 to each `do` position, giving
+      // O(n^2) behavior (~13s at this size). The precomputed prefix keeps each lookup
+      // O(log n); the parse then stays well under the threshold. The precise scaling guard
+      // is the ratio test below; this absolute bound is generous (8000ms) so coverage
+      // instrumentation and CI contention do not flake it, while still failing hard on the
+      // pre-fix ~13s blow-up.
+      assert.ok(elapsed < 8000, `parse took ${elapsed}ms (expected < 8000ms; pre-fix was ~13s)`);
+    });
+
+    test('should not scale quadratically between 500 and 2000 cond do blocks', () => {
+      const small = buildCondBlocks(500);
+      const big = buildCondBlocks(2000);
+      // Warm-up to stabilize timings against JIT and module init.
+      parser.parse(small);
+      parser.parse(big);
+      const t1 = Date.now();
+      parser.parse(small);
+      const smallMs = Date.now() - t1;
+      const t2 = Date.now();
+      parser.parse(big);
+      const bigMs = Date.now() - t2;
+      // 4x more blocks: pre-fix computeBracketDepthAt is quadratic, giving ~29x time
+      // (super-quadratic because the per-position scan also grows). With the precomputed
+      // prefix the cost is near-linear (~4x plus a small residual). A baseline floor avoids
+      // tripping the ratio on very fast small runs; 12x cleanly separates the post-fix (~4-8x)
+      // from the pre-fix (~29x) curve with headroom on both sides.
+      const baseline = Math.max(smallMs, 5);
+      const ratio = bigMs / baseline;
+      assert.ok(
+        ratio < 12,
+        `2000-block parse took ${bigMs}ms vs 500-block ${smallMs}ms (ratio ${ratio.toFixed(1)}x; expected < 12x, was ~29x with O(n^2) computeBracketDepthAt)`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
