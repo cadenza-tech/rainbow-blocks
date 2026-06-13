@@ -774,6 +774,21 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         if (parenScan < source.length && source[parenScan] === '(') {
           return { nextPos: endPos };
         }
+        // Reject `else if(...)` (function-call form of `if`). The compound `else if`
+        // matcher already rejects the tight `else if(` shape, but falls back to the
+        // single-keyword path, which would otherwise attach a bare `else` as an
+        // intermediate. Detect `if` followed directly by `(` (no ASCII space/tab
+        // between them, which would have been recognized as a real `else if` block).
+        if (parenScan + 2 <= source.length && source.slice(parenScan, parenScan + 2).toLowerCase() === 'if') {
+          const afterIf = parenScan + 2;
+          if (afterIf >= source.length || !/\w/.test(source[afterIf])) {
+            let parenScan2 = afterIf;
+            while (parenScan2 < source.length && isUnicodeWhitespace(source[parenScan2])) parenScan2++;
+            if (parenScan2 < source.length && source[parenScan2] === '(') {
+              return { nextPos: endPos };
+            }
+          }
+        }
       }
 
       const { line, column } = this.getLineAndColumn(i, newlinePositions);
