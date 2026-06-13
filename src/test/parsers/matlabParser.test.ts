@@ -3347,6 +3347,23 @@ end`;
     });
   });
 
+  suite('Regression: arguments with invalid attribute list should still register a phantom for the stray end', () => {
+    test('should pair function with its end when arguments(Input,,Output) is rejected as a function call', () => {
+      // `arguments(Input,,Output)` has an invalid attribute list (the double comma leaves
+      // an empty entry). isMatlabArgumentsFunctionCall classifies it as a function call and
+      // rejects it as a block opener. But the user clearly intended an arguments block (the
+      // line starts with `arguments` followed by something that LOOKS like an attribute
+      // list) and wrote a stray `end` for it. The parser must record a phantom for the
+      // rejected `arguments` so matchBlocks can skip the stray `end` instead of pairing it
+      // with the outer function. Lines: 0=function, 1=arguments(Input,,Output),
+      // 2=x (1,1) double, 3=inner end, 4=outer end.
+      const source = 'function foo(x)\n  arguments(Input,,Output)\n    x (1,1) double\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 4, 'function must pair with the outer end on line 4');
+    });
+  });
+
   suite('Middle keyword followed by end on same line', () => {
     test('should pair if/end when else is followed by end on the same line', () => {
       const source = 'if x\nelse end';
