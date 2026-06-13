@@ -906,8 +906,25 @@ export function isPrecedingContinuationKeyword(source: string, position: number,
     // Must end with &
     if (!prevLine.endsWith('&')) return false;
 
+    // Skip chained continuation-only lines: a line whose code portion is just `&` (or
+    // `[leading-&] [stuff] &` where the stripped content is empty) carries no keyword,
+    // so walk further back to the previous physical line. This handles the chained form
+    // `change &\n  &\n  team` where the middle line is a bare `&` continuation marker.
+    // The content before the trailing `&` may also start with a leading `&` (Fortran
+    // free-form allows an optional leading `&` on continuation lines). Both `&` and
+    // `& &` are treated as empty.
+    const codeBeforeAmp = prevLine.slice(0, -1).trimEnd();
+    const codeStripLeadingAmp = codeBeforeAmp.startsWith('&') ? codeBeforeAmp.slice(1).trimStart() : codeBeforeAmp;
+    if (codeStripLeadingAmp.length === 0) {
+      prevLineEnd = prevLineStart - 1;
+      if (prevLineEnd > 0 && source[prevLineEnd] === '\n' && source[prevLineEnd - 1] === '\r') {
+        prevLineEnd--;
+      }
+      continue;
+    }
+
     // Check if the content before & ends with the keyword
-    const beforeAmp = prevLine.slice(0, -1).trimEnd().toLowerCase();
+    const beforeAmp = codeBeforeAmp.toLowerCase();
     if (!beforeAmp.endsWith(keyword)) return false;
 
     // Ensure it's a whole word
