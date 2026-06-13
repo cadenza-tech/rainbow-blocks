@@ -5406,5 +5406,59 @@ end`;
     });
   });
 
+  suite('Regression: expression-position end after method call, identifier, binary expr, paren-semicolon, backslash continuation', () => {
+    // Bug: isEndInExpressionPosition recognised numeric/string/regex/symbol/percent/closing-bracket
+    // values before a stray `end`, but missed several common patterns. The inner `end` was kept,
+    // closing the outer `def` and leaving the legitimate outer `end` as an orphan.
+    test('should drop inner end after method-call value (def m\\n foo() end\\nend)', () => {
+      const source = 'def m\n  foo() end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop inner end after bare identifier value (def m\\n foo end\\nend)', () => {
+      const source = 'def m\n  foo end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop inner end after binary expression with identifier operands (def m\\n x = a + b end\\nend)', () => {
+      const source = 'def m\n  x = a + b end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop inner end placed inside parens after semicolon (def m\\n x = (a; end)\\nend)', () => {
+      const source = 'def m\n  x = (a; end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should drop inner end after backslash line continuation (def m\\n x = \\\\\\n end\\nend)', () => {
+      const source = 'def m\n  x = \\\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      // Outer end is on line 3
+      assertTokenPosition(pairs[0].closeKeyword, 3, 0);
+    });
+
+    // Guard: similar shapes already work and must keep working
+    test('guard: bare identifier value with sole end remains paired (begin foo end)', () => {
+      const source = 'begin foo end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('guard: method-call value with sole end remains paired (begin foo() end)', () => {
+      const source = 'begin foo() end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
