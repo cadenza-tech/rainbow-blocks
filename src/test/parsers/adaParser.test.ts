@@ -5034,5 +5034,43 @@ end loop;`;
     });
   });
 
+  suite('Regression: Ada 2022 declare expression inside parens', () => {
+    test('should not treat declare/begin inside parens as block openers', () => {
+      // Ada 2022 LRM 4.5.9: declare expressions appear inside parentheses as
+      // sub-expressions. Their `declare`/`begin` keywords are part of the
+      // expression syntax, not statement-level block openers, so they must not
+      // consume the outer subprogram's `end Compute;`.
+      const source = `function Compute (X : Integer) return Integer is
+begin
+  return (declare
+            Y : constant Integer := X * 2;
+          begin
+            Y + 1);
+end Compute;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // Intermediates should only contain the body separator `is` and the inner
+      // `begin`; no stray `declare`/`begin` from the parenthesized expression.
+      const fn = findBlock(pairs, 'function');
+      assertIntermediates(fn, ['is', 'begin']);
+    });
+
+    test('should ignore declare expression in function call argument', () => {
+      // A declare expression passed as a function argument must not leak its
+      // `declare`/`begin` to the outer block stack.
+      const source = `procedure P is
+begin
+  Put (declare
+         X : constant Integer := 1;
+       begin
+         X);
+end P;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'procedure', 'end');
+      const p = findBlock(pairs, 'procedure');
+      assertIntermediates(p, ['is', 'begin']);
+    });
+  });
+
   generateCommonTests(config);
 });
