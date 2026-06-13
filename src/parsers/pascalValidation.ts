@@ -776,18 +776,58 @@ export function isVariantCase(source: string, caseStart: number, excludedRegions
         while (j < source.length && /[a-zA-Z0-9_]/.test(source[j])) j++;
       }
       // Continue scanning past range dots, negatives, commas, spaces, newlines, qualified names, parentheses, char constants
+      // Track whether the previous significant token was a label-list separator (`,`) or
+      // range operator (`..`) so a following identifier is treated as the next label, but
+      // an identifier that simply follows whitespace after a complete label token is not.
+      // Without this, pathological inputs like `case of case of case of ...` consume the
+      // entire trailing source as one giant label (every char matches the continuation
+      // class), producing O(N^2) behavior over many nested `case` keywords.
+      let separatorSeen = false;
       while (j < source.length && (/[.,# \t()\p{L}0-9_$-]/u.test(source[j]) || source[j] === '\n' || source[j] === '\r')) {
         // Skip excluded regions within labels (e.g., char constants in range labels)
         const innerRegion = callbacks.findExcludedRegionAt(j, excludedRegions);
         if (innerRegion) {
           j = innerRegion.end;
+          separatorSeen = false;
           continue;
         }
         if (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r') {
-          // Peek ahead past whitespace/newlines to see if next non-space is ':'
+          // Peek ahead past whitespace/newlines to see what follows.
           let peek = j;
           while (peek < source.length && (source[peek] === ' ' || source[peek] === '\t' || source[peek] === '\n' || source[peek] === '\r')) peek++;
-          if (peek < source.length && source[peek] === ':') break;
+          if (peek >= source.length) break;
+          const peekCh = source[peek];
+          // A `:` ends the label; let the post-loop logic confirm.
+          if (peekCh === ':') break;
+          // A label-list separator (`,`), range continuation (`..`/`.`), parenthesized
+          // expression continuation, char-constant prefix, or sign keeps the label going.
+          // Anything else (notably another identifier without a preceding `,` or `..`) is
+          // a token boundary and the label scan must abort: real labels never have two
+          // identifier tokens separated only by whitespace.
+          const isLabelContinuation =
+            peekCh === ',' || peekCh === '.' || peekCh === '(' || peekCh === ')' || peekCh === '#' || peekCh === '-' || peekCh === '$';
+          if (!isLabelContinuation && !separatorSeen) {
+            // No separator since the last token: this is a fresh statement-level token,
+            // not a label continuation. Bail out so the caller treats this `case` as a
+            // standalone block opener (the surrounding code will handle pairing).
+            return false;
+          }
+          j = peek;
+          continue;
+        }
+        // Record label-list / range separators so a following identifier is still a label.
+        if (source[j] === ',' || source[j] === '.') {
+          separatorSeen = true;
+        } else if (/[a-zA-Z_$#]/.test(source[j])) {
+          // Starting a new identifier-like token. If no separator preceded it, abort.
+          if (!separatorSeen) {
+            return false;
+          }
+          separatorSeen = false;
+          // Consume the identifier-like token in one shot so the outer loop does not
+          // examine each interior char individually (also keeps the scan linear).
+          while (j < source.length && /[a-zA-Z0-9_$]/.test(source[j])) j++;
+          continue;
         }
         j++;
       }
