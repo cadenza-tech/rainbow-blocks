@@ -780,6 +780,13 @@ export class PascalBlockParser extends BaseBlockParser {
 
     const prev = source[bp];
     if (prev === ';' || prev === ',') return true;
+    // A `:` immediately preceding the keyword is a case-label delimiter when the token
+    // before the `:` is a case-label-compatible value (numeric literal, identifier,
+    // char constant, string literal). Example: `case X of 1: until: foo;` — the inner
+    // `until` sits in the value position of the label `1:` and must not be treated as
+    // a block-close keyword. Without this branch the inner `until` consumes the
+    // surrounding `repeat`, leaving the outer `until done` orphan.
+    if (prev === ':' && this.isCaseLabelColon(source, bp, excludedRegions)) return true;
     // Check for 'of' (word ending at bp)
     if (/[a-zA-Z]/.test(prev)) {
       let ws = bp;
