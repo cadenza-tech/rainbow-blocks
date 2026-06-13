@@ -5034,6 +5034,39 @@ end loop;`;
     });
   });
 
+  suite('Regression: Unicode adjacency uses Ada LRM 2.3 identifier_extend (Nd only)', () => {
+    test('should tokenize end when followed by Number_Other character', () => {
+      // Ada LRM 2.3 identifier_extend is decimal_digit, connector_punctuation,
+      // or combining_mark — Number_Other (e.g., U+00B2 SUPERSCRIPT TWO) is
+      // not an identifier character. So `end²;` must tokenize `end` as
+      // a block close, leaving the `²` outside the keyword.
+      const source = 'procedure P is begin null; end²;';
+      const tokens = parser.getTokens(source);
+      const closeTokens = tokens.filter((t) => t.type === 'block_close');
+      assert.strictEqual(closeTokens.length, 1, `expected 1 block_close, got ${closeTokens.length}`);
+      assert.strictEqual(closeTokens[0].value.toLowerCase(), 'end');
+    });
+
+    test('should still reject end immediately followed by Nd decimal digit', () => {
+      // Control: a decimal_digit (e.g., ASCII `1`) is a valid identifier_extend
+      // character per LRM 2.3, so `end1` is an identifier (not the reserved
+      // word `end`) and must not be tokenized as a block close.
+      const source = 'procedure P is begin null; end1;';
+      const tokens = parser.getTokens(source);
+      const closeTokens = tokens.filter((t) => t.type === 'block_close');
+      assert.strictEqual(closeTokens.length, 0, `expected 0 block_close, got ${closeTokens.length}`);
+    });
+
+    test('should still reject end immediately followed by Unicode letter', () => {
+      // Control: a Unicode letter (e.g., α U+03B1) is an identifier_letter per
+      // LRM 2.3, so `endα` is an identifier and `end` must not be a token.
+      const source = 'procedure P is begin null; endα;';
+      const tokens = parser.getTokens(source);
+      const closeTokens = tokens.filter((t) => t.type === 'block_close');
+      assert.strictEqual(closeTokens.length, 0, `expected 0 block_close, got ${closeTokens.length}`);
+    });
+  });
+
   suite('Regression: exit Label when Cond modifier is not a case-arm when', () => {
     test('should not register exit-label-when as case intermediate', () => {
       // Ada LRM 5.7 supports labeled exit statements: `exit <loop-label> when X;`.
