@@ -800,6 +800,18 @@ export class BashBlockParser extends BaseBlockParser {
         if (nextChar !== undefined && nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r' && nextChar !== '(') {
           continue;
         }
+        // The command-group `{` is a reserved word only at the start of a command,
+        // i.e. when the character immediately before it is a separator: whitespace,
+        // a command operator (`;`/`&`/`|`), or a grouping/substitution character
+        // (`(`/`)`/`{`/`}`/backtick), or start of file. When `{` is glued directly to
+        // a word constituent (`if{`, `while{`, `then{`, `coproc{`, `time{`, `foo{`) it
+        // fuses into a single POSIX word and never opens a block. Mirrors the `}` side's
+        // hasWhitespaceBefore guard below; the funcdef `)` and `function`/`coproc NAME`
+        // separators (space/`)`) all sit in the separator set and stay accepted.
+        const prevChar = source[i - 1];
+        if (i > 0 && prevChar !== ' ' && prevChar !== '\t' && prevChar !== '\n' && prevChar !== '\r' && !';&|(){}`'.includes(prevChar)) {
+          continue;
+        }
         if (!this.isAtCommandPosition(source, i, excludedRegions)) {
           // Allow { in function definitions: "function name {" or "name() {"
           // Also handle "coproc {" (anonymous coproc) and "coproc NAME {" (named coproc)
