@@ -5460,5 +5460,40 @@ end`;
     });
   });
 
+  suite('Regression: block-open keyword used as a hash key with => should be filtered, not paired', () => {
+    test('should pair def with outer end even when do appears as hash key before => (def m\\n h = {do => 1}\\nend)', () => {
+      // Bug: `do` inside `{do => 1}` was tokenised as block_open and consumed the outer
+      // `end`, leaving `def` as orphan. `do` is a reserved word and cannot legally be a
+      // hash key, but Rainbow Blocks must not mis-pair the surrounding `def`/`end`.
+      const source = 'def m\n  h = {do => 1}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+
+    test('should filter other block-open keywords used as hash keys before => (if/begin/while)', () => {
+      // Same shape for the other block-open keywords. All should be filtered when
+      // followed by `=>` so the outer block pairs correctly.
+      for (const kw of ['if', 'begin', 'while']) {
+        const source = `def m\n  h = {${kw} => 1}\nend`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'def', 'end');
+        assert.strictEqual(pairs[0].closeKeyword.line, 2, `def should pair with outer end for keyword ${kw}`);
+      }
+    });
+
+    test('should still tokenize do that follows {key, => 1, do_block_var: ... where do has no =>', () => {
+      // Guard: a legitimate `do` block inside a method call passed to a hash is not affected
+      const source = 'def m\n  configure({key: 1}) do |x|\n    x\n  end\nend';
+      const pairs = parser.parse(source);
+      // Expect def/end + do/end pair
+      assertBlockCount(pairs, 2);
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(defPair.closeKeyword.line, 4);
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword.line, 3);
+    });
+  });
+
   generateCommonTests(config);
 });
