@@ -87,11 +87,26 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   // Validates block open: 'fun' references and spec context are not blocks
   protected isValidBlockOpen(keyword: string, source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Reject keywords followed by => or := (map key/update: #{begin => 1, end := 2})
-    // Allow one line break (possibly with trailing comment) plus zero or more comment-only lines
-    // Blank lines without comments do NOT continue the map key detection
+    // Reject keywords followed by => or := (map key/update: #{begin => 1, end := 2}).
+    // Outside a map scope we require the => / := to follow on the same line, on the
+    // next line (with an optional trailing comment), or after a run of comment-only
+    // lines — but NOT across blank lines: a bare `begin` followed by a blank line is
+    // a real block opener, not a map key (existing test 1404). Inside a map scope
+    // (#{...}) we relax the rule and allow blank lines too, so `#{begin\n\n=> v}`
+    // still treats `begin` as a map key and does not open a spurious block that
+    // would later pair with an unrelated `end` outside the map. The map-scope
+    // check is gated behind the lenient lookahead so it only runs on the rare
+    // input where => / := is actually reachable across a blank line — calling
+    // isInMapScope on every keyword would walk backward to the start of source
+    // and turn tokenize into O(n^2).
     const afterKeyword = source.slice(position + keyword.length);
     if (/^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:%[^\n\r]*(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(afterKeyword)) {
+      return false;
+    }
+    if (
+      /^[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*(?:(?:%[^\n\r]*)?(?:\r\n|\r|\n)[ \t]*)*)?(?:=>|:=)/.test(afterKeyword) &&
+      this.isInMapScope(source, position, excludedRegions)
+    ) {
       return false;
     }
 
@@ -670,6 +685,36 @@ export class ErlangBlockParser extends BaseBlockParser {
   private isFunReferenceAt(source: string, position: number): boolean {
     const afterFun = source.slice(position + 3);
     return FUN_REF_WITH_MODULE_PATTERN.test(afterFun) || FUN_REF_NO_MODULE_PATTERN.test(afterFun) || FUN_REF_QUOTED_PATTERN.test(afterFun);
+  }
+
+  // Returns true when `position` sits inside an unclosed `#{ ... }` map scope.
+  // Walks backward from `position` tracking only brace depth so that a `}` raises
+  // the depth and a matching `{` lowers it; the outermost still-unclosed `{`
+  // whose immediate predecessor is `#` opens the map containing `position`.
+  // Used by isValidBlockOpen to relax the map-key `=> / :=` lookahead so that
+  // blank lines between a bare reserved-word map key and its arrow do not let
+  // the key escape as a block opener.
+  private isInMapScope(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let braceDepth = 0;
+    for (let i = position - 1; i >= 0; i--) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '}') {
+        braceDepth++;
+        continue;
+      }
+      if (ch === '{') {
+        if (braceDepth === 0) {
+          return i > 0 && source[i - 1] === '#';
+        }
+        braceDepth--;
+      }
+    }
+    return false;
   }
 
   // Returns true if there is an unclosed block opener between the enclosing #{ and the
