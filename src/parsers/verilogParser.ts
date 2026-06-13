@@ -1328,6 +1328,35 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject close keywords used as a pure rvalue identifier (preceded by an
+    // assignment operator `=` family and NOT followed by `(`). A reserved word
+    // on the RHS of an assignment is a misused identifier (e.g.,
+    // `a = endmodule + 1;`, `a = endmodule;`). The existing
+    // `isInInstanceNamePosition` carve-out only handled the `<id> <close_kw> (`
+    // typo form; this catches the bare-rvalue form where no follow-`(` exists.
+    //
+    // Followed-by-`(` is excluded here so that
+    // `isInInstanceNamePosition` (for typed typo forms) retains exclusive
+    // responsibility for the followed-by-`(` shape.
+    if (this.isRvalueIdentifierPosition(source, position, keyword.length, excludedRegions)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Returns true when the close keyword at `position` is the rvalue of an
+  // assignment with no following `(`: the immediately preceding non-trivia
+  // character is `=` (matching `=`, `<=`, `+=`, `-=`, etc. — `==`/`!=` already
+  // excluded by `isPrecededByAssignmentOperator`'s call site) AND the keyword is
+  // NOT followed (after trivia) by `(`. Used to suppress reserved words misused
+  // as rvalue identifiers (e.g., `a = endmodule + 1;`).
+  private isRvalueIdentifierPosition(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
+    if (!this.isPrecededByAssignmentOperator(source, position, excludedRegions)) return false;
+    // Excluding the followed-by-`(` shape keeps the responsibility for typo
+    // forms inside `isInInstanceNamePosition`.
+    const afterKeyword = this.skipForwardTrivia(source, position + keywordLength, excludedRegions);
+    if (afterKeyword < source.length && source[afterKeyword] === '(') return false;
     return true;
   }
 
