@@ -756,24 +756,26 @@ export class MatlabBlockParser extends BaseBlockParser {
     if (this.isKeywordUsedAsFunctionCall(source, position, keyword)) {
       return false;
     }
-    // Reject `function` used as the function NAME in another `function` header.
-    // `function function()` has a reserved word in the name position; MATLAB rejects
-    // it at parse time. When the leading identifier of the logical line is `function`
-    // and this keyword is a LATER `function` on the same line, the later occurrence
-    // is the identifier (name) — not a real block opener. Without this, the inner
-    // header consumes two `end`s in a row, leaving the outer function orphan.
-    if (keyword === 'function' && this.isFunctionUsedAsIdentifierOnSameLine(source, position, excludedRegions)) {
+    // Reject any reserved word used as the function NAME in a `function` header.
+    // Forms like `function function()`, `function classdef()`, `function if()` use
+    // a reserved word in the name position; MATLAB rejects this at parse time. When
+    // the leading identifier of the logical line is `function` and this keyword is a
+    // LATER reserved word on the same line, the later occurrence is the identifier
+    // (name) — not a real block opener. Without this, the inner header consumes two
+    // `end`s in a row, leaving the outer function orphan.
+    if (this.isReservedWordUsedAsIdentifierAfterLeadingFunction(source, position, excludedRegions)) {
       return false;
     }
     return true;
   }
 
-  // Returns true when `function` at `position` sits AFTER a leading `function` keyword
-  // on the same logical line (after horizontal whitespace and `...`/`\` line continuations
-  // at line start). Such forms (`function function()`, `function [a] = function(x)`) use
-  // the reserved word `function` as the function name — invalid MATLAB but recoverable
-  // by rejecting the LATER `function` as the block opener and keeping outer pairing.
-  private isFunctionUsedAsIdentifierOnSameLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+  // Returns true when the reserved word at `position` sits AFTER a leading `function`
+  // keyword on the same logical line (after horizontal whitespace and `...`/`\` line
+  // continuations at line start). Such forms (`function function()`, `function classdef()`,
+  // `function if()`, `function [a] = function(x)`) use a reserved word as the function
+  // name — invalid MATLAB but recoverable by rejecting the LATER reserved word as the
+  // block opener and keeping outer pairing.
+  private isReservedWordUsedAsIdentifierAfterLeadingFunction(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.statementStartAtPos === null) {
       return false;
     }
