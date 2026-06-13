@@ -5,6 +5,49 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.65] - 2026-06-14
+
+### Fixed
+
+- Ada: Limit Unicode-letter adjacency to LRM 2.3 `identifier_extend` (decimal-digit only)
+- Ada: Recognize labeled `exit <Label> when X` as a loop-exit modifier
+- Ada: Skip `declare` and `begin` inside parentheses for Ada 2022 declare expressions
+- AppleScript: Recognize NBSP and Unicode whitespace in `isKeywordAsVariableName` regex patterns
+- AppleScript: Reject `else if(x)` function-call form to avoid a spurious `else` intermediate
+- AppleScript: Skip NBSP whitespace before an expression terminator
+- AppleScript: Skip NBSP whitespace before a line-continuation marker
+- AppleScript: Skip NBSP whitespace before a record-key colon
+- Bash: Drop phantom keyword tokens occluded by a line-continuation logical word
+- Crystal: Accept instance var, global var, splat, and block prefixes as `def` parameter starters
+- Crystal: Prioritize macro closer over char-literal recognition in macro templates
+- Crystal: Recognize method-bang suffix `?` in `end` ternary-value detection
+- Crystal: Skip `do:` in a named tuple when scanning for a loop separator
+- Crystal: Skip heredoc detection at the second `<` of three or more consecutive `<`
+- Erlang: Recognize `@` as identifier-continuation in `isCatchFollowedByClausePattern`
+- Fortran: Memoize `getSelectSubtype` to avoid `O(n²)` parse on many `select case` blocks
+- Fortran: Recognize F77 type declaration across line continuation in `isAfterF77TypeDeclaration`
+- Fortran: Recognize fixed-form column-6 digit continuation marker before `then` in `if`-headers
+- Fortran: Treat literal closing quote as operator context across continuation
+- Fortran: Walk past chained bare `&` continuation lines in `isPrecedingContinuationKeyword`
+- Julia: Remove non-reserved words (`isa`, `throw`, `type`, `mutable`, `missing`, `nothing`) from the string-macro reserved-word set
+- MATLAB: Push `pendingSkipDepth` for a valid `arguments` attribute form outside `function`/`methods`/`classdef`
+- MATLAB: Record a phantom for `arguments` with an attempted attribute form
+- MATLAB: Reject any reserved word used as a function name in a `function` header
+- MATLAB: Treat VT and FF as line-start whitespace before block comment markers
+- MATLAB: Treat VT and FF as statement-start whitespace before shell escape
+- Octave: Preserve `@arguments` function-handle rejection in the rescue path
+- Octave: Recognize SMP Unicode letters via `codePointAt` in the `do` probe
+- Octave: Reject `end` followed by a value-like token (numeric/string/`[`/`{`)
+- Octave: Treat `end` followed by `..` as field access
+- Pascal: Reject `try`/`case`/`begin`/`repeat` as a block opener after comparison `=`
+- Pascal: Skip identifier-prefixed `end` (`$end`/`#end`/`&end`) inside an `asm` body
+- Ruby: Detect more value-position patterns before a stray `end` (identifier value, parens-internal `;`, backslash continuation)
+- Ruby: Filter block-open keywords used as a hash key before `=>`
+- Verilog: Recognize compound assignments and statement bodies in `case_item` labels
+- Verilog: Suppress `block_close` keywords used as rvalue identifiers
+- Verilog: Suppress close keywords in instance-type position
+- VHDL: Recognize word operators (`not`/`and`/`or`/etc) as RHS markers in `isInExpressionRhsContext`
+
 ## [1.1.64] - 2026-06-13
 
 ### Fixed
@@ -2564,6 +2607,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.65]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.64...v1.1.65
 [1.1.64]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.63...v1.1.64
 [1.1.63]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.62...v1.1.63
 [1.1.62]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.61...v1.1.62
