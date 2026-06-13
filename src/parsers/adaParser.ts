@@ -1197,7 +1197,48 @@ export class AdaBlockParser extends BaseBlockParser {
     if (p < 0 || !isWordChar(source[p])) return false;
     let wordStart = p;
     while (wordStart > 0 && isWordChar(source[wordStart - 1])) wordStart--;
-    return source.slice(wordStart, p + 1).toLowerCase() === 'exit';
+    if (source.slice(wordStart, p + 1).toLowerCase() !== 'exit') return false;
+    // The preceding word is `exit`, but that alone is not conclusive: when a
+    // case-arm / select-alternative body is mid-edit and ends in `exit` with
+    // its `;` not yet typed (`when Done => exit` followed by `when Other =>`),
+    // the *next* arm's `when` also sees `exit` as its preceding word. A real
+    // `exit when Cond` is terminated by `;`, never by `=>`; a case-arm /
+    // select-alternative guard is always closed by `=>`. So if this `when`'s
+    // choice/guard is followed by `=>` (before any `;` or end of the
+    // statement), it heads a new arm and is not an `exit when` modifier.
+    return !this.whenGuardEndsWithArrow(whenStart + 4);
+  }
+
+  // Scans forward from `start` (just past a `when` keyword) and returns true
+  // when the when-guard is closed by a top-level `=>` (the arm/alternative
+  // arrow) rather than terminated by `;`. Tracks parenthesis depth so a `=>`
+  // inside a parenthesized expression (e.g. an inner case/if expression
+  // `(case Y is when 1 => ...)`) is not mistaken for the guard arrow. A `;`
+  // at depth 0 (the terminator of an `exit when Cond;` statement) or the end
+  // of source ends the scan with `false`.
+  private whenGuardEndsWithArrow(start: number): boolean {
+    const source = this.currentSource;
+    const excluded = this.currentExcludedRegions;
+    let parenDepth = 0;
+    let i = start;
+    while (i < source.length) {
+      if (this.isInExcludedRegion(i, excluded)) {
+        const region = this.findExcludedRegionAt(i, excluded);
+        i = region ? region.end : i + 1;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '(') {
+        parenDepth++;
+      } else if (ch === ')') {
+        if (parenDepth > 0) parenDepth--;
+      } else if (parenDepth === 0) {
+        if (ch === '=' && i + 1 < source.length && source[i + 1] === '>') return true;
+        if (ch === ';') return false;
+      }
+      i++;
+    }
+    return false;
   }
 
   // Decides whether an `or` token that starts its own physical line delimits a
