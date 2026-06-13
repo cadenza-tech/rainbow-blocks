@@ -1115,6 +1115,14 @@ export function isLoopDo(source: string, position: number, excludedRegions: Excl
           continue;
         }
       }
+      // Skip 'do' followed by ':' (named tuple key like `{do: 1}`), which is not
+      // a block opener nor a loop separator. Without this, an intermediate `do:`
+      // inside a loop condition (e.g. `for k, v in {do: 1} do`) would be the first
+      // `do` found and the scan would terminate before reaching the actual trailing
+      // loop separator.
+      if (doAbsolutePos + 2 < source.length && source[doAbsolutePos + 2] === ':') {
+        continue;
+      }
       if (doAbsolutePos === position) {
         return true;
       }
