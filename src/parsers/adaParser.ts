@@ -233,6 +233,19 @@ export class AdaBlockParser extends BaseBlockParser {
       return !isInsideParens(source, position, excludedRegions, cb);
     }
 
+    // Ada 2022 LRM 4.5.9 declare expressions appear inside parentheses, e.g.
+    //   F (declare X : constant Integer := ...; begin X + 1)
+    // The `declare`/`begin` keywords inside such an expression are part of the
+    // expression syntax, not statement-level block openers. Without this
+    // rejection the inner `begin` is pushed onto the open-block stack and the
+    // surrounding subprogram's `end Compute;` (a compound end keyword) is
+    // mis-paired with `declare`, orphaning the outer subprogram.
+    if (lowerKeyword === 'declare' || lowerKeyword === 'begin') {
+      if (isInsideParens(source, position, excludedRegions, cb)) {
+        return false;
+      }
+    }
+
     if (lowerKeyword === 'for') {
       return isValidForOpen(source, position, excludedRegions, cb);
     }
