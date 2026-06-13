@@ -5732,5 +5732,120 @@ end`;
     });
   });
 
+  suite('Regression: many block keywords inside a single enclosing bracket must not be quadratic', () => {
+    // Bug: the bracket-context helpers in juliaHelpers.ts and juliaLastindexHelpers.ts
+    // (hasUnmatchedBlockOpenerBetween, hasAnyBlockOpenerBetween, hasForBetween,
+    // hasUnmatchedBlockOpenerBetweenInIndexing, allUnmatchedOpenersAreFilteredBegins,
+    // allUnmatchedBeginsAreFirstindex) each scanned the source from `enclosing.open + 1`
+    // forward to the keyword position. Because every keyword inside the same bracket
+    // shares the same `start = open + 1` but a different `position`, the total work
+    // across all keywords in a bracket of size K is O(K^2). The existing
+    // buildArrayConstructionSource test above repeats the bracket many times (small
+    // brackets), so it did not catch the case where a SINGLE bracket holds many
+    // keywords. The shapes below pin all four reproducible paths reported by the
+    // bug-verifier (array-construction begin/end, indexing if/else/end, indexing
+    // do/quote end, parenthesized begin/end). The fix shares the forward-scan work
+    // across all keywords in a bracket so each helper answers each query in
+    // O(log K), keeping total parsing work O(N log N).
+    //
+    // The block-pair output must remain identical to the pre-fix behavior; the
+    // timing ceilings below are intentionally generous (~5s) so CI jitter and
+    // coverage instrumentation do not cause flakes, while the quadratic
+    // version takes 10s+ at the same sizes.
+
+    function repeatJoin(unit: string, n: number, sep = '; '): string {
+      return Array.from({ length: n }, () => unit).join(sep);
+    }
+
+    test('should parse a single huge array-construction bracket with many begin/end pairs in linear time', () => {
+      // Path 1: [begin x end; begin x end; ... (xN) ...]
+      // Triggers hasAnyBlockOpenerBetween / hasUnmatchedBlockOpenerBetween across
+      // a single large [] bracket. Pre-fix: O(N^2). Post-fix: O(N log N).
+      const n = 2000;
+      const source = `[${repeatJoin('begin x end', n)}]`;
+      parser.parse('[begin x end]'); // warm-up
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(
+        elapsed < 5000,
+        `single-bracket array begin/end x${n} parse took ${elapsed.toFixed(0)}ms, expected < 5000ms (O(N^2) bracket-content scan regression)`
+      );
+    });
+
+    test('should parse a single huge indexing bracket with many if/else/end blocks in linear time', () => {
+      // Path 2 (heaviest): a[if c 1 else 2 end; ... (xN) ...]
+      // Triggers hasUnmatchedBlockOpenerBetweenInIndexing and the lastindex helpers
+      // across a single large indexing bracket. Pre-fix: O(N^2). Post-fix: O(N log N).
+      const n = 1500;
+      const source = `a[${repeatJoin('if c 1 else 2 end', n)}]`;
+      parser.parse('a[if c 1 else 2 end]'); // warm-up
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(
+        elapsed < 5000,
+        `single-bracket indexing if/else/end x${n} parse took ${elapsed.toFixed(0)}ms, expected < 5000ms (O(N^2) indexing-bracket scan regression)`
+      );
+    });
+
+    test('should parse a single huge indexing bracket with many quote/end blocks in linear time', () => {
+      // Path 3: a[quote x end; quote x end; ... (xN) ...]
+      // Same indexing-bracket helpers as path 2, but with quote/end (which keeps
+      // the lastindex filtering path active and exercises allUnmatchedOpenersAreFilteredBegins).
+      const n = 1500;
+      const source = `a[${repeatJoin('quote x end', n)}]`;
+      parser.parse('a[quote x end]'); // warm-up
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(
+        elapsed < 5000,
+        `single-bracket indexing quote/end x${n} parse took ${elapsed.toFixed(0)}ms, expected < 5000ms (O(N^2) indexing-bracket scan regression)`
+      );
+    });
+
+    test('should parse a single huge parenthesized expression with many begin/end pairs in linear time', () => {
+      // Path 4: (begin x end; begin x end; ... (xN) ...)
+      // Triggers hasUnmatchedBlockOpenerBetween / allUnmatchedBeginsAreFirstindex
+      // for the enclosing parens (isInsideParentheses, isInsideIndexingBrackets
+      // call them on the same paren span repeatedly).
+      const n = 1500;
+      const source = `(${repeatJoin('begin x end', n)})`;
+      parser.parse('(begin x end)'); // warm-up
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(
+        elapsed < 5000,
+        `single-bracket parens begin/end x${n} parse took ${elapsed.toFixed(0)}ms, expected < 5000ms (O(N^2) paren-content scan regression)`
+      );
+    });
+
+    test('should produce identical block pairs for a single huge bracket as the small-input reference', () => {
+      // Sanity check: the linearization must not alter classification. Compare
+      // a moderately large single-bracket input against the expected pair count.
+      const small = 'a[if c 1 else 2 end; if c 1 else 2 end]';
+      const smallPairs = parser.parse(small);
+      assertBlockCount(smallPairs, 2);
+      const innerIfs = smallPairs.filter((p) => p.openKeyword.value === 'if');
+      assertBlockCount(innerIfs, 2);
+
+      const n = 100;
+      const big = `a[${repeatJoin('if c 1 else 2 end', n)}]`;
+      const bigPairs = parser.parse(big);
+      assertBlockCount(bigPairs, n);
+      const innerBigIfs = bigPairs.filter((p) => p.openKeyword.value === 'if');
+      assertBlockCount(innerBigIfs, n);
+      for (const p of innerBigIfs) {
+        assertIntermediates(p, ['else']);
+      }
+    });
+  });
+
   generateCommonTests(config);
 });
