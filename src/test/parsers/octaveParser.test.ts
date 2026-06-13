@@ -3385,5 +3385,16 @@ end`;
     });
   });
 
+  suite('Bug: end followed by double dot (..) must be treated as field access', () => {
+    test('should reject end..x as block close (double-dot field access)', () => {
+      const source = 'function f\n  end..x;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      // The closing `end` must be the OUTER `end` (offset 21), not the inner `end..x` (offset 13).
+      // Without this check the test passes even when the inner `end` is wrongly used as close.
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
