@@ -222,7 +222,7 @@ function computeIdentificationAreaStart(source: string, lineStart: number): numb
 // pseudo-text payloads, EXEC blocks): when the skipped range contains a newline the
 // line start moves to just past the last one. Scanning is bounded to the jumped range
 // so the total cost over a whole parse stays O(n).
-function lineStartAfterJump(source: string, from: number, to: number, currentLineStart: number): number {
+export function lineStartAfterJump(source: string, from: number, to: number, currentLineStart: number): number {
   for (let k = to - 1; k >= from; k--) {
     if (source[k] === '\n' || source[k] === '\r') {
       return k + 1;

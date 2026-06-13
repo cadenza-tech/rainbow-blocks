@@ -18,7 +18,7 @@ import {
   matchExecBlock,
   matchPseudoText
 } from './cobolHelpers';
-import { buildPeriodPositions, findBlockVerbAfterCopybook, getPseudoTextStarts } from './cobolPseudoText';
+import { buildPeriodPositions, findBlockVerbAfterCopybook, getPseudoTextStarts, lineStartAfterJump } from './cobolPseudoText';
 import { buildCaseInsensitiveKeywordPattern, findLastOpenerByType } from './parserUtils';
 
 // Mapping of close keywords to their valid openers (case insensitive comparison)
@@ -138,9 +138,15 @@ export class CobolBlockParser extends BaseBlockParser {
   private cachedNewlines: number[] | null = null;
   private cachedInlineComments: number[] | null = null;
 
-  // Override findExcludedRegions to reset per-parse caches before scanning.
-  // Without this, repeated parser.parse() calls on different sources would
-  // reuse stale cached data.
+  // Override findExcludedRegions to reset per-parse caches before scanning and
+  // to track the current line start incrementally. Tracking lineStart here
+  // (advanced forward, never re-scanned backward) lets tryMatchExcludedRegion's
+  // fixed-format guards (identification area, column-7 comment indicator,
+  // `>>` directive) locate the line start in O(1) instead of walking backward
+  // to the nearest newline at every character. Without this, a long source
+  // with no newline (or one very long line) made those per-character backward
+  // walks O(n^2). Mirrors the incremental lineStart tracking already used by
+  // getPseudoTextStarts in cobolPseudoText.
   protected findExcludedRegions(source: string): ExcludedRegion[] {
     if (this.cachedSource !== source) {
       this.cachedSource = source;
@@ -151,7 +157,29 @@ export class CobolBlockParser extends BaseBlockParser {
       this.cachedNewlines = null;
       this.cachedInlineComments = null;
     }
-    return super.findExcludedRegions(source);
+    const regions: ExcludedRegion[] = [];
+    let i = 0;
+    let currentLineStart = 0;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === '\n' || ch === '\r') {
+        i++;
+        currentLineStart = i;
+        continue;
+      }
+      const result = this.tryMatchExcludedRegion(source, i, currentLineStart);
+      if (result) {
+        regions.push(result);
+        // A matched region may span newlines (EXEC blocks, multi-line strings,
+        // pseudo-text payloads); advance the tracked line start past the last
+        // newline inside the jumped range so it stays correct after the jump.
+        currentLineStart = lineStartAfterJump(source, i, result.end, currentLineStart);
+        i = result.end;
+      } else {
+        i++;
+      }
+    }
+    return regions;
   }
 
   // Returns offset of the last period outside strings/comments at or before
@@ -837,7 +865,13 @@ export class CobolBlockParser extends BaseBlockParser {
     return isInExpressionContext(source, position, excludedRegions);
   }
 
-  protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
+  // The `lineStart` argument is the offset of the first character of the line
+  // containing `pos`. The findExcludedRegions override above advances it
+  // incrementally and passes it in so the three fixed-format guards below can
+  // use it directly instead of walking backward to the nearest newline at every
+  // character (which made a long single line O(n^2)). When other callers omit
+  // it, the fallback `this.findLineStart(pos)` keeps the original behaviour.
+  protected tryMatchExcludedRegion(source: string, pos: number, lineStart = this.findLineStart(pos)): ExcludedRegion | null {
     const char = source[pos];
 
     // Skip excluded-region detection in the fixed-format identification area
@@ -850,7 +884,7 @@ export class CobolBlockParser extends BaseBlockParser {
     // covered subsequent real blocks. The guard only matches when the leading 6
     // columns look like a fixed-format sequence area, so free-format sources (which
     // have no sequence area) are unaffected even past visual column 72.
-    if (this.isInFixedFormatIdentificationArea(source, pos)) {
+    if (this.isInFixedFormatIdentificationArea(source, pos, lineStart)) {
       return null;
     }
 
@@ -862,10 +896,6 @@ export class CobolBlockParser extends BaseBlockParser {
     // Fixed-format column 7 comment indicator (*, /, D, d)
     // Only treat as comment if columns 1-6 look like fixed-format sequence area
     if (char === '*' || char === '/' || char === 'D' || char === 'd') {
-      let lineStart = pos;
-      while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-        lineStart--;
-      }
       if (this.getVisualColumn(source, lineStart, pos) === 6) {
         const sequenceArea = source.slice(lineStart, pos);
         if (/^[\d \t]*$/.test(sequenceArea)) {
@@ -889,7 +919,7 @@ export class CobolBlockParser extends BaseBlockParser {
     // A directive must be the first non-blank token on its line. A `>>` that
     // appears mid-expression is a relational/data context, not a directive, so
     // the rest of the line must stay tokenised (e.g. PERFORM ... >> ... END-PERFORM).
-    if (char === '>' && pos + 1 < source.length && source[pos + 1] === '>' && this.isDirectiveLineStart(source, pos)) {
+    if (char === '>' && pos + 1 < source.length && source[pos + 1] === '>' && this.isDirectiveLineStart(source, pos, lineStart)) {
       return this.matchSingleLineComment(source, pos);
     }
 
@@ -939,30 +969,34 @@ export class CobolBlockParser extends BaseBlockParser {
   // by tokenize() and computeValidPositions() so excluded-region detection agrees
   // with keyword tokenisation about which columns are compiler-ignored free text.
   // Returns false in free format (no sequence area), leaving such sources unaffected.
-  private isInFixedFormatIdentificationArea(source: string, pos: number): boolean {
-    let lineStart = pos;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-      lineStart--;
-    }
+  // `lineStart` is the precomputed offset of the line containing `pos`. When
+  // omitted (callers other than findExcludedRegions / tryMatchExcludedRegion)
+  // it is recomputed with findLineStart so the behaviour is unchanged.
+  //
+  // The sequence-area regex test is intentionally evaluated before the
+  // visual-column walk: in free format (the vast majority of modern COBOL and
+  // every position whose line cannot be a fixed-format sequence area) it falls
+  // through to `return false` in O(1) and the O(pos - lineStart)
+  // `getVisualColumn` walk is skipped entirely. Without this ordering the walk
+  // ran at every character of a long single line, producing O(n^2) overall.
+  private isInFixedFormatIdentificationArea(source: string, pos: number, lineStart = this.findLineStart(pos)): boolean {
     if (lineStart + 6 > source.length) {
       return false;
     }
-    if (this.getVisualColumn(source, lineStart, pos) < 72) {
+    const sequenceArea = source.slice(lineStart, lineStart + 6);
+    if (!/^[ \t\d]{6}$/.test(sequenceArea)) {
       return false;
     }
-    const sequenceArea = source.slice(lineStart, lineStart + 6);
-    return /^[ \t\d]{6}$/.test(sequenceArea);
+    return this.getVisualColumn(source, lineStart, pos) >= 72;
   }
 
   // Returns true when `pos` is the first non-blank token on its line — the
   // position where a `>>` compiler directive is allowed. The leading run may be
   // pure whitespace (free format) or a 6-char digit/whitespace sequence area
-  // followed by whitespace (fixed format).
-  private isDirectiveLineStart(source: string, pos: number): boolean {
-    let lineStart = pos;
-    while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-      lineStart--;
-    }
+  // followed by whitespace (fixed format). `lineStart` is the precomputed offset
+  // of the line containing `pos`; with the default it falls back to walking
+  // backward for callers outside the per-character excluded-region scan.
+  private isDirectiveLineStart(source: string, pos: number, lineStart = this.findLineStart(pos)): boolean {
     const prefix = source.slice(lineStart, pos);
     // Free format: nothing but blanks before the directive.
     if (/^[ \t]*$/.test(prefix)) {
