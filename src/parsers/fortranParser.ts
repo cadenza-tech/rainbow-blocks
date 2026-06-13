@@ -136,6 +136,14 @@ export class FortranBlockParser extends BaseBlockParser {
   // `procedure` keyword (which was O(N^2) on generic interfaces). Reset on each tokenize.
   private currentInterfaceSpans: InterfaceSpan[] = [];
 
+  // Cache of getSelectSubtype results keyed by the opener Token reference. Without
+  // caching, matchBlocks called getSelectSubtype once per `case`/`rank` intermediate
+  // inside a select block, and each call sliced the source from the opener to EOF and
+  // ran collapseContinuationLines over the whole suffix — O(N) per call and O(N^2) for
+  // the whole file. The cache makes it O(1) per call after the first. Reset on each
+  // tokenize via the WeakMap reassignment in tokenize().
+  private selectSubtypeCache: WeakMap<Token, 'type' | 'case' | 'rank' | null> = new WeakMap();
+
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'program',
@@ -1022,8 +1030,21 @@ export class FortranBlockParser extends BaseBlockParser {
 
   // Returns the select subtype (`type`, `case`, `rank`) for a `select` opener
   // token, or null if the token is not a select opener or the subtype cannot be
-  // determined. Reads from currentSource captured during tokenize().
+  // determined. Reads from currentSource captured during tokenize(). Results are
+  // memoized in selectSubtypeCache keyed by the opener Token reference so repeated
+  // calls during matchBlocks (once per `case`/`rank` intermediate) run in O(1)
+  // instead of re-slicing and re-collapsing the source suffix on every call.
   private getSelectSubtype(token: Token): 'type' | 'case' | 'rank' | null {
+    const cached = this.selectSubtypeCache.get(token);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const result = this.computeSelectSubtype(token);
+    this.selectSubtypeCache.set(token, result);
+    return result;
+  }
+
+  private computeSelectSubtype(token: Token): 'type' | 'case' | 'rank' | null {
     if (token.value.toLowerCase() !== 'select') {
       return null;
     }
@@ -1043,6 +1064,9 @@ export class FortranBlockParser extends BaseBlockParser {
     // Precompute interface spans once so isValidProcedureOpen (invoked per `procedure`
     // keyword while validating block opens below) can binary-search them.
     this.currentInterfaceSpans = computeInterfaceSpans(source, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
+    // Reset the getSelectSubtype memoization cache: tokens carry over to matchBlocks
+    // but the previous parse's cache entries are stale for the new source.
+    this.selectSubtypeCache = new WeakMap();
 
     // Find all compound end keywords and their positions
     const compoundEndPositions = new Map<number, { keyword: string; length: number; endType: string }>();
