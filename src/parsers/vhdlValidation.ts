@@ -837,8 +837,16 @@ export function isInSignalAssignment(
   keyword: string,
   callbacks: VhdlValidationCallbacks
 ): boolean {
-  // Search backwards for <= or statement/block boundaries
-  const lowerSource = source.toLowerCase();
+  // Search backwards for <= or statement/block boundaries.
+  //
+  // PERFORMANCE: avoid materializing `source.toLowerCase()` per call. With many `when ...
+  // else` chains (one validator call per intermediate `when`/`else`), an upfront
+  // whole-source toLowerCase makes each call O(N) and the parse O(N^2). For
+  // case-insensitive keyword checks we lowercase only the bounded local slice we are
+  // about to compare (each slice is <= 6 chars), keeping per-check work O(1). This is
+  // safe for the ASCII keywords compared below (`when`, `then`, `return`, `assert`,
+  // `begin`, `loop`, `generate`, `is`, `end`) because their length is preserved by
+  // `String.prototype.toLowerCase`, so offsets stay aligned with `source`.
   let i = position - 1;
   let foundWhen = false;
   while (i >= 0) {
@@ -852,7 +860,7 @@ export function isInSignalAssignment(
     if (ch === ';') return false;
     // Track 'when' keyword presence (conditional signal assignments require when before else)
     if (i >= 3) {
-      const whenSlice = lowerSource.slice(i - 3, i + 1);
+      const whenSlice = source.slice(i - 3, i + 1).toLowerCase();
       if (
         whenSlice === 'when' &&
         (i - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 4])) &&
@@ -882,7 +890,7 @@ export function isInSignalAssignment(
             if (source[j] === ';') break;
             // Check for 'then' keyword boundary
             if (j >= 3) {
-              const thenSlice = lowerSource.slice(j - 3, j + 1);
+              const thenSlice = source.slice(j - 3, j + 1).toLowerCase();
               if (
                 thenSlice === 'then' &&
                 (j - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[j - 4])) &&
@@ -927,7 +935,7 @@ export function isInSignalAssignment(
     // Port/generic map association: => (e.g., sig => val when cond else other)
     // But NOT case branch arrow (when choice =>)
     if (ch === '>' && i > 0 && source[i - 1] === '=') {
-      if (isCaseBranchArrow(source, i - 1, lowerSource, excludedRegions, callbacks)) {
+      if (isCaseBranchArrow(source, i - 1, excludedRegions, callbacks)) {
         i -= 2;
         continue;
       }
@@ -939,7 +947,7 @@ export function isInSignalAssignment(
     }
     // 'return' starts a conditional expression context (return X when C else Y)
     if (i >= 5) {
-      const retSlice = lowerSource.slice(i - 5, i + 1);
+      const retSlice = source.slice(i - 5, i + 1).toLowerCase();
       if (
         retSlice === 'return' &&
         (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
@@ -954,7 +962,7 @@ export function isInSignalAssignment(
     // assignment. The boundary keywords below (then/begin/loop/generate/is/end) and `;`
     // already stop the scan from leaking out of the assertion's enclosing statement.
     if (i >= 5) {
-      const assertSlice = lowerSource.slice(i - 5, i + 1);
+      const assertSlice = source.slice(i - 5, i + 1).toLowerCase();
       if (
         assertSlice === 'assert' &&
         (i - 6 < 0 || !/[a-zA-Z0-9_]/.test(source[i - 6])) &&
@@ -972,7 +980,7 @@ export function isInSignalAssignment(
       if (i >= len - 1) {
         const start = i - len + 1;
         if (
-          lowerSource.slice(start, start + len) === boundary &&
+          source.slice(start, start + len).toLowerCase() === boundary &&
           (start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) &&
           (start + len >= source.length || !/[a-zA-Z0-9_]/.test(source[start + len]))
         ) {
@@ -985,14 +993,12 @@ export function isInSignalAssignment(
   return false;
 }
 
-// Checks if => at position is part of a case branch (preceded by 'when' keyword)
-function isCaseBranchArrow(
-  source: string,
-  eqPos: number,
-  lowerSource: string,
-  excludedRegions: ExcludedRegion[],
-  callbacks: VhdlValidationCallbacks
-): boolean {
+// Checks if => at position is part of a case branch (preceded by 'when' keyword).
+//
+// PERFORMANCE: mirrors isInSignalAssignment — case-insensitive keyword checks lowercase
+// the bounded local slice instead of relying on a precomputed full-source lowercase
+// string (which would re-introduce the O(N^2) cost the caller deliberately removed).
+function isCaseBranchArrow(source: string, eqPos: number, excludedRegions: ExcludedRegion[], callbacks: VhdlValidationCallbacks): boolean {
   let j = eqPos - 1;
   while (j >= 0) {
     const rj = callbacks.findExcludedRegionAt(j, excludedRegions);
@@ -1004,7 +1010,7 @@ function isCaseBranchArrow(
     if (c === ';') return false;
     // Check for 'when' keyword (4 chars ending at j)
     if (j >= 3) {
-      const slice = lowerSource.slice(j - 3, j + 1);
+      const slice = source.slice(j - 3, j + 1).toLowerCase();
       if (slice === 'when' && (j - 4 < 0 || !/[a-zA-Z0-9_]/.test(source[j - 4])) && (j + 1 >= source.length || !/[a-zA-Z0-9_]/.test(source[j + 1]))) {
         return true;
       }
@@ -1015,7 +1021,7 @@ function isCaseBranchArrow(
       if (j >= len - 1) {
         const start = j - len + 1;
         if (
-          lowerSource.slice(start, start + len) === boundary &&
+          source.slice(start, start + len).toLowerCase() === boundary &&
           (start === 0 || !/[a-zA-Z0-9_]/.test(source[start - 1])) &&
           (start + len >= source.length || !/[a-zA-Z0-9_]/.test(source[start + len]))
         ) {
