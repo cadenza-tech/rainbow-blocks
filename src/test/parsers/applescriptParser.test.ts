@@ -4133,6 +4133,23 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: NBSP whitespace skip in isPrecededByExpressionTerminator', () => {
+    // isPrecededByExpressionTerminator walks backward from a tell/if/repeat keyword to
+    // detect whether it follows an expression terminator (`)`, identifier, etc.) and is
+    // therefore being used as an identifier/value rather than a block opener. The
+    // whitespace-skip loop only consumed ASCII space/tab, so Unicode whitespace (NBSP
+    // U+00A0) between the terminator and the keyword caused the scan to mis-identify
+    // the position and treat the keyword as a valid block opener.
+    const NBSP = ' ';
+
+    test('should treat `foo()<NBSP>tell` as right-operand expression (not block opener)', () => {
+      const source = `set x to foo()${NBSP}tell\nend tell`;
+      const pairs = parser.parse(source);
+      // Expected: no blocks; `tell` is mid-line after `)` and is part of the expression
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Bug AS-LOW: else if(x) function-call form must not attach else as intermediate', () => {
     // `else if(x)` is a function-call form (invoking `if` as a function with arg `x`),
     // not an `else if` block_middle. The compound `else if` matcher rejects it (because
