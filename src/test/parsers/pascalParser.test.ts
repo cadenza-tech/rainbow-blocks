@@ -4277,6 +4277,40 @@ end`;
     });
   });
 
+  suite('Regression 2026-06-13: pathological nested `case of` should not be O(N^2)', () => {
+    test('should parse deeply nested `case of case of ...` chain in linear time', () => {
+      // The pathological input `case of case of case of ...` has no `:` labels, so
+      // isVariantCase walked forward past every following `case of` looking for a label
+      // pattern. With N nested chains this scanned O(N) chars per `case`, producing
+      // O(N^2) overall behavior. The label continuation must bail out once it has
+      // crossed a token boundary (whitespace between two identifier tokens) without
+      // seeing a label separator. With N=4000 the quadratic path takes seconds;
+      // the linear fix completes comfortably under the 5s ceiling even under
+      // coverage instrumentation. The order-of-magnitude regression signal
+      // (pre-fix this input takes 30s+ under instrumentation, post-fix it is
+      // sub-second) is preserved.
+      const n = 4000;
+      let source = '';
+      for (let i = 0; i < n; i++) source += 'case of ';
+      const start = Date.now();
+      parser.parse(source);
+      const elapsed = Date.now() - start;
+      assert.ok(elapsed < 5000, `parsing ${n} pathological case-of chains took ${elapsed}ms, expected < 5000ms`);
+    });
+
+    test('should still parse a long series of standard `case ... of N: stmt; end;` blocks in linear time', () => {
+      // Sanity check that the fix does not slow down well-formed inputs.
+      const n = 4000;
+      let source = '';
+      for (let i = 0; i < n; i++) source += 'case X of 1: a; end; ';
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(elapsed < 5000, `parsing ${n} well-formed case blocks took ${elapsed}ms, expected < 5000ms`);
+    });
+  });
+
   suite('Regression 2026-06-13: case label value position with block-close keyword', () => {
     test('should not treat until as block close when used as a case label value after `:`', () => {
       // The `until` after `1:` sits in the value position of a case label and must not
