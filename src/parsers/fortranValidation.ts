@@ -691,6 +691,14 @@ export function isPrecededByOperator(source: string, position: number): boolean 
   if (crossedContinuation && char >= '0' && char <= '9') {
     return true;
   }
+  // Closing quote of a string or BOZ literal (`z'FF'`, `"abc"`) ending an expression that
+  // continues across a `&` line break. Without this, an `end` on the next line would be
+  // misread as a real block_close. Restricted to continuations for the same reason as
+  // the digit case: a bare quote on a single physical line is not a meaningful operator
+  // context, but a literal's closing quote immediately before `&` clearly is.
+  if (crossedContinuation && (char === "'" || char === '"')) {
+    return true;
+  }
   return false;
 }
 
