@@ -109,6 +109,33 @@ function isUnterminatedStringRegion(source: string, region: ExcludedRegion): boo
   return source[region.end - 1] !== '"';
 }
 
+// Word-form RHS markers (LRM 9.2): when an identifier word immediately precedes a
+// reserved-word block opener, that word is one of VHDL's word-form operators (logical
+// `not`/`and`/`or`/`xor`/`nand`/`nor`/`xnor`, shift `sll`/`srl`/`sla`/`sra`/`rol`/`ror`,
+// arithmetic `mod`/`rem`, unary `abs`) or `return` (LRM 10.3), the keyword is on the
+// RHS of an expression and must NOT be tokenized as a fresh block opener. Compared
+// case-insensitively against the lowercase identifier extracted in
+// isInExpressionRhsContext.
+const RHS_WORD_OPERATORS: ReadonlySet<string> = new Set([
+  'return',
+  'not',
+  'and',
+  'or',
+  'xor',
+  'nand',
+  'nor',
+  'xnor',
+  'sll',
+  'srl',
+  'sla',
+  'sra',
+  'rol',
+  'ror',
+  'mod',
+  'rem',
+  'abs'
+]);
+
 // Block-opener keywords that should NEVER appear on the RHS of an expression
 // (assignment, comparison, argument list, etc.). Reserved words cannot legally be
 // identifiers in VHDL, but editors regularly encounter in-progress or hand-written
@@ -494,17 +521,18 @@ export class VhdlBlockParser extends BaseBlockParser {
       break;
     }
     if (i < 0) return false;
-    // `return <reserved>` is a value/type context: `return` introduces the return type of a
-    // function (`return view is`) or a return statement's expression (`return view;`). The
-    // reserved word after it is never a block opener, so treat it like an RHS marker. Read
-    // the identifier-like word ending at `i` and compare against `return` (word-bounded).
+    // Word-form RHS markers: `return <reserved>` (return type / return statement RHS,
+    // LRM 10.3) and VHDL word operators (LRM 9.2: not/and/or/xor/nand/nor/xnor, shift
+    // sll/srl/sla/sra/rol/ror, mod/rem, unary abs) all establish an expression / value
+    // context, so a reserved-word block opener following them must be rejected. Read the
+    // identifier-like word ending at `i` (word-bounded) and consult RHS_WORD_OPERATORS.
     if (/[a-zA-Z0-9_]/.test(source[i])) {
       let wordStart = i;
       while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
         wordStart--;
       }
-      if (source.slice(wordStart, i + 1).toLowerCase() === 'return') return true;
-      return false;
+      const word = source.slice(wordStart, i + 1).toLowerCase();
+      return RHS_WORD_OPERATORS.has(word);
     }
     const prev = source[i];
     // `=>` is the association arrow: after `=>` a fresh statement / target begins, where a
