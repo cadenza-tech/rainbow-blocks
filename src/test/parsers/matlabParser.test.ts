@@ -340,6 +340,26 @@ end`;
       assert.ok(regions.length >= 1);
       assert.strictEqual(regions[0].start, 0);
     });
+
+    test('should treat ! as shell escape after VT (\\v) leading whitespace', () => {
+      // `\v!if foo; bar; end` is a shell escape line where the `!` is preceded only by a
+      // vertical tab. isAtStatementStart must treat \v as horizontal whitespace (matching
+      // the broader isHorizontalWhitespace coverage) so the `!` is recognised as the
+      // start of a shell escape and the rest of the line (including `if` and `end`) is
+      // excluded from tokenisation. Without the fix the inner `end` is mis-tokenised and
+      // pairs with the outer `if`, leaving the real outer `end` orphan.
+      const source = 'if true\n\v!if foo; bar; end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'if must pair with the outer end on line 2');
+    });
+
+    test('should treat ! as shell escape after FF (\\f) leading whitespace', () => {
+      const source = 'if true\n\f!if foo; bar; end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2);
+    });
   });
 
   suite('Edge cases', () => {
