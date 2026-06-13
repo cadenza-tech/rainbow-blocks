@@ -2949,6 +2949,22 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should not detect heredoc from second < of <<<-IDENT (three or more consecutive <)', () => {
+      // `<<<-end` is invalid Crystal syntax (heredoc opener is `<<-` not `<<<-`).
+      // The earlier tryMatchExcludedRegion would inspect the second `<` and call
+      // matchHeredoc which then misread `<<-end` as a valid opener with terminator
+      // `end`. After the fix, a preceding `<` disqualifies the position as a
+      // heredoc opener so no heredoc-style excluded region is produced. Verified
+      // via getExcludedRegions: no region starting before the trailing `end` line.
+      const source = 'x = <<<-end\nbody\nend';
+      const regions = parser.getExcludedRegions(source);
+      // No heredoc region should be present. Without the fix, a heredoc region
+      // would extend from the opener line newline (~position 11) to the end of
+      // the terminator line (position 20), swallowing both `body` and `end`.
+      const heredocRegion = regions.find((r) => r.start >= 11 && r.start < 20);
+      assert.strictEqual(heredocRegion, undefined, 'should not produce heredoc region for <<<-end');
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
