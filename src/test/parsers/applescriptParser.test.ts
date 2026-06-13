@@ -4150,6 +4150,22 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: NBSP whitespace skip in isFollowedByRecordKeyColon', () => {
+    // isFollowedByRecordKeyColon scans forward from a keyword end position to find a
+    // record-key `:` after optional whitespace and continuations. The whitespace skip
+    // only accepted ASCII space/tab, so Unicode whitespace (NBSP) between the keyword
+    // and the colon caused the colon to be missed and the keyword was wrongly
+    // attached as a block_middle intermediate.
+    const NBSP = '\u00A0';
+
+    test('should treat `else<NBSP>:` in a multi-line record literal as a record key', () => {
+      const source = `if x then\n  set r to {\n    else${NBSP}: 5\n  }\nend if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+  });
+
   suite('Bug AS-LOW: else if(x) function-call form must not attach else as intermediate', () => {
     // `else if(x)` is a function-call form (invoking `if` as a function with arg `x`),
     // not an `else if` block_middle. The compound `else if` matcher rejects it (because
