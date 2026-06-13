@@ -358,8 +358,12 @@ export class CrystalBlockParser extends BaseBlockParser {
       return this.matchRegexLiteral(source, pos);
     }
 
-    // Heredoc
-    if (char === '<' && pos + 1 < source.length && source[pos + 1] === '<') {
+    // Heredoc. Reject when the preceding char is also `<`, so that 3+ consecutive
+    // `<` (e.g. `<<<-end`) is interpreted as chained shift operators rather than
+    // a heredoc opener — without this guard, the second `<` would dispatch to
+    // matchHeredoc, mis-read `<<-end` as a valid opener, and swallow the rest of
+    // the source up to the spurious terminator.
+    if (char === '<' && pos + 1 < source.length && source[pos + 1] === '<' && !(pos > 0 && source[pos - 1] === '<')) {
       const result = matchHeredoc(source, pos);
       if (result) return { start: result.contentStart, end: result.end };
     }
