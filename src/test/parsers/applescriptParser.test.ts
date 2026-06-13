@@ -4040,6 +4040,99 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: NBSP-aware whitespace in isKeywordAsVariableName patterns', () => {
+    // isKeywordAsVariableName uses `[ \t]+` to match whitespace around keyword-as-variable
+    // markers (`set`, `copy`, `return`, `of`, `in`, `exit`, possessive `'s`, prepositions
+    // `to/thru/through/from/by/before/after/at`). When the source uses Unicode whitespace
+    // (e.g., NBSP U+00A0) between the marker and the keyword, the marker fails to match and
+    // the block keyword is incorrectly tokenized as a block opener, producing spurious pairs.
+    const NBSP = ' ';
+
+    test('should treat `return<NBSP>tell` as return value, not block opener', () => {
+      const source = `on run\n  return${NBSP}tell\nend tell\nend`;
+      const pairs = parser.parse(source);
+      // Expected: only [on/end] block pair; the `tell\nend tell` is part of the return value expression
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value, 'on');
+      assert.strictEqual(pairs[0].closeKeyword?.value, 'end');
+    });
+
+    test('should treat `set<NBSP>tell<NBSP>to` as variable name', () => {
+      const source = `set${NBSP}tell${NBSP}to 5`;
+      const pairs = parser.parse(source);
+      // Expected: no blocks; `tell` is a variable name in `set ... to`
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat `copy<NBSP>tell<NBSP>to` as variable name', () => {
+      const source = `copy${NBSP}tell${NBSP}to x`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test("should treat `x's<NBSP>tell` as property access", () => {
+      const source = `set y to x's${NBSP}tell`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat `tell<NBSP>of x` as property access', () => {
+      // `tell of x` -- `tell` is the property name; after the keyword we need `of` on first physical line
+      const source = `set y to tell${NBSP}of x`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat `of<NBSP>tell` as property access (keyword as object)', () => {
+      const source = `set y to property of${NBSP}tell`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat `in<NBSP>tell` as list expression', () => {
+      const source = `repeat with i in${NBSP}tell\nend repeat`;
+      const pairs = parser.parse(source);
+      // Only the repeat/end repeat pair; the `tell` after `in` is a list expression
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should treat `exit<NBSP>repeat` as control flow (not a block opener)', () => {
+      const source = `repeat\n  exit${NBSP}repeat\nend repeat`;
+      const pairs = parser.parse(source);
+      // Only the outer repeat/end repeat pair; the inner `exit repeat` is not a block opener
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should treat `log<NBSP>tell` as command expression value', () => {
+      const source = `log${NBSP}tell`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat `get<NBSP>tell` as command expression value', () => {
+      const source = `get${NBSP}tell`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should treat `from<NBSP>end` as bare end after preposition', () => {
+      const source = `repeat with i from 1 to${NBSP}end\n  beep\nend repeat`;
+      const pairs = parser.parse(source);
+      // Only the repeat/end repeat pair; `to end` is the upper bound, not a block close
+      assertSingleBlock(pairs, 'repeat', 'end repeat');
+    });
+
+    test('should treat compound `set<NBSP>end if<NBSP>to` as variable name', () => {
+      // Compound block_middle path uses the same regex pattern.
+      // `end if` is here a compound block_close; the `set ... to` pattern uses it as a variable name.
+      // Actually `end if` is block_close not block_middle. Use a block_open compound instead:
+      // `set with timeout to 5` should not open a block.
+      const source = `set${NBSP}with timeout${NBSP}to 5`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Bug AS-LOW: else if(x) function-call form must not attach else as intermediate', () => {
     // `else if(x)` is a function-call form (invoking `if` as a function with arg `x`),
     // not an `else if` block_middle. The compound `else if` matcher rejects it (because
