@@ -3943,5 +3943,46 @@ end`;
     });
   });
 
+  suite('Regression: any reserved word as identifier inside function header', () => {
+    test('should pair outer function with outer end when classdef is used as the inner function name', () => {
+      // `function classdef()` uses the reserved word `classdef` as the function NAME.
+      // MATLAB rejects this at parse time, but the inner `classdef` must NOT be treated
+      // as a real block opener (a classdef block opener). Otherwise both `end`s pair
+      // with `classdef`/`function` (inner) and the outer function loses its `end`.
+      // Expected best-effort pairing:
+      //   outer function (line 0) <-> outer end (line 3)
+      //   inner function (line 1, col 2) <-> inner end (line 2)
+      const source = 'function outer()\n  function classdef()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.line === 0);
+      const inner = pairs.find((p) => p.openKeyword.value === 'function' && p.openKeyword.line === 1 && p.openKeyword.column === 2);
+      assert.ok(outer, 'outer function on line 0 must pair with its end');
+      assert.ok(inner, 'inner function on line 1 col 2 must pair with its end');
+      assert.strictEqual(outer.closeKeyword.line, 3, 'outer function must pair with the end on line 3');
+      assert.strictEqual(inner.closeKeyword.line, 2, 'inner function must pair with the end on line 2');
+    });
+
+    test('should pair outer function with outer end when if is used as the inner function name', () => {
+      // Same pattern with `if` as the function name.
+      const source = 'function outer()\n  function if()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.value === 'function' && p.openKeyword.line === 0);
+      assert.ok(outer, 'outer function on line 0 must pair with its end');
+      assert.strictEqual(outer.closeKeyword.line, 3, 'outer function must pair with the end on line 3');
+    });
+
+    test('should pair outer function with outer end when for is used as the inner function name', () => {
+      // Same pattern with `for` as the function name.
+      const source = 'function outer()\n  function for()\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((p) => p.openKeyword.value === 'function' && p.openKeyword.line === 0);
+      assert.ok(outer, 'outer function on line 0 must pair with its end');
+      assert.strictEqual(outer.closeKeyword.line, 3, 'outer function must pair with the end on line 3');
+    });
+  });
+
   generateCommonTests(config);
 });
