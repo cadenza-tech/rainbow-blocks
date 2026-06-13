@@ -170,6 +170,10 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
   let depth = 0;
   let bracketDepth = 0;
   let sawContent = false;
+  // Set once a top-level `when` (guard introducer) is seen. A `catch`/`after` appearing
+  // after `when` is a guard-internal expression prefix (e.g. `catch error:R when catch h(R) -> ok`)
+  // and must not be mistaken for the next try section, so the scan keeps going past it.
+  let sawWhen = false;
   while (k < source.length) {
     if (isInExcludedRegion(k, excludedRegions)) {
       k++;
@@ -254,17 +258,27 @@ export function isCatchFollowedByClausePattern(source: string, afterCatch: numbe
       // and is a clause separator. Otherwise the candidate 'catch' was an expression prefix
       // whose value was the expression ending at this 'end'.
       if (depth === 0 && bracketDepth === 0 && w === 'end') return !sawContent;
+      // A top-level `catch`/`after` reached BEFORE the clause arrow `->` and OUTSIDE any
+      // guard (no top-level `when` seen since the candidate `catch`) is the real next
+      // try-section separator. The candidate `catch` we are scanning forward from was
+      // therefore an expression prefix whose value was the expression ending here.
+      // Without this bail-out the forward scan walked past `catch bar()` to the next
+      // clause's `->` and wrongly marked catch@bar as the clause separator. Inside a
+      // guard (`catch X when catch h(X) -> ok`) the inner `catch` is still an expression
+      // prefix, so the `sawWhen` guard below keeps the scan running for that case.
+      if (depth === 0 && bracketDepth === 0 && (w === 'catch' || w === 'after') && !sawWhen) {
+        return false;
+      }
       sawContent = true;
-      // 'catch'/'after' do NOT bail out here: before the clause arrow '->' is reached we are
-      // still inside the clause head/guard, where 'catch' (e.g. `when catch h(R)`) is an
-      // expression prefix, not the next try section. Keep scanning so the top-level '->' that
-      // confirms the clause pattern is still found. A real next-section 'catch'/'after' only
-      // appears after the '->' (which already returned true above), so it is never reached.
-      // Track block nesting: openers increase depth, end decreases depth
+      // Track block nesting: openers increase depth, end decreases depth. A top-level
+      // `when` switches to guard context, where a subsequent top-level `catch`/`after`
+      // is an expression-prefix catch inside the guard, not the next try section.
       if (w === 'if' || w === 'case' || w === 'receive' || w === 'try' || w === 'begin' || w === 'fun' || w === 'maybe') {
         depth++;
       } else if (w === 'end' && depth > 0) {
         depth--;
+      } else if (depth === 0 && bracketDepth === 0 && w === 'when') {
+        sawWhen = true;
       }
       k = wEnd;
       continue;
