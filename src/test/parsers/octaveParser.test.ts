@@ -3396,5 +3396,28 @@ end`;
     });
   });
 
+  suite('Bug: end followed by value-like token must not be a block close', () => {
+    test('should reject "end 5" as block close (numeric literal after end)', () => {
+      const source = 'function f\n  end 5\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should reject "end "abc"" as block close (double-quoted string after end)', () => {
+      const source = 'function f\n  end "abc"\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should reject "end [1 2]" as block close (array literal after end)', () => {
+      const source = 'function f\n  end [1 2]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
