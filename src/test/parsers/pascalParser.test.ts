@@ -4277,6 +4277,40 @@ end`;
     });
   });
 
+  suite('Regression 2026-06-13: case label value position with block-close keyword', () => {
+    test('should not treat until as block close when used as a case label value after `:`', () => {
+      // The `until` after `1:` sits in the value position of a case label and must not
+      // be treated as a block-close keyword. Without this guard the inner `until` closes
+      // the surrounding `repeat`, leaving the final `until done` orphan.
+      const source = `repeat
+  case X of
+    1: until: foo;
+  end;
+until done`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.openKeyword.startOffset, source.indexOf('case'));
+      assert.strictEqual(casePair.closeKeyword.value, 'end');
+      assert.strictEqual(casePair.closeKeyword.startOffset, source.indexOf('end;'));
+      const repeatPair = findBlock(pairs, 'repeat');
+      assert.strictEqual(repeatPair.openKeyword.startOffset, 0);
+      assert.strictEqual(repeatPair.closeKeyword.value, 'until');
+      assert.strictEqual(repeatPair.closeKeyword.startOffset, source.lastIndexOf('until'));
+    });
+
+    test('should not treat end as block close when used as a case label value after `:`', () => {
+      // Same shape but with `end` in the value position: `1: end: foo;`. The inner
+      // `end` must not close the enclosing `case` prematurely.
+      const source = `case X of
+    1: end: foo;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression 2026-06-13: type section with many declarations should not be O(N^2)', () => {
     test('should parse a type section with many class declarations in linear time', () => {
       // A type section containing many `T = class end;` declarations forced the
