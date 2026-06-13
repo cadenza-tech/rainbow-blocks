@@ -4277,5 +4277,59 @@ end`;
     });
   });
 
+  suite('Regression 2026-06-13: type section with many declarations should not be O(N^2)', () => {
+    test('should parse a type section with many class declarations in linear time', () => {
+      // A type section containing many `T = class end;` declarations forced the
+      // isValidBlockOpen cross-`;` scope scan to walk back to the start of the source
+      // for every `class` keyword. With N declarations this is O(N^2): n=4000 took
+      // ~22s under the quadratic path. A linear scan finishes well under the 5s
+      // ceiling even at n=4000.
+      const n = 4000;
+      let source = 'type\n';
+      for (let i = 0; i < n; i++) source += `  T${i} = class end;\n`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(elapsed < 5000, `parsing ${n} class declarations took ${elapsed}ms, expected < 5000ms`);
+    });
+
+    test('should parse a type section with many record declarations in linear time', () => {
+      // Same shape but with `record` instead of `class`. Record validation also goes
+      // through isPrecededByComparisonEquals via the record-context map, so the
+      // cross-`;` scope scan must remain bounded.
+      const n = 2000;
+      let source = 'type\n';
+      for (let i = 0; i < n; i++) source += `  T${i} = record X: Integer; end;\n`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(elapsed < 5000, `parsing ${n} record declarations took ${elapsed}ms, expected < 5000ms`);
+    });
+
+    test('should parse a type section with many object declarations in linear time', () => {
+      const n = 4000;
+      let source = 'type\n';
+      for (let i = 0; i < n; i++) source += `  T${i} = object end;\n`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(elapsed < 5000, `parsing ${n} object declarations took ${elapsed}ms, expected < 5000ms`);
+    });
+
+    test('should parse a type section with many interface declarations in linear time', () => {
+      const n = 4000;
+      let source = 'type\n';
+      for (let i = 0; i < n; i++) source += `  I${i} = interface end;\n`;
+      const start = Date.now();
+      const pairs = parser.parse(source);
+      const elapsed = Date.now() - start;
+      assertBlockCount(pairs, n);
+      assert.ok(elapsed < 5000, `parsing ${n} interface declarations took ${elapsed}ms, expected < 5000ms`);
+    });
+  });
+
   generateCommonTests(config);
 });
