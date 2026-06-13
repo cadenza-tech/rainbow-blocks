@@ -4297,6 +4297,228 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-14: VHDL word operators (not/and/or/etc) must mark RHS context', () => {
+    // VHDL LRM 9.2 defines word-form operators (not/and/or/xor/nand/nor/xnor/sll/srl/
+    // sla/sra/rol/ror/mod/rem/abs) that produce expressions. A reserved-word block opener
+    // appearing as the right-hand operand of such an operator (e.g., `if not view then`)
+    // must be rejected the same way it is rejected after `=` / `:=` / `<=` / `return`.
+    // Without this, the reserved word is tokenized as a fresh block_open and absorbs the
+    // surrounding control-flow block's `then`/`begin` intermediate.
+    test('should not treat view after unary not as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if not view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate, not have it absorbed by stray view opener');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view after unary not should not pair as a block opener');
+    });
+
+    test('should not treat view after and as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x and view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view after and should not pair as a block opener');
+    });
+
+    test('should not treat view after or as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x or view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after xor as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x xor view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after nand as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x nand view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after nor as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x nor view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after xnor as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x xnor view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after shift operator sll as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x sll view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after shift operator srl as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x srl view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after shift operator sla as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x sla view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after shift operator sra as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x sra view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after rotate operator rol as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x rol view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after rotate operator ror as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x ror view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after mod as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x mod view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after rem as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if x rem view then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+    });
+
+    test('should not treat view after unary abs as block opener', () => {
+      const source = `architecture a of e is
+begin
+  if abs view > 0 then
+    null;
+  end if;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      const thenIntermediate = ifBlock.intermediates.find((t) => t.value.toLowerCase() === 'then');
+      assert.ok(thenIntermediate, 'if block should retain its then intermediate');
+      const viewOpener = pairs.find((p) => p.openKeyword.value.toLowerCase() === 'view');
+      assert.ok(!viewOpener, 'view after unary abs should not pair as a block opener');
+    });
+  });
+
   suite('Regression 2026-05-25: comment-separated compound end with comments around trailing word', () => {
     // LRM 15.9 treats comments as whitespace. The same-line regex COMPOUND_END_PATTERN
     // only allows spaces/tabs, so findCommentSeparatedCompoundEnds supplements it. When
