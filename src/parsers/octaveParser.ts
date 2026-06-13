@@ -1091,6 +1091,17 @@ export class OctaveBlockParser extends MatlabBlockParser {
     if (lowerKw === 'end' && this.isPrecededByUntilOnLogicalLine(source, position, excludedRegions)) {
       return false;
     }
+    // Reject `end <value-token>` on the same physical line — `end 5`, `end "abc"`,
+    // `end [1 2]`. A value-like token (numeric literal, double-quoted string, array
+    // literal opener) directly after `end` puts the `end` in expression / command-syntax
+    // argument position rather than block-close position. Treating it as a block close
+    // consumes a real outer `end` and destroys outer block pairing. The parent's same-line
+    // checks already reject `end` followed by binary operators or `.`-field-access; this
+    // covers the remaining value-token tail. Only applies to bare `end`. The check is
+    // scoped to the same physical line so legitimate `end\n<next-stmt>` is unaffected.
+    if (lowerKw === 'end' && this.isEndFollowedByValueLikeToken(source, position)) {
+      return false;
+    }
     // Reject typed-end keywords (endif/endfor/endwhile/etc.) used as identifiers in
     // expression context (e.g., `if endif == 5`). When the keyword does not appear at
     // the start of a statement, it is being used as a variable/identifier rather than
@@ -1194,6 +1205,41 @@ export class OctaveBlockParser extends MatlabBlockParser {
         return true;
       }
     }
+    return false;
+  }
+
+  // Returns true when `end` at `position` is directly followed (after horizontal whitespace
+  // only, on the SAME physical line) by a value-like token: a decimal-digit numeric literal
+  // (`end 5`, including Unicode digits via `\p{Nd}`), a double-quoted string opener
+  // (`end "abc"`), or an array-literal opener (`end [1 2]`). Such forms place `end` in
+  // expression / command-syntax argument context, never block-close context. Pairing `end`
+  // with an inner block consumes a real outer `end` and destroys outer block pairing.
+  // Scoped to the same physical line so legitimate `end\n<next-stmt>` and `end<NL><body>`
+  // are unaffected. Line continuations (`...` / `\<NL>`) are NOT skipped — those continue
+  // the logical line so the next token is on a different physical line, where this check
+  // does not fire.
+  private isEndFollowedByValueLikeToken(source: string, position: number): boolean {
+    let probe = position + 'end'.length;
+    while (probe < source.length && isHorizontalWhitespace(source[probe])) probe++;
+    if (probe >= source.length) return false;
+    const ch = source[probe];
+    // A raw newline terminates the same-physical-line scan — `end\n<body>` is legitimate
+    // block-close form (followed by the next statement), not value-token form.
+    if (ch === '\n' || ch === '\r') return false;
+    // Numeric literal: ASCII digits and Unicode decimal digits (e.g. U+0665 `٥`) via
+    // `\p{Nd}`. `0.5` etc. also start with a digit; `.5` is rejected by the parent's
+    // dot-field-access check.
+    if (/\p{Nd}/u.test(ch)) return true;
+    // Double-quoted string opener. Single-quoted strings (`'`) are NOT covered here:
+    // `end 'abc'` is harmlessly rejected by `isCommandSyntaxArgument` in the parent and
+    // by the surrounding excluded-region logic; including `'` here would interfere with
+    // the transpose-vs-string ambiguity.
+    if (ch === '"') return true;
+    // Array-literal opener (`[1 2]`). Cell-literal opener `{` is also a value-token
+    // context (`end {1, 2}`), so include it for symmetry. Round paren `(` is intentionally
+    // omitted — `end(1)` is array-indexing of a variable named `end` and is already
+    // handled by `isIndexingAssignment`.
+    if (ch === '[' || ch === '{') return true;
     return false;
   }
 
