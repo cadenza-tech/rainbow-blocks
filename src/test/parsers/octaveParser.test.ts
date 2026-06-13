@@ -3377,5 +3377,13 @@ end`;
     });
   });
 
+  suite('Bug: do followed by SMP Unicode letter (surrogate pair) is not a block opener', () => {
+    test('should reject do followed by U+1D400 (Math Bold Capital A)', () => {
+      const source = 'function f\n  do 𝐀\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
