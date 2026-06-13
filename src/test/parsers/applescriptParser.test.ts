@@ -4166,6 +4166,27 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: NBSP whitespace skip on continuation lines', () => {
+    // Continuation-line detection (isOnContinuationLine / isAtLogicalLineStart and the
+    // findLogicalLineStart/End helpers) walks backward from a position past whitespace to
+    // find the `¬` continuation marker. The backward-whitespace loops only consumed ASCII
+    // space/tab, so Unicode whitespace (NBSP) between `¬` and the newline (e.g.
+    // `5 ¬<NBSP>\n`) caused the continuation to go undetected and the next line's `end`/
+    // `end tell` was treated as a real close keyword instead of part of the expression.
+    const NBSP = '\u00A0';
+    const CONT = '\u00AC';
+
+    test('should suppress `end tell` on continuation line when ¬ is followed by NBSP and newline', () => {
+      const source = `tell app outer\n  set x to 5 ${CONT}${NBSP}\n  end tell\nend tell`;
+      const pairs = parser.parse(source);
+      // Inner `end tell` is on a continuation line of `set x to 5 ¬`, so only the outer
+      // `tell` should pair with the trailing `end tell`.
+      assertSingleBlock(pairs, 'tell', 'end tell');
+      // Verify the close is the outer one (at the end of source), not the inner one
+      assert.ok(pairs[0].closeKeyword.startOffset > 35, 'should pair with the outer end tell');
+    });
+  });
+
   suite('Bug AS-LOW: else if(x) function-call form must not attach else as intermediate', () => {
     // `else if(x)` is a function-call form (invoking `if` as a function with arg `x`),
     // not an `else if` block_middle. The compound `else if` matcher rejects it (because
