@@ -3343,5 +3343,13 @@ end`;
     });
   });
 
+  suite('Bug: @arguments function handle must not be treated as block opener', () => {
+    test('should reject @arguments as block opener (function handle prefix)', () => {
+      const source = 'function f\n  h = @arguments;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
