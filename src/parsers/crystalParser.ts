@@ -1581,9 +1581,12 @@ export class CrystalBlockParser extends BaseBlockParser {
       return false;
     }
     const afterName = source[i];
-    // If the next token after the method name is an identifier-start char, this is a
-    // no-paren parameter list (`def foo x = 1`). Not a shorthand assignment.
-    if (/[A-Za-z_]/.test(afterName)) {
+    // If the next token after the method name is a parameter-start char, this is a
+    // no-paren parameter list (`def foo x = 1`, `def foo @ivar = 1`, `def foo *args`,
+    // `def foo &block`, `def foo $g = 1`). Not a shorthand assignment. Accept
+    // identifier-start chars plus instance var `@`, global var `$`, splat `*`, and
+    // block `&` as parameter-list starters.
+    if (/[A-Za-z_@$*&]/.test(afterName)) {
       return false;
     }
     // Otherwise scan for a standalone `=` outside of parens.
