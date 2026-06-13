@@ -2,6 +2,7 @@
 
 import type { ExcludedRegion } from '../types';
 import type { BracketIndex } from './bracketIndex';
+import { getBracketScan, queryHABO, queryHFB, queryUBOB } from './juliaBracketScan';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
 
 // Callbacks and pre-computed context passed to bracket-aware scanning functions.
@@ -546,6 +547,17 @@ export function hasUnmatchedBlockOpenerBetween(
   blockOpeners: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Fast path: when (start, end) matches the precomputed bracket scan exactly
+  // (start == enclosing.open + 1 and end is one of the bracket's recorded
+  // keyword offsets), answer in O(log K) via the snapshot table. The fused
+  // scan in juliaBracketScan mirrors this helper's loop exactly, so the
+  // returned value is identical to the linear fallback below.
+  const enclosing = callbacks.bracketIndex.enclosing(start);
+  if (enclosing !== null && enclosing.open + 1 === start) {
+    const scan = getBracketScan(enclosing, source, excludedRegions, blockOpeners, callbacks.isAdjacentToUnicodeLetter);
+    const fast = queryUBOB(scan, end);
+    if (fast !== null) return fast;
+  }
   // 'for' is excluded from openers because in comprehension context it acts as a generator
   // (no end). 'if' is conditionally excluded once we've seen a 'for x in y' pattern, since
   // subsequent 'if's are comprehension filters.
@@ -656,6 +668,15 @@ export function hasAnyBlockOpenerBetween(
   blockOpeners: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Fast path: see hasUnmatchedBlockOpenerBetween for the rationale. The fused
+  // scan tracks a saturating "any opener seen" flag whose snapshot at `end` is
+  // the helper's return value.
+  const enclosing = callbacks.bracketIndex.enclosing(start);
+  if (enclosing !== null && enclosing.open + 1 === start) {
+    const scan = getBracketScan(enclosing, source, excludedRegions, blockOpeners, callbacks.isAdjacentToUnicodeLetter);
+    const fast = queryHABO(scan, end);
+    if (fast !== null) return fast;
+  }
   for (let i = start; i < end; i++) {
     if (isInExcludedRegion(i, excludedRegions)) continue;
     for (const keyword of blockOpeners) {
@@ -682,8 +703,18 @@ export function hasForBetween(
   start: number,
   end: number,
   excludedRegions: ExcludedRegion[],
+  blockOpeners: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Fast path: see hasUnmatchedBlockOpenerBetween. The fused scan tracks the
+  // "non-leading generator `for` at paren depth 0 outside active block bodies"
+  // outcome and answers it in O(log K).
+  const enclosing = callbacks.bracketIndex.enclosing(start);
+  if (enclosing !== null && enclosing.open + 1 === start) {
+    const scan = getBracketScan(enclosing, source, excludedRegions, blockOpeners, callbacks.isAdjacentToUnicodeLetter);
+    const fast = queryHFB(scan, end);
+    if (fast !== null) return fast;
+  }
   // Detect a leading block-form 'for' (after whitespace/excluded regions)
   let firstNonWhite = start;
   while (firstNonWhite < end) {

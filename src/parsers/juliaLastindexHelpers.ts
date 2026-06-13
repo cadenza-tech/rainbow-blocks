@@ -1,6 +1,7 @@
 // Julia lastindex/firstindex helpers: classify end/begin keywords inside indexing brackets
 
 import type { ExcludedRegion } from '../types';
+import { getBracketScan, queryAUB, queryAUO, queryUBOBI } from './juliaBracketScan';
 import type { JuliaHelperCallbacks } from './juliaHelpers';
 import { isIndexingBracket, isTransposeOperator, isTypeKeywordAfterAbstractOrPrimitive } from './juliaHelpers';
 import { findExcludedRegionAt, isInExcludedRegion } from './parserUtils';
@@ -260,6 +261,16 @@ export function hasUnmatchedBlockOpenerBetweenInIndexing(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Fast path: per-bracket fused scan (see juliaBracketScan). The scan mirrors
+  // this helper's loop exactly: `end<binary-op>` is lastindex (no depth drop),
+  // `for` is an opener only at depth > 0, and the leading block-form `for`
+  // contributes +1 to depth before scanning starts.
+  const enclosing = callbacks.bracketIndex.enclosing(start);
+  if (enclosing !== null && enclosing.open + 1 === start) {
+    const scan = getBracketScan(enclosing, source, excludedRegions, blockOpen, callbacks.isAdjacentToUnicodeLetter);
+    const fast = queryUBOBI(scan, end);
+    if (fast !== null) return fast;
+  }
   const openersWithoutFor = blockOpen.filter((kw) => kw !== 'for');
   let depth = 0;
   let inComprehensionContext = false;
@@ -401,6 +412,15 @@ export function allUnmatchedOpenersAreFilteredBegins(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Fast path: per-bracket fused scan tracks the LIFO opener stack as a
+  // (size, non-'begin' count) pair; the helper's return value is "every
+  // remaining opener is 'begin'", i.e. non-'begin' count is zero.
+  const enclosing = callbacks.bracketIndex.enclosing(start);
+  if (enclosing !== null && enclosing.open + 1 === start) {
+    const scan = getBracketScan(enclosing, source, excludedRegions, blockOpen, callbacks.isAdjacentToUnicodeLetter);
+    const fast = queryAUO(scan, end);
+    if (fast !== null) return fast;
+  }
   // Stack of opener types in source order. 'begin' tracks bare begin (filtered as
   // firstindex inside indexing brackets); 'other' tracks every other block opener.
   const openerStack: ('begin' | 'other')[] = [];
@@ -524,6 +544,15 @@ export function allUnmatchedBeginsAreFirstindex(
   blockOpen: readonly string[],
   callbacks: JuliaHelperCallbacks
 ): boolean {
+  // Fast path: per-bracket fused scan tracks `depth` (non-'begin' openers minus
+  // ends) and `nonFirstindexBegins` (bare 'begin's minus ends after depth==0).
+  // The helper returns true when both counters are zero.
+  const enclosing = callbacks.bracketIndex.enclosing(start);
+  if (enclosing !== null && enclosing.open + 1 === start) {
+    const scan = getBracketScan(enclosing, source, excludedRegions, blockOpen, callbacks.isAdjacentToUnicodeLetter);
+    const fast = queryAUB(scan, end);
+    if (fast !== null) return fast;
+  }
   // Walk range; for each `begin` not followed by `:`, fail. Also count ends so that a
   // genuine block (`begin ... end`) cancels out. If no unmatched non-firstindex begin
   // remains, return true. Track [ ] bracket depth so `end` inside arr[end] (lastindex)

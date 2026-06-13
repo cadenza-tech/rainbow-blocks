@@ -329,7 +329,7 @@ export function isComprehensionFilterInBrackets(
   if (hasUnmatchedBlockOpenerBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks)) {
     return false;
   }
-  return hasForBetween(source, open + 1, position, excludedRegions, callbacks);
+  return hasForBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks);
 }
 
 // Checks if 'if' is a generator filter inside parentheses (for...if pattern)
@@ -355,7 +355,7 @@ export function isGeneratorFilterIf(
   if (hasUnmatchedBlockOpenerBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks)) {
     return false;
   }
-  return hasForBetween(source, open + 1, position, excludedRegions, callbacks);
+  return hasForBetween(source, open + 1, position, excludedRegions, blockOpen, callbacks);
 }
 
 // Checks if a position is inside unmatched parentheses (for generator expressions)
