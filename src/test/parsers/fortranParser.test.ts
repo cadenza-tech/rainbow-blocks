@@ -6482,6 +6482,35 @@ end function`;
     });
   });
 
+  suite('Regression 2026-06-14: isPrecedingContinuationKeyword recognizes chained continuation lines', () => {
+    test('should pair change team across a bare-& continuation line before team', () => {
+      // `change` ends with `&`, the next line is a bare `&` (no other content), and `team`
+      // appears on the third line. The chained continuation must walk past the bare `&`
+      // line so that `team` is recognized as the continuation of `change`. Without
+      // walking past the bare `&` line, `team` would be rejected as a block opener and
+      // the construct would not pair.
+      const source = 'change &\n  &\n  team (t)\n  x = 1\nend team';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'team', 'end team');
+    });
+
+    test('should pair select case across a bare-& continuation line before case', () => {
+      // Same shape as the change/team case but for the select/case keyword pair.
+      const source = 'select &\n  &\n  case (v)\n  case (1)\n    x = 1\nend select';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'select', 'end select');
+    });
+
+    test('should pair change team across a bare-& continuation line with inline comment', () => {
+      // The bare-& continuation line carries an inline comment after `&` (`& ! note`).
+      // The chained continuation must still walk past it so `team` is recognized as the
+      // continuation of `change`.
+      const source = 'change &\n  & ! note\n  team (t)\n  x = 1\nend team';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'team', 'end team');
+    });
+  });
+
   suite('Regression 2026-06-13: concatenated endinterface closes interface block', () => {
     test('should treat concatenated endinterface as interface close so later module procedure pairs', () => {
       const source =
