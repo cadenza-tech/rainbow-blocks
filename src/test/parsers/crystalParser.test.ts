@@ -2903,6 +2903,17 @@ end`;
       const pairs = parser.parse('x = :save!\nif true\n  y = 1\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should treat trailing do as loop separator when for-in condition contains do: named tuple key', () => {
+      // The for loop condition `{do: 1}` uses `do:` as a named tuple key. The
+      // earlier isLoopDo scan would match the first `do` in `do:` and break,
+      // failing to skip past it to the actual trailing loop separator `do`.
+      // After the fix, `do:` is recognized as a named tuple key and skipped,
+      // and the trailing `do` is correctly identified as the loop separator.
+      const source = 'for k, v in {do: 1} do\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'end');
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
