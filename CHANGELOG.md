@@ -5,6 +5,33 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.64] - 2026-06-13
+
+### Fixed
+
+- Ada: Recognize non-ASCII type names on their own line in the `is` filter
+- Ada: Treat a non-ASCII suffix before the `access` keyword as part of the identifier
+- Ada: Treat a non-ASCII suffix before `protected` and `task` as part of the identifier
+- Ada: Keep the `then abort` intermediate after a trailing `and` in a `select` ATC
+- Ada: Keep the case arm guard `when` after a semicolonless `exit` body
+- Bash: Skip a command-group brace glued to a keyword without a separator
+- COBOL: Track `lineStart` incrementally to keep the excluded-region scan linear on long single-line sources
+- COBOL: Skip an identification-area period as a statement boundary in pseudo-text scanning
+- Crystal: Skip `end` in value-expecting positions on the same line
+- Crystal / Ruby: Cap interpolation nesting depth to prevent a stack overflow on deeply nested string interpolation
+- Elixir: Memoize the bracket-depth prefix to keep value-position scans linear with many block-keyword conditions
+- Elixir: Treat `fn` as a value when `do` follows across a newline, comment, or comma
+- Erlang: Stop the forward scan at a top-level `catch` or `after` outside guards in `try` clauses
+- Erlang: Allow blank lines before a map-key arrow inside a `#{}` scope
+- Fortran: Handle backslash-continued preprocessor directives in the excluded-region scan
+- Julia: Linearize bracket-context helpers via a per-bracket fused scan
+- Pascal: Make type-section block opener validation linear for many `class`/`record`/`object`/`interface` declarations
+- Pascal: Skip block-close keywords in case-label value position
+- Pascal: Bound the variant-case label forward scan to avoid `O(n²)` on nested `case of` chains
+- Ruby: Balance open count when filtering expression-position `end` tokens so inner `do/end` blocks survive
+- Verilog: Preserve the close keyword after an rvalue identifier in instance-name detection
+- VHDL: Avoid a full-source `toLowerCase` per keyword in conditional signal assignment validation
+
 ## [1.1.63] - 2026-06-13
 
 ### Fixed
@@ -2537,6 +2564,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.64]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.63...v1.1.64
 [1.1.63]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.62...v1.1.63
 [1.1.62]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.61...v1.1.62
 [1.1.61]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.60...v1.1.61
