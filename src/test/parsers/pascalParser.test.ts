@@ -2728,6 +2728,46 @@ end.`;
     });
   });
 
+  suite('Regression: identifier-prefixed end inside asm body', () => {
+    // isValidBlockClose rejects `$end`, `#end`, `&end` as block-close keywords
+    // (identifier-escape and literal prefixes). The asm-body excluded-region scan
+    // must mirror the same prefix set; otherwise the prefixed `end` inside the asm
+    // body is taken as the asm-closing `end`, the real asm closing `end` is left
+    // dangling, and a spurious `case`/`end` pair appears with the wrong outer block.
+    test('should ignore $end inside asm body and pair with closing end', () => {
+      const source = 'procedure Foo; assembler;\nasm\n  mov ax, bx\n$end case word\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'asm', 'end');
+      // The asm at line 1 must pair with the closing end at line 4.
+      assertTokenPosition(pairs[0].openKeyword, 1, 0);
+      assertTokenPosition(pairs[0].closeKeyword, 4, 0);
+    });
+
+    test('should ignore #end inside asm body and pair with closing end', () => {
+      const source = 'procedure Foo; assembler;\nasm\n  mov ax, bx\n#end case word\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'asm', 'end');
+      assertTokenPosition(pairs[0].openKeyword, 1, 0);
+      assertTokenPosition(pairs[0].closeKeyword, 4, 0);
+    });
+
+    test('should ignore &end inside asm body and pair with closing end', () => {
+      const source = 'procedure Foo; assembler;\nasm\n  mov ax, bx\n&end case word\nend;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'asm', 'end');
+      assertTokenPosition(pairs[0].openKeyword, 1, 0);
+      assertTokenPosition(pairs[0].closeKeyword, 4, 0);
+    });
+
+    test('should ignore ..end (range operator) inside asm body', () => {
+      const source = 'asm\n  mov ax, arr[0..end]\n  nop\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'asm', 'end');
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+      assertTokenPosition(pairs[0].closeKeyword, 3, 0);
+    });
+  });
+
   suite('Regression 2026-05-06: Pascal & keyword-escape and procedure-of-object', () => {
     test('should not treat &case as block opener', () => {
       const source = 'begin\n  X := &case;\n  case Y of\n    1: DoOne;\n  end;\nend';
