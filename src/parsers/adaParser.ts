@@ -1097,7 +1097,18 @@ export class AdaBlockParser extends BaseBlockParser {
         // both sides. isAdaWordAt rejects `Test_and`/`1and` (left side is a
         // word character) so their trailing 'then' is not collapsed away.
         if (j >= 2 && isAdaWordAt(source, j - 2, 'and') && !this.isInExcludedRegion(j - 2, excludedRegions)) {
-          continue;
+          // Exception: the `then abort` of a select asynchronous transfer of
+          // control (LRM 9.7.4: `select <stmt> then abort <stmts> end select;`)
+          // also has a preceding `and` when the triggering expression ends in
+          // `and` and the line wraps before `then`. In that case the `then` is
+          // the genuine select intermediate, not the `and then` short-circuit:
+          // the short-circuit's `then` is always followed by an operand, never
+          // the reserved word `abort`. Detect the `abort` keyword immediately
+          // after `then` (skipping whitespace and comments) and keep the token.
+          const afterThen = skipAdaWhitespaceAndComments(source, token.endOffset);
+          if (!isAdaWordAt(source, afterThen, 'abort')) {
+            continue;
+          }
         }
       }
 
