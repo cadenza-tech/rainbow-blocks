@@ -6482,6 +6482,38 @@ end function`;
     });
   });
 
+  suite('Regression 2026-06-14: fixed-form col-6 digit continuation marker before then', () => {
+    test('should recognize `if (a)\\n     1then` as block-if when col-6 marker is digit `1`', () => {
+      // Fixed-form Fortran: line 2 has 5 spaces and a digit `1` in column 6 as the
+      // continuation marker, followed immediately by `then`. The word-boundary check for
+      // `then` (looking at source[i-1]) saw `1` as part of an identifier (`[a-zA-Z0-9_]`)
+      // and rejected the position, treating `1then` as a single token rather than `then`
+      // continued from the previous line. Skipping the col-6 marker before the word
+      // boundary check makes `then` recognizable. Without this, the if-header was
+      // misread and the construct did not pair.
+      const source = '      if (a)\n     1then\n          x = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+    });
+
+    test('should recognize digit-marker variants (2-9) before then', () => {
+      // Any digit 1-9 in column 6 is a valid fixed-form continuation marker. Confirm a
+      // representative range (`2`, `5`, `9`) parses correctly too.
+      for (const digit of ['2', '5', '9']) {
+        const source = `      if (a)\n     ${digit}then\n          x = 1\n      end if`;
+        const pairs = parser.parse(source);
+        assertSingleBlock(pairs, 'if', 'end if');
+      }
+    });
+
+    test('should capture `then` as intermediate across fixed-form col-6 digit continuation', () => {
+      const source = '      if (a)\n     1then\n          x = 1\n      end if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['then']);
+    });
+  });
+
   suite('Performance 2026-06-14: getSelectSubtype does not blow up to O(N^2) on many select case constructs', () => {
     // Builds N independent `select case` blocks each holding `caseCount` case branches.
     // Each `case` token inside a block invokes getSelectSubtype(topBlock.token); pre-fix
