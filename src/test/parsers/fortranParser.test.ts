@@ -6482,6 +6482,28 @@ end function`;
     });
   });
 
+  suite('Regression 2026-06-14: BOZ/string literal closing quote before continuation is operator context', () => {
+    test("should treat `end` after `z'FF' &\\n end` as variable in expression context (do block stays open)", () => {
+      // BOZ literal `z'FF'` is part of an expression; the trailing closing quote `'` is
+      // the last code character before the `&` line break. Pre-fix isPrecededByOperator
+      // did not classify the closing quote of a string/BOZ literal as an operator context,
+      // so `end` on the next physical line was misread as a real block_close and
+      // phantom-closed the do block. Treat literal closing quotes as expression context
+      // so the chained `end` reads as a variable name. The whole do block then pairs
+      // with the explicit `end do` on the last line.
+      const source = "do i=1,10\n  x = z'FF' &\n  end\nend do";
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+
+    test('should treat `end` after `"abc" &\\n end` as variable in expression context (do block stays open)', () => {
+      // Same shape as the BOZ-literal case but with a double-quoted string literal.
+      const source = 'do i=1,10\n  x = "abc" &\n  end\nend do';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end do');
+    });
+  });
+
   suite('Regression 2026-06-14: F77 type declaration with continuation suppresses bare end on next line', () => {
     test('should treat `end` on the next physical line as a variable name when preceded by `integer &`', () => {
       // Fortran 77-style declaration (no `::` separator) `integer end` declares a variable
