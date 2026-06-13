@@ -6910,6 +6910,73 @@ fi`;
     });
   });
 
+  suite('Regression: { command-group opener requires separator before brace', () => {
+    // `if{ true; then echo ok; fi }` is invalid bash because `if{` fuses into a
+    // single POSIX word (the command name), so the `{` never opens a block. The
+    // `{` matcher used to ask isAtCommandPosition, whose command-starter scan
+    // matched the glued `if`/`while`/`then`/`coproc`/`time` keyword and reported
+    // command position, producing a phantom `{...}` pair around the body. Mirror
+    // the `}` side's whitespace guard: a `{` glued directly to a word constituent
+    // is a fused word, not a command-group opener. The existing `if{ ...` test
+    // (no trailing `}`) only checks `if` is not a block open; it could not catch
+    // the phantom `{`/`}` pair, which surfaces only when a `}` follows.
+    test('should not pair { with } when { is glued to if without whitespace', () => {
+      const pairs = parser.parse('if{ true; then echo ok; fi }');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair { with } when { is glued to while without whitespace', () => {
+      const pairs = parser.parse('while{ echo; }');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair { with } when { is glued to coproc without whitespace', () => {
+      const pairs = parser.parse('coproc{ echo; }');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair { with } when { is glued to time without whitespace', () => {
+      const pairs = parser.parse('time{ echo; }');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair { with } when { is glued to then without whitespace', () => {
+      // The bogus `{`/`}` pair must vanish while the surrounding if/fi pair survives.
+      const pairs = parser.parse('if true; then{ echo; }; fi');
+      assertSingleBlock(pairs, 'if', 'fi');
+    });
+
+    test('should still pair { with } when whitespace separates them from if', () => {
+      // Regression guard: `if { true; }; then ... fi` keeps producing the {/} and if/fi pairs.
+      const pairs = parser.parse('if { true; }; then echo; fi');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still pair { with } in coproc with separating whitespace', () => {
+      // Regression guard: anonymous coprocess `coproc { ... }` stays a command group.
+      const pairs = parser.parse('coproc { echo; }');
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should still pair { with } in a function definition glued to the close paren', () => {
+      // Regression guard: `name(){ ... }` is a funcdef; the `)` is a valid separator.
+      const pairs = parser.parse('name(){ echo; }');
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should still pair { with } when { follows a control operator', () => {
+      // Regression guard: `done&&{ echo; }` — `&` is a separator, so `{` opens a group.
+      const pairs = parser.parse('for x in a; do done&&{ echo; }');
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still pair { with } in a subshell-starting group', () => {
+      // Regression guard: `{ (echo);}` at start of file — `{` is the command-group opener.
+      const pairs = parser.parse('{ (echo);}');
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
   suite('Regression: ASCII shell metacharacters <, >, | must not fuse with keyword', () => {
     // The Unicode Symbol category (\p{S}) includes ASCII shell metacharacters
     // like `<`, `>`, `|`, `\``, which DO terminate words in POSIX shell. They
