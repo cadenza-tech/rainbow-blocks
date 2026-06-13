@@ -100,6 +100,26 @@ const COMPOUND_END_CLOSE_PATTERN = new RegExp(`^end(?:[${COMPOUND_END_SEPARATOR_
 // in adaValidation.ts.
 const MAX_OR_BOUNDARY_SCAN_CHARS = 2048;
 
+// Returns true when the already-lowercased, trim-end-ed `text` ends with the
+// reserved word `protected` or `task` as a whole word. The left boundary is
+// checked with the Unicode-aware Ada word-char definition (LRM 2.3: ASCII word
+// chars plus any code unit > 127), so an identifier that merely ends with those
+// letters after a non-ASCII letter — e.g. `Ñprotected` / `Ñtask`
+// (Ñ = U+00D1) — is not mistaken for the reserved word. A JavaScript `\b`
+// boundary is ASCII-only and treats `Ñprotected` as ending in the reserved
+// word `protected`, which wrongly disables the type-decl `is` filter and leaks
+// the declaration `is` as the enclosing block's intermediate.
+function endsWithProtectedOrTask(text: string): boolean {
+  for (const word of ['protected', 'task']) {
+    if (!text.endsWith(word)) continue;
+    const before = text.length - word.length - 1;
+    if (before < 0) return true;
+    const ch = text[before];
+    if (!(/[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127)) return true;
+  }
+  return false;
+}
+
 export class AdaBlockParser extends BaseBlockParser {
   // Most recent source string and excluded regions seen by parse(). Used by
   // matchBlocks to scan for non-keyword markers (e.g., `do` in accept/return
@@ -687,7 +707,7 @@ export class AdaBlockParser extends BaseBlockParser {
             const prevEnd = scanPos + 1;
             const prevLineStart = this.findLineStart(source, prevEnd);
             const prevToken = this.stripExcludedRegions(source, prevLineStart, prevEnd, excludedRegions).toLowerCase().trimEnd();
-            if (/\b(?:protected|task)$/.test(prevToken)) {
+            if (endsWithProtectedOrTask(prevToken)) {
               isTypeDeclLine = false;
             }
           }
@@ -712,7 +732,7 @@ export class AdaBlockParser extends BaseBlockParser {
             // Skip 'type' when preceded by 'protected' or 'task' (these are block, not type decl)
             if (m[1].toLowerCase() === 'type') {
               const beforeType = this.stripExcludedRegions(source, lineStart, absPos, excludedRegions).toLowerCase().trimEnd();
-              if (/\b(?:protected|task)$/.test(beforeType)) continue;
+              if (endsWithProtectedOrTask(beforeType)) continue;
               // When 'type' is at the start of the line, check previous lines
               if (beforeType.length === 0) {
                 let sp = lineStart - 1;
@@ -723,7 +743,7 @@ export class AdaBlockParser extends BaseBlockParser {
                   const pe = sp + 1;
                   const ps = this.findLineStart(source, pe);
                   const pt = this.stripExcludedRegions(source, ps, pe, excludedRegions).toLowerCase().trimEnd();
-                  if (/\b(?:protected|task)$/.test(pt)) continue;
+                  if (endsWithProtectedOrTask(pt)) continue;
                 }
               }
             }
@@ -844,7 +864,7 @@ export class AdaBlockParser extends BaseBlockParser {
                     const checkEnd = checkPos + 1;
                     const checkLineStart = this.findLineStart(source, checkEnd);
                     const checkToken = this.stripExcludedRegions(source, checkLineStart, checkEnd, excludedRegions).toLowerCase().trimEnd();
-                    if (/\b(?:protected|task)$/.test(checkToken)) {
+                    if (endsWithProtectedOrTask(checkToken)) {
                       scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
                       continue;
                     }
