@@ -3351,5 +3351,31 @@ end`;
     });
   });
 
+  suite('Bug: function <reserved>(x) must not treat reserved word as block opener', () => {
+    test('should reject "function try(x)" inner try as block opener', () => {
+      const source = 'function try(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject "function if(x)" inner if as block opener', () => {
+      const source = 'function if(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject "function while(x)" inner while as block opener', () => {
+      const source = 'function while(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+
+    test('should reject "function for(x)" inner for as block opener', () => {
+      const source = 'function for(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
