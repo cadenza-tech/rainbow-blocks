@@ -3737,5 +3737,36 @@ foo() ->
     });
   });
 
+  suite('Regression: isCatchFollowedByClausePattern must treat @ as identifier continuation', () => {
+    // Bug: The forward scan in isCatchFollowedByClausePattern (erlangHelpers.ts) uses
+    // /[a-z0-9_]/i as the identifier continuation class. Per the Erlang Reference Manual,
+    // atom syntax is [a-z][a-zA-Z0-9_@]* and variable syntax is [A-Z_][a-zA-Z0-9_@]*, so
+    // '@' is an identifier continuation character. When 'catch' is followed by an atom
+    // containing '@' (e.g. `node@end` or `x@catch`), the word scan splits the atom at '@'
+    // and treats the suffix as a reserved keyword. This wrongly ends the forward scan and
+    // classifies the candidate 'catch' as an expression prefix, removing it from the try
+    // block's intermediates.
+    test('should treat catch as intermediate when followed by atom node@end', () => {
+      // `node@end` is a single atom (valid Erlang node name). The 'end' inside it is a
+      // continuation suffix, not the try block's closing keyword. The real 'end' at the
+      // line end closes the try, and 'catch' must remain as an intermediate.
+      const source = 'foo() -> try foo() catch node@end -> ok end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+      assert.strictEqual(tryBlock.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat catch as intermediate when followed by atom x@catch', () => {
+      // `x@catch` is a single atom. The 'catch' inside it is a continuation suffix, not a
+      // second try-section separator. The outer 'catch' must remain as an intermediate.
+      const source = 'foo() -> try foo() catch x@catch -> ok end.';
+      const pairs = parser.parse(source);
+      const tryBlock = findBlock(pairs, 'try');
+      assertIntermediates(tryBlock, ['catch']);
+      assert.strictEqual(tryBlock.closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
