@@ -1188,29 +1188,51 @@ export class AdaBlockParser extends BaseBlockParser {
   // tokenized as a block keyword, so an `exit when X;` inside a select
   // alternative body would otherwise have its `when` misattributed to the
   // enclosing select as an intermediate. Scans backward skipping whitespace,
-  // comments and excluded regions; if the immediately preceding word is
-  // `exit`, the `when` is a loop-exit modifier and must be ignored.
+  // comments and excluded regions; the preceding word must be `exit`, or an
+  // identifier (loop label) whose own preceding word is `exit` — the labeled
+  // form `exit <loop-label> when X;` (LRM 5.7) is also a loop-exit modifier
+  // and must not register the `when` as a case-arm / select-alternative /
+  // entry-guard boundary.
   private isExitWhen(whenStart: number): boolean {
     const source = this.currentSource;
     const excluded = this.currentExcludedRegions;
     const isWordChar = (ch: string) => /[a-zA-Z0-9_]/.test(ch) || ch.charCodeAt(0) > 127;
-    let p = whenStart - 1;
-    while (p >= 0) {
-      if (this.isInExcludedRegion(p, excluded)) {
-        const region = this.findExcludedRegionAt(p, excluded);
-        p = region ? region.start - 1 : p - 1;
-        continue;
+    // Helper: skip whitespace, comments and excluded regions backward from p.
+    const skipWsBackward = (start: number): number => {
+      let q = start;
+      while (q >= 0) {
+        if (this.isInExcludedRegion(q, excluded)) {
+          const region = this.findExcludedRegionAt(q, excluded);
+          q = region ? region.start - 1 : q - 1;
+          continue;
+        }
+        if (isAdaWhitespace(source[q])) {
+          q--;
+          continue;
+        }
+        break;
       }
-      if (isAdaWhitespace(source[p])) {
-        p--;
-        continue;
-      }
-      break;
-    }
+      return q;
+    };
+    let p = skipWsBackward(whenStart - 1);
     if (p < 0 || !isWordChar(source[p])) return false;
     let wordStart = p;
     while (wordStart > 0 && isWordChar(source[wordStart - 1])) wordStart--;
-    if (source.slice(wordStart, p + 1).toLowerCase() !== 'exit') return false;
+    let prevWord = source.slice(wordStart, p + 1).toLowerCase();
+    if (prevWord !== 'exit') {
+      // Allow one identifier (loop label) between `exit` and `when`:
+      // `exit <loop-label> when Cond;` (Ada LRM 5.7). The label is an
+      // identifier, not a reserved keyword, so verify the preceding token is
+      // `exit` and that no `;` or other statement separator intervenes (the
+      // identifier check above already excluded such separators because they
+      // are not word characters).
+      p = skipWsBackward(wordStart - 1);
+      if (p < 0 || !isWordChar(source[p])) return false;
+      let prevStart = p;
+      while (prevStart > 0 && isWordChar(source[prevStart - 1])) prevStart--;
+      prevWord = source.slice(prevStart, p + 1).toLowerCase();
+      if (prevWord !== 'exit') return false;
+    }
     // The preceding word is `exit`, but that alone is not conclusive: when a
     // case-arm / select-alternative body is mid-edit and ends in `exit` with
     // its `;` not yet typed (`when Done => exit` followed by `when Other =>`),
