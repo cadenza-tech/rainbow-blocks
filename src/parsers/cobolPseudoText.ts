@@ -263,13 +263,22 @@ export function getPseudoTextStarts(source: string, callbacks: CobolHelperCallba
   while (i < source.length) {
     const ch = source[i];
     // End of statement: period (outside strings/comments — those are handled
-    // by the if-cases below). Reset all statement-level flags.
+    // by the if-cases below). Reset all statement-level flags. The period must
+    // be skipped when it falls in the fixed-format identification area (visual
+    // cols 72+) — compiler-ignored free text — otherwise a `.` typed into
+    // sequence-area or identification-area padding spuriously closes the
+    // active COPY REPLACING context and the next `==IF==` is no longer
+    // classified as pseudo-text. Mirrors the identification-area guard already
+    // applied to `=`/letter/`E` further below.
     if (ch === '.') {
-      let lineStart = i;
-      while (lineStart > 0 && source[lineStart - 1] !== '\n' && source[lineStart - 1] !== '\r') {
-        lineStart--;
+      if (identAreaStart === -2) {
+        identAreaStart = computeIdentificationAreaStart(source, currentLineStart);
       }
-      if (!isFixedFormatCommentLine(source, lineStart)) {
+      if (identAreaStart >= 0 && i >= identAreaStart) {
+        i++;
+        continue;
+      }
+      if (!isFixedFormatCommentLine(source, currentLineStart)) {
         sawCopy = false;
         inReplaceContext = false;
         copyWordsSeen = 0;
