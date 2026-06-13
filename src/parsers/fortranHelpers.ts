@@ -105,6 +105,45 @@ export function matchFortranString(source: string, pos: number, quote: string): 
   return { start: pos, end: source.length };
 }
 
+// Matches a C preprocessor directive (`#define`, `#if`, ...) from pos to end of line,
+// following backslash-newline line continuations so multi-line macro definitions are
+// excluded as a single region. A trailing `\` immediately before a line break (LF, CRLF,
+// or CR-only) continues the logical line onto the next physical line, so keywords on the
+// continuation lines are macro text, not Fortran code. An even number of consecutive
+// backslashes does not continue (the last `\` is escaped). Unterminated continuation at
+// EOF excludes to source end.
+export function matchPreprocessorDirective(source: string, pos: number): ExcludedRegion {
+  let i = pos;
+  while (i < source.length) {
+    const char = source[i];
+    if (char === '\n' || char === '\r') {
+      // Count consecutive backslashes immediately before the line break.
+      // For CRLF, skip the CR so the backslash count starts before it.
+      let j = i - 1;
+      if (char === '\n' && j >= 0 && source[j] === '\r') {
+        j--;
+      }
+      let backslashCount = 0;
+      while (j >= 0 && source[j] === '\\') {
+        backslashCount++;
+        j--;
+      }
+      // Odd number of backslashes means line continuation: consume the line break and continue.
+      if (backslashCount % 2 === 1) {
+        if (char === '\r' && i + 1 < source.length && source[i + 1] === '\n') {
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      return { start: pos, end: i };
+    }
+    i++;
+  }
+  return { start: pos, end: source.length };
+}
+
 // Collapses Fortran & continuation lines into a single logical line
 // Handles: & followed by optional trailing content and newline, intermediate comment-only
 // lines, continuation-only lines (just &), and optional leading & on the next content line

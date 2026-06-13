@@ -15,7 +15,8 @@ import {
   isPrecedingContinuationKeyword,
   isTypeSpecifier,
   matchElseWhere,
-  matchFortranString
+  matchFortranString,
+  matchPreprocessorDirective
 } from './fortranHelpers';
 import type { InterfaceSpan } from './fortranValidation';
 import {
@@ -911,9 +912,12 @@ export class FortranBlockParser extends BaseBlockParser {
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
-    // C preprocessor directive: # at line start (after optional whitespace)
+    // C preprocessor directive: # at line start (after optional whitespace).
+    // Backslash-newline continuations extend the directive across physical lines, so
+    // multi-line macro definitions are excluded as one region (matchSingleLineComment
+    // would stop at the first newline and leak continuation-line keywords as code).
     if (char === '#' && isAtLineStartAllowingWhitespace(source, pos)) {
-      return this.matchSingleLineComment(source, pos);
+      return matchPreprocessorDirective(source, pos);
     }
 
     // Fixed-form comment: * in column 1, or C/c in column 1 followed by non-identifier char
