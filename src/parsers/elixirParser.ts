@@ -342,21 +342,48 @@ export class ElixirBlockParser extends BaseBlockParser {
   }
 
   // Checks if `fn` at `position` is a value/variable for a preceding block keyword.
-  // True only when fn is directly followed by `do` (after whitespace) AND preceded by a
-  // do-block keyword on the same statement. `fn ->` (arrow syntax) is real fn and returns
-  // false. Used by hasDoKeyword's fn tracking to suppress fnDepth++ when fn is a value
+  // True only when fn is followed by `do`/`do:` AND preceded by a do-block keyword on the
+  // same statement. `fn ->` (arrow syntax) is real fn and returns false. Used by
+  // hasDoKeyword's fn tracking to suppress fnDepth++ when fn is a value
   // (e.g. `case fn do ... end` — fn is the case value, do belongs to case).
   private isFnDirectlyFollowedByDoAfterBlockKw(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
-    // Scan forward from after `fn`. Must find `do` with word boundary before any other token.
-    let j = position + 2;
-    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) {
-      j++;
+    // Scan forward from after `fn` to the next significant token. Whitespace, newlines, and
+    // comments are skipped (a newline between fn and do is just whitespace in Elixir, like
+    // `case fn\ndo ... end`). A single leading comma is also skipped so the keyword-list form
+    // `fn, do: v` is recognized (fn is the value, do: is the outer block's one-liner).
+    // A genuine anonymous function uses arrow syntax (`fn -> ...`): the next significant token
+    // is then `->`, not `do`, so this returns false and fn stays a real opener.
+    let j = this.skipWhitespaceCommentsNewlines(source, position + 2, excludedRegions);
+    if (source[j] === ',') {
+      j = this.skipWhitespaceCommentsNewlines(source, j + 1, excludedRegions);
     }
     if (source.slice(j, j + 2) !== 'do') return false;
     const afterDo = source[j + 2];
     if (afterDo !== undefined && /[a-zA-Z0-9_]/.test(afterDo)) return false;
     // Must be preceded by a do-block keyword on the same statement (use existing helper).
     return this.isValueForPrecedingBlockKeyword(source, position, 'fn', excludedRegions);
+  }
+
+  // Advances past spaces, tabs, newlines (\n/\r), and single-line comments (excluded
+  // regions) starting at `pos`, returning the position of the next significant character.
+  // Mirrors the skip used by isFnParensFollowedByDo so `fn` value detection handles the same
+  // whitespace/comment shapes between `fn` and its trailing `do`.
+  private skipWhitespaceCommentsNewlines(source: string, pos: number, excludedRegions: ExcludedRegion[]): number {
+    let i = pos;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      break;
+    }
+    return i;
   }
 
   // Checks if this keyword is being used as a variable/value for a preceding block keyword.
@@ -1532,7 +1559,12 @@ export class ElixirBlockParser extends BaseBlockParser {
             word === 'fn' &&
             !/[?!]/.test(source[i + word.length] || '') &&
             !(i > 0 && (source[i - 1] === '.' || source[i - 1] === '@' || (source[i - 1] === '&' && (i < 2 || source[i - 2] !== '&')))) &&
-            !this.isAdjacentToUnicodeLetter(source, i, 2)
+            !this.isAdjacentToUnicodeLetter(source, i, 2) &&
+            // fn used as a value for a preceding block keyword (fn followed by do/do:, e.g.
+            // `if fn, do: v do`) is not an inner block; its do: belongs to the outer opener.
+            // Without this guard the do: is consumed as the fn's inner block and the do:
+            // one-liner is missed, mirroring hasDoKeyword's fn tracking guard.
+            !this.isFnDirectlyFollowedByDoAfterBlockKw(source, i, excludedRegions)
           ) {
             innerBlockDepth++;
             i += word.length;
