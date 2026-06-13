@@ -1246,15 +1246,19 @@ export class PascalBlockParser extends BaseBlockParser {
           continue;
         }
 
-        // Skip end preceded by `.` (field access like `foo.end` inside asm body)
-        if (endPos > 0 && source[endPos - 1] === '.') {
-          continue;
-        }
-
-        // Skip end preceded by `@` (assembly local label like `@end` used as branch target).
-        // Borland/Delphi asm uses `@name` for local labels; `JMP @end` references such a label.
-        if (endPos > 0 && source[endPos - 1] === '@') {
-          continue;
+        // Skip end preceded by `.` (field access like `foo.end` inside asm body),
+        // `@` (asm local label `@end`), `$` (hex-literal prefix `$end`), `#`
+        // (char-constant prefix `#end`), or `&` (FreePascal identifier-escape `&end`).
+        // Must stay in sync with the reject set in isValidBlockClose: a prefix that
+        // disqualifies an `end` token as a block-close keyword must also disqualify it
+        // as the asm-body terminator. Without this, a prefixed `end` inside the asm
+        // body is taken as the asm-closing `end`, the real asm closing `end` is left
+        // dangling, and a spurious case/end pair appears with the wrong outer block.
+        if (endPos > 0) {
+          const prev = source[endPos - 1];
+          if (prev === '.' || prev === '@' || prev === '$' || prev === '#' || prev === '&') {
+            continue;
+          }
         }
 
         // Skip end preceded by `;` on the same line. In asm bodies (Intel/AT&T syntax),
