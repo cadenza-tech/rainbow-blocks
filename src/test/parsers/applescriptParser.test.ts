@@ -4040,5 +4040,27 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: else if(x) function-call form must not attach else as intermediate', () => {
+    // `else if(x)` is a function-call form (invoking `if` as a function with arg `x`),
+    // not an `else if` block_middle. The compound `else if` matcher rejects it (because
+    // it is immediately followed by `(`), but the fallback single-keyword path was
+    // matching just `else` and attaching it as an intermediate of the enclosing `if`.
+    // The single-keyword `else` matcher must also reject this shape so the result
+    // contains no spurious intermediate.
+    test('should not attach else as intermediate when followed by if(', () => {
+      const source = 'if x then\n  beep\nelse if(x)\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should still attach a genuine else if as intermediate when then follows', () => {
+      const source = 'if x then\n  beep\nelse if y then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if']);
+    });
+  });
+
   generateCommonTests(config);
 });
