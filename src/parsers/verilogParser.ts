@@ -993,20 +993,28 @@ export class VerilogBlockParser extends BaseBlockParser {
 
   // For a token starting just after a close keyword whose next non-trivia
   // character is the label colon (`<close_kw> : <name> ...`), returns true when
-  // the `<name>` after the colon is itself followed by `=` (assignment operator,
-  // not `==`/`<=`/etc. comparison). This is the discriminator between the two
+  // the `<name>` after the colon is itself followed by a statement-like
+  // continuation: any assignment operator (`=`, `<=`, `+=`, `-=`, `*=`, `/=`,
+  // `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, etc.), increment/decrement (`++`,
+  // `--`), or `(` (function call). This is the discriminator between the two
   // interpretations of `<close_kw> : <name>`:
-  //   - true  → case_item label-name misuse pattern `endcase : x = 1;`
-  //             where `x = 1;` is the case_item body. Suppress.
-  //   - false → invalid end-label suffix attempt `endcase : my_label` or
-  //             `endcase : my_label;`. Keep the close keyword tokenized.
+  //   - true  → case_item label-name misuse pattern (`endcase : x = 1;`,
+  //             `endcase : x <= y;`, `endcase : x++;`, `endcase : foo();`),
+  //             where `<name> ...` is the case_item statement body. Suppress.
+  //   - false → invalid end-label suffix attempt (`endcase : my_label` or
+  //             `endcase : my_label;` with no statement-like continuation).
+  //             Keep the close keyword tokenized.
   //
   // `searchStart` is the offset immediately after the close keyword's last
   // character. The scan skips whitespace, line comments, and block comments to
   // find the colon, then the label name, then the next non-trivia character.
-  // When the label name or the trailing `=` cannot be located, returns false
-  // (treat as not-an-assignment so the close keyword stays tokenized — the
-  // safer default per best-effort parsing).
+  // When the label name or the statement-like continuation cannot be located,
+  // returns false (treat as end-label suffix so the close keyword stays
+  // tokenized — the safer default per best-effort parsing).
+  //
+  // Comparison operators (`==`, `===`, `!=`, `!==`) and `<<`/`>>`/`<`/`>` shift
+  // / comparison forms are excluded: those are expression operators, not
+  // statement bodies, and `<name> == ...` is not a case_item body shape.
   private isLabelColonFollowedByAssignment(source: string, searchStart: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = this.skipForwardTrivia(source, searchStart, excludedRegions);
     if (i >= source.length || source[i] !== ':') return false;
@@ -1017,10 +1025,36 @@ export class VerilogBlockParser extends BaseBlockParser {
     if (i >= source.length || !/[a-zA-Z_]/.test(source[i])) return false;
     while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
     i = this.skipForwardTrivia(source, i, excludedRegions);
-    if (i >= source.length || source[i] !== '=') return false;
-    // Exclude `==` / `===` comparison operators (they are not assignment).
-    if (i + 1 < source.length && source[i + 1] === '=') return false;
-    return true;
+    if (i >= source.length) return false;
+    const ch = source[i];
+    const next = i + 1 < source.length ? source[i + 1] : '';
+    // `(` → function-call statement (`endcase : foo();`).
+    if (ch === '(') return true;
+    // `++` / `--` → increment / decrement statement.
+    if ((ch === '+' || ch === '-') && next === ch) return true;
+    // Compound assignment operators that end in `=` (`+=`, `-=`, `*=`, `/=`,
+    // `%=`, `&=`, `|=`, `^=`). The op char itself must be one of these and the
+    // next char must be `=`.
+    if ((ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '%' || ch === '&' || ch === '|' || ch === '^') && next === '=') return true;
+    // `<=` → non-blocking assignment (statement body). Plain `<` and `<<` are
+    // expression operators only — exclude them.
+    if (ch === '<' && next === '=') return true;
+    // `<<=` / `<<<=` shift-assign forms.
+    if (ch === '<' && next === '<') {
+      // `<<=` → after `<<` look for `=`. `<<<=` (4-state arithmetic) also ends `=`.
+      let j = i + 2;
+      if (j < source.length && source[j] === '<') j++;
+      return j < source.length && source[j] === '=';
+    }
+    // `>>=` / `>>>=` shift-assign forms.
+    if (ch === '>' && next === '>') {
+      let j = i + 2;
+      if (j < source.length && source[j] === '>') j++;
+      return j < source.length && source[j] === '=';
+    }
+    // Bare `=` (blocking assignment). Exclude `==` / `===` (comparison).
+    if (ch === '=' && next !== '=') return true;
+    return false;
   }
 
   // Walks `pos` forward over whitespace, line comments (`//...`), and block
