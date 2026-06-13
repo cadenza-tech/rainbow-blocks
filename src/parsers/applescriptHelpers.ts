@@ -275,9 +275,10 @@ export function findLogicalLineEnd(
   }
   // Check if line ends with continuation
   while (lineEnd < source.length) {
-    // Find last non-whitespace before line end
+    // Find last non-whitespace before line end. Skip ASCII whitespace and Unicode
+    // whitespace (NBSP etc.) so `\u00AC<NBSP>\n` is still recognized as a continuation.
     let checkPos = lineEnd - 1;
-    while (checkPos > position && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
+    while (checkPos > position && (source[checkPos] === ' ' || source[checkPos] === '\t' || isUnicodeWhitespace(source[checkPos]))) {
       checkPos--;
     }
     // Skip excluded regions backward (e.g., single-line comments like "-- comment")
@@ -286,7 +287,7 @@ export function findLogicalLineEnd(
         const region = callbacks.findExcludedRegionAt(checkPos, excludedRegions);
         if (region) {
           checkPos = region.start - 1;
-          while (checkPos > position && (source[checkPos] === ' ' || source[checkPos] === '\t')) {
+          while (checkPos > position && (source[checkPos] === ' ' || source[checkPos] === '\t' || isUnicodeWhitespace(source[checkPos]))) {
             checkPos--;
           }
           continue;
@@ -347,9 +348,10 @@ export function findLogicalLineStart(
     if (prevChar === '\n' && checkPos > 0 && source[checkPos - 1] === '\r') {
       checkPos--;
     }
-    // Find last non-whitespace before newline
+    // Find last non-whitespace before newline. Skip ASCII whitespace and Unicode
+    // whitespace (NBSP etc.) so `\u00AC<NBSP>\n` is still recognized as a continuation.
     let contentEnd = checkPos - 1;
-    while (contentEnd >= 0 && (source[contentEnd] === ' ' || source[contentEnd] === '\t')) {
+    while (contentEnd >= 0 && (source[contentEnd] === ' ' || source[contentEnd] === '\t' || isUnicodeWhitespace(source[contentEnd]))) {
       contentEnd--;
     }
     // Skip excluded regions backward (e.g., single-line comments like "-- comment")
@@ -358,7 +360,7 @@ export function findLogicalLineStart(
         const region = callbacks.findExcludedRegionAt(contentEnd, excludedRegions);
         if (region) {
           contentEnd = region.start - 1;
-          while (contentEnd >= 0 && (source[contentEnd] === ' ' || source[contentEnd] === '\t')) {
+          while (contentEnd >= 0 && (source[contentEnd] === ' ' || source[contentEnd] === '\t' || isUnicodeWhitespace(source[contentEnd]))) {
             contentEnd--;
           }
           continue;

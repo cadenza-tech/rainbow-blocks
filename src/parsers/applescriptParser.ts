@@ -918,7 +918,9 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     let prevEnd = lineStart - 1;
     if (prevEnd >= 0 && source[prevEnd] === '\n') prevEnd--;
     if (prevEnd >= 0 && source[prevEnd] === '\r') prevEnd--;
-    while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+    // Skip ASCII whitespace and Unicode whitespace (NBSP etc.) so `¬<NBSP>\n` is still
+    // recognized as a continuation marker.
+    while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t' || isUnicodeWhitespace(source[prevEnd]))) {
       prevEnd--;
     }
     // Skip excluded regions backward (e.g., single-line comments like "-- comment")
@@ -926,7 +928,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       const region = this.findExcludedRegionAt(prevEnd, excludedRegions);
       if (region) {
         prevEnd = region.start - 1;
-        while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+        while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t' || isUnicodeWhitespace(source[prevEnd]))) {
           prevEnd--;
         }
         continue;
@@ -1070,12 +1072,14 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
       lineStart--;
     }
-    // Check if previous physical line ends with continuation character
+    // Check if previous physical line ends with continuation character.
+    // Skip ASCII whitespace and Unicode whitespace (NBSP etc.) so `\u00AC<NBSP>\n` is still
+    // recognized as a continuation marker.
     if (lineStart > 0) {
       let prevEnd = lineStart - 1;
       if (prevEnd >= 0 && source[prevEnd] === '\n') prevEnd--;
       if (prevEnd >= 0 && source[prevEnd] === '\r') prevEnd--;
-      while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+      while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t' || isUnicodeWhitespace(source[prevEnd]))) {
         prevEnd--;
       }
       // Skip excluded regions backward (e.g., single-line comments like "-- comment")
@@ -1083,7 +1087,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         const region = this.findExcludedRegionAt(prevEnd, excludedRegions);
         if (region) {
           prevEnd = region.start - 1;
-          while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t')) {
+          while (prevEnd >= 0 && (source[prevEnd] === ' ' || source[prevEnd] === '\t' || isUnicodeWhitespace(source[prevEnd]))) {
             prevEnd--;
           }
           continue;
