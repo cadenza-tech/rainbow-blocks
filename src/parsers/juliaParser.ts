@@ -59,26 +59,25 @@ const JULIA_RESERVED_WORDS: ReadonlySet<string> = new Set<string>([
   'abstract',
   'primitive',
   // Non-block reserved words that cannot be macro names but are NOT block keywords.
+  // Per Julia 1.0+ reserved word list. Note that `type`, `mutable`, `missing`, `nothing`,
+  // `throw`, `isa` are NOT reserved words: `type` was removed in Julia 1.0, `mutable` is a
+  // soft contextual keyword (only reserved in `mutable struct`), `missing`/`nothing` are
+  // built-in values, and `throw`/`isa` are built-in functions. All of these are valid
+  // identifiers and may be used as string/command macro names (`@type_str`, `@isa_str`...).
   'where',
   'import',
   'using',
   'export',
   'public',
   'in',
-  'isa',
   'return',
-  'throw',
   'break',
   'continue',
   'global',
   'local',
   'const',
   'true',
-  'false',
-  'nothing',
-  'missing',
-  'type',
-  'mutable'
+  'false'
 ]);
 
 export class JuliaBlockParser extends BaseBlockParser {
