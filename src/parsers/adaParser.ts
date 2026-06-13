@@ -872,8 +872,17 @@ export class AdaBlockParser extends BaseBlockParser {
               // Continue if inside parenthesized discriminant (scanParenDepth > 0) or line starts with (
               // Also continue past plain identifier lines (e.g., type name on its own line)
               if (!isTypeDecl && scanParenDepth <= 0 && !/^\(/.test(prevLine)) {
-                // Allow one extra line if this line is just an identifier (type name)
-                if (/^[a-zA-Z_][a-zA-Z0-9_]*[ \t]*$/.test(prevLine)) {
+                // Allow one extra line if this line is just an identifier (type
+                // name). Ada LRM 2.3 identifiers may begin with and contain
+                // non-ASCII letters (e.g. Groesse with an umlaut), so the
+                // character classes include any non-ASCII code unit
+                // (U+0080 to U+FFFF) in addition to ASCII word chars, matching
+                // the charCodeAt(0) > 127 isWordChar definition used throughout
+                // this parser. An ASCII-only class would fail to recognize a
+                // Unicode type name on its own line, stopping the backward scan
+                // before it reached the `type` keyword and leaking the
+                // declaration `is` as the enclosing block's intermediate.
+                if (/^[a-zA-Z_\u0080-\uFFFF][a-zA-Z0-9_\u0080-\uFFFF]*[ \t]*$/.test(prevLine)) {
                   scanPos = this.skipPreviousLineTerminator(source, prevStart - 1);
                   continue;
                 }
