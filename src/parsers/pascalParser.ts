@@ -246,13 +246,19 @@ export class PascalBlockParser extends BaseBlockParser {
       return true;
     }
 
-    // Comparison-context 'record': `if X = record then` uses `record` as a comparison
-    // operand, not a type definition. Mirrors the class/object/interface comparison check
-    // below. Without this guard the spurious `record` is pushed onto the stack and the
-    // surrounding `end` closes it instead of the real enclosing block. A type-definition
-    // `TFoo = record` is unaffected because isPrecededByComparisonEquals only fires when
-    // the preceding `=` is a comparison operator.
-    if (keyword === 'record' && isPrecededByComparisonEquals(source, position, excludedRegions, this.validationCallbacks)) {
+    // Comparison-context 'record'/'try'/'case'/'begin'/'repeat': `if X = record then`
+    // (and analogous forms with `try`, `case`, `begin`, `repeat`) use the keyword as a
+    // comparison operand, not a block opener. Mirrors the class/object/interface
+    // comparison check below. Without this guard the spurious opener is pushed onto the
+    // stack and the surrounding `end`/`until` closes it instead of the real enclosing
+    // block, leaving the outer block orphan. A type-definition `TFoo = record` is
+    // unaffected because isPrecededByComparisonEquals only fires when the preceding `=`
+    // is a comparison operator (and `try`/`case`/`begin`/`repeat` never appear in a real
+    // `= keyword` type definition anyway).
+    if (
+      (keyword === 'record' || keyword === 'try' || keyword === 'case' || keyword === 'begin' || keyword === 'repeat') &&
+      isPrecededByComparisonEquals(source, position, excludedRegions, this.validationCallbacks)
+    ) {
       return false;
     }
 
