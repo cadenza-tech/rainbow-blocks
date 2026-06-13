@@ -5951,6 +5951,29 @@ fi`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'case', 'esac');
     });
+
+    test('should not emit a phantom case token when case\\<newline>X extends to a non-keyword word', () => {
+      // Bash collapses `\<newline>` lexically, so `case\<newline>X` is the single
+      // logical word `caseX`, which is not a reserved keyword. No `case` token
+      // should be emitted, so the stray `esac` finds no opener and stays orphan.
+      const source = 'case\\\nX in echo;; esac';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not emit a phantom do intermediate when do\\<newline>X extends to a non-keyword word', () => {
+      // `do\<newline>nXXX` is the logical word `donXXX`, not `do` and not `done`.
+      // The regex tokenizer's `do` match must be dropped so it is not injected as
+      // a phantom intermediate into the for-loop. The body's real `do`/`done` pair
+      // up; the spurious `do\<newline>nXXX` contributes nothing.
+      const source = 'for i in 1; do echo; do\\\nnXXX foo; done';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'done');
+      // The for-loop must have exactly one intermediate `do` (the real body opener),
+      // and it must be the contiguous one at offset 12, not the spurious `do` at offset 21.
+      assertIntermediates(pairs[0], ['do']);
+      assert.strictEqual(pairs[0].intermediates[0].startOffset, 12);
+    });
   });
 
   suite('Regression: empty case in subshell on one line closes properly', () => {
