@@ -129,7 +129,14 @@ export function isValidSubprogramOpen(
     const candidate = source.slice(scanPos - 5, scanPos + 1);
     if (candidate.toLowerCase() === 'access') {
       const beforeAccess = scanPos - 6;
-      if (beforeAccess < 0 || !/[a-zA-Z0-9_]/.test(source[beforeAccess])) {
+      // Use the Unicode-aware isAdaWordChar for the left boundary so an
+      // identifier ending in `access` after a non-ASCII letter (e.g.
+      // `Ñaccess`, Ñ = U+00D1) is recognized as a single Ada identifier
+      // (LRM 2.3) rather than the reserved word `access`. An ASCII-only
+      // boundary would misread `Ñaccess procedure F is` as an access type
+      // and wrongly suppress the subprogram body. Matches the boundary
+      // logic isValidProtectedOpen already uses via endsWithWord.
+      if (beforeAccess < 0 || !isAdaWordChar(source[beforeAccess])) {
         return false;
       }
     }
