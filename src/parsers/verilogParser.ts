@@ -1394,7 +1394,42 @@ export class VerilogBlockParser extends BaseBlockParser {
     if (this.keywords.blockOpen.includes(word)) return false;
     if (this.keywords.blockClose.includes(word)) return false;
     if (this.keywords.blockMiddle.includes(word)) return false;
+    // Reject if the preceding identifier itself follows an assignment / equality
+    // operator (`=`, `<=`, `>=`, `==`, `!=`). In that case the identifier is the
+    // rvalue of an expression (e.g., `q <= d end (clk)` — a semicolon-missing
+    // typo), NOT a module type identifier introducing an instantiation.
+    // Suppressing the close keyword here would falsely drop the orphan-prevention
+    // close, breaking the BlockPair set further than leaving the close in place.
+    // We deliberately restrict to the `=` family to avoid weakening scenario A
+    // (`module top; sub endmodule (.x(y));`), where the identifier `sub`
+    // follows `;` or a newline (a statement boundary, NOT `=`).
+    if (this.isPrecededByAssignmentOperator(source, i + 1, excludedRegions)) return false;
     return true;
+  }
+
+  // Returns true when the character just before `position` (after skipping
+  // backward through whitespace and comments) is `=` (matching bare `=`,
+  // `<=`, `>=`, `==`, `!=`). Used by `isInInstanceNamePosition` to distinguish
+  // between a real module-type identifier (preceded by a statement boundary
+  // like `;` or `begin`) and an rvalue identifier (preceded by an assignment
+  // operator) inside a semicolon-missing typo such as `q <= d end (clk)`.
+  private isPrecededByAssignmentOperator(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) return false;
+    return source[i] === '=';
   }
 
   // Finds excluded regions: comments and strings
