@@ -4938,5 +4938,48 @@ end Pkg;`;
     });
   });
 
+  suite('Select then abort regression', () => {
+    test('should keep then intermediate for then abort when expression ends with and', () => {
+      // LRM 9.7.4 select asynchronous transfer of control. The triggering
+      // expression `A and` ends in `and` and the line wraps before `then`, but
+      // the `then` here begins the `then abort` of the ATC, not an `and then`
+      // short-circuit. It must remain the select's intermediate.
+      const source = `select
+  X := A and
+  then abort
+    Long;
+end select;`;
+      const pairs = parser.parse(source);
+      const sel = findBlock(pairs, 'select');
+      assertIntermediates(sel, ['then']);
+    });
+
+    test('should keep then intermediate for plain then abort (control)', () => {
+      // Plain ATC where the triggering statement is a delay; the `then abort`
+      // `then` is the select intermediate.
+      const source = `select
+  delay 1.0;
+  then abort
+    Long;
+end select;`;
+      const pairs = parser.parse(source);
+      const sel = findBlock(pairs, 'select');
+      assertIntermediates(sel, ['then']);
+    });
+
+    test('should still drop and-then short-circuit then before a non-abort operand', () => {
+      // Guard against over-keeping: a genuine `and then` short-circuit inside an
+      // if condition (followed by an operand, not `abort`) must still be
+      // collapsed, leaving only the real if-`then` intermediate.
+      const source = `if A and
+  then B then
+  null;
+end if;`;
+      const pairs = parser.parse(source);
+      const iff = findBlock(pairs, 'if');
+      assertIntermediates(iff, ['then']);
+    });
+  });
+
   generateCommonTests(config);
 });
