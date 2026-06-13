@@ -24,10 +24,14 @@ export function isHorizontalWhitespace(ch: string | undefined): boolean {
 // Checks if position is at line start allowing leading whitespace.
 // Also skips a leading UTF-8/UTF-16 BOM (U+FEFF) so files saved with a byte-order mark
 // still recognise block comments (`%{`/`#{`) and shell escapes (`!`) at the file start.
+// Vertical tab (`\v`) and form feed (`\f`) are also treated as horizontal whitespace,
+// kept consistent with isBlockCommentStart in matlabExcluded.ts so that both legs of
+// nested block-comment matching (the leading `%{`/`%}` test AND the trailing-content
+// test) accept the same whitespace characters.
 export function isAtLineStartWithWhitespace(source: string, pos: number): boolean {
   if (pos === 0) return true;
   let i = pos - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '﻿')) {
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\v' || source[i] === '\f' || source[i] === '﻿')) {
     i--;
   }
   return i < 0 || source[i] === '\n' || source[i] === '\r';
