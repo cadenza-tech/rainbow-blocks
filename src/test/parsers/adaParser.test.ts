@@ -4898,6 +4898,44 @@ begin null; end F;`;
       const proc = findBlock(pairs, 'procedure');
       assertIntermediates(proc, ['is', 'begin']);
     });
+
+    test('should not leak type-decl is when previous line is identifier ending in protected', () => {
+      // `Ñprotected` (Ñ = U+00D1) is a single identifier, not the reserved word
+      // `protected`. The type-decl `is` filter must not treat the previous line
+      // as a `protected` block prefix, so the declaration `is` stays filtered
+      // out and the package keeps only its own `is` intermediate.
+      const source = `package body Pkg is
+  Ñprotected
+  type T is range 1..10;
+end Pkg;`;
+      const pairs = parser.parse(source);
+      const pkg = findBlock(pairs, 'package');
+      assertIntermediates(pkg, ['is']);
+    });
+
+    test('should not leak type-decl is when previous line is identifier ending in task', () => {
+      // Same as the `protected` case for the other reserved-word suffix: a
+      // non-ASCII-prefixed `Ñtask` is an identifier, not the reserved `task`.
+      const source = `package body Pkg is
+  Ñtask
+  type T is range 1..10;
+end Pkg;`;
+      const pairs = parser.parse(source);
+      const pkg = findBlock(pairs, 'package');
+      assertIntermediates(pkg, ['is']);
+    });
+
+    test('should keep type-decl is filtering for ASCII identifier ending in protected', () => {
+      // ASCII control: `Xprotected` is an identifier, so the type-decl `is` is
+      // filtered and the package has only its own `is` intermediate.
+      const source = `package body Pkg is
+  Xprotected
+  type T is range 1..10;
+end Pkg;`;
+      const pairs = parser.parse(source);
+      const pkg = findBlock(pairs, 'package');
+      assertIntermediates(pkg, ['is']);
+    });
   });
 
   generateCommonTests(config);
