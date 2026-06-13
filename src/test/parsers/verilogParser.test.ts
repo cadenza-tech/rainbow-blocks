@@ -5666,5 +5666,80 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: instance-type-position suppression for close keyword followed by identifier and parens', () => {
+    // A SystemVerilog module instantiation has the form
+    //   <module_type_id> [#(...)] <instance_name> (<port_list>)
+    // If a reserved word appears in the `<module_type_id>` position (e.g.,
+    // `endmodule sub_inst()`), it is being misused as a type identifier. The
+    // previous `isInInstanceNamePosition` check covered only the
+    // `<type_id> <close_kw> (` (close keyword as instance NAME) form; it did
+    // not cover the inverse `<close_kw> <identifier> (` (close keyword as
+    // instance TYPE) form. Without the new suppression the inner `endmodule`
+    // incorrectly paired with the outer `module top`, leaving the trailing
+    // `endmodule` orphan.
+    test('should suppress `endmodule` in `endmodule sub_inst();`', () => {
+      const source = 'module top;\n  endmodule sub_inst();\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset);
+    });
+
+    test('should suppress `endfunction` in `endfunction inst();`', () => {
+      const source = 'function f;\n  endfunction inst();\nendfunction';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+      const fnPair = findBlock(pairs, 'function');
+      const trailingOffset = source.lastIndexOf('endfunction');
+      assert.strictEqual(fnPair.closeKeyword?.startOffset, trailingOffset);
+    });
+
+    test('should suppress `endmodule` in `endmodule inst(.x(y));`', () => {
+      // Same pattern with port connections inside the parens.
+      const source = 'module top;\n  endmodule inst(.x(y));\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset);
+    });
+
+    test('should still pair `endmodule` followed only by `;` (sanity)', () => {
+      // No identifier-then-`(` pattern after the close keyword. The trailing
+      // `endmodule;` must remain tokenized and pair with the open `module`.
+      const source = 'module top;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still pair `endmodule` followed by another module declaration (sanity)', () => {
+      // The next non-trivia token is the reserved word `module`, not a plain
+      // identifier, so the new suppression must not fire. The first
+      // module/endmodule pair must remain.
+      const source = 'module a;\nendmodule\nmodule b;\nendmodule';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still pair `endmodule` followed by `(* attribute *)` (sanity)', () => {
+      // After `endmodule` the next non-trivia token is `(*` (attribute), not a
+      // plain identifier followed by `(`, so the new suppression must not fire.
+      const source = 'module top;\nendmodule\n(* keep *) wire y;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still pair `endmodule` followed by trailing identifier without parens (end-label attempt)', () => {
+      // `endmodule my_label` (no parens) is an invalid end-label suffix attempt
+      // but the close keyword itself remains tokenized so the outer block
+      // pairs. The instance-type-position suppression requires the trailing
+      // `(` and must not fire here.
+      const source = 'module top;\nendmodule my_label';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+  });
+
   generateCommonTests(config);
 });
