@@ -1104,16 +1104,14 @@ export class MatlabBlockParser extends BaseBlockParser {
               });
               if (!hasFunctionOrClass) {
                 // Drop the token: an `arguments` block outside of any function/methods/
-                // classdef context cannot be a real arguments block. When the keyword is
-                // followed by `(` (e.g. `arguments(obj)`) it's a function call with no
-                // stray `end` expected, so we drop without pendingSkipDepth — pushing
-                // pendingSkipDepth here would consume a legitimate `end` from an outer
-                // block. When the keyword is bare (no `(`), the user likely wrote a
-                // stray `end` for it; record pendingSkipDepth so the next `end` at this
-                // depth is skipped instead of pairing with an outer block.
-                if (!this.sectionKeywordsWithParen.has(token.startOffset)) {
-                  pendingSkipDepths.push(stack.length);
-                }
+                // classdef context cannot be a real arguments block. The `arguments(obj)`
+                // function-call form has already been filtered out by isMatlabArgumentsFunctionCall
+                // in isValidBlockOpen, so any `arguments` token reaching here is either bare
+                // or the VALID attribute form (`arguments(Input)`, `arguments(Output)`,
+                // `arguments(Repeating)`). In BOTH cases the user likely wrote a stray `end`
+                // expecting a real arguments block to open: push pendingSkipDepth so the next
+                // `end` at this depth is skipped instead of pairing with an outer block.
+                pendingSkipDepths.push(stack.length);
                 break;
               }
             } else {
