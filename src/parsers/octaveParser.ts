@@ -385,21 +385,29 @@ export class OctaveBlockParser extends MatlabBlockParser {
           if (ch === '?' || ch === '!' || ch === '@' || ch === '+' || ch === '-' || ch === '~') {
             return false;
           }
+          // Use codePointAt so SMP (supplementary plane) characters encoded as surrogate
+          // pairs (e.g. U+1D400 Math Bold Cap A — `𝐀`) are recognised as a single code
+          // point rather than a lone high surrogate. Without this, `\p{L}` would not match
+          // the high surrogate half and `do 𝐀` would slip through as a do/until opener.
+          const cp = source.codePointAt(probe);
+          const chFull = cp !== undefined ? String.fromCodePoint(cp) : ch;
           // `do 5` / `do "s"` — a numeric literal or double-quoted string after `do` on the
           // same line is an implicit-multiplication operand or command-syntax argument, not a
           // do/until block body. (`do .5` is rejected by the field-access `.` check and
           // `do 's'` by the transpose-vs-string check elsewhere, so only digits and `"` are
           // missing from the rejection set here.) `\p{Nd}` covers Unicode decimal digits such
           // as U+0665 (Arabic-Indic five), so `do ٥` is rejected like ASCII `do 5`.
-          if (/\p{Nd}/u.test(ch) || ch === '"') {
+          if (/\p{Nd}/u.test(chFull) || ch === '"') {
             return false;
           }
           // Identifier following `do` on the same physical line (`do x;`, `do foo`, etc.).
           // Includes ASCII letters/_ and Unicode letters for symmetry with the rest of the
           // parser. Do NOT skip across line continuations here — `do ...<NL>body` is a
           // legitimate continuation-based do/until form (probe stops at `.` of `...` which
-          // is not an identifier char, so this branch is not entered).
-          if (/[a-zA-Z_]/.test(ch) || /\p{L}/u.test(ch)) {
+          // is not an identifier char, so this branch is not entered). The Unicode-letter
+          // check uses the surrogate-pair-aware code point (`chFull`) so SMP letters like
+          // U+1D400 (Math Bold Cap A — `𝐀`) are recognised in `do 𝐀` and rejected.
+          if (/[a-zA-Z_]/.test(ch) || /\p{L}/u.test(chFull)) {
             return false;
           }
           // Unicode symbol following `do` on the same physical line (`do ×`, `do ÷`, etc.).
@@ -407,8 +415,9 @@ export class OctaveBlockParser extends MatlabBlockParser {
           // (`+`/`-`/`~`/etc.) are already rejected above; this extends the same rejection to
           // Unicode symbols so `do ×` (U+00D7) is treated like `do *` — an operand/expression
           // form, never a do/until body start. Cost-minimal: leaves `do` orphan rather than
-          // pairing it with a later `until`/`end` and destroying outer block pairing.
-          if (/\p{S}/u.test(ch)) {
+          // pairing it with a later `until`/`end` and destroying outer block pairing. Use
+          // `chFull` so SMP symbols (e.g. U+1F600+) are recognised via codePointAt as well.
+          if (/\p{S}/u.test(chFull)) {
             return false;
           }
         }
