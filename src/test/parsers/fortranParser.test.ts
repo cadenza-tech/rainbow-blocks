@@ -6482,6 +6482,42 @@ end function`;
     });
   });
 
+  suite('Performance 2026-06-14: getSelectSubtype does not blow up to O(N^2) on many select case constructs', () => {
+    // Builds N independent `select case` blocks each holding `caseCount` case branches.
+    // Each `case` token inside a block invokes getSelectSubtype(topBlock.token); pre-fix
+    // every call sliced the source from the opener to EOF and ran collapseContinuationLines
+    // over the whole suffix, giving O(N) per call and O(N^2) for the whole file.
+    function makeSelectCaseBlocks(blockCount: number, caseCount: number): string {
+      const lines: string[] = [];
+      for (let i = 0; i < blockCount; i++) {
+        lines.push(`select case (v${i})`);
+        for (let j = 0; j < caseCount; j++) {
+          lines.push(`case (${j})`);
+          lines.push(`x = ${j}`);
+        }
+        lines.push('end select');
+      }
+      return lines.join('\n');
+    }
+
+    test('should parse 1000 select-case blocks with 20 cases each without quadratic blowup', function () {
+      // Pre-fix per-case getSelectSubtype slice + collapseContinuationLines over the
+      // remaining source ran O(blockCount * caseCount * total-source-length), which on
+      // 1000 select-case blocks × 20 cases (~22000 lines) took multiple seconds and grew
+      // quadratically with input size. Caching getSelectSubtype by opener token brings
+      // the total cost back to linear. The 20s timeout fails the quadratic version while
+      // passing the cached version with a wide margin, matching the other perf tests so it
+      // also holds under c8 instrumentation in `yarn test:coverage`.
+      this.timeout(20000);
+      const blockCount = 1000;
+      const caseCount = 20;
+      const source = makeSelectCaseBlocks(blockCount, caseCount);
+      const pairs = parser.parse(source);
+      // Each select-case construct produces one block pair.
+      assertBlockCount(pairs, blockCount);
+    });
+  });
+
   suite('Regression 2026-06-14: isPrecedingContinuationKeyword recognizes chained continuation lines', () => {
     test('should pair change team across a bare-& continuation line before team', () => {
       // `change` ends with `&`, the next line is a bare `&` (no other content), and `team`
