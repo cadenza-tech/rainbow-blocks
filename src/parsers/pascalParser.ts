@@ -7,6 +7,8 @@ import type { PascalValidationCallbacks } from './pascalValidation';
 import {
   buildRecordContextMap,
   COMPARISON_CONTEXT_KEYWORDS,
+  CROSS_SCAN_CLOSE_KEYWORDS,
+  CROSS_SCAN_OPEN_KEYWORDS,
   DECLARATION_CONTEXT_SCOPE_KEYWORDS,
   isIfThenElse,
   isInsideParens,
@@ -496,8 +498,25 @@ export class PascalBlockParser extends BaseBlockParser {
     // keyword is encountered first decides the context.
     //  - statement-context keywords (begin/try/repeat/asm) => comparison
     //  - declaration-context keywords (type/var/const) => type definition
+    //
+    // A block that was already closed before the `=` (its `end`/`until` appears while
+    // scanning backward) is NOT the enclosing scope, so its opener must be skipped.
+    // Track close depth: each `end`/`until` opens a closed block, balanced by the matching
+    // opener. Only an opener seen at depth 0 is the genuine enclosing scope. Mirrors the
+    // matching closeDepth logic in isPrecededByComparisonEquals.
+    //
+    // To keep the scan O(1) amortized on long type sections (without this guard each
+    // `T_k = class end;` validation walks back O(k) chars to find `type`, producing
+    // O(N^2) overall), early-terminate once we have crossed several `;` boundaries with
+    // closeDepth=0 and no statement-context keyword in sight. A run of `;`-separated
+    // chunks at top level overwhelmingly indicates a declaration section; a statement
+    // list inside `begin..end` would surface a `begin`/`try`/`repeat`/`asm` keyword much
+    // sooner.
     if (hitSemicolon && !hitDeclarationKeyword) {
       let si = ci - 1;
+      let closeDepth = 0;
+      let semicolonsCrossed = 0;
+      const SEMICOLON_BUDGET = 3;
       while (si >= 0) {
         if (this.isInExcludedRegion(si, excludedRegions)) {
           const region = this.findExcludedRegionAt(si, excludedRegions);
@@ -507,6 +526,15 @@ export class PascalBlockParser extends BaseBlockParser {
           }
         }
         const ch = source[si];
+        if (ch === ';' && closeDepth === 0) {
+          semicolonsCrossed++;
+          if (semicolonsCrossed >= SEMICOLON_BUDGET) {
+            // Several consecutive declaration-like chunks crossed without surfacing a
+            // statement-context keyword: this is a declaration section, not a statement
+            // list. Treat the `=` as a type-definition marker.
+            break;
+          }
+        }
         if (/[a-zA-Z_]/.test(ch)) {
           const wordEnd = si;
           while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
@@ -514,10 +542,14 @@ export class PascalBlockParser extends BaseBlockParser {
           // would resolve to ASCII `begin` and force the wrong scope decision.
           if (!this.isAdjacentToUnicodeLetter(source, si, wordEnd + 1 - si)) {
             const word = source.slice(si, wordEnd + 1).toLowerCase();
-            if (STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+            if (CROSS_SCAN_CLOSE_KEYWORDS.has(word)) {
+              closeDepth++;
+            } else if (CROSS_SCAN_OPEN_KEYWORDS.has(word) && closeDepth > 0) {
+              // Opener of an already-closed block: balance the close and keep scanning.
+              closeDepth--;
+            } else if (closeDepth === 0 && STATEMENT_CONTEXT_SCOPE_KEYWORDS.has(word)) {
               return false;
-            }
-            if (DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
+            } else if (closeDepth === 0 && DECLARATION_CONTEXT_SCOPE_KEYWORDS.has(word)) {
               break;
             }
           }

@@ -47,12 +47,15 @@ export const STATEMENT_CONTEXT_SCOPE_KEYWORDS = new Set(['begin', 'try', 'repeat
 export const DECLARATION_CONTEXT_SCOPE_KEYWORDS = new Set(['type', 'var', 'const']);
 
 // Block-close keywords used by the cross-`;` scan to detect already-closed blocks.
-const CROSS_SCAN_CLOSE_KEYWORDS = new Set(['end', 'until']);
+export const CROSS_SCAN_CLOSE_KEYWORDS = new Set(['end', 'until']);
 
 // Block-open keywords (closed by `end`/`until`) used to balance closed blocks during the
-// cross-`;` scan. `case`/`record` are openers too but are not statement-context scopes,
-// so they are listed here purely for depth balancing.
-const CROSS_SCAN_OPEN_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm', 'case', 'record']);
+// cross-`;` scan. `case`/`record`/`class`/`object`/`interface` are openers too but are not
+// statement-context scopes, so they are listed here purely for depth balancing. Including
+// class/object/interface lets the scan balance `T = class end;` (and friends) entries in a
+// long type section so the semicolon budget can early-terminate; without these the
+// `end` of every declaration leaves closeDepth pinned at 1 and the budget never fires.
+export const CROSS_SCAN_OPEN_KEYWORDS = new Set(['begin', 'try', 'repeat', 'asm', 'case', 'record', 'class', 'object', 'interface']);
 
 // Returns true if the `=` that precedes the keyword at `keywordStart` (with optional
 // type modifiers between) is a comparison operator, not a type definition. Implements
@@ -139,9 +142,19 @@ export function isPrecededByComparisonEquals(
   // opener. Only an opener seen at depth 0 is the genuine enclosing scope.
   // Without this, `try ... end; TFoo = record` reads the closed `try` as the enclosing
   // scope and misclassifies the type-definition `=` as a comparison.
+  //
+  // To keep the scan O(1) amortized on long type sections (without this guard each
+  // `T_k = record ... end;` validation walks back O(k) chars to find `type`, producing
+  // O(N^2) overall), early-terminate once we have crossed several `;` boundaries with
+  // closeDepth=0 and no statement-context keyword in sight. A run of `;`-separated
+  // chunks at top level overwhelmingly indicates a declaration section; a statement
+  // list inside `begin..end` would surface a `begin`/`try`/`repeat`/`asm` keyword much
+  // sooner.
   if (hitSemicolon && !hitDeclarationKeyword) {
     let si = ci - 1;
     let closeDepth = 0;
+    let semicolonsCrossed = 0;
+    const SEMICOLON_BUDGET = 3;
     while (si >= 0) {
       if (callbacks.isInExcludedRegion(si, excludedRegions)) {
         const region = callbacks.findExcludedRegionAt(si, excludedRegions);
@@ -151,6 +164,15 @@ export function isPrecededByComparisonEquals(
         }
       }
       const ch = source[si];
+      if (ch === ';' && closeDepth === 0) {
+        semicolonsCrossed++;
+        if (semicolonsCrossed >= SEMICOLON_BUDGET) {
+          // Several consecutive declaration-like chunks crossed without surfacing a
+          // statement-context keyword: this is a declaration section, not a statement
+          // list. Treat the `=` as a type-definition marker.
+          return false;
+        }
+      }
       if (/[a-zA-Z_]/.test(ch)) {
         const wordEnd = si;
         while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
@@ -267,14 +289,19 @@ type RecordContextRole = 'open-record' | 'open-block' | 'close' | 'ignore';
 // per-keyword accept/reject logic that the record scan needs: 'class'/'object'/'interface'
 // have several non-block uses (forward declarations, class-of references, field types,
 // method modifiers) that must not count as block boundaries.
+//
+// `lowerSource` is passed in (rather than computed here) because the helper is invoked
+// once per block keyword in the source. Recomputing `source.toLowerCase()` per call would
+// make buildRecordContextMap O(N^2) on long sources with many class/object/interface
+// keywords.
 function recordContextKeywordRole(
   source: string,
+  lowerSource: string,
   keywordStart: number,
   keyword: string,
   excludedRegions: ExcludedRegion[],
   callbacks: PascalValidationCallbacks
 ): RecordContextRole {
-  const lowerSource = source.toLowerCase();
   switch (keyword) {
     case 'end':
       return 'close';
@@ -424,6 +451,9 @@ export function buildRecordContextMap(source: string, excludedRegions: ExcludedR
   // Stack of enclosing block kinds: 'record'/'object' count as record context,
   // 'block' is a non-record block, 'case' is transparent for the record question.
   const stack: ('record' | 'block' | 'case')[] = [];
+  // Compute `lowerSource` once and reuse it for every recordContextKeywordRole call:
+  // recomputing per keyword would make the sweep O(N^2) on long sources.
+  const lowerSource = source.toLowerCase();
 
   for (let match = RECORD_CONTEXT_KEYWORD_PATTERN.exec(source); match !== null; match = RECORD_CONTEXT_KEYWORD_PATTERN.exec(source)) {
     const keywordStart = match.index;
@@ -461,7 +491,7 @@ export function buildRecordContextMap(source: string, excludedRegions: ExcludedR
       continue;
     }
 
-    const role = recordContextKeywordRole(source, keywordStart, keyword, excludedRegions, callbacks);
+    const role = recordContextKeywordRole(source, lowerSource, keywordStart, keyword, excludedRegions, callbacks);
     if (role === 'close') {
       if (stack.length > 0) stack.pop();
     } else if (role === 'open-record') {
