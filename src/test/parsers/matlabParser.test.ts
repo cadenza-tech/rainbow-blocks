@@ -3900,6 +3900,27 @@ end`;
       assert.ok(args, 'arguments must pair as a real block inside a function');
       assert.ok(func, 'function must still pair with its end');
     });
+
+    test('should not pair stray arguments(Input)...end with outer if end', () => {
+      // `arguments(Input)` is a valid ATTRIBUTE form of `arguments`. Outside any
+      // function/methods/classdef context it still cannot be a real arguments block,
+      // but the user likely wrote a stray `end` for it. The drop path must push
+      // pendingSkipDepth (like bare arguments) so the inner `end` is skipped and the
+      // real outer `if`/`end` pair remains intact. Lines: 0=if, 1=arguments(Input),
+      // 2=inner end, 3=outer end.
+      const source = 'if true\n  arguments(Input)\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'if must pair with the outer end on line 3');
+    });
+
+    test('should not pair stray arguments(Output)...end with outer if end', () => {
+      // Same pattern with the `Output` attribute keyword.
+      const source = 'if true\n  arguments(Output)\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3);
+    });
   });
 
   suite('Regression 2026-05-29: pendingSkipDepths must check remainingCloses before consuming end', () => {
