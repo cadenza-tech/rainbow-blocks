@@ -1376,6 +1376,38 @@ export class VerilogBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject close keywords used as a module/primitive instance TYPE identifier.
+    // Inverse of isInInstanceNamePosition: when the close keyword is itself in
+    // `<module_type_id>` position (immediately followed by `<identifier> (`),
+    // it is being misused as a type identifier rather than introducing a real
+    // close. Without this check, `module top; endmodule sub_inst(); endmodule`
+    // has the inner `endmodule` falsely pair with the outer `module top` open,
+    // leaving the trailing `endmodule` orphan.
+    if (this.isInInstanceTypePosition(source, position, keyword.length, excludedRegions)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Returns true when the close keyword at `position` is in module-instantiation
+  // type-identifier position: the keyword is immediately followed (after trivia)
+  // by a plain user-defined identifier and then `(`. This is the inverse of
+  // `isInInstanceNamePosition` (which catches the close keyword in the
+  // <instance_name> slot) and covers the `<close_kw> <identifier> (` typo form
+  // (e.g., `endmodule sub_inst();`).
+  private isInInstanceTypePosition(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step 1: next non-trivia token must be a plain identifier (letters/digits/
+    // underscore, not adjacent to `$` or `\`).
+    let i = this.skipForwardTrivia(source, position + keywordLength, excludedRegions);
+    if (i >= source.length) return false;
+    if (!/[a-zA-Z_]/.test(source[i])) return false;
+    while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+    // Step 2: next non-trivia char after the identifier must be `(`. A `(*`
+    // attribute opener is not an instance port list, so it is excluded.
+    const afterId = this.skipForwardTrivia(source, i, excludedRegions);
+    if (afterId >= source.length || source[afterId] !== '(') return false;
+    if (afterId + 1 < source.length && source[afterId + 1] === '*') return false;
     return true;
   }
 
