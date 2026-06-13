@@ -811,6 +811,26 @@ end`;
     });
   });
 
+  suite('Regression: deeply nested interpolation does not overflow the stack', () => {
+    test('should not throw on deeply nested string interpolation', () => {
+      const depth = 3000;
+      const source = `x = ${'"#{'.repeat(depth)}1${'}"'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not throw on deeply nested regex interpolation', () => {
+      const depth = 3000;
+      const source = `x = ${'/#{'.repeat(depth)}1${'}/'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not throw on deeply nested backtick interpolation', () => {
+      const depth = 3000;
+      const source = `x = ${'`#{'.repeat(depth)}1${'}`'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+  });
+
   suite('Symbol literals', () => {
     test('should not match keywords inside symbol literals', () => {
       const source = `:if

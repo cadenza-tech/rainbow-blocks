@@ -432,6 +432,26 @@ end`;
     generateRegexInterpolationTests(config);
   });
 
+  suite('Regression: deeply nested interpolation does not overflow the stack', () => {
+    test('should not throw on deeply nested string interpolation', () => {
+      const depth = 3000;
+      const source = `x = ${'"#{'.repeat(depth)}1${'}"'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not throw on deeply nested regex interpolation', () => {
+      const depth = 3000;
+      const source = `x = ${'/#{'.repeat(depth)}1${'}/'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+
+    test('should not throw on deeply nested backtick interpolation', () => {
+      const depth = 3000;
+      const source = `x = ${'`#{'.repeat(depth)}1${'}`'.repeat(depth)}`;
+      assert.doesNotThrow(() => parser.parse(source));
+    });
+  });
+
   suite('Excluded regions - Interpolation with regex inside', () => {
     test('should handle regex with } inside string interpolation', () => {
       const source = 'x = "value: #{str.match(/}/) ? "yes" : "no"}"';
