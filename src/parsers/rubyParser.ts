@@ -413,6 +413,26 @@ export class RubyBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Filter out block-open keywords used as a hash key before `=>`. Reserved words
+      // cannot legally be hash keys in Ruby (`{do => 1}`, `{if => 1}`, ... are syntax
+      // errors), but Rainbow Blocks must not let such a stray `do`/`if`/... consume an
+      // outer `end` -- treating the keyword as block_open would mis-pair surrounding
+      // blocks. The `=>` may be separated from the keyword by spaces/tabs.
+      //
+      // We additionally require the keyword to be preceded by a hash-context opener
+      // (`{` or `,` after whitespace) so non-hash forms like `items.each do=>:value`
+      // remain a block opener (cost-minimization: keeping `do` paired with the later
+      // `end` produces 0 orphans, while filtering it leaves 1 orphan `end`). block_close
+      // (`end`) is intentionally NOT filtered here: `begin foo end => 1` is a valid hash
+      // entry where `end` legitimately closes the `begin` expression. block_middle
+      // keywords are also left alone -- `rescue Error => e` keeps `=>` with a class name.
+      if (
+        token.type === 'block_open' &&
+        this.isFollowedByHashRocket(source, token.endOffset, excludedRegions) &&
+        this.isPrecededByHashContextOpener(source, token.startOffset, excludedRegions)
+      ) {
+        return false;
+      }
       // Filter out keywords followed by ! but not != (method names like end!, begin!)
       if (afterChar === '!') {
         if (token.endOffset + 1 >= source.length || source[token.endOffset + 1] !== '=') {
@@ -601,6 +621,54 @@ export class RubyBlockParser extends BaseBlockParser {
     }
     // Need at least two consecutive dots to form .. (or ...)
     return i + 1 < source.length && source[i] === '.' && source[i + 1] === '.';
+  }
+
+  // Checks whether the token ending at `endOffset` is followed by a hash rocket `=>`.
+  // Spaces and tabs (not newlines) are allowed between the token and the `=>` since hash
+  // literals are typically written on one line. Used to filter block-open keywords used
+  // as hash keys -- reserved words cannot legally be hash keys in Ruby, but Rainbow
+  // Blocks must avoid mis-pairing surrounding blocks when such an invalid form appears.
+  private isFollowedByHashRocket(source: string, endOffset: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = endOffset;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t') {
+        i++;
+        continue;
+      }
+      break;
+    }
+    if (i + 1 >= source.length) return false;
+    if (this.isInExcludedRegion(i, excludedRegions)) return false;
+    return source[i] === '=' && source[i + 1] === '>';
+  }
+
+  // Checks whether the token starting at `startOffset` is in a hash-key context: the
+  // preceding non-whitespace character (skipping excluded regions) is `{` (hash literal
+  // opener) or `,` (next hash entry). Used together with isFollowedByHashRocket so we
+  // only filter reserved-word "hash keys" inside an actual hash context -- avoids
+  // filtering legitimate block openers like `items.each do=>:value` where `do` follows
+  // a method name and the `=>` is just stray syntax after the block opener.
+  private isPrecededByHashContextOpener(source: string, startOffset: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = startOffset - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 0) return false;
+    const ch = source[i];
+    return ch === '{' || ch === ',';
   }
 
   // Checks if `end` at position sits in the value position of a ternary expression
