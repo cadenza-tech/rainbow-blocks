@@ -479,8 +479,53 @@ function isRegexInInterpolation(source: string, pos: number, interpStart: number
   return /[(,=!~|&{[:;+\-*%<>^?]/.test(source[j]);
 }
 
-// Shared skip logic for #{} interpolation in strings (with heredoc support)
+// Maximum nesting depth for #{} interpolation recursion. Ruby and Crystal allow
+// arbitrarily deep nesting (`"#{"#{...}"}"`), and the mutual recursion
+// skipInterpolationShared/skipRegexInterpolationShared -> skipNested* ->
+// skipInterpolation would otherwise overflow the call stack on pathological
+// input (RangeError). Real code never nests beyond a handful of levels, so the
+// cap never affects valid sources; past it, skipInterpolationByBraceDepth keeps
+// parsing crash-free (best-effort coloring).
+const MAX_INTERPOLATION_DEPTH = 200;
+let interpolationRecursionDepth = 0;
+
+// Non-recursive fallback used once the interpolation nesting cap is reached.
+// Scans forward from pos (already inside one `#{`) tracking only brace depth and
+// backslash escapes, returning the offset just past the matching `}` (or EOF).
+function skipInterpolationByBraceDepth(source: string, pos: number): number {
+  let depth = 1;
+  let i = pos;
+  while (i < source.length && depth > 0) {
+    if (source[i] === '\\' && i + 1 < source.length) {
+      i += 2;
+      continue;
+    }
+    if (source[i] === '{') {
+      depth++;
+    } else if (source[i] === '}') {
+      depth--;
+    }
+    i++;
+  }
+  return i;
+}
+
+// Shared skip logic for #{} interpolation in strings (with heredoc support).
+// Guards the mutual recursion with a depth cap so deeply nested interpolation
+// cannot overflow the stack; the inner body is skipInterpolationSharedBody.
 export function skipInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers, heredocState?: HeredocState): number {
+  if (interpolationRecursionDepth >= MAX_INTERPOLATION_DEPTH) {
+    return skipInterpolationByBraceDepth(source, pos);
+  }
+  interpolationRecursionDepth++;
+  try {
+    return skipInterpolationSharedBody(source, pos, handlers, heredocState);
+  } finally {
+    interpolationRecursionDepth--;
+  }
+}
+
+function skipInterpolationSharedBody(source: string, pos: number, handlers: InterpolationHandlers, heredocState?: HeredocState): number {
   let depth = 1;
   let i = pos;
   let heredocSkipEnd = -1;
@@ -562,8 +607,22 @@ export function skipInterpolationShared(source: string, pos: number, handlers: I
   return i;
 }
 
-// Shared skip logic for #{} interpolation in regex
+// Shared skip logic for #{} interpolation in regex. Shares the interpolation
+// depth cap with skipInterpolationShared (regex and string interpolation can
+// nest into each other) so neither path can overflow the stack.
 export function skipRegexInterpolationShared(source: string, pos: number, handlers: InterpolationHandlers, heredocState?: HeredocState): number {
+  if (interpolationRecursionDepth >= MAX_INTERPOLATION_DEPTH) {
+    return skipInterpolationByBraceDepth(source, pos);
+  }
+  interpolationRecursionDepth++;
+  try {
+    return skipRegexInterpolationSharedBody(source, pos, handlers, heredocState);
+  } finally {
+    interpolationRecursionDepth--;
+  }
+}
+
+function skipRegexInterpolationSharedBody(source: string, pos: number, handlers: InterpolationHandlers, heredocState?: HeredocState): number {
   let depth = 1;
   let i = pos;
   let heredocSkipEnd = -1;
