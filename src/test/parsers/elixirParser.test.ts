@@ -5630,5 +5630,86 @@ end`;
     });
   });
 
+  suite('Bug: fn as value of preceding block keyword across newline/comment/comma', () => {
+    // `<opener> fn do ... end` means `fn` is the value/variable and `do` belongs to the
+    // outer opener (e.g. `case fn do ... end` pairs case/end, not fn/end — see the same-line
+    // tests above). The detection of "fn directly followed by do" must treat a newline,
+    // comment, or single comma the same as a space, mirroring the same-line spec. Pre-fix
+    // the forward scan only skipped spaces/tabs, so a newline/comment/comma between `fn` and
+    // `do` let fn be treated as an anonymous-function opener that stole the `end` and orphaned
+    // the outer block. A genuine anonymous function uses arrow syntax (`fn -> ...`); the next
+    // token after `fn` is then `->`, never `do`, so the arrow form stays correctly paired.
+    test('should not treat fn as opener when do is on the next line after case (case fn\\ndo)', () => {
+      const source = 'case fn\ndo\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat fn as opener when do is on the next line after if (if fn\\ndo)', () => {
+      const source = 'if fn\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should not treat fn as opener when do is on the next line after with (with fn\\ndo)', () => {
+      const source = 'with fn\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'with', 'end');
+    });
+
+    test('should not treat fn as opener when do is on the next line after cond (cond fn\\ndo)', () => {
+      const source = 'cond fn\ndo\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'cond', 'end');
+    });
+
+    test('should not treat fn as opener when a comment separates fn and do (case fn # c\\ndo)', () => {
+      const source = 'case fn # comment\ndo\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat fn as opener when CRLF separates fn and do (case fn\\r\\ndo)', () => {
+      const source = 'case fn\r\ndo\n  _ -> :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should not treat fn as opener when a CR-only line ending separates fn and do (case fn\\rdo)', () => {
+      const source = 'case fn\rdo\r  _ -> :ok\rend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+    });
+
+    test('should produce no pairs for fn, do: one-liner followed by bare do (if fn, do: v do)', () => {
+      // Mirror of `if cond, do: v do` (above): `fn, do: v` is fn-as-value with a do: one-liner,
+      // then a stray bare `do` — invalid Elixir. fn must not become an opener that pairs with
+      // the trailing end; no block pair should be produced.
+      const source = 'if fn, do: v do\nend';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair fn/end for a real anonymous function whose arrow precedes a newline (if fn ->\\n...end)', () => {
+      // `fn ->` is genuine arrow syntax; the inner fn..end is a complete anonymous function.
+      // Skipping newlines/comments must not break this: the token after `fn` is `->`, not `do`,
+      // so fn stays a real opener and pairs with its own end.
+      const source = 'if fn ->\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fn', 'end');
+    });
+
+    test('should still pair both fn/end and if/end for arrow fn followed by , do (if fn -> :ok end, do)', () => {
+      // Regression guard for the existing `if fn -> :ok end, do` behavior: the comma/newline
+      // skip must not misclassify the real arrow fn. fn pairs with its inner end; the if pairs
+      // with the trailing end.
+      const source = 'if fn -> :ok end, do\n  :ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'fn' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+    });
+  });
+
   generateCommonTests(config);
 });
