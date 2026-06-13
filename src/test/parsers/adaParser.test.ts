@@ -4875,6 +4875,29 @@ end P;`;
       const proc = findBlock(pairs, 'procedure');
       assertIntermediates(proc, ['is', 'begin']);
     });
+
+    test('should treat non-ASCII suffix before access as part of the identifier', () => {
+      // `Ñaccess` ends with the letters `access` but begins with a non-ASCII
+      // letter (Ñ = U+00D1), so it is a single Ada identifier, not the reserved
+      // word `access`. The subprogram-open access-prefix check must use a
+      // Unicode-aware left-boundary so the procedure body is still detected.
+      const source = `Ñaccess procedure F is
+begin null; end F;`;
+      const pairs = parser.parse(source);
+      const proc = findBlock(pairs, 'procedure');
+      assertIntermediates(proc, ['is', 'begin']);
+    });
+
+    test('should suppress procedure body for genuine access prefix (ASCII control)', () => {
+      // An ASCII identifier ending in `access` (`Xaccess`) is the symmetric
+      // control: like `Ñaccess`, the word boundary before `access` is a word
+      // char, so the subprogram body is detected.
+      const source = `Xaccess procedure F is
+begin null; end F;`;
+      const pairs = parser.parse(source);
+      const proc = findBlock(pairs, 'procedure');
+      assertIntermediates(proc, ['is', 'begin']);
+    });
   });
 
   generateCommonTests(config);
