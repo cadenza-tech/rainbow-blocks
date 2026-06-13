@@ -758,15 +758,22 @@ export class BashBlockParser extends BaseBlockParser {
     // (e.g. `i\<newline>f`). Bash collapses backslash-newline during lexing, so the
     // logical word `if` should be recognized as the if keyword. The regex-based
     // super.tokenize() misses these because the keyword text is not contiguous.
-    const splitTokens = this.findSplitKeywordTokens(source, excludedRegions);
-    if (splitTokens.length > 0) {
+    // `splitSpans` includes every logical word span we inspected, even those that
+    // did not resolve to a keyword: the regex tokenizer can emit a phantom
+    // sub-keyword token at the head of such a span (e.g. `case` from
+    // `case\<newline>X` whose logical word `caseX` is not a keyword), and that
+    // phantom must also be dropped so the trailing `esac` does not find a bogus
+    // opener.
+    const { tokens: splitTokens, spans: splitSpans } = this.findSplitKeywordTokens(source, excludedRegions);
+    if (splitSpans.length > 0) {
       // A split keyword such as `do\<newline>ne` (the `done` close) starts with the
       // shorter keyword `do`, which the regex tokenizer already matched as a
       // standalone token sharing the split token's start offset. That partial token
       // physically overlaps the synthesized split token, producing a duplicate
       // (e.g. a phantom `do` intermediate on top of the `done` close span). Drop any
-      // existing token fully contained within a split token's source span.
-      tokens = tokens.filter((token) => !this.isContainedInSplitToken(token, splitTokens));
+      // existing token fully contained within a logical word span (whether or not
+      // the span resolved to a keyword).
+      tokens = tokens.filter((token) => !this.isContainedInSpan(token, splitSpans));
       tokens.push(...splitTokens);
     }
 
@@ -930,14 +937,15 @@ export class BashBlockParser extends BaseBlockParser {
     return tokens.sort((a, b) => a.startOffset - b.startOffset);
   }
 
-  // Returns true when `token` lies fully within the source span of any split
-  // keyword token. The regex tokenizer can match a split keyword's leading
-  // sub-keyword as a standalone token (e.g. the `do` of a `do\<newline>ne`
-  // close), which then overlaps the synthesized split token; such partial
-  // tokens are dropped so the split token alone represents the keyword.
-  private isContainedInSplitToken(token: Token, splitTokens: Token[]): boolean {
-    for (const split of splitTokens) {
-      if (token.startOffset >= split.startOffset && token.endOffset <= split.endOffset) {
+  // Returns true when `token` lies fully within any logical-word span
+  // assembled by findSplitKeywordTokens. The regex tokenizer can match a split
+  // keyword's leading sub-keyword as a standalone token (e.g. the `do` of a
+  // `do\<newline>ne` close, or the `case` of `case\<newline>X`), which then
+  // overlaps the logical word span; such partial tokens are dropped so they do
+  // not contribute as phantom block tokens.
+  private isContainedInSpan(token: Token, spans: { start: number; end: number }[]): boolean {
+    for (const span of spans) {
+      if (token.startOffset >= span.start && token.endOffset <= span.end) {
         return true;
       }
     }
@@ -948,8 +956,13 @@ export class BashBlockParser extends BaseBlockParser {
   // synthesized tokens. Bash collapses backslash-newline during lexical processing
   // so `i\<newline>f` is the `if` keyword, but the regex-based base tokenizer
   // misses it because the keyword text is not contiguous.
-  private findSplitKeywordTokens(source: string, excludedRegions: ExcludedRegion[]): Token[] {
+  // Also returns the logical word spans we inspected (whether or not they
+  // resolved to a keyword) so the caller can suppress phantom regex tokens whose
+  // text is a sub-keyword of a non-keyword logical word (e.g. `case` regex token
+  // emitted for `case\<newline>X`, whose logical word `caseX` is not a keyword).
+  private findSplitKeywordTokens(source: string, excludedRegions: ExcludedRegion[]): { tokens: Token[]; spans: { start: number; end: number }[] } {
     const tokens: Token[] = [];
+    const spans: { start: number; end: number }[] = [];
     const allKeywords = new Set<string>([...this.keywords.blockOpen, ...this.keywords.blockClose, ...this.keywords.blockMiddle]);
     const newlinePositions = this.buildNewlinePositions(source);
 
@@ -1013,8 +1026,13 @@ export class BashBlockParser extends BaseBlockParser {
         }
         break;
       }
-      // Bail early if the assembled word is not a known keyword (handles
-      // `i\<nl>fx` -> `ifx`, which must not produce an `if` token)
+      // Record the logical word span unconditionally. Even when the assembled
+      // word is not a known keyword (e.g. `case\<nl>X` -> `caseX`), the regex
+      // tokenizer may have emitted a phantom sub-keyword token at the head of
+      // the span (here, a `case` token at leftStart). The caller filters those
+      // out using the span list so the phantom token does not pair with a real
+      // close keyword (e.g. a stray `esac`).
+      spans.push({ start: leftStart, end: endInSource });
       if (allKeywords.has(logicalWord) && this.isValidSplitKeyword(logicalWord, source, leftStart, endInSource, excludedRegions)) {
         const tokenType = this.getTokenType(logicalWord);
         const { line, column } = this.getLineAndColumn(leftStart, newlinePositions);
@@ -1031,7 +1049,7 @@ export class BashBlockParser extends BaseBlockParser {
       // its interior `\<newline>` sequences
       i = endInSource;
     }
-    return tokens;
+    return { tokens, spans };
   }
 
   // Validates a split keyword using the actual span (startOffset..endInSource)
