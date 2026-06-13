@@ -1040,6 +1040,35 @@ END-PERFORM`;
         // Post-fix it is a few milliseconds. Use a generous ceiling for slow CI.
         assert.ok(elapsed < 1000, `8000-char banner took ${elapsed}ms (expected < 1000ms)`);
       });
+
+      // Regression: a long single physical line (no newline) used to run in
+      // O(n^2) because tryMatchExcludedRegion's fixed-format identification-area
+      // / column-7 comment / `>>` directive guards each walked backward to the
+      // line start at every character, and isInFixedFormatIdentificationArea
+      // then walked forward through getVisualColumn at every character. With no
+      // newline the line start is offset 0, so each of the n characters did
+      // O(n) work. Pre-fix a multi-thousand-token single line took tens of
+      // seconds; now findExcludedRegions tracks lineStart incrementally and
+      // isInFixedFormatIdentificationArea checks the sequence-area pattern
+      // before the visual-column walk, so the whole scan stays linear. The
+      // trailing IF/END-IF on their own lines must still pair as one block.
+      test('should scan a long single-line source in linear time', () => {
+        const buf: string[] = [];
+        for (let i = 0; i < 4000; i++) {
+          buf.push(`MOVE A${i} TO B${i} `);
+        }
+        const source = `${buf.join('')}\nIF X\nEND-IF`;
+        const t0 = Date.now();
+        const pairs = parser.parse(source);
+        const elapsed = Date.now() - t0;
+        assertSingleBlock(pairs, 'IF', 'END-IF');
+        // Pre-fix this took many seconds for the same input size (O(n^2));
+        // post-fix it completes in tens of ms. The 2000ms ceiling absorbs the
+        // VS Code test harness overhead and coverage instrumentation slowdown
+        // without losing the order-of-magnitude regression signal (pre-fix this
+        // input would still take 10s+).
+        assert.ok(elapsed < 2000, `long single-line source took ${elapsed}ms (expected < 2000ms)`);
+      });
     });
   });
 
