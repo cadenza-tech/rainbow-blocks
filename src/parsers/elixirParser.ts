@@ -92,6 +92,18 @@ export class ElixirBlockParser extends BaseBlockParser {
   private valueMemoSource: string | null = null;
   private valueMemo = new Map<number, boolean>();
 
+  // Per-source cache of the bracket-depth prefix used by computeBracketDepthAt. Built once
+  // per source in a single O(N) forward scan: bracketDepthOffsets[k] is the offset of the
+  // k-th bracket char that changes the running depth, and bracketDepthAfter[k] is the depth
+  // immediately after processing it. A query at `position` binary-searches for the last
+  // offset strictly below `position`. Without this, computeBracketDepthAt re-scanned from
+  // offset 0 on every call; when a do-block keyword (cond/if/...) precedes `do`, that scan
+  // fires once per keyword, making N such statements O(N^2). Keyed by source identity and
+  // rebuilt whenever a different source is seen, so it never leaks across parse() calls.
+  private bracketDepthSource: string | null = null;
+  private bracketDepthOffsets: number[] = [];
+  private bracketDepthAfter: number[] = [];
+
   // Transient source reference for matchBlocks. Captured at the start of parse() and
   // cleared afterwards; only valid during a single parse() call.
   private currentSource: string | null = null;
@@ -403,28 +415,67 @@ export class ElixirBlockParser extends BaseBlockParser {
     return false;
   }
 
-  // Computes the bracket depth at `position` by scanning forward from source start,
-  // counting unmatched `(`/`[`/`{` (each +1) minus `)`/`]`/`}` (each -1). Excluded
-  // regions are skipped. Used to decide whether a newline encountered during a backward
-  // scan is a statement boundary or just whitespace inside an open bracket pair.
+  // Computes the bracket depth at `position`: the count of unmatched `(`/`[`/`{` (each +1)
+  // minus `)`/`]`/`}` (each -1) over `[0, position)`, with closers clamped at 0 and excluded
+  // regions skipped. Used to decide whether a newline encountered during a backward scan is a
+  // statement boundary or just whitespace inside an open bracket pair.
+  //
+  // Backed by a per-source prefix (built once in O(N)) and a binary search, so a sequence of
+  // queries stays O(N + Q log N) instead of the former O(N * Q) full re-scan per call.
   private computeBracketDepthAt(source: string, position: number, excludedRegions: ExcludedRegion[]): number {
+    this.ensureBracketDepthPrefix(source, excludedRegions);
+    // Binary search for the largest recorded bracket-change offset strictly below `position`.
+    // The depth there is the depth at `position` (no bracket char between that offset and
+    // `position` changes the depth). Returns 0 when no bracket char precedes `position`.
+    const offsets = this.bracketDepthOffsets;
+    let lo = 0;
+    let hi = offsets.length - 1;
+    let result = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (offsets[mid] < position) {
+        result = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return result < 0 ? 0 : this.bracketDepthAfter[result];
+  }
+
+  // Builds (once per source) the parallel arrays consumed by computeBracketDepthAt. The scan
+  // is identical to the former inline forward scan (same bracket set, same clamp-at-0 on
+  // closers, same excluded-region skipping), so the binary-searched result matches the old
+  // full-scan result at every position.
+  private ensureBracketDepthPrefix(source: string, excludedRegions: ExcludedRegion[]): void {
+    if (this.bracketDepthSource === source) {
+      return;
+    }
+    const offsets: number[] = [];
+    const after: number[] = [];
     let depth = 0;
     let p = 0;
-    while (p < position) {
+    while (p < source.length) {
       const region = this.findExcludedRegionAt(p, excludedRegions);
       if (region) {
-        p = Math.min(region.end, position);
+        p = region.end;
         continue;
       }
       const ch = source[p];
       if (ch === '(' || ch === '[' || ch === '{') {
         depth++;
+        offsets.push(p);
+        after.push(depth);
       } else if ((ch === ')' || ch === ']' || ch === '}') && depth > 0) {
         depth--;
+        offsets.push(p);
+        after.push(depth);
       }
       p++;
     }
-    return depth;
+    this.bracketDepthSource = source;
+    this.bracketDepthOffsets = offsets;
+    this.bracketDepthAfter = after;
   }
 
   // Matches blocks with the default LIFO algorithm, but only attaches a block_middle token
