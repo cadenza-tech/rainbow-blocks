@@ -2358,6 +2358,54 @@ end.`;
     });
   });
 
+  suite('Bug: false positive for try/case/begin/repeat after comparison =', () => {
+    test('should not treat try after if comparison as block opener', () => {
+      const source = 'begin\n  if x = try then\n    DoSomething;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The outer begin@line0 must be the paired opener, not the spurious try.
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+    });
+
+    test('should not treat case after if comparison as block opener', () => {
+      const source = 'begin\n  if x = case then\n    DoSomething;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+    });
+
+    test('should not treat begin after if comparison as block opener', () => {
+      const source = 'begin\n  if x = begin then\n    DoSomething;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // Outer begin at line 0, not the spurious second `begin` at line 1.
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+    });
+
+    test('should not treat repeat after if comparison as block opener', () => {
+      const source = 'repeat\n  if x = repeat then DoIt;\nuntil False';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'repeat', 'until');
+      // Outer repeat at line 0, not the spurious second `repeat` at line 1.
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+    });
+
+    test('should not treat try after while comparison as block opener', () => {
+      const source = 'begin\n  while x = try do\n    DoSomething;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assertTokenPosition(pairs[0].openKeyword, 0, 0);
+    });
+
+    test('should still treat record after type definition = as block opener', () => {
+      // Regression guard: the broadened comparison check must not affect the existing
+      // record type-definition behavior.
+      const source = 'type\n  TFoo = record\n    FValue: Integer;\n  end;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'record', 'end');
+    });
+  });
+
   suite('Bug: only one type modifier handled', () => {
     test('should recognize packed sealed class as block opener', () => {
       const source = 'type\n  TFoo = packed sealed class\n    FValue: Integer;\n  end;';
