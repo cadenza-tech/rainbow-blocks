@@ -5034,6 +5034,64 @@ end loop;`;
     });
   });
 
+  suite('Regression: exit Label when Cond modifier is not a case-arm when', () => {
+    test('should not register exit-label-when as case intermediate', () => {
+      // Ada LRM 5.7 supports labeled exit statements: `exit <loop-label> when X;`.
+      // The `when` modifier of a labeled exit must not be misattributed to the
+      // enclosing case-statement as a case-arm boundary.
+      const source = `procedure Process is
+begin
+  Outer : loop
+    case State is
+      when Initial =>
+        exit Outer when Done;
+      when Working =>
+        State := Initial;
+    end case;
+  end loop Outer;
+end Process;`;
+      const pairs = parser.parse(source);
+      const c = findBlock(pairs, 'case');
+      assertIntermediates(c, ['is', 'when', 'when']);
+    });
+
+    test('should not register exit-label-when as select-alternative when', () => {
+      // Same modifier inside a select alternative body must not be attributed
+      // to the surrounding select as an alternative boundary.
+      const source = `procedure P is
+begin
+  Outer : loop
+    select
+      accept A;
+      exit Outer when X;
+    or
+      accept B;
+    end select;
+  end loop Outer;
+end P;`;
+      const pairs = parser.parse(source);
+      const s = findBlock(pairs, 'select');
+      assertIntermediates(s, ['or']);
+    });
+
+    test('should still register a genuine case-arm when on the next line after exit-label-when', () => {
+      // Control: with a `;`-terminated exit statement, the next `when` is a
+      // bona-fide case arm and must remain registered.
+      const source = `procedure P is
+begin
+  Outer : loop
+    case State is
+      when A => exit Outer when Done;
+      when B => null;
+    end case;
+  end loop Outer;
+end P;`;
+      const pairs = parser.parse(source);
+      const c = findBlock(pairs, 'case');
+      assertIntermediates(c, ['is', 'when', 'when']);
+    });
+  });
+
   suite('Regression: Ada 2022 declare expression inside parens', () => {
     test('should not treat declare/begin inside parens as block openers', () => {
       // Ada 2022 LRM 4.5.9: declare expressions appear inside parentheses as
