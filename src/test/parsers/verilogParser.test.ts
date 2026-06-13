@@ -5589,5 +5589,82 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: case_item label name suppression for non-assignment statement bodies', () => {
+    // For `<close_kw> : <name> ...` inside a case statement, the previous
+    // `isLabelColonFollowedByAssignment` discriminator only returned true when
+    // `<name>` was followed by `=` (bare assignment). It missed compound /
+    // non-blocking assignments (`<=`, `+=`, ...), increment/decrement (`++`,
+    // `--`), and function-call statements (`foo();`), so for those forms the
+    // close keyword was kept tokenized and prematurely paired with the outer
+    // `case` opener.
+    //
+    // The fix expands the discriminator to recognize any statement-like
+    // continuation after `<name>` (any assignment operator, `++`/`--`, or `(`),
+    // while preserving the existing end-label suffix sanity (`endcase : my_label`
+    // not followed by a statement-like continuation stays tokenized).
+    test('should suppress `endcase` in `case (s) endcase: x <= y;` (non-blocking)', () => {
+      const source = 'case (s)\n  endcase: x <= y;\n  default: z = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      const casePair = findBlock(pairs, 'case');
+      const trailingEndcase = source.lastIndexOf('endcase');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, trailingEndcase);
+    });
+
+    test('should suppress `endcase` in `case (s) endcase: x++;` (increment)', () => {
+      const source = 'case (s)\n  endcase: x++;\n  default: z = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      const casePair = findBlock(pairs, 'case');
+      const trailingEndcase = source.lastIndexOf('endcase');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, trailingEndcase);
+    });
+
+    test('should suppress `endcase` in `case (s) endcase: foo();` (function call)', () => {
+      const source = 'case (s)\n  endcase: foo();\n  default: z = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      const casePair = findBlock(pairs, 'case');
+      const trailingEndcase = source.lastIndexOf('endcase');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, trailingEndcase);
+    });
+
+    test('should suppress `endcase` in `case (s) endcase: x += y;` (compound assignment)', () => {
+      const source = 'case (s)\n  endcase: x += y;\n  default: z = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      const casePair = findBlock(pairs, 'case');
+      const trailingEndcase = source.lastIndexOf('endcase');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, trailingEndcase);
+    });
+
+    test('should suppress `endcase` in `case (s) endcase: x--;` (decrement)', () => {
+      const source = 'case (s)\n  endcase: x--;\n  default: z = 1;\nendcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+      const casePair = findBlock(pairs, 'case');
+      const trailingEndcase = source.lastIndexOf('endcase');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, trailingEndcase);
+    });
+
+    test('should still keep `endcase` tokenized in `endcase : my_label` (end-label suffix sanity)', () => {
+      // Regression guard: `endcase : my_label` with no statement-like
+      // continuation must remain an invalid end-label suffix attempt, not
+      // a case_item label-name misuse. The close keyword stays tokenized.
+      const source = 'case (sel)\n  1: x = 1;\nendcase : my_label';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should still keep `endcase` tokenized in `endcase : my_label;` (semicolon-only)', () => {
+      // Regression guard: a trailing `;` alone after `<name>` is ambiguous
+      // (could be an empty statement); the existing behavior treats it as
+      // end-label suffix and keeps endcase tokenized. Preserved.
+      const source = 'case (sel)\n  1: x = 1;\nendcase : my_label;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+  });
+
   generateCommonTests(config);
 });
