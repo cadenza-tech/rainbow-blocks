@@ -40,10 +40,13 @@ export function isAtLineStartWithWhitespace(source: string, pos: number): boolea
 // Checks if position is at the start of a statement (line start or after ; , )
 // Also skips a leading UTF-8/UTF-16 BOM (U+FEFF) so files saved with a byte-order mark
 // still recognise the leading shell escape (`!`) at the file start.
+// Vertical tab (`\v`) and form feed (`\f`) are also treated as horizontal whitespace,
+// matching isAtLineStartWithWhitespace and the broader isHorizontalWhitespace coverage,
+// so a shell-escape `!` preceded only by VT/FF still triggers excluded-region detection.
 export function isAtStatementStart(source: string, pos: number): boolean {
   if (pos === 0) return true;
   let i = pos - 1;
-  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '﻿')) {
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\v' || source[i] === '\f' || source[i] === '﻿')) {
     i--;
   }
   if (i < 0) return true;
