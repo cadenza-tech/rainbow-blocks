@@ -2939,6 +2939,16 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should not treat ?% inside {% %} macro body as char literal when % starts the macro closer', () => {
+      // For `{%?%}`, the trailing `%` is the start of the macro closer `%}` rather
+      // than the body of a char literal `?%`. Without this, the `%` was consumed
+      // as part of `?%`, the closer `%}` was missed, and the macro template
+      // engulfed the rest of the source past EOF, hiding the trailing `if/end` pair.
+      const source = 'x = {%?%}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
