@@ -121,6 +121,39 @@ const RHS_EXPECTING_KEYWORD_OPERATORS: ReadonlySet<string> = new Set([
   'defined?'
 ]);
 
+// Ruby reserved words that act as block/control structure (block_open / block_middle /
+// block_close), so an `end` immediately following them is a legitimate block close
+// rather than an expression-position `end`. isEndInExpressionPosition consults this set
+// when its backward scan encounters an identifier-like token: words in this set short-
+// circuit to "not expression position" (return false), while other identifiers are
+// treated as value content and the scan continues. Value-keywords such as `true`,
+// `false`, `nil`, `self`, `super`, `__FILE__`, `__LINE__`, `__ENCODING__` are
+// intentionally NOT in this set because `<value-keyword> end` is the same as
+// `<bare value> end` and the `end` is in expression position.
+const BLOCK_STRUCTURE_KEYWORDS: ReadonlySet<string> = new Set([
+  // block_open
+  'do',
+  'if',
+  'unless',
+  'while',
+  'until',
+  'begin',
+  'def',
+  'class',
+  'module',
+  'case',
+  'for',
+  // block_middle
+  'else',
+  'elsif',
+  'rescue',
+  'ensure',
+  'when',
+  'then',
+  // block_close
+  'end'
+]);
+
 // Full-match pattern for a Ruby numeric literal: hex (0x), binary (0b), octal (0o),
 // decimal-prefixed (0d), or base-10 integer/float with optional decimal point and
 // exponent, plus optional rational (`r`) / imaginary (`i`) suffix. Used by
@@ -662,6 +695,34 @@ export class RubyBlockParser extends BaseBlockParser {
     return -1;
   }
 
+  // Returns true when the `;` at `semicolonPos` sits inside an enclosing `(`/`[`/`{`,
+  // i.e. the backward scan from `;` reaches an unmatched open bracket. Used by
+  // isEndInExpressionPosition's `;`-handler so that `(a; end)` is still recognised as
+  // expression-position `end` (the `;` separates statements inside the bracketed
+  // expression rather than terminating the whole statement). Skips excluded regions.
+  private isSemicolonInsideBrackets(source: string, semicolonPos: number, excludedRegions: ExcludedRegion[]): boolean {
+    let depth = 0;
+    let i = semicolonPos - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ')' || ch === ']' || ch === '}') {
+        depth++;
+      } else if (ch === '(' || ch === '[' || ch === '{') {
+        if (depth === 0) return true;
+        depth--;
+      }
+      i--;
+    }
+    return false;
+  }
+
   // Determines whether an excluded region represents a value-like expression
   // (string, backtick, regex, symbol, percent literal, character literal, heredoc body)
   // rather than syntactic whitespace (single-line comment `#` or multi-line comment
@@ -763,6 +824,39 @@ export class RubyBlockParser extends BaseBlockParser {
         i = n;
         continue;
       }
+      // Identifier-like word ending at `i`. Most identifiers (method names, locals,
+      // value-keywords like `true`/`nil`/`self`) are values; encountering one means a
+      // value precedes `end` on this line. Block-structure keywords (`if`, `do`, `then`,
+      // `else`, `end`, ...) and RHS-expecting keywords (`return`, `break`, ...) are NOT
+      // values: the former legitimise the `end` (block close), the latter put the `end`
+      // into expression position via the keyword-RHS check below the main loop. So:
+      //   - block-structure word here => fall through to the keyword-RHS check
+      //   - RHS-expecting word here   => fall through to the keyword-RHS check (returns true)
+      //   - any other identifier word => mark value-crossed and continue scanning back
+      // `?` is allowed as a trailing identifier char only (for `defined?`); skip it
+      // upfront via readBackwardWord which already supports the suffix.
+      if (/[a-zA-Z_]/.test(ch) || /[\p{L}\p{M}\p{N}\p{Pc}]/u.test(ch)) {
+        const word = this.readBackwardWord(source, i);
+        if (word) {
+          // The word must be a standalone identifier (not part of a longer one that
+          // happens to end here). The char before the word must not be an identifier
+          // continuation char.
+          const beforeWord = i - word.length;
+          const standalone = beforeWord < 0 || !/[a-zA-Z0-9_]/.test(source[beforeWord]);
+          if (standalone && (BLOCK_STRUCTURE_KEYWORDS.has(word) || RHS_EXPECTING_KEYWORD_OPERATORS.has(word))) {
+            // Keyword: stop scanning and let the post-loop check decide.
+            break;
+          }
+          if (standalone) {
+            // Regular identifier (method call, local, value-keyword): treat as value.
+            crossedValueOnLine = true;
+            i = beforeWord;
+            continue;
+          }
+          // Not standalone (e.g. trailing chars of a longer identifier); fall through
+          // to break and let the post-loop logic look at the trailing char.
+        }
+      }
       // Implicit line continuation: if we hit a newline and the previous physical line
       // ends with an operator that implies continuation (e.g. `+`, `-`, `=`, ...), the
       // logical statement continues across the newline. Cross the newline and resume
@@ -772,6 +866,28 @@ export class RubyBlockParser extends BaseBlockParser {
         let prevLineEnd = i;
         if (ch === '\n' && i > 0 && source[i - 1] === '\r') {
           prevLineEnd = i - 1;
+        }
+        // Backslash line continuation: previous physical line ends with an odd number of
+        // backslashes (the final backslash escapes the newline). Cross the newline and
+        // resume scanning past the backslash so `x = \<NL>  end` is recognised as
+        // expression-position `end`. Skip when the backslash sits inside an excluded
+        // region (e.g. a `# x = \` comment) or is part of `$\` global variable.
+        if (prevLineEnd > 0 && source[prevLineEnd - 1] === '\\' && !this.isInExcludedRegion(prevLineEnd - 1, excludedRegions)) {
+          let bsPos = prevLineEnd - 1;
+          let bsCount = 0;
+          while (bsPos >= 0 && source[bsPos] === '\\') {
+            bsCount++;
+            bsPos--;
+          }
+          // Odd backslash count = real line continuation; even = escaped backslashes.
+          // `$\` (output record separator global) is not a continuation either.
+          if (bsCount % 2 === 1 && !(bsCount === 1 && bsPos >= 0 && source[bsPos] === '$')) {
+            // Resume at the char before the backslashes. Logical statement continues, so
+            // do NOT reset `crossedValueOnLine`: a value on this physical line is part of
+            // the same statement that `end` is in.
+            i = bsPos;
+            continue;
+          }
         }
         if (endsWithContinuationOperator(source, prevLineEnd, excludedRegions, this.validationCallbacks)) {
           i = prevLineEnd - 1;
@@ -794,10 +910,15 @@ export class RubyBlockParser extends BaseBlockParser {
       return crossedValueOnLine;
     }
     const ch = source[i];
-    // Statement separators: `;`. `end` after `;` is legitimate (closes some earlier
-    // opener). (`\n`/`\r` are handled by the line-start branch above.)
+    // Statement separators: `;`. `end` after `;` is normally legitimate (closes some
+    // earlier opener), EXCEPT when the `;` sits inside an enclosing `(`/`[`/`{`. In that
+    // case the `;` is a statement separator inside a parenthesized expression, and the
+    // `end` is still in expression position (e.g. `(a; end)` is invalid Ruby because
+    // `end` cannot be the value of the bracketed expression). Walk back from `i`
+    // tracking bracket depth: a `(`/`[`/`{` reached at depth 0 indicates an unmatched
+    // opener and the `end` is inside the bracketed expression -> expression position.
     if (ch === ';') {
-      return false;
+      return this.isSemicolonInsideBrackets(source, i, excludedRegions);
     }
     // Opening brackets directly before `end`: definitely expression position.
     if (ch === '(' || ch === '[' || ch === '{') {
