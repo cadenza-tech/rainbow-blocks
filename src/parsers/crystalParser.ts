@@ -1157,7 +1157,14 @@ export class CrystalBlockParser extends BaseBlockParser {
     // First-value form: `end` immediately follows the ternary `?`. A `?` here
     // is the ternary operator, not a char literal: char literals are excluded
     // regions (handled by `tryMatchExcludedRegion`) and are skipped above.
+    // Require the `?` to be whitespace-surrounded (whitespace before it) so that
+    // method-bang suffixes (e.g. `valid?`) where `?` is glued to an identifier
+    // are not misclassified as ternary operators.
     if (source[i] === '?') {
+      const beforeQuestion = source[i - 1];
+      if (beforeQuestion !== undefined && /[A-Za-z0-9_]/.test(beforeQuestion)) {
+        return false;
+      }
       return true;
     }
     // Second-value form: `end` immediately follows the ternary `:`. The
