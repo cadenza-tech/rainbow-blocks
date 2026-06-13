@@ -100,11 +100,18 @@ export class MatlabBlockParser extends BaseBlockParser {
       return false;
     }
     // Reject end followed by a single `.` (possibly preceded by whitespace or `...` line
-    // continuations) that is NOT part of `..` (line continuation marker prefix or junk).
+    // continuations) that is NOT part of `...` (line continuation marker — three dots).
     // `end.field`, `end .field`, and `end ...\n .field` are all struct field-access syntax,
     // not block close — the `end` is an identifier in expression context. The continuation
     // skip handles the multi-line form symmetrically with the same-line form.
-    if (source[assignFrom] === '.' && source[assignFrom + 1] !== '.') {
+    //
+    // `end..x` is also field access: `..` is not a valid MATLAB/Octave token, so the parse
+    // is `end` then `.` then `.x`. Treating `end` as a block close here consumes a real
+    // outer `end` and destroys outer block pairing. Only `...` (exactly three dots) is a
+    // line continuation marker that should NOT match here — it's already handled as an
+    // excluded region by the parent skip step. So reject `.` followed by anything except
+    // a second `.` immediately followed by a third `.` (the line-continuation marker).
+    if (source[assignFrom] === '.' && !(source[assignFrom + 1] === '.' && source[assignFrom + 2] === '.')) {
       return false;
     }
     // Reject end immediately followed by `:N` (N is anything except `=`). `end:N` is always
