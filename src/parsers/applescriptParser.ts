@@ -9,7 +9,8 @@ import {
   isKeywordAsVariableName,
   isUnicodeWhitespace,
   matchCompoundKeyword,
-  stripExcludedRegionsInRange
+  stripExcludedRegionsInRange,
+  VAR_NAME_PATTERNS
 } from './applescriptHelpers';
 import { BaseBlockParser } from './baseParser';
 
@@ -563,7 +564,10 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         }
       }
 
-      // Check if compound middle keyword is used in set/copy/possessive patterns
+      // Check if compound middle keyword is used in set/copy/possessive patterns.
+      // The VAR_NAME_PATTERNS regexes accept ASCII space/tab plus Unicode whitespace
+      // (NBSP etc.) so `set<NBSP>else if<NBSP>to`-style sources are recognized the
+      // same way as their ASCII-whitespace counterparts.
       if (type === 'block_middle') {
         const ls = findLogicalLineStart(source, i, excludedRegions, this.helperCallbacks);
         const lineBefore = source
@@ -571,7 +575,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           .toLowerCase()
           .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
-        if (/^(set|copy)[ \t]+$/.test(lineBefore) || /'s[ \t]+$/.test(lineBefore)) {
+        if (VAR_NAME_PATTERNS.setOrCopyBefore.test(lineBefore) || VAR_NAME_PATTERNS.possessiveBefore.test(lineBefore)) {
           return { nextPos: flexMatch };
         }
       }
@@ -599,16 +603,19 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         // binary-search-backed helper so the cost is O(log N + K) per keyword rather than
         // O(N) per keyword via excludedRegions.filter(...), which made tokenize O(N^2) when
         // every block carried a trailing comment.
+        // VAR_NAME_PATTERNS accept ASCII space/tab plus Unicode whitespace (NBSP etc.) so
+        // `set<NBSP>with timeout<NBSP>to`-style sources are recognized the same way as
+        // their ASCII-whitespace counterparts.
         const lineBefore = stripExcludedRegionsInRange(source, ls, i, excludedRegions)
           .toLowerCase()
           .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
           .trimStart();
         if (
-          /^(set|copy)[ \t]+$/.test(lineBefore) ||
-          /'s[ \t]+$/.test(lineBefore) ||
-          /\bof[ \t]+$/.test(lineBefore) ||
-          /\bin[ \t]+$/.test(lineBefore) ||
-          /\b(?:return|log|get)[ \t]+$/.test(lineBefore)
+          VAR_NAME_PATTERNS.setOrCopyBefore.test(lineBefore) ||
+          VAR_NAME_PATTERNS.possessiveBefore.test(lineBefore) ||
+          VAR_NAME_PATTERNS.ofBefore.test(lineBefore) ||
+          VAR_NAME_PATTERNS.inBefore.test(lineBefore) ||
+          VAR_NAME_PATTERNS.commandBefore.test(lineBefore)
         ) {
           return { nextPos: flexMatch };
         }

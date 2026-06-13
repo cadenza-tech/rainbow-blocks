@@ -94,6 +94,29 @@ export function isUnicodeWhitespace(ch: string): boolean {
   );
 }
 
+// Pre-compiled regex patterns used by isKeywordAsVariableName and the parser's
+// compound-keyword variable-name guards. The character class `[ \t  -...]`
+// matches ASCII space/tab plus Unicode whitespace characters recognized by
+// isUnicodeWhitespace, so that `set<NBSP>tell<NBSP>to`-style patterns (with NBSP
+// or other Unicode whitespace between words) are recognized the same way as their
+// ASCII-whitespace counterparts. Pre-compiling avoids re-parsing the patterns on
+// every keyword and keeps tokenize linear under large inputs.
+const WSC = '[ \\t\\u00A0\\u2000-\\u200B\\u2028\\u2029\\u202F\\u205F\\u3000]';
+export const VAR_NAME_PATTERNS = {
+  setBefore: new RegExp(`(?:^|${WSC})set${WSC}+$`),
+  copyBefore: new RegExp(`(?:^|${WSC})copy${WSC}+$`),
+  possessiveBefore: new RegExp(`'s${WSC}+$`),
+  ofToAfter: new RegExp(`^${WSC}+to\\b`),
+  ofBefore: new RegExp(`\\bof${WSC}+$`),
+  inBefore: new RegExp(`\\bin${WSC}+$`),
+  exitBefore: new RegExp(`\\bexit${WSC}+$`),
+  commandBefore: new RegExp(`\\b(?:return|log|get)${WSC}+$`),
+  prepositionBefore: new RegExp(`\\b(?:to|thru|through|from|by|before|after|at)${WSC}+$`, 'i'),
+  ofAfter: new RegExp(`^${WSC}+of\\b`),
+  ofLineStart: new RegExp(`^${WSC}*of\\b`),
+  setOrCopyBefore: new RegExp(`^(set|copy)${WSC}+$`)
+} as const;
+
 // Matches a compound keyword allowing flexible whitespace between words
 // Also handles line continuation character (U+00AC) between words
 // Returns the end position if matched, or -1 if not matched
@@ -437,9 +460,9 @@ export function isKeywordAsVariableName(
 ): boolean {
   // Find start of logical line (following continuations backward)
   const lineStart = findLogicalLineStart(source, position, excludedRegions, callbacks);
-  // Strip excluded regions (block comments) from lineBefore, replacing with spaces
-  // Normalize continuations to spaces so regexes match across line breaks
-  // toLowerCase to avoid case mismatch
+  // Strip excluded regions (block comments) from lineBefore, replacing with spaces.
+  // Normalize continuations to spaces so regexes match across line breaks.
+  // toLowerCase to avoid case mismatch.
   const lineBefore = stripExcludedRegionsInRange(source, lineStart, position, excludedRegions)
     .toLowerCase()
     .replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ')
@@ -457,21 +480,21 @@ export function isKeywordAsVariableName(
   const afterKwNorm = rawAfterKwText.replace(/\u00AC[^\r\n]*(?:\r\n|\r|\n)[ \t]*/g, ' ');
 
   // 'set <keyword> to' pattern (only on same logical line, not across plain newlines)
-  if (/(?:^|[ \t])set[ \t]+$/.test(lineBefore)) {
-    if (/^[ \t]+to\b/.test(afterKwNorm)) {
+  if (VAR_NAME_PATTERNS.setBefore.test(lineBefore)) {
+    if (VAR_NAME_PATTERNS.ofToAfter.test(afterKwNorm)) {
       return true;
     }
   }
 
   // 'copy <keyword> to' pattern (only on same logical line, not across plain newlines)
-  if (/(?:^|[ \t])copy[ \t]+$/.test(lineBefore)) {
-    if (/^[ \t]+to\b/.test(afterKwNorm)) {
+  if (VAR_NAME_PATTERNS.copyBefore.test(lineBefore)) {
+    if (VAR_NAME_PATTERNS.ofToAfter.test(afterKwNorm)) {
       return true;
     }
   }
 
   // Possessive form: 'X's <keyword>' pattern (property access)
-  if (/'s[ \t]+$/.test(lineBefore)) {
+  if (VAR_NAME_PATTERNS.possessiveBefore.test(lineBefore)) {
     return true;
   }
 
@@ -480,18 +503,18 @@ export function isKeywordAsVariableName(
   // to avoid matching 'of' across continuation lines
   const afterPhysLines = rawAfterKwText.split(/\r\n|\r|\n/);
   const firstPhysLine = afterPhysLines[0];
-  if (!keyword.includes(' ') && !keyword.includes('\t') && /^[ \t]+of\b/.test(firstPhysLine)) {
+  if (!keyword.includes(' ') && !keyword.includes('\t') && VAR_NAME_PATTERNS.ofAfter.test(firstPhysLine)) {
     return true;
   }
   // '<keyword> of' across continuation (only when keyword is in expression context)
-  if (lineBefore.length > 0 && !keyword.includes(' ') && /^[ \t]+of\b/.test(afterKwNorm.split(/\r\n|\r|\n/)[0])) {
+  if (lineBefore.length > 0 && !keyword.includes(' ') && VAR_NAME_PATTERNS.ofAfter.test(afterKwNorm.split(/\r\n|\r|\n/)[0])) {
     return true;
   }
   // '<keyword> continuation\nof' at line start: suppress only when the line after 'of <value>' is
   // absent or not indented (not a block body). Compound keywords (e.g. 'end tell') are
   // never property access, so skip them.
   if (lineBefore.length === 0 && !keyword.includes(' ') && afterPhysLines.length >= 2) {
-    if (/^[ \t]*\u00AC[ \t]*$/.test(firstPhysLine) && /^[ \t]*of\b/.test(afterPhysLines[1])) {
+    if (/^[ \t]*\u00AC[ \t]*$/.test(firstPhysLine) && VAR_NAME_PATTERNS.ofLineStart.test(afterPhysLines[1])) {
       const lineAfterOf = afterPhysLines.length > 2 ? afterPhysLines[2] : '';
       if (lineAfterOf.length === 0 || !/^[ \t]/.test(lineAfterOf)) {
         return true;
@@ -500,24 +523,24 @@ export function isKeywordAsVariableName(
   }
 
   // 'of <keyword>' pattern (keyword as object in property access)
-  if (/\bof[ \t]+$/.test(lineBefore)) {
+  if (VAR_NAME_PATTERNS.ofBefore.test(lineBefore)) {
     return true;
   }
 
   // 'in <keyword>' pattern (keyword as list expression in repeat with X in <expr>)
-  if (/\bin[ \t]+$/.test(lineBefore)) {
+  if (VAR_NAME_PATTERNS.inBefore.test(lineBefore)) {
     return true;
   }
 
   // 'exit repeat' is a control flow statement, not a block opener
-  if (keyword === 'repeat' && /\bexit[ \t]+$/.test(lineBefore)) {
+  if (keyword === 'repeat' && VAR_NAME_PATTERNS.exitBefore.test(lineBefore)) {
     return true;
   }
 
   // Keywords used as values in command expression contexts
   // e.g., 'return tell', 'log repeat', 'get tell'
   if (lineBefore.length > 0) {
-    if (/\b(?:return|log|get)[ \t]+$/.test(lineBefore)) {
+    if (VAR_NAME_PATTERNS.commandBefore.test(lineBefore)) {
       return true;
     }
   }
@@ -530,7 +553,7 @@ export function isKeywordAsVariableName(
 
   // Bare 'end' after prepositions in expression context
   // e.g., 'repeat with i from 1 to end', 'items thru end', 'by end', 'before end', 'after end', 'at end'
-  if (keyword === 'end' && /\b(?:to|thru|through|from|by|before|after|at)[ \t]+$/i.test(lineBefore)) {
+  if (keyword === 'end' && VAR_NAME_PATTERNS.prepositionBefore.test(lineBefore)) {
     return true;
   }
 
