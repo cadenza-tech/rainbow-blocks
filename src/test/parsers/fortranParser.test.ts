@@ -6482,6 +6482,21 @@ end function`;
     });
   });
 
+  suite('Regression 2026-06-14: F77 type declaration with continuation suppresses bare end on next line', () => {
+    test('should treat `end` on the next physical line as a variable name when preceded by `integer &`', () => {
+      // Fortran 77-style declaration (no `::` separator) `integer end` declares a variable
+      // named `end`. The variable name can also appear on a free-form continuation line:
+      // `integer &\n  end`. Pre-fix, isAfterF77TypeDeclaration scanned only the current
+      // physical line and missed the continuation case, so the bare `end` on line 2 was
+      // tokenized as a block_close and phantom-closed the enclosing subroutine. After the
+      // fix, the continuation form is recognized and `end` on line 2 is suppressed; only
+      // the real `end subroutine` on line 4 closes the block.
+      const source = 'subroutine s\n  integer &\n  end\nend subroutine';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+  });
+
   suite('Regression 2026-06-14: fixed-form col-6 digit continuation marker before then', () => {
     test('should recognize `if (a)\\n     1then` as block-if when col-6 marker is digit `1`', () => {
       // Fixed-form Fortran: line 2 has 5 spaces and a digit `1` in column 6 as the
