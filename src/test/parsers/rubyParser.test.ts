@@ -5322,5 +5322,89 @@ end`;
     });
   });
 
+  suite('Regression: expression-position end filter must not steal an inner do close from outer blocks', () => {
+    // Bug: applyExpressionPositionEndFilter dropped every `end` whose predecessor was an
+    // RHS-expecting keyword (`break`, `return`, `next`, ...) or a bare value on the same
+    // logical line, but its fallback only resurrected the last dropped `end` when ALL closes
+    // were removed. In the 2+-open form `def m\n loop do break end\nend`, the outer `end`
+    // survives as a close, so the fallback never fires; the inner `end` is dropped, the outer
+    // `end` pairs with the inner `do`, and the `def` is left as an orphan (1 pair, 1 orphan
+    // open). Per cost-minimization, the correct parse is 2 pairs / 0 orphans: the inner `end`
+    // closes the inner `do`, and the outer `end` closes the `def`.
+    //
+    // Fix: generalize the fallback so that whenever open count > surviving close count, the
+    // latest dropped expression-position `end` tokens are resurrected one by one until the
+    // counts balance. The existing 2-end form `def m\n break end\nend` (open=1, surviving
+    // close=1 already) is unaffected because it already balances without resurrection.
+    test('should pair the inner do/end inside def when end follows break (def m\\n loop do break end\\nend)', () => {
+      const source = 'def m\n  loop do break end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerDo = findBlock(pairs, 'do');
+      assertTokenPosition(innerDo.closeKeyword, 1, 16);
+      assert.strictEqual(innerDo.nestLevel, 1, 'inner do should be nested inside def');
+      const outerDef = findBlock(pairs, 'def');
+      assertTokenPosition(outerDef.closeKeyword, 2, 0);
+      assert.strictEqual(outerDef.nestLevel, 0);
+    });
+
+    test('should pair two sibling inner do/end blocks plus the outer def (def m\\n loop do break end\\n loop do break end\\nend)', () => {
+      const source = 'def m\n  loop do break end\n  loop do break end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 3);
+      // Two sibling do/end on lines 1 and 2, plus def closed by end on line 3.
+      const defBlock = findBlock(pairs, 'def');
+      assertTokenPosition(defBlock.closeKeyword, 3, 0);
+      assert.strictEqual(defBlock.nestLevel, 0);
+      // Both inner do blocks should be at nest level 1 with their own end on the same line.
+      const doPairs = pairs.filter((p) => p.openKeyword.value === 'do');
+      assert.strictEqual(doPairs.length, 2, 'should pair both sibling do blocks');
+      for (const p of doPairs) {
+        assert.strictEqual(p.openKeyword.line, p.closeKeyword.line, 'each inner do/end should sit on one line');
+        assert.strictEqual(p.nestLevel, 1);
+      }
+    });
+
+    test('should pair the inner do/end inside def when end follows return value (def m\\n loop do return 1 end\\nend)', () => {
+      // Same shape with a value following the RHS-expecting keyword (`return 1`); the inner
+      // `end` is in expression position via the bare-value path but must still close the do.
+      const source = 'def m\n  loop do return 1 end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerDo = findBlock(pairs, 'do');
+      assert.strictEqual(innerDo.openKeyword.line, 1);
+      assert.strictEqual(innerDo.closeKeyword.line, 1);
+      assert.strictEqual(innerDo.nestLevel, 1);
+      const outerDef = findBlock(pairs, 'def');
+      assertTokenPosition(outerDef.closeKeyword, 2, 0);
+    });
+
+    test('should pair the inner do/end inside def when end follows next (def m\\n loop do next end\\nend)', () => {
+      const source = 'def m\n  loop do next end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerDo = findBlock(pairs, 'do');
+      assert.strictEqual(innerDo.openKeyword.line, 1);
+      assert.strictEqual(innerDo.closeKeyword.line, 1);
+      assert.strictEqual(innerDo.nestLevel, 1);
+      const outerDef = findBlock(pairs, 'def');
+      assertTokenPosition(outerDef.closeKeyword, 2, 0);
+    });
+
+    // Guards against regression of the existing fix in the surrounding suite:
+    test('guard: standalone loop do break end remains a single do/end pair', () => {
+      const source = 'loop do break end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'end');
+    });
+
+    test('guard: def m\\n break end\\nend still drops the inner end and pairs def with the outer end', () => {
+      const source = 'def m\n  break end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertTokenPosition(pairs[0].closeKeyword, 2, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
