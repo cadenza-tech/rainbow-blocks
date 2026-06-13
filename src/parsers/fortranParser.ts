@@ -124,6 +124,14 @@ const SELECT_TYPE_GUARD_PATTERN = new RegExp(
   'gi'
 );
 
+// Matches a line beginning, exactly 5 leading chars (blank or digit), a digit 1-9 at
+// column 6 (fixed-form continuation marker that is NOT excluded by `\b` boundary
+// because it shares the [0-9] character class), then `then` and a non-word break.
+// Group 1 captures the line-break + cols-1-5 prefix so the marker offset is
+// `match.index + match[1].length`. `isFixedFormContinuationMarkerAt` is then called
+// to fully validate the col-6 position (lineStart-relative checks).
+const THEN_AFTER_COL6_DIGIT_PATTERN = /((?:^|\r\n|\r|\n)[ \t0-9]{5})[1-9]then(?![a-zA-Z0-9_])/gi;
+
 export class FortranBlockParser extends BaseBlockParser {
   // Transient source captured during tokenize() for use in matchBlocks().
   // matchBlocks() needs source access to determine `select` opener subtypes
@@ -711,11 +719,19 @@ export class FortranBlockParser extends BaseBlockParser {
       // Check for 'then' keyword only at top-level (not inside parentheses)
       // 'then' must directly follow ')' (with only whitespace/comments between) to be a block if
       // If other content exists between ')' and 'then', it's a single-line if with 'then' as variable
+      //
+      // Word boundary preceding `then`: a fixed-form col-6 continuation marker (e.g.
+      // digit `1` in `     1then`) is alphanumeric, so the naive `[a-zA-Z0-9_]` check
+      // would reject the boundary and misread `1then` as a single identifier. The col-6
+      // marker is metadata (column 6 of a continued physical line), not part of the
+      // logical word, so treat its position as a valid word boundary too.
+      const precedingIsWordChar = i > 0 && /[a-zA-Z0-9_]/.test(source[i - 1]);
+      const precedingIsCol6Marker = i > 0 && this.isFixedFormContinuationMarkerAt(source, i - 1);
       if (
         parenDepth === 0 &&
         sawOpenParen &&
         source.slice(i, i + 4).toLowerCase() === 'then' &&
-        (i === 0 || !/[a-zA-Z0-9_]/.test(source[i - 1])) &&
+        (i === 0 || !precedingIsWordChar || precedingIsCol6Marker) &&
         (i + 4 >= source.length || !/[a-zA-Z0-9_]/.test(source[i + 4]))
       ) {
         // Verify no executable content between closing ')' and 'then'.
@@ -1475,8 +1491,39 @@ export class FortranBlockParser extends BaseBlockParser {
       guardMatch = SELECT_TYPE_GUARD_PATTERN.exec(source);
     }
 
+    // Detect `then` whose only preceding word character on its physical line is a
+    // fixed-form column-6 digit continuation marker (e.g. `     1then`). The base regex
+    // tokenizer uses `\b` word boundaries, so `1then` reads as a single identifier and
+    // the bare-keyword loop never emits a `then` token. The col-6 digit marker is
+    // metadata (continuation indicator) and not part of the logical word, so inject the
+    // `then` token here for col-6 marker positions.
+    let thenInjectionAdded = false;
+    THEN_AFTER_COL6_DIGIT_PATTERN.lastIndex = 0;
+    let thenMatch = THEN_AFTER_COL6_DIGIT_PATTERN.exec(source);
+    while (thenMatch !== null) {
+      const markerPos = thenMatch.index + thenMatch[1].length;
+      const thenPos = markerPos + 1;
+      if (
+        !this.isInExcludedRegion(thenPos, excludedRegions) &&
+        this.isFixedFormContinuationMarkerAt(source, markerPos) &&
+        isThenAfterParen(source, thenPos)
+      ) {
+        const { line, column } = this.getLineAndColumn(thenPos, newlinePositions);
+        result.push({
+          type: 'block_middle',
+          value: source.slice(thenPos, thenPos + 4),
+          startOffset: thenPos,
+          endOffset: thenPos + 4,
+          line,
+          column
+        });
+        thenInjectionAdded = true;
+      }
+      thenMatch = THEN_AFTER_COL6_DIGIT_PATTERN.exec(source);
+    }
+
     // Re-sort by position after adding concatenated forms or guard injections
-    if (compoundEndPositions.size > processedCompoundPositions.size || guardInjectionAdded) {
+    if (compoundEndPositions.size > processedCompoundPositions.size || guardInjectionAdded || thenInjectionAdded) {
       result.sort((a, b) => a.startOffset - b.startOffset);
     }
 
