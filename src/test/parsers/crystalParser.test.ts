@@ -2914,6 +2914,18 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'for', 'end');
     });
+
+    test('should treat end after method-bang suffix ? as block close, not ternary value', () => {
+      // `valid?` is a Crystal method-bang suffix (the `?` is part of the method
+      // name `valid?`, not a ternary operator). The earlier isEndInTernaryValuePosition
+      // would see `?` immediately before `end` (after whitespace skip) and
+      // misclassify `end` as a ternary first-value position, filtering it out.
+      // After the fix, a `?` adjacent to an identifier character is recognized as
+      // a method-bang suffix and `end` is correctly tokenized as block_close.
+      const source = 'def foo; x.valid? end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
