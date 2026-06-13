@@ -5235,5 +5235,144 @@ end`;
     });
   });
 
+  suite('Regression: end in a value-expecting position should not be tokenized as block_close', () => {
+    test('should not pair if with end after a binary operator (=~)', () => {
+      // `x =~ end` puts `end` on the right of the `=~` pattern-match operator. `end`
+      // is a reserved word and cannot be a value, so it must not be tokenized as
+      // block_close. The outer `if` must pair with the trailing `end` on the last
+      // line, not the in-expression one (which would orphan the real trailing `end`).
+      const source = 'if cond\n  x =~ end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end after a separator inside a call (foo(a, end))', () => {
+      // `foo(a, end)` places `end` after a `,` argument separator. `end` cannot be an
+      // argument value, so it must not be tokenized as block_close.
+      const source = 'if cond\n  foo(a, end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end after an open paren (foo(end))', () => {
+      // `foo(end)` places `end` right after an opening `(`. The opening paren expects
+      // an expression, and `end` cannot be one.
+      const source = 'if cond\n  foo(end)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end after an open bracket (arr[end])', () => {
+      const source = 'if cond\n  x = arr[end]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with end after the value-expecting keyword return', () => {
+      // `return end` places `end` where `return` expects a value. `end` is a reserved
+      // word and cannot be the returned value, so it must not be tokenized as
+      // block_close. The outer `def` must pair with the trailing `end`.
+      const source = 'def f\n  return end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with end after the value-expecting keyword yield', () => {
+      const source = 'def f\n  yield end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair if with end in method-call argument position (puts end)', () => {
+      // `puts end` places `end` as an argument to the method `puts`. A bare identifier
+      // (method name) directly before `end` means `end` is an argument value, which is
+      // invalid. It must not be tokenized as block_close.
+      const source = 'if x\n  puts end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still pair begin/end when an operator precedes begin on an earlier line (x =~ begin)', () => {
+      // The value-expecting context is followed by `begin` (a block opener), not by
+      // `end`. The trailing `end` genuinely closes the `begin` block on a later line,
+      // so it must remain a block_close. The same-line restriction of the filter must
+      // keep this `end` tokenized.
+      const source = 'x =~ begin\n y\n end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still pair begin/end when begin follows a separator in a call', () => {
+      const source = 'foo(a, begin\n z\n end)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still pair begin/end when begin is a method-call argument (puts begin)', () => {
+      const source = 'puts begin\n 1\n end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should still treat return if c as a postfix conditional (no block) and leave trailing end orphan', () => {
+      // `return if c` is `return (value) if c`, a postfix conditional, so the `if`
+      // opens no block. The trailing `end` has no opener and stays orphan. The filter
+      // must not turn this into a spurious block pair.
+      const source = 'return if c\n 1\n end';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should still pair an empty begin/end block on the same line (begin end)', () => {
+      // `begin end` is a valid empty begin block: the `end` closes the same-line
+      // `begin` opener. The preceding word is a block keyword, so the `end` must
+      // remain a block_close. The outer `if` pairs with its own trailing `end`.
+      const source = 'if cond\n  begin end\n  x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword?.startOffset, source.indexOf('end'));
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still pair an empty do/end block on the same line (each do end)', () => {
+      // `arr.each do end` is a valid empty do-block. The preceding word `do` is a
+      // block opener, so the same-line `end` closing it must remain a block_close.
+      const source = 'if cond\n  arr.each do end\n  x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const doPair = findBlock(pairs, 'do');
+      assert.strictEqual(doPair.closeKeyword?.value, 'end');
+      const ifPair = findBlock(pairs, 'if');
+      assert.strictEqual(ifPair.closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still pair a one-line if-then-end block (if a then end)', () => {
+      // `if a then end` is a valid (empty-body) one-line conditional whose `end`
+      // closes it. The preceding word `then` is a block-middle keyword, so the
+      // same-line `end` must remain a block_close.
+      const source = 'if cond\n  if a then end\n  x\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+    });
+
+    test('should still pair x = if-block-expression with its own end across newlines', () => {
+      // A block-expression assignment whose closing `end` is on its own line. The
+      // value-expecting `=` is on an earlier line, so the same-line restriction of the
+      // filter must keep this `end` tokenized as a genuine block_close.
+      const source = 'x = a +\n  if c\n    1\n  end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
