@@ -957,10 +957,11 @@ export class ApplescriptBlockParser extends BaseBlockParser {
   // tell/if/repeat appearing mid-line after a non-keyword expression (e.g., 'doStuff() tell').
   private isPrecededByExpressionTerminator(source: string, pos: number, excludedRegions: ExcludedRegion[]): boolean {
     let i = pos - 1;
-    // Skip whitespace, excluded regions, and `¬<newline>` line continuations (so the
-    // preceding logical token across continuations is examined).
+    // Skip whitespace (ASCII space/tab and Unicode whitespace such as NBSP), excluded
+    // regions, and `¬<newline>` line continuations (so the preceding logical token across
+    // continuations is examined).
     while (i >= 0) {
-      if (source[i] === ' ' || source[i] === '\t') {
+      if (source[i] === ' ' || source[i] === '\t' || isUnicodeWhitespace(source[i])) {
         i--;
         continue;
       }
@@ -969,7 +970,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         let probe = i;
         if (source[probe] === '\n' && probe > 0 && source[probe - 1] === '\r') probe--;
         probe--;
-        while (probe >= 0 && (source[probe] === ' ' || source[probe] === '\t')) probe--;
+        while (probe >= 0 && (source[probe] === ' ' || source[probe] === '\t' || isUnicodeWhitespace(source[probe]))) probe--;
         if (probe >= 0 && source[probe] === '¬') {
           i = probe - 1;
           continue;
