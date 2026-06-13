@@ -5595,6 +5595,64 @@ end`;
     });
   });
 
+  suite('Regression: non-reserved identifiers accepted as string/command macro prefix', () => {
+    // `type`, `mutable`, `missing`, `nothing`, `throw`, `isa` are NOT Julia reserved words
+    // (Julia 1.0+): `type` was removed in 1.0, `mutable` is a soft keyword (`mutable struct`
+    // only), `missing`/`nothing` are constants, `throw`/`isa` are functions. They can all
+    // be used as string/command macro names (`@type_str`, `@mutable_str`, etc.). So
+    // `type"hello"end` must be parsed as a single macro region with `end` consumed as the
+    // suffix flag, and the surrounding `function...end` must pair with the FINAL `end`.
+
+    test('should treat type"..."end as string macro and pair function with final end', () => {
+      const source = 'function f()\n  x = type"hello"end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat mutable"..."end as string macro and pair function with final end', () => {
+      const source = 'function f()\n  x = mutable"hello"end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat missing"..."end as string macro and pair function with final end', () => {
+      const source = 'function f()\n  x = missing"hello"end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat nothing"..."end as string macro and pair function with final end', () => {
+      const source = 'function f()\n  x = nothing"hello"end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat throw"..."end as string macro and pair function with final end', () => {
+      const source = 'function f()\n  x = throw"hello"end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat isa"..."end as string macro and pair function with final end', () => {
+      const source = 'function f()\n  x = isa"hello"end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should treat type`...`end as command macro and pair function with final end', () => {
+      const source = 'function f()\n  x = type`cmd`end\n  y = 1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression: end preceded by Unicode binary operator is rejected as block close (Bug 3)', () => {
     test('should not treat end as block close when preceded by × (Unicode times)', () => {
       // `a×end` is `a × end`; the trailing `end` is invalid syntax (end isn't a value
