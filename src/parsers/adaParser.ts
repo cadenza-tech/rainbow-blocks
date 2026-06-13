@@ -385,6 +385,41 @@ export class AdaBlockParser extends BaseBlockParser {
     return null;
   }
 
+  // Override to honor Ada LRM 2.3 identifier_extend: identifier-continuation
+  // characters are decimal_digit (\p{Nd}), connector_punctuation (\p{Pc}), or
+  // combining_mark (\p{M}); letter_number (\p{Nl}) and other_number (\p{No})
+  // are NOT identifier characters. The shared base implementation uses
+  // \p{N} which over-matches both Nl and No, so e.g. `end²` (² = U+00B2,
+  // Number_Other) is wrongly treated as a single identifier and `end` is not
+  // tokenized as a block close. Restricting to \p{Nd} matches LRM 2.3.
+  protected isAdjacentToUnicodeLetter(source: string, startOffset: number, keywordLength: number): boolean {
+    const isExtend = (s: string): boolean => /[\p{L}\p{M}\p{Nd}\p{Pc}]/u.test(s);
+    if (startOffset > 0) {
+      const before = source[startOffset - 1];
+      if (!/\w/.test(before)) {
+        if (startOffset >= 2 && before >= '\uDC00' && before <= '\uDFFF') {
+          const cp = source.codePointAt(startOffset - 2);
+          if (cp !== undefined && cp > 0xffff && isExtend(String.fromCodePoint(cp))) return true;
+        } else if (isExtend(before)) {
+          return true;
+        }
+      }
+    }
+    const afterPos = startOffset + keywordLength;
+    if (afterPos < source.length) {
+      const after = source[afterPos];
+      if (!/\w/.test(after)) {
+        if (afterPos + 1 < source.length && after >= '\uD800' && after <= '\uDBFF') {
+          const cp = source.codePointAt(afterPos);
+          if (cp !== undefined && cp > 0xffff && isExtend(String.fromCodePoint(cp))) return true;
+        } else if (isExtend(after)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Override to recognize Ada LRM 2.2 line terminators (LF, CR, NEL U+0085,
   // LS U+2028, PS U+2029). The default baseParser implementation only stops
   // at `\n` and `\r`, so a `-- comment<NEL>` would swallow the rest of the
