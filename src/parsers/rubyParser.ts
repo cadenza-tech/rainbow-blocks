@@ -403,13 +403,18 @@ export class RubyBlockParser extends BaseBlockParser {
   // as block_close mis-pairs surrounding blocks, so per the anchor-set principle they are
   // dropped so blocks pair correctly.
   //
-  // Fallback (cost-minimization): dropping is correct only when a legitimate `end` remains
-  // to close the block. When ALL close keywords would be removed yet a block opener is
-  // present -- as in the valid one-block sources `loop do break end`, `begin x = 42 end`,
-  // `while c do x + 1 end` -- deleting the sole `end` would erase the whole block (0 pairs,
-  // 1 orphan open). Keeping the last such `end` instead yields 1 pair and 0 orphans, the
-  // lower-cost parse. The 2-end form keeps dropping its inner `end` because the outer `end`
-  // still survives as a close keyword.
+  // Fallback (cost-minimization): dropping is correct only when enough legitimate `end`
+  // tokens remain to close every surviving opener. Whenever dropping would leave the open
+  // count greater than the surviving close count, the most recently flagged `end` tokens
+  // are resurrected one by one (latest first) until the counts balance. This generalises the
+  // original "all closes removed" fallback so it also covers cases like
+  // `def m\n loop do break end\nend` (open=2, surviving close=1 once the inner `end` is
+  // dropped): without resurrection the outer `end` would close the inner `do` and the `def`
+  // would be left as an orphan (1 pair, 1 orphan); resurrecting the inner `end` gives the
+  // lower-cost parse (2 pairs, 0 orphans). The single-opener forms `loop do break end` and
+  // `begin x = 42 end` are still rescued because they hit the same imbalance (1 open, 0
+  // surviving closes). The 2-end form `def m\n break end\nend` already balances (1 open, 1
+  // surviving outer `end`), so no resurrection occurs and the inner `end` is still dropped.
   private applyExpressionPositionEndFilter(tokens: Token[], source: string, excludedRegions: ExcludedRegion[]): Token[] {
     // Indices of `end` tokens that the expression-position check would remove.
     const expressionEndIndices: number[] = [];
@@ -424,18 +429,19 @@ export class RubyBlockParser extends BaseBlockParser {
     }
 
     const removed = new Set(expressionEndIndices);
-    // Would any block_open survive with no surviving block_close? If so, resurrect the last
-    // flagged `end` (closest to source end -- the most likely closer of the outermost open)
-    // so the block is not erased.
-    let hasOpen = false;
-    let hasSurvivingClose = false;
+    // Count surviving opens and closes given the current removed set.
+    let openCount = 0;
+    let survivingCloseCount = 0;
     for (let i = 0; i < tokens.length; i++) {
       if (removed.has(i)) continue;
-      if (tokens[i].type === 'block_open') hasOpen = true;
-      else if (tokens[i].type === 'block_close') hasSurvivingClose = true;
+      if (tokens[i].type === 'block_open') openCount++;
+      else if (tokens[i].type === 'block_close') survivingCloseCount++;
     }
-    if (hasOpen && !hasSurvivingClose) {
-      removed.delete(expressionEndIndices[expressionEndIndices.length - 1]);
+    // Resurrect the most recently flagged `end` tokens (latest source position first) until
+    // open count <= surviving close count, so every opener can be paired.
+    for (let k = expressionEndIndices.length - 1; k >= 0 && openCount > survivingCloseCount; k--) {
+      removed.delete(expressionEndIndices[k]);
+      survivingCloseCount++;
     }
 
     return tokens.filter((_token, i) => !removed.has(i));
