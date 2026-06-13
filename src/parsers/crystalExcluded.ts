@@ -63,6 +63,13 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
     let i = bodyStart;
     while (i < source.length) {
       const char = source[i];
+      // Close marker `%}` takes precedence over char-literal-body recognition.
+      // For `{%?%}` the trailing `%` is the start of the macro closer, not the
+      // body of a char literal `?%` — without this check the closer would be
+      // consumed as char-literal content and the macro body would run to EOF.
+      if (source[i] === '%' && source[i + 1] === '}') {
+        return { start: pos, end: i + 2 };
+      }
       // Skip char literals `?<delim>` so the delimiter is not misread as the
       // start of a comment / string / backtick / regex. Must come before the
       // `#`/`"`/`'`/`` ` ``/`/` branches below.
@@ -101,9 +108,6 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
         i = skipRegexLiteral(source, i);
         continue;
       }
-      if (source.slice(i, i + 2) === '%}') {
-        return { start: pos, end: i + 2 };
-      }
       // Skip percent literals (%r(...), %w[...], %|...|, etc.) inside macro body
       if (char === '%') {
         const percentEnd = skipMacroPercentLiteral(source, i);
@@ -125,6 +129,47 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
     let singleBraceDepth = 0;
     while (i < source.length && depth > 0) {
       const char = source[i];
+      // `}}` close-marker handling takes precedence over char-literal-body
+      // recognition. For `{{?}}` the trailing `}}` is the macro closer, not the
+      // body of a char literal `?}` — without this check the closer would be
+      // consumed as char-literal content and the macro body would run to EOF.
+      if (source[i] === '}' && source[i + 1] === '}') {
+        // `}}}` (three or more consecutive `}`) with at least one unbalanced inner
+        // `{`: leading `}` closes one inner brace. The trailing `}}` is reserved
+        // for either the template close (when sBD becomes 0 after the leading
+        // close) or another inner close on the next iteration (when sBD remains
+        // > 0). Without this case, `{{ { x { }}}` would consume the first `}}` as
+        // two inner closes (sBD: 2 -> 0) and leave a lone `}` that never closes
+        // the template, letting the macro extend to EOF and swallow following
+        // blocks.
+        if (singleBraceDepth >= 1 && i + 2 < source.length && source[i + 2] === '}') {
+          singleBraceDepth--;
+          i++;
+          continue;
+        }
+        if (singleBraceDepth >= 2) {
+          // Both braces close single { inside the template, not the template itself
+          singleBraceDepth -= 2;
+          i += 2;
+          continue;
+        }
+        if (singleBraceDepth === 1) {
+          // Unbalanced single {: treat }} as template closer
+          singleBraceDepth = 0;
+          depth--;
+          if (depth === 0) {
+            return { start: pos, end: i + 2 };
+          }
+          i += 2;
+          continue;
+        }
+        depth--;
+        if (depth === 0) {
+          return { start: pos, end: i + 2 };
+        }
+        i += 2;
+        continue;
+      }
       // Skip char literals `?<delim>` so the delimiter is not misread as the
       // start of a comment / string / backtick / regex. Must come before the
       // `#`/`"`/`'`/`` ` ``/`/` branches below.
@@ -175,43 +220,6 @@ export function matchMacroTemplate(source: string, pos: number): ExcludedRegion 
       }
       if (source.slice(i, i + 2) === '{{') {
         depth++;
-        i += 2;
-        continue;
-      }
-      if (source.slice(i, i + 2) === '}}') {
-        // `}}}` (three or more consecutive `}`) with at least one unbalanced inner
-        // `{`: leading `}` closes one inner brace. The trailing `}}` is reserved
-        // for either the template close (when sBD becomes 0 after the leading
-        // close) or another inner close on the next iteration (when sBD remains
-        // > 0). Without this case, `{{ { x { }}}` would consume the first `}}` as
-        // two inner closes (sBD: 2 -> 0) and leave a lone `}` that never closes
-        // the template, letting the macro extend to EOF and swallow following
-        // blocks.
-        if (singleBraceDepth >= 1 && i + 2 < source.length && source[i + 2] === '}') {
-          singleBraceDepth--;
-          i++;
-          continue;
-        }
-        if (singleBraceDepth >= 2) {
-          // Both braces close single { inside the template, not the template itself
-          singleBraceDepth -= 2;
-          i += 2;
-          continue;
-        }
-        if (singleBraceDepth === 1) {
-          // Unbalanced single {: treat }} as template closer
-          singleBraceDepth = 0;
-          depth--;
-          if (depth === 0) {
-            return { start: pos, end: i + 2 };
-          }
-          i += 2;
-          continue;
-        }
-        depth--;
-        if (depth === 0) {
-          return { start: pos, end: i + 2 };
-        }
         i += 2;
         continue;
       }
