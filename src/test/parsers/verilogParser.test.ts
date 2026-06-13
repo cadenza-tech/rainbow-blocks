@@ -5542,5 +5542,52 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: block_close keyword as rvalue identifier after assignment', () => {
+    // A close keyword used as a pure rvalue identifier (the right-hand side of
+    // an assignment with no following `(`) must not be tokenized as a real
+    // block_close. The previous `isInInstanceNamePosition` carve-out only
+    // covered the `<id> <close_kw> (` form (instance-style typos); when the
+    // close keyword is the rvalue directly (`a = endmodule + 1;`,
+    // `a = endmodule;`), no follow-`(` exists so the carve-out never fired and
+    // the close keyword incorrectly paired with the enclosing module's open.
+    test('should not tokenize `endmodule` as block_close in `a = endmodule + 1;`', () => {
+      const source = 'module outer;\n  a = endmodule + 1;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset);
+    });
+
+    test('should not tokenize `endmodule` as block_close in `a = endmodule;`', () => {
+      const source = 'module outer;\n  a = endmodule;\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset);
+    });
+
+    test('should not tokenize `endcase` as block_close in `a = endcase;`', () => {
+      const source = 'module outer;\n  case (s) 0: a = endcase; endcase\nendmodule';
+      // The middle `endcase` (after `=`) is rvalue; the trailing `endcase`
+      // must close the `case` opener.
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const casePair = findBlock(pairs, 'case');
+      const trailingEndcase = source.lastIndexOf('endcase');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, trailingEndcase);
+    });
+
+    test('should still pair `endcase` end-label suffix `case (s) 0: x = y; endcase`', () => {
+      // Sanity: a real case statement with a normal case_item assignment still
+      // pairs; the rvalue identifier `y` is not a close keyword so the new
+      // suppression does not fire on it.
+      const source = 'case (s) 0: x = y; endcase';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+  });
+
   generateCommonTests(config);
 });
