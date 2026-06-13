@@ -5061,5 +5061,86 @@ end package;`;
     });
   });
 
+  // Bug: isInSignalAssignment built `const lowerSource = source.toLowerCase();` on every
+  // `when` / `else` token. With many `when ... else` chains across an architecture, the
+  // base scanner calls the validator once per intermediate, making the per-keyword work
+  // proportional to source length (O(N^2) total). The fix replaces the precomputed full
+  // lowercase string with bounded local slices (`source.slice(a, b).toLowerCase()`) inside
+  // the backward scan, so each keyword check is O(1). The two functional tests below pin
+  // the local-slice equivalence for the LRM 10.5.3 / 11.6 chains (so the slice rewrite is
+  // not free to over-prune `when`/`else` intermediates), and the timing test pins the
+  // linearization.
+  suite('Regression 2026-06-13: VHDL conditional signal assignment validation slicing', () => {
+    test('should keep when/else intermediates inside chained conditional signal assignment', () => {
+      // Chained `when ... else` per LRM 10.5.3: every `when` and `else` between `<=` and
+      // the trailing `;` belongs to the same conditional signal assignment, so none of
+      // them should reach the if-block stack. With the assignment alone (no enclosing
+      // `if`), zero pairs form; if the validator wrongly let `when`/`else` through they
+      // would attach to surrounding blocks and break this expectation.
+      const source = 'architecture a of b is\nbegin\nsig <= x when c1 else y when c2 else z;\nend architecture;';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+    });
+
+    test('should still treat else inside an if-statement above the assignment as a block intermediate', () => {
+      // Functional guard for the local-slice rewrite: the `else` here is the if-block's
+      // else (no value on its own line after it), not part of a signal assignment. The
+      // bounded scan must still walk back past `then` and recognize the if context.
+      const source =
+        'architecture a of b is\nbegin\nprocess\nbegin\nif c then\n  sig <= a;\nelse\n  sig <= b;\nend if;\nend process;\nend architecture;';
+      const pairs = parser.parse(source);
+      const ifBlock = findBlock(pairs, 'if');
+      assert.ok(
+        ifBlock.intermediates.some((t) => t.value.toLowerCase() === 'else'),
+        'if-block else (no inline value) must remain a block intermediate'
+      );
+    });
+
+    test('should parse 10000 conditional signal assignments without quadratic slowdown', function () {
+      // Each line is a `sig_i <= ... when c else other;` chain (LRM 10.5.3). The base
+      // scanner runs isInSignalAssignment for every `when` and `else` (two `block_middle`
+      // candidates per line). Pre-fix each call built `source.toLowerCase()` over the
+      // whole source — N lines x 2 candidates per line x O(N) per call = O(N^2). At this
+      // size a standalone Node measurement showed >2 minutes; the local-slice fix lands
+      // the same parse in well under a second.
+      //
+      // Same isolation tactic as the other VHDL window-slicing tests: keep the source
+      // shape close to a real architecture (one outer `architecture ... end architecture`
+      // pair) so the unrelated O(pairs^2) term in recalculateNestLevels stays flat and
+      // the isInSignalAssignment cost is what dominates.
+      //
+      // The default mocha timeout (2s) is shorter than even the linear baseline at this
+      // size; raise it to 60s so a quadratic regression is caught by the ceiling
+      // assertion below rather than a mocha "timeout of 2000ms exceeded".
+      this.timeout(60000);
+      const buildSource = (n: number): string => {
+        const header = 'architecture a of b is\nbegin\n';
+        const footer = 'end architecture;';
+        const lines: string[] = [];
+        for (let i = 0; i < n; i++) {
+          lines.push(`sig${i} <= func(a, b, c) when cond else other;`);
+        }
+        return `${header + lines.join('\n')}\n${footer}`;
+      };
+      const warmUp = buildSource(1000);
+      for (let i = 0; i < 5; i++) {
+        parser.parse(warmUp); // JIT warm-up on a small, fast source
+      }
+      const source = buildSource(10000);
+      const start = performance.now();
+      const pairs = parser.parse(source);
+      const elapsed = performance.now() - start;
+      assertSingleBlock(pairs, 'architecture', 'end architecture');
+      // Linearized parsing finishes in well under a second; a 4000ms ceiling keeps headroom
+      // for coverage instrumentation and CI jitter while still failing by an order of
+      // magnitude if the O(N^2) full-source toLowerCase per keyword returns (the legacy
+      // measurement at this size was tens of seconds).
+      assert.ok(
+        elapsed < 4000,
+        `10000 conditional signal assignment parse took ${elapsed.toFixed(0)}ms, expected < 4000ms (O(N^2) isInSignalAssignment regression)`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
