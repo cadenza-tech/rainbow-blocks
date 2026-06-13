@@ -1936,6 +1936,45 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'function', 'end');
     });
+
+    test('should treat \\v%} as block comment end (VT leading whitespace before %})', () => {
+      // `%}` preceded ONLY by a vertical tab (\v) on its line should still close the block
+      // comment. isAtLineStartWithWhitespace must treat \v as horizontal whitespace just
+      // like the block-comment-start side (isBlockCommentStart) already does. Without the
+      // fix the `%}` is not recognised as the block-comment terminator, leaving the inner
+      // `if` un-excluded and the outer block pairing destroyed. Lines: 0=%{,
+      // 1=foo, 2=\v%}, 3=if true, 4=end.
+      const source = '%{\nfoo\n\v%}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat \\f%} as block comment end (FF leading whitespace before %})', () => {
+      const source = '%{\nfoo\n\f%}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should treat \\v%{ as nested block comment start (VT leading whitespace before nested %{)', () => {
+      // Nested `%{` preceded ONLY by a vertical tab (\v) on its line should still increase
+      // the block-comment nesting depth. Without the fix, the inner `\v%{` is NOT recognised
+      // as a nesting open and the FIRST `%}` closes the OUTER `%{` — the second `%}` is then
+      // a stray and the comment ends earlier than intended. Adding `\v`-as-whitespace to
+      // isAtLineStartWithWhitespace makes the inner `%{` increase depth, so the first `%}`
+      // returns the depth to 1 and only the second `%}` actually closes the outer comment.
+      // Lines: 0=%{, 1=foo, 2=\v%{ (nested), 3=bar, 4=%}, 5=%}, 6=if true, 7=end.
+      const source = '%{\nfoo\n\v%{\nbar\n%}\n%}\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      // Verify the entire commented region (through the second %} on line 5) is excluded:
+      // an excluded region whose end reaches line 5 means depth-2 nesting was applied.
+      const regions = parser.getExcludedRegions(source);
+      const blockCommentRegion = regions.find((r) => source[r.start] === '%' && source[r.start + 1] === '{');
+      assert.ok(blockCommentRegion, 'block comment region must exist');
+      // The block comment must extend at least to the position of the second `%}` (line 5).
+      const secondClosePos = source.indexOf('%}', source.indexOf('%}') + 2);
+      assert.ok(blockCommentRegion.end > secondClosePos, 'block comment must include the inner %} (depth-2 nesting)');
+    });
   });
 
   suite('Regression 2026-05-09: end after logical NOT operator !', () => {
