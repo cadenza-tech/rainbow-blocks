@@ -2183,6 +2183,22 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'IF', 'END-IF');
     });
+
+    // Regression: a `.` typed in the fixed-format identification area (visual
+    // cols 72+, compiler-ignored free text) used to reset the active
+    // COPY REPLACING context, so the next line's area-B `==IF==` was no longer
+    // classified as pseudo-text. The IF inside was tokenised and wrongly paired
+    // with END-IF below. The period-in-identification-area case mirrors the
+    // existing area-B REPLACE guard above: both must leave inReplaceContext
+    // untouched.
+    test('should not treat an identification-area period as a statement boundary', () => {
+      // Pad a complete `COPY ... REPLACING ==A== BY ==B==` so its terminating
+      // period sits inside the identification area (visual col 72+).
+      const copyLine = `${'000400 COPY X REPLACING ==A== BY ==B=='.padEnd(72)}.`;
+      const source = `${copyLine}\n000400 ==IF==\n000400 END-IF`;
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Regression: WHEN/ELSE used as data names', () => {
