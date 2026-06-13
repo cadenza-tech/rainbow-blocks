@@ -5479,5 +5479,68 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: instance-name suppression must not fire on rvalue identifiers after assignment', () => {
+    // Scenario B from /investigate-bugs: a typo where a semicolon is missing
+    // before a close keyword followed by `(`, e.g. `q <= d end (clk)`. The
+    // identifier just before the close keyword is the rvalue of an assignment,
+    // NOT a module type identifier introducing an instantiation. The instance-
+    // name suppression must NOT fire here — otherwise the close keyword is
+    // dropped from tokenization and the enclosing block becomes orphan.
+    //
+    // The discriminator vs. scenario A (`module top; sub endmodule (.x(y));`)
+    // is the character immediately before the preceding identifier: in A it is
+    // a statement boundary (`;`, newline, `begin`), in B it is an assignment
+    // operator (`=`, `<=`, `>=`, `!=`, `==`).
+    test('should not suppress `end` after `<=` rvalue identifier (always begin q <= d end)', () => {
+      // `always @* begin q <= d end (clk)` — missing semicolon before `end`.
+      // Without the rvalue-aware carve-out, `end` was suppressed as if `d` were
+      // an instance type identifier, dropping both `begin/end` and `always/end`
+      // pairs (orphan 2). With the fix, `end` survives and pairs with `begin`,
+      // which in turn pairs with `always`.
+      const source = 'always @* begin q <= d end (clk)';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const beginPair = findBlock(pairs, 'begin');
+      assert.strictEqual(beginPair.closeKeyword?.value, 'end');
+      const alwaysPair = findBlock(pairs, 'always');
+      assert.strictEqual(alwaysPair.closeKeyword?.value, 'end');
+    });
+
+    test('should not suppress `endcase` after `=` rvalue identifier (case ... endcase (z))', () => {
+      // `case(s) 1: x = y endcase (z)` — missing semicolon before `endcase`.
+      // `y` is the rvalue of `x = y`, NOT a module type identifier.
+      const source = 'case(s) 1: x = y endcase (z)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'endcase');
+    });
+
+    test('should not suppress `join` after `=` rvalue identifier (fork x = y join (z))', () => {
+      // `fork x = y join (z)` — missing semicolon before `join`.
+      const source = 'fork x = y join (z)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'fork', 'join');
+    });
+
+    test('should not suppress `endfunction` after `=` rvalue identifier (function f; x = y endfunction (z))', () => {
+      // `function f; x = y endfunction (z)` — missing semicolon before
+      // `endfunction`. `y` is the rvalue of `x = y`.
+      const source = 'function f; x = y endfunction (z)';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'endfunction');
+    });
+
+    test('should still suppress `endmodule` instance-name pattern after statement boundary (scenario A sanity)', () => {
+      // Sanity: the original scenario A protection must still hold. Here `sub`
+      // follows `;\n  ` (a statement boundary), so the rvalue carve-out must
+      // NOT fire and the instance-name suppression must take effect.
+      const source = 'module top;\n  sub endmodule (.x(y));\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset);
+    });
+  });
+
   generateCommonTests(config);
 });
