@@ -2926,6 +2926,19 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'def', 'end');
     });
+
+    test('should not treat def with no-paren parameter starting with @ as Crystal shorthand', () => {
+      // `def foo @param = 1` uses a no-paren instance-variable parameter `@param`
+      // with a default value. The earlier hasShorthandDefAssignment only treated
+      // `[A-Za-z_]` as a no-paren parameter-start; `@` did not match, so the `=`
+      // later was treated as the Crystal 1.0 shorthand `def name = expr` and the
+      // `def` token was filtered. After the fix, instance var `@`, class var `@@`,
+      // global var `$`, splat `*`, and block `&` are recognized as no-paren
+      // parameter-list starters and the `def` is paired with the trailing `end`.
+      const source = 'def foo @param = 1\n  puts @param\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Coverage: uncovered code paths', () => {
