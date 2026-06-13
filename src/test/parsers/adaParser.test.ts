@@ -4845,5 +4845,37 @@ end Obj;`;
     });
   });
 
+  suite('Unicode identifier regression', () => {
+    test('should not leak type-decl is for non-ASCII type name on its own line', () => {
+      // The type name `Größe` starts with a non-ASCII letter (ö = U+00F6). The
+      // multi-line type-decl `is` filter must still recognize the type-name-on-
+      // its-own-line layout so the declaration `is` is not recorded as the
+      // surrounding procedure's intermediate. Mirrors the ASCII case below.
+      const source = `procedure P is
+  type
+  Größe
+  is range 1..10;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      const proc = findBlock(pairs, 'procedure');
+      assertIntermediates(proc, ['is', 'begin']);
+    });
+
+    test('should keep type-decl is filtering for ASCII type name on its own line', () => {
+      const source = `procedure P is
+  type
+  Tname
+  is range 1..10;
+begin
+  null;
+end P;`;
+      const pairs = parser.parse(source);
+      const proc = findBlock(pairs, 'procedure');
+      assertIntermediates(proc, ['is', 'begin']);
+    });
+  });
+
   generateCommonTests(config);
 });
