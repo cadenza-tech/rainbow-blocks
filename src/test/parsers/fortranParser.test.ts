@@ -1527,6 +1527,49 @@ end program`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'program', 'end program');
     });
+
+    test('should exclude backslash-continued macro lines so end if inside the macro does not close real if (LF)', () => {
+      // The `end if` on the macro continuation line must not close the real `if`.
+      // Real `if` should pair with the final `end if` (offset 51), not the macro's (offset 36).
+      const source = 'if (a > 0) then\n#define MACRO x \\\n  end if\n  y = 1\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const block = findBlock(pairs, 'if');
+      assert.strictEqual(block.closeKeyword?.startOffset, 51);
+    });
+
+    test('should exclude backslash-continued macro lines so end if inside the macro does not close real if (CRLF)', () => {
+      const source = 'if (a > 0) then\r\n#define MACRO x \\\r\n  end if\r\n  y = 1\r\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const block = findBlock(pairs, 'if');
+      assert.strictEqual(block.closeKeyword?.startOffset, 55);
+    });
+
+    test('should exclude backslash-continued macro lines so end if inside the macro does not close real if (CR-only)', () => {
+      const source = 'if (a > 0) then\r#define MACRO x \\\r  end if\r  y = 1\rend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      const block = findBlock(pairs, 'if');
+      assert.strictEqual(block.closeKeyword?.startOffset, 51);
+    });
+
+    test('should exclude backslash-continued macro lines so end do inside the macro does not steal the outer do', () => {
+      // The `end do` on the macro continuation line must not close the outer `do`.
+      // Outer `do` (offset 0) should pair with the final `end do` (offset 54),
+      // and the inner `do` (offset 36) with its own `end do` (offset 47).
+      const source = 'do i=1,3\n  #define M y \\\n  end do\n  do j=1,5\n  end do\nend do';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const outer = pairs.find((pr) => pr.openKeyword.startOffset === 0);
+      assert.ok(outer, 'outer do block should exist');
+      assert.strictEqual(outer.closeKeyword?.startOffset, 54);
+      assert.strictEqual(outer.nestLevel, 0);
+      const inner = pairs.find((pr) => pr.openKeyword.startOffset === 36);
+      assert.ok(inner, 'inner do block should exist');
+      assert.strictEqual(inner.closeKeyword?.startOffset, 47);
+      assert.strictEqual(inner.nestLevel, 1);
+    });
   });
 
   suite('Module and procedure continuation edge cases', () => {
