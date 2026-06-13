@@ -4981,5 +4981,58 @@ end if;`;
     });
   });
 
+  suite('Exit-when vs case arm regression', () => {
+    test('should keep next when guard when previous arm body ends with exit (no semicolon)', () => {
+      // The arm `when Done => exit` is missing its `;` (mid-edit). The next
+      // `when Other` heads a new case arm, so its guard `when` must still be
+      // recorded as the case intermediate even though its preceding word is
+      // `exit`. A case-arm guard is closed by `=>`, an `exit when Cond` by `;`.
+      const source = `case X is
+  when Done => exit
+  when Other => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const c = findBlock(pairs, 'case');
+      assertIntermediates(c, ['is', 'when', 'when']);
+    });
+
+    test('should keep both when guards when arm body ends with exit and semicolon (control)', () => {
+      // Control: with the `;` present, the next `when` is already preceded by
+      // `;`, so both arm guards are recorded.
+      const source = `case X is
+  when Done => exit;
+  when Other => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const c = findBlock(pairs, 'case');
+      assertIntermediates(c, ['is', 'when', 'when']);
+    });
+
+    test('should ignore exit-when modifier inside an arm body', () => {
+      // `exit when Y;` is a loop-exit modifier (LRM 5.7) terminated by `;`, not
+      // an arm guard, so its `when` is not a case intermediate. Both real arm
+      // guards (`when A`, `when B`) remain.
+      const source = `case X is
+  when A => exit when Y;
+  when B => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const c = findBlock(pairs, 'case');
+      assertIntermediates(c, ['is', 'when', 'when']);
+    });
+
+    test('should ignore plain exit-when modifier inside a loop', () => {
+      // A plain `exit when Done;` in a loop has no enclosing case/select, so the
+      // loop carries no `when` intermediate.
+      const source = `loop
+  exit when Done;
+  null;
+end loop;`;
+      const pairs = parser.parse(source);
+      const l = findBlock(pairs, 'loop');
+      assertIntermediates(l, []);
+    });
+  });
+
   generateCommonTests(config);
 });
