@@ -3595,6 +3595,45 @@ foo() ->
     });
   });
 
+  suite('Regression: map-scope bare reserved-word key followed by blank line', () => {
+    // Bug: the block_open => / := lookahead only allowed a single newline before the
+    // arrow, so a bare reserved-word map key with a blank line between the key and
+    // the arrow (`#{begin\n\n  => v}`) escaped the lookahead and became a real block
+    // opener. The `begin` then paired with an unrelated `end` outside the map and
+    // produced a spurious BlockPair. The block_close side already consulted
+    // hasUnclosedOpenerInMapScope, so the fix is symmetric: inside a #{...} scope
+    // we accept blank lines between the bare key and its `=>`/`:=` arrow.
+    test('should not open a block for bare begin inside a map even when => sits after a blank line', () => {
+      const source = '#{begin\n\n  => v},\nfoo() -> ok end';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 0, 'begin inside #{...} must not pair with the unrelated end');
+    });
+
+    test('should still leave the bare begin outside any map as a block opener when => sits after a blank line', () => {
+      // Mirrors the existing test 1404: outside a map scope, a blank line breaks the
+      // map-key lookahead and `begin` reverts to a normal block opener. This guards
+      // against the symmetric fix relaxing the rule outside of #{ ... }.
+      const source = 'begin\n\n=> value\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+
+    test('should not open a block for bare case inside a map even when => sits after a blank line', () => {
+      const source = '#{case\n\n  => v},\nfoo() -> ok end';
+      const pairs = parser.parse(source);
+      assert.strictEqual(pairs.length, 0, 'case inside #{...} must not pair with the unrelated end');
+    });
+
+    test('should keep begin as opener when it is followed by content inside a map (#{begin ok end => value})', () => {
+      // begin@2 here is followed by `ok end`, so the map key is `begin ok end`, not the
+      // bare `begin`. begin/end must still pair as a complete block before the `=>`,
+      // preserving the existing test 1746 expectation.
+      const source = '#{begin ok end => value}.';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+    });
+  });
+
   suite('Regression: expression-prefix catch in clause body must not shadow the real clause-separator catch', () => {
     // Bug: when a try clause body begins with an expression-prefix catch (e.g. the clause
     // body `catch bar()` after `->`), isCatchFollowedByClausePattern scans forward past the
