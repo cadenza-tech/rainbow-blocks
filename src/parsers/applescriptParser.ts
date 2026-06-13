@@ -816,7 +816,7 @@ export class ApplescriptBlockParser extends BaseBlockParser {
     let after = endPos;
     while (after < source.length) {
       const ch = source[after];
-      if (ch === ' ' || ch === '\t') {
+      if (ch === ' ' || ch === '\t' || isUnicodeWhitespace(ch)) {
         after++;
         continue;
       }
