@@ -5772,5 +5772,62 @@ end`;
     });
   });
 
+  suite('Bug: hasDoKeyword end in expression RHS must not abort do search', () => {
+    // `end` immediately preceded by an expression operator (e.g., `=`, `!=`, `!`, `+`, `<>`,
+    // `and`/`or`/`not`/`in`/`when`, or `..`) is an identifier in expression position, not a
+    // block close. hasDoKeyword scans forward from a block-open candidate to find its `do`; if
+    // it sees such a stray `end` and treats it as a real close it returns false early, the
+    // candidate is rejected, and the genuine inner block is never tokenized. The genuine outer
+    // `end` then orphan-pairs with the surrounding opener, losing the inner block entirely.
+    // Symmetric with isValidBlockClose's RHS check.
+    test('should still detect inner if-end when condition contains != end (if a != end do)', () => {
+      const source = 'def foo do\n  if a != end do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should still detect inner if-end when condition contains = end (if a = end do)', () => {
+      const source = 'def foo do\n  if a = end do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should still detect inner if-end when condition contains + end (if a + end do)', () => {
+      const source = 'def foo do\n  if a + end do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should still detect inner if-end when condition contains and end (if a and end do)', () => {
+      const source = 'def foo do\n  if a and end do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should still detect inner if-end when condition contains end(args) function call (if end(x) do)', () => {
+      const source = 'def foo do\n  if end(x) do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def' && p.closeKeyword.value === 'end'));
+    });
+
+    test('should still detect inner if-end when condition contains ..end (if 1..end do)', () => {
+      const source = 'def foo do\n  if 1..end do\n    :ok\n  end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'if' && p.closeKeyword.value === 'end'));
+      assert.ok(pairs.some((p) => p.openKeyword.value === 'def' && p.closeKeyword.value === 'end'));
+    });
+  });
+
   generateCommonTests(config);
 });
