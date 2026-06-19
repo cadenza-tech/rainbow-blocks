@@ -4228,5 +4228,35 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: duplicate else after else should be dropped', () => {
+    // AppleScript `if`/`else if`/`else`/`end if` allows at most one bare `else`
+    // branch, and it must be the last intermediate (no `else if` can follow it).
+    // When the source contains two consecutive `else` (or an `else if` after a
+    // bare `else`), the second clause is a syntax error rather than a real
+    // intermediate of the enclosing `if`. The matchBlocks intermediate handler
+    // must drop the duplicate so only the first `else` is attached and the
+    // anchor-set principle (one canonical pair) is preserved.
+    test('should drop duplicate else after first else', () => {
+      const source = 'if x then\n  beep\nelse\n  beep\nelse\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should drop else if after first else', () => {
+      const source = 'if x then\n  beep\nelse\n  beep\nelse if y then\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should keep multiple else if before the bare else (legal AppleScript)', () => {
+      const source = 'if x then\n  beep\nelse if y then\n  beep\nelse if z then\n  beep\nelse\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], ['else if', 'else if', 'else']);
+    });
+  });
+
   generateCommonTests(config);
 });
