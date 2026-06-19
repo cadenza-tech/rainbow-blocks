@@ -4487,6 +4487,43 @@ until done`;
     });
   });
 
+  suite('Regression 2026-06-20: case-label statement position with `until`/`end` followed by value', () => {
+    test('should not treat until as block close when used at case label statement position followed by identifier', () => {
+      // `1: until X;` puts `until` at the statement position right after a case label
+      // colon. `until` cannot start a Pascal statement, so the inner `until X;` is
+      // malformed; preferring uncolored over a wrong pairing (project policy),
+      // the inner `until` must not be treated as a block-close keyword. Without this
+      // guard the inner `until` pops the surrounding `repeat`, leaving the outer
+      // `until Y` orphan.
+      const source = `repeat
+  case X of
+    1: until X;
+  end;
+until Y`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const repeatPair = findBlock(pairs, 'repeat');
+      assert.strictEqual(repeatPair.openKeyword.startOffset, 0);
+      assert.strictEqual(repeatPair.closeKeyword.value, 'until');
+      assert.strictEqual(repeatPair.closeKeyword.startOffset, source.lastIndexOf('until'));
+      const casePair = findBlock(pairs, 'case');
+      assert.strictEqual(casePair.openKeyword.startOffset, source.indexOf('case'));
+      assert.strictEqual(casePair.closeKeyword.value, 'end');
+      assert.strictEqual(casePair.closeKeyword.startOffset, source.indexOf('end;'));
+    });
+
+    test('should not treat end as block close when used at case label statement position followed by identifier', () => {
+      // Same shape but with `end` in the statement position after `1:`: `1: end X;`.
+      // The inner `end` must not close the enclosing `case` prematurely.
+      const source = `case X of
+    1: end X;
+  end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Regression 2026-06-20: SEMICOLON_BUDGET must not misclassify class as type definition inside begin-end body', () => {
     test('should not treat `T = class` as a type definition when preceded by 4+ assignment statements inside begin-end', () => {
       // The cross-`;` scope scan uses SEMICOLON_BUDGET=3 to early-terminate on long
