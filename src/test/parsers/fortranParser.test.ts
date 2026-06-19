@@ -6667,6 +6667,39 @@ end function`;
     });
   });
 
+  suite('Regression: bare procedure NAME inside type::contains is not a block opener', () => {
+    test('should reject bare procedure NAME as block_open inside derived-type contains, so end type pairs', () => {
+      // Inside `type :: t ... contains ... procedure NAME ... end type`, the bare
+      // `procedure NAME` (without `::`) is a type-bound procedure declaration, not a
+      // block opener. Mirroring the generic-interface `procedure NAME` rule, the parser
+      // must suppress these tokens so the enclosing `type` block closes normally and a
+      // later `procedure thing ... end procedure` inside the subroutine body still pairs.
+      const source = `module mod
+  type :: t
+  contains
+    procedure m
+  end type
+contains
+  subroutine sub
+    procedure thing
+    x = 1
+    end procedure
+  end subroutine
+end module`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 4);
+      const sorted = [...pairs].sort((a, b) => a.openKeyword.startOffset - b.openKeyword.startOffset);
+      assert.strictEqual(sorted[0].openKeyword.value.toLowerCase(), 'module');
+      assert.strictEqual(sorted[0].closeKeyword?.value.toLowerCase(), 'end module');
+      assert.strictEqual(sorted[1].openKeyword.value.toLowerCase(), 'type');
+      assert.strictEqual(sorted[1].closeKeyword?.value.toLowerCase(), 'end type');
+      assert.strictEqual(sorted[2].openKeyword.value.toLowerCase(), 'subroutine');
+      assert.strictEqual(sorted[2].closeKeyword?.value.toLowerCase(), 'end subroutine');
+      assert.strictEqual(sorted[3].openKeyword.value.toLowerCase(), 'procedure');
+      assert.strictEqual(sorted[3].closeKeyword?.value.toLowerCase(), 'end procedure');
+    });
+  });
+
   suite('Regression: bracket close ] recognized as operator predecessor for expression-context end', () => {
     test('should treat ] (Fortran 2003 array constructor close) as expression context so end is not a phantom block_close', () => {
       // `[1, 2]` is a Fortran 2003 array constructor. When a `&` continues the line after `]`,
