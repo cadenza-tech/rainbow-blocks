@@ -813,17 +813,64 @@ export class CrystalBlockParser extends BaseBlockParser {
         const before = source[wordStart - 1];
         if (/[A-Za-z0-9_.@$]/.test(before)) {
           // Preceded by `.`/`@`/`$` the word is a method/variable reference; the `end`
-          // after it (e.g. `obj.foo end`) is still an argument value, so suppress.
-          // Preceded by another identifier char cannot happen (the inner loop would
-          // have consumed it), but treating it as a value slot is safe.
+          // after it (e.g. `obj.foo end`) is still an argument value, so suppress —
+          // unless the same logical line earlier contains a `then` or `when` keyword,
+          // in which case the `end` is closing an inline if/case branch body and the
+          // intervening method-call value is that body.
+          if (this.hasInlineThenOrWhenOnSameLine(source, wordStart, excludedRegions)) {
+            return false;
+          }
           return true;
         }
       }
       const word = source.slice(wordStart, i + 1);
-      // Block keywords that may legitimately precede a same-line closing `end` keep the
-      // `end` as a block_close. Any other word (value-expecting keyword or ordinary
-      // method/variable name) puts `end` in a value slot.
-      return !END_CLOSE_PRECEDING_KEYWORDS.has(word);
+      if (END_CLOSE_PRECEDING_KEYWORDS.has(word)) {
+        return false;
+      }
+      // Any other word (value-expecting keyword or ordinary method/variable name) puts
+      // `end` in a value slot. Exception: when the same logical line earlier contains a
+      // `then` or `when` keyword, the `end` is closing an inline if/case branch body
+      // (`if c then 1 end`, `case x when 1 then 2 end`) and the value is that body.
+      if (this.hasInlineThenOrWhenOnSameLine(source, wordStart, excludedRegions)) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // Scans backward from `position` on the same physical line, skipping excluded regions
+  // and whitespace, looking for a standalone `then` or `when` keyword. Returns true when
+  // such a keyword exists earlier on the same line. Used by isEndInValueExpectingPosition
+  // to override the value-position filter for one-line conditional/case branch bodies
+  // (`if c then 1 end`, `case x when 1 then 2 end`): the `then`/`when` signals that the
+  // trailing `end` is closing an inline block, not standing in a value slot.
+  private hasInlineThenOrWhenOnSameLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === '\n' || ch === '\r') {
+        return false;
+      }
+      // Match `then` (4 chars) or `when` (4 chars) ending at i, with a non-identifier
+      // boundary before the word so we do not match suffixes like `mywhen`/`bythen`.
+      if (ch === 'n' && i >= 3) {
+        const word = source.slice(i - 3, i + 1);
+        if (word === 'then' || word === 'when') {
+          const before = i - 4 >= 0 ? source[i - 4] : '';
+          if (before === '' || !/[A-Za-z0-9_.@$]/.test(before)) {
+            return true;
+          }
+        }
+      }
+      i--;
     }
     return false;
   }
