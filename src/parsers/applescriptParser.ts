@@ -781,18 +781,28 @@ export class ApplescriptBlockParser extends BaseBlockParser {
         if (parenScan < source.length && source[parenScan] === '(') {
           return { nextPos: endPos };
         }
-        // Reject `else if(...)` (function-call form of `if`). The compound `else if`
-        // matcher already rejects the tight `else if(` shape, but falls back to the
-        // single-keyword path, which would otherwise attach a bare `else` as an
-        // intermediate. Detect `if` followed directly by `(` (no ASCII space/tab
-        // between them, which would have been recognized as a real `else if` block).
+        // Reject `else if(...)` and `else if (...)` (function-call form of `if`).
+        // The compound `else if` matcher rejects both shapes when the parenthesized
+        // expression carries no trailing `then`, but the fallback single-keyword
+        // path would otherwise attach a bare `else` as an intermediate AND leave the
+        // inner `if` to tokenize as a real block_open (which then geometrically
+        // crosses with the outer `end if`). Detect `if` followed by `(` with ASCII
+        // space/tab or Unicode whitespace between them, and consume both `else` and
+        // `if` so the tokenize loop resumes at the parenthesized expression — that
+        // suppresses the spurious inner `if` block_open as well as the `else`
+        // intermediate.
         if (parenScan + 2 <= source.length && source.slice(parenScan, parenScan + 2).toLowerCase() === 'if') {
           const afterIf = parenScan + 2;
           if (afterIf >= source.length || !/\w/.test(source[afterIf])) {
             let parenScan2 = afterIf;
-            while (parenScan2 < source.length && isUnicodeWhitespace(source[parenScan2])) parenScan2++;
+            while (
+              parenScan2 < source.length &&
+              (source[parenScan2] === ' ' || source[parenScan2] === '\t' || isUnicodeWhitespace(source[parenScan2]))
+            ) {
+              parenScan2++;
+            }
             if (parenScan2 < source.length && source[parenScan2] === '(') {
-              return { nextPos: endPos };
+              return { nextPos: afterIf };
             }
           }
         }
