@@ -4258,5 +4258,38 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: lone ¬ line should not orphan a following close keyword', () => {
+    // A physical line that contains only the line-continuation marker `¬` (plus
+    // optional whitespace) is a stray continuation of a non-existent expression
+    // — the prior logical line has no value to continue. Before this fix,
+    // isOnContinuationLine saw the `¬` on the immediately preceding physical
+    // line and reported the following keyword (e.g. `end tell`) as part of a
+    // mid-statement continuation, causing it to be skipped and the outer `tell`
+    // block to lose its closer. The fix scans backward from `¬` to the start of
+    // its own physical line: if everything before the `¬` is whitespace only,
+    // the `¬` is treated as if it were absent and the close keyword on the next
+    // line is recognized normally.
+    test('should pair tell with end tell when only ¬ sits on the line between them', () => {
+      const source = 'tell app\n¬\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should pair tell with end tell when indented ¬ is the only content of the prior line', () => {
+      const source = 'tell app\n  ¬\nend tell';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'tell', 'end tell');
+    });
+
+    test('should still suppress close keyword when prior physical line has real content before ¬', () => {
+      // Sanity-check: a `¬` after real content (`set x to 5 ¬`) must still
+      // suppress the following `end tell` as a mid-statement continuation, so
+      // the tell block is left unclosed (zero pairs).
+      const source = 'tell app\n  set x to 5 ¬\n  end tell';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 0);
+    });
+  });
+
   generateCommonTests(config);
 });
