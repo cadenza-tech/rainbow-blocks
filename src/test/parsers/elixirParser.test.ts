@@ -5829,5 +5829,38 @@ end`;
     });
   });
 
+  suite('Bug: end after unary NOT (!) must be rejected as block close', () => {
+    // `!end` is `!` (unary NOT) applied to the identifier `end` in expression position;
+    // `end` is not a block close. Pre-fix `!` was missing from EXPRESSION_OPERATOR_LEAD_CHARS,
+    // so `x = !end` tokenized the trailing `end` as a real block close, paired it with the
+    // surrounding opener, and orphaned the real outer `end`. The `!=` operator (`!` followed
+    // by `=`) does not interact with this guard: the RHS check looks at the previous non-space
+    // char before `end`, and for `!= end` that char is `=`, which already triggers the existing
+    // `=` rejection rather than the new `!` one.
+    test('should reject !end as block close (x = !end)', () => {
+      const source = 'def foo do\n  x = !end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should reject ! end as block close with whitespace (x = ! end)', () => {
+      const source = 'def foo do\n  x = ! end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still pair end after != operator on assignment LHS (x = a != end ... end)', () => {
+      // `!=` (not-equal): previous non-space char before the inner `end` is `=`, already
+      // rejected by the `=` branch. This test guards that adding `!` to the operator set
+      // does not interfere with the existing `!=` rejection.
+      const source = 'def foo do\n  x = a != end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
