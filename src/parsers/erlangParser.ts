@@ -869,8 +869,14 @@ export class ErlangBlockParser extends BaseBlockParser {
       if (ch === '.' && depth === 0) {
         const prev = i > 0 ? source[i - 1] : '';
         const next = i + 1 < source.length ? source[i + 1] : '';
-        // Skip '..' range operator and decimal points in float literals
-        if (prev !== '.' && next !== '.' && !(/[0-9]/.test(prev) && /[0-9]/.test(next))) {
+        // Skip '..' range operator and decimal points in float literals.
+        // Also skip record-field access dots (identifier on both sides, e.g. Rec#state.field):
+        // these are not declaration terminators. Mirror the exemption in
+        // findDeclarationEndingPeriod so a record-field dot inside an unclosed `{}` does not
+        // prematurely end the backward scan and let a bare reserved word escape as a real
+        // intermediate of the enclosing block.
+        const isRecordFieldDot = /[a-zA-Z0-9_]/.test(prev) && /[a-zA-Z_]/.test(next);
+        if (prev !== '.' && next !== '.' && !(/[0-9]/.test(prev) && /[0-9]/.test(next)) && !isRecordFieldDot) {
           return false;
         }
         continue;
