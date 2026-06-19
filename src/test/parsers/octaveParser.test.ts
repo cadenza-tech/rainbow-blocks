@@ -3433,6 +3433,21 @@ end`;
     });
   });
 
+  suite('Bug: do<ZWSP>(args) (U+200B) must be treated as a function call', () => {
+    test('should not treat do<U+200B>(x) as a block opener', () => {
+      // U+200B (ZERO WIDTH SPACE) between `do` and `(` is an invisible character that
+      // legitimate users may accidentally paste in. AppleScript already treats U+2000-U+200B
+      // as horizontal whitespace; Octave's HORIZONTAL_WHITESPACE_PATTERN only covered
+      // U+2000-U+200A, so `do<ZWSP>(` failed the function-call check and `do` was wrongly
+      // pushed as a block opener. The orphan `do` then prevented the outer `end` from
+      // closing the `function`, collapsing the function/end pair entirely.
+      const source = 'function f\n  do​(x)\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   suite('Bug: arguments dropped outside function context must phantom-skip its stray end', () => {
     test('should pair if with its outer end when arguments block is dropped inside if', () => {
       // A bare `arguments` keyword outside any function/methods/classdef context is dropped
