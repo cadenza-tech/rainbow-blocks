@@ -162,11 +162,16 @@ export function isRegexStart(
     while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
       wordStart--;
     }
+    // Reject the word when the preceding char is a Unicode identifier-continue: in that
+    // case the ASCII run we just collected is a suffix of a larger non-ASCII identifier
+    // (e.g. `αif`), not a standalone keyword. Treating it as a keyword would force regex
+    // interpretation on the following `/` and mis-parse `αif / 2` as a regex.
     const word = source.substring(wordStart, i + 1);
+    const isStandaloneWord = wordStart === 0 || !endsWithIdentifierChar(source, wordStart - 1);
     // True control keywords always force regex interpretation (e.g. `if /re/`).
     // Method-like identifiers (p, puts, raise, ...) skip this branch and fall through
     // to the spacing rule so that `p / 2` stays division.
-    if (regexPrecedingKeywords.has(word) && !methodLikeKeywords?.has(word)) {
+    if (isStandaloneWord && regexPrecedingKeywords.has(word) && !methodLikeKeywords?.has(word)) {
       return true;
     }
     // Method-call regex argument: `method /regex/`. When an identifier is
