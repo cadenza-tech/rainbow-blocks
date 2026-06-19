@@ -207,17 +207,25 @@ export function matchDefineDirective(source: string, pos: number): ExcludedRegio
       // End the define at this newline (the comment consumed any trailing backslash)
       return { start: pos, end: i };
     }
-    // Skip string literals inside define body (backslash escapes apply)
+    // Skip string literals inside define body (backslash escapes apply).
+    // Per IEEE 1800-2017 §5.9 a backslash immediately followed by a newline
+    // (`\<LF>`, `\<CR>`, `\<CRLF>`) inside a string literal is a line
+    // continuation: both the backslash and the line break are consumed and the
+    // string continues on the next physical line. Matches the same behavior in
+    // `matchVerilogString`.
     if (source[i] === '"') {
       i++;
-      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+      while (i < source.length) {
         if (source[i] === '\\' && i + 1 < source.length) {
           const nextChar = source[i + 1];
-          if (nextChar === '\n' || nextChar === '\r') {
-            // Backslash before newline inside string: string is unterminated
-            // The backslash is part of the string content, not a define continuation
-            // End the define at this newline
-            return { start: pos, end: i + 1 };
+          if (nextChar === '\n') {
+            i += 2;
+            continue;
+          }
+          if (nextChar === '\r') {
+            const skip = i + 2 < source.length && source[i + 2] === '\n' ? 3 : 2;
+            i += skip;
+            continue;
           }
           i += 2;
           continue;
@@ -226,9 +234,16 @@ export function matchDefineDirective(source: string, pos: number): ExcludedRegio
           i++;
           break;
         }
+        // Bare newline (without a preceding backslash) terminates an
+        // unfinished string in Verilog; let the outer loop end the define.
+        if (source[i] === '\n' || source[i] === '\r') {
+          break;
+        }
         i++;
       }
-      // After exiting string, if we stopped at newline, the outer loop handles it
+      // After exiting the string body, fall back to the outer loop. If we
+      // stopped at a bare newline it ends the define; otherwise scanning
+      // continues with the rest of the define body.
       continue;
     }
     if (source[i] === '\n') {
