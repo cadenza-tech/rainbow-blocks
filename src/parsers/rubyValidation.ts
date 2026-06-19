@@ -276,6 +276,17 @@ export function endsWithContinuationOperator(
   // vs global variable `$/`). Trailing `/` rarely indicates line continuation in practice.
   if ('|&+-*%^<>=~'.includes(ch)) return true;
 
+  // Ternary `?` causes continuation: `cond ?\n  then_value : else_value`. Only when the
+  // `?` is a bare operator (whitespace or operator-like char before it) -- a `?` directly
+  // glued to an identifier (`valid?`, `defined?`, ...) is a predicate-method suffix, not
+  // a ternary operator, and the next physical line is an unrelated statement. Character
+  // literals like `?x` are excluded regions and were rejected above.
+  if (ch === '?') {
+    if (i === 0) return true;
+    const prev = source[i - 1];
+    return prev === ' ' || prev === '\t';
+  }
+
   return false;
 }
 
