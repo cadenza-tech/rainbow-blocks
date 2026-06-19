@@ -18,9 +18,10 @@ import {
   matchFortranString,
   matchPreprocessorDirective
 } from './fortranHelpers';
-import type { InterfaceSpan } from './fortranValidation';
+import type { InterfaceSpan, TypeContainsSpan } from './fortranValidation';
 import {
   computeInterfaceSpans,
+  computeTypeContainsSpans,
   isAtLineStartAllowingWhitespace,
   isInsideParentheses,
   isMiddleInExpressionContext,
@@ -143,6 +144,12 @@ export class FortranBlockParser extends BaseBlockParser {
   // can binary-search them instead of re-scanning the whole preceding source on every
   // `procedure` keyword (which was O(N^2) on generic interfaces). Reset on each tokenize.
   private currentInterfaceSpans: InterfaceSpan[] = [];
+
+  // Derived-type contains regions precomputed once per tokenize() pass so
+  // isValidProcedureOpen can binary-search them to suppress bare `procedure NAME`
+  // tokens inside `type :: t ... contains ... end type`. Same reasoning as the
+  // interface span cache: avoid re-scanning the prefix per `procedure` keyword.
+  private currentTypeContainsSpans: TypeContainsSpan[] = [];
 
   // Cache of getSelectSubtype results keyed by the opener Token reference. Without
   // caching, matchBlocks called getSelectSubtype once per `case`/`rank` intermediate
@@ -328,7 +335,8 @@ export class FortranBlockParser extends BaseBlockParser {
         position,
         excludedRegions,
         (pos, regions) => this.isInExcludedRegion(pos, regions),
-        this.currentInterfaceSpans
+        this.currentInterfaceSpans,
+        this.currentTypeContainsSpans
       );
     }
 
@@ -1080,6 +1088,8 @@ export class FortranBlockParser extends BaseBlockParser {
     // Precompute interface spans once so isValidProcedureOpen (invoked per `procedure`
     // keyword while validating block opens below) can binary-search them.
     this.currentInterfaceSpans = computeInterfaceSpans(source, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
+    // Same idea for derived-type contains regions: precompute once, binary-search per call.
+    this.currentTypeContainsSpans = computeTypeContainsSpans(source, excludedRegions, (pos, regions) => this.isInExcludedRegion(pos, regions));
     // Reset the getSelectSubtype memoization cache: tokens carry over to matchBlocks
     // but the previous parse's cache entries are stale for the new source.
     this.selectSubtypeCache = new WeakMap();

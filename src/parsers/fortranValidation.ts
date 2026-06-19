@@ -87,6 +87,112 @@ export function isInsideInterfaceSpan(pos: number, spans: InterfaceSpan[]): bool
   return false;
 }
 
+// Half-open [start, end) range of source offsets that sit inside the type-bound
+// procedure declaration region of a derived type: from the `contains` keyword inside
+// `type :: t ... contains ... end type` to the matching `end type`. Within this span,
+// a bare `procedure NAME` (without `::`) is a type-bound procedure declaration, not a
+// block opener. Mirrors `InterfaceSpan` semantics so `isInsideTypeContainsSpan` shares
+// the same binary-search shape as `isInsideInterfaceSpan`.
+export interface TypeContainsSpan {
+  start: number;
+  end: number;
+}
+
+// Matches the delimiters of a derived-type contains region:
+//   - `type, attribute :: name` / `type :: name`: opens a derived type. Recognized by
+//      `type` followed by `,` or `::` (the canonical F90+ derived-type open syntax).
+//      The bare-name form `type name` is not detected — it is rare and the F90-style
+//      derived type rarely uses `contains` (which arrived in F2003 alongside `type ::`).
+//   - `end[ \t]*type`: closes any derived type (spaced and concatenated forms).
+//   - `contains`: marks the boundary between the data-component section and the
+//      type-bound procedure declaration section. Only counted when inside a type block.
+// The leading `(?<![a-zA-Z0-9_%])` keeps `mytype`/`obj%type` from matching as `type`.
+// For the type-open alternatives the trailing `,`/`::` are not word characters, so a
+// `\b` after them would never match; the lookahead `(?!=)` excludes `::=` (also not a
+// valid Fortran sequence but kept for symmetry) but otherwise lets the next character
+// be anything. `end[ \t]*type` and `contains` keep `\b` at the tail to require a word
+// boundary so `endtypename` and `containsfoo` do not falsely match.
+const TYPE_CONTAINS_DELIMITER_PATTERN = /(?<![a-zA-Z0-9_%])(?:end[ \t]*type\b|type[ \t]*(?:,|::)|contains\b)/gi;
+
+// Precomputes, in a single pass over the source, the [start, end) offset ranges that
+// lie inside the type-bound procedure declaration region of a derived type. Called once
+// per parse so `isValidProcedureOpen` can binary-search these spans instead of
+// re-scanning the prefix per `procedure` keyword.
+//
+// Algorithm: walk delimiters in source order tracking type-block depth. A `type ::` /
+// `type,` increments depth. An `end type` decrements depth. The first `contains` at
+// the immediate type-block depth opens a span; the matching `end type` (depth returning
+// to the level the contains opened at) closes it. Nested type blocks (rare but valid
+// when a type is declared inside a procedure inside the outer type's contains region)
+// do not start their own contains span until they themselves emit a contains.
+export function computeTypeContainsSpans(
+  source: string,
+  excludedRegions: ExcludedRegion[],
+  isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean
+): TypeContainsSpan[] {
+  const spans: TypeContainsSpan[] = [];
+  // Stack of type-block frames. Each frame tracks whether `contains` has been seen at
+  // this nesting level and, if so, the byte offset where the contains span began.
+  const stack: { containsStart: number }[] = [];
+  TYPE_CONTAINS_DELIMITER_PATTERN.lastIndex = 0;
+  let match = TYPE_CONTAINS_DELIMITER_PATTERN.exec(source);
+  while (match !== null) {
+    if (!isInExcludedRegion(match.index, excludedRegions)) {
+      const text = match[0].toLowerCase();
+      const tokenEnd = match.index + match[0].length;
+      if (text.startsWith('end')) {
+        // `end type`: close the innermost type block.
+        const frame = stack.pop();
+        if (frame && frame.containsStart >= 0) {
+          spans.push({ start: frame.containsStart, end: tokenEnd });
+        }
+      } else if (text.startsWith('type')) {
+        // `type, attr :: name` or `type :: name`: open a new derived type frame.
+        stack.push({ containsStart: -1 });
+      } else {
+        // `contains`: only meaningful when inside a type block. The first contains
+        // in a frame marks the start of its type-contains span. Subsequent contains
+        // keywords inside the same frame are ignored (Fortran allows only one).
+        const top = stack[stack.length - 1];
+        if (top && top.containsStart < 0) {
+          top.containsStart = tokenEnd;
+        }
+      }
+    }
+    match = TYPE_CONTAINS_DELIMITER_PATTERN.exec(source);
+  }
+  // Unclosed type at EOF: the span extends to the end of source so a `procedure NAME`
+  // after an unclosed `contains` inside an unclosed `type` block is still suppressed.
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    if (frame && frame.containsStart >= 0) {
+      spans.push({ start: frame.containsStart, end: source.length + 1 });
+    }
+  }
+  // Sort by start so the binary search below works regardless of pop order.
+  spans.sort((a, b) => a.start - b.start);
+  return spans;
+}
+
+// Binary-searches the precomputed type-contains spans for one containing `pos`
+// (span.start <= pos < span.end). Spans are sorted ascending and non-overlapping.
+export function isInsideTypeContainsSpan(pos: number, spans: TypeContainsSpan[]): boolean {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const span = spans[mid];
+    if (pos < span.start) {
+      hi = mid - 1;
+    } else if (pos >= span.end) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Checks if position is at line start allowing leading whitespace (for # preprocessor)
 export function isAtLineStartAllowingWhitespace(source: string, pos: number): boolean {
   if (pos === 0) return true;
@@ -105,7 +211,8 @@ export function isValidProcedureOpen(
   position: number,
   excludedRegions: ExcludedRegion[],
   isInExcludedRegion: (pos: number, regions: ExcludedRegion[]) => boolean,
-  interfaceSpans: InterfaceSpan[]
+  interfaceSpans: InterfaceSpan[],
+  typeContainsSpans: TypeContainsSpan[]
 ): boolean {
   // Reject 'module procedure NAME' when inside an unclosed 'interface' block.
   // Within a module/submodule body (outside of interface), 'module procedure'
@@ -169,6 +276,22 @@ export function isValidProcedureOpen(
   // These 'procedure' lines are NOT block openers - they reference existing
   // procedures and have no matching 'end procedure'.
   if (isInsideInterfaceSpan(position, interfaceSpans)) {
+    return false;
+  }
+  // Reject bare 'procedure NAME' inside a derived-type contains region.
+  // Type-bound procedure declarations look like:
+  //   type :: t
+  //   contains
+  //     procedure m
+  //     procedure :: n => impl
+  //   end type
+  // The `procedure m` form (no `::`) is a type-bound procedure declaration, not a
+  // block opener. The `procedure :: ...` form is already rejected by the `::` scan
+  // above. Without this check, the bare form would be emitted as block_open, then the
+  // cross-pair check in matchBlocks would reject the enclosing `end type` (since the
+  // phantom `procedure` opener has its own pending compound-end candidate), causing
+  // the type pair to be lost.
+  if (isInsideTypeContainsSpan(position, typeContainsSpans)) {
     return false;
   }
   // Reject assignment forms: 'procedure = expr' and 'procedure(N) = expr'
