@@ -390,6 +390,12 @@ export class BashBlockParser extends BaseBlockParser {
     if (this.isFollowedByFunctionParens(source, position, keyword)) {
       return false;
     }
+    // `case` requires a `WORD in` header. A `case` followed directly by an arm
+    // separator (`;`) or `esac` without `in` is a syntax error in real bash, so
+    // skip pairing instead of producing a phantom case-esac block.
+    if (keyword === 'case' && !this.isCaseFollowedByIn(source, position, excludedRegions)) {
+      return false;
+    }
     return true;
   }
 
@@ -526,6 +532,72 @@ export class BashBlockParser extends BaseBlockParser {
       }
       k--;
     }
+    return false;
+  }
+
+  // Confirms the `case` keyword at `position` is followed by a `WORD in` header by
+  // scanning forward. A valid case header has at least one subject character
+  // (excluded-region content like `${x}`, or any non-whitespace) between `case`
+  // and the `in` keyword. The scan must reach `in` (word-bounded) before crossing
+  // an arm separator (`;`/`;;`/`;&`/`;;&`) or the matching `esac`; otherwise the
+  // case statement is malformed and must not pair. Mirrors `isCaseHeaderIn` (the
+  // backward scan applied at `esac`) so both endpoints reject the same malformed
+  // headers (`case ; esac`, `case x; esac`, etc.).
+  private isCaseFollowedByIn(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let k = position + 4; // skip `case`
+    let sawSubject = false;
+    while (k < source.length) {
+      if (this.isInExcludedRegion(k, excludedRegions)) {
+        const region = this.findExcludedRegionAt(k, excludedRegions);
+        // An excluded region (`${...}`, `$(...)`, quoted string, etc.) is a
+        // valid subject word, e.g. `case ${x} in esac`.
+        sawSubject = true;
+        k = region ? region.end : k + 1;
+        continue;
+      }
+      const ch = source[k];
+      // Arm separator (`;`, `;;`, `;&`, `;;&`) reached before `in`: malformed.
+      // A `&` alone is not an arm separator (background operator); only `;&` /
+      // `;;&` (preceded by `;`) bound the arm header.
+      if (ch === ';') {
+        return false;
+      }
+      // `in` keyword (word-bounded): a valid case header requires at least one
+      // subject character before it.
+      if (
+        ch === 'i' &&
+        k + 1 < source.length &&
+        source[k + 1] === 'n' &&
+        (k === 0 || !/[\p{L}\p{N}_]/u.test(source[k - 1])) &&
+        (k + 2 >= source.length || !/[\p{L}\p{N}_]/u.test(source[k + 2]))
+      ) {
+        return sawSubject;
+      }
+      // `esac` reached before `in`: malformed.
+      if (
+        ch === 'e' &&
+        k + 3 < source.length &&
+        source.slice(k, k + 4) === 'esac' &&
+        (k === 0 || !/[\p{L}\p{N}_]/u.test(source[k - 1])) &&
+        (k + 4 >= source.length || !/[\p{L}\p{N}_]/u.test(source[k + 4]))
+      ) {
+        return false;
+      }
+      // Any non-whitespace ASCII character counts as subject content. Backslash
+      // is treated as a subject character (`case \x in esac` is valid) except
+      // for `\<newline>` line continuations, which are pure layout and must not
+      // count as subject content.
+      if (ch === '\\' && k + 1 < source.length && (source[k + 1] === '\n' || source[k + 1] === '\r')) {
+        k += 2;
+        if (source[k - 1] === '\r' && k < source.length && source[k] === '\n') k++;
+        continue;
+      }
+      if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') {
+        sawSubject = true;
+      }
+      k++;
+    }
+    // End of source reached without `in`: malformed (no header found).
     return false;
   }
 
