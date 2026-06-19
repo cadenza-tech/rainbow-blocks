@@ -419,7 +419,29 @@ export function isInExpressionContext(source: string, position: number, excluded
 // that spell a reserved word inside a same-line `MOVE IF TO X` / `MOVE END-IF
 // TO Y` operand list, without over-filtering legitimate block keywords that
 // merely happen to follow a verb across a newline (`PERFORM DISPLAY\nEND-PERFORM`).
-export function isPrecedingWordDataNameVerbSameLine(source: string, position: number, callbacks: CobolHelperCallbacks): boolean {
+//
+// When `keyword` is supplied and names a closer (`END-X`), the function first
+// scans the same physical line for the matching opener `X` between the line
+// start and `position`. If found, the closer is a real block terminator (e.g.
+// `IF Y DISPLAY 1 END-IF` is a one-line IF block where DISPLAY is an
+// intermediate verb, not the host of an END-IF operand), and the function
+// returns false without invoking the data-name-verb walk. Without this guard,
+// the backward walk past `END-IF` would land on the inline DISPLAY (a
+// DATA_NAME_VERB) and wrongly drop the END-IF token, leaving the IF orphan.
+export function isPrecedingWordDataNameVerbSameLine(source: string, position: number, callbacks: CobolHelperCallbacks, keyword?: string): boolean {
+  // For an END-X closer, look for the matching opener X on the same line
+  // between line start and `position`. If present, the closer is a real
+  // terminator, not an operand.
+  if (keyword) {
+    const upper = keyword.toUpperCase();
+    if (upper.startsWith('END-')) {
+      const matchingOpener = upper.slice(4);
+      const lineStart = findLineStart(source, position);
+      if (hasWordOnLineBefore(source, lineStart, position, matchingOpener)) {
+        return false;
+      }
+    }
+  }
   const keywordLineStart = findLineStart(source, position);
   let pos = position;
   for (let step = 0; step < 32; step++) {
@@ -440,6 +462,54 @@ export function isPrecedingWordDataNameVerbSameLine(source: string, position: nu
     const word = source.slice(wordStart, wordEndIndex + 1).toUpperCase();
     if (DATA_NAME_VERBS.has(word)) return true;
     pos = wordStart;
+  }
+  return false;
+}
+
+// Scans `[lineStart, posExclusive)` for an occurrence of the uppercase identifier
+// `target` as a standalone word, skipping content inside *> inline comments,
+// single/double-quoted strings, and rejecting hyphenated neighbours (so `MY-IF`
+// does not match `IF`). Used by the END-X same-line opener probe to decide
+// whether an END-X closer has its matching opener on the same line.
+function hasWordOnLineBefore(source: string, lineStart: number, posExclusive: number, target: string): boolean {
+  let i = lineStart;
+  while (i < posExclusive) {
+    const ch = source[i];
+    // *> inline comment runs to end of line
+    if (ch === '*' && i + 1 < posExclusive && source[i + 1] === '>') {
+      return false;
+    }
+    // Single/double-quoted string literal
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      i++;
+      while (i < posExclusive) {
+        if (source[i] === quote) {
+          if (i + 1 < posExclusive && source[i + 1] === quote) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        if (source[i] === '\n' || source[i] === '\r') break;
+        i++;
+      }
+      continue;
+    }
+    // Word boundary: identifier char preceded by non-identifier (or line start)
+    if (/[a-zA-Z]/.test(ch)) {
+      const wordStart = i;
+      while (i < posExclusive && /[a-zA-Z0-9_-]/.test(source[i])) i++;
+      const word = source.slice(wordStart, i).toUpperCase();
+      if (word === target) {
+        // Reject if preceded by `-` (mid-identifier like `MY-IF`).
+        if (wordStart > lineStart && source[wordStart - 1] === '-') continue;
+        return true;
+      }
+      continue;
+    }
+    i++;
   }
   return false;
 }

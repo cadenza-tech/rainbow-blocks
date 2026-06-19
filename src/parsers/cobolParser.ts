@@ -352,6 +352,53 @@ export class CobolBlockParser extends BaseBlockParser {
     return i;
   }
 
+  // Returns true when an `END-PERFORM` keyword appears on the same physical line
+  // as `from`, before any `.` that would terminate the statement. Used by the
+  // PERFORM validation to recognise inline structured PERFORMs whose body is a
+  // non-blockOpen verb statement (e.g. `PERFORM MOVE A TO B END-PERFORM`): in
+  // that pattern the entire line is a single PERFORM/END-PERFORM block whose
+  // body happens to be a DATA_NAME_VERB. Without this hint the validation
+  // rejected the PERFORM as a paragraph call with stray text.
+  private hasInlineEndPerformOnSameLine(source: string, from: number): boolean {
+    let i = from;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === '\n' || ch === '\r') return false;
+      // A period outside a string ends the PERFORM statement.
+      if (ch === '.') return false;
+      // *> inline comment → no END-PERFORM possible after on this physical line.
+      if (ch === '*' && i + 1 < source.length && source[i + 1] === '>') return false;
+      // Skip single/double-quoted strings (COBOL strings cannot span lines).
+      if (ch === "'" || ch === '"') {
+        const quote = ch;
+        i++;
+        while (i < source.length) {
+          if (source[i] === '\n' || source[i] === '\r') break;
+          if (source[i] === quote) {
+            if (i + 1 < source.length && source[i + 1] === quote) {
+              i += 2;
+              continue;
+            }
+            i++;
+            break;
+          }
+          i++;
+        }
+        continue;
+      }
+      // Word boundary: identifier-character start preceded by non-identifier.
+      if (/[a-zA-Z]/.test(ch) && (i === 0 || !/[a-zA-Z0-9_-]/.test(source[i - 1]))) {
+        const wordStart = i;
+        while (i < source.length && /[a-zA-Z0-9_-]/.test(source[i])) i++;
+        const upper = source.slice(wordStart, i).toUpperCase();
+        if (upper === 'END-PERFORM') return true;
+        continue;
+      }
+      i++;
+    }
+    return false;
+  }
+
   // Single-pass computation of all valid opener positions for a keyword type
   private computeValidPositions(lowerKeyword: string, source: string, excludedRegions: ExcludedRegion[]): Set<number> {
     const endKeyword = `end-${lowerKeyword}`;
@@ -394,7 +441,7 @@ export class CobolBlockParser extends BaseBlockParser {
       // general `isInExpressionContext` check (`=`, relational words, ...) is
       // intentionally NOT applied here — current de-facto behaviour treats
       // expression-position reserved words like `==IF` as the real block opener.
-      if (this.isPrecedingWordDataNameVerbSameLine(source, pos)) {
+      if (this.isPrecedingWordDataNameVerbSameLine(source, pos, match[0])) {
         continue;
       }
       // Skip hyphenated identifiers
@@ -525,10 +572,14 @@ export class CobolBlockParser extends BaseBlockParser {
                   continue;
                 }
                 // PERFORM <para-name> <extra-token> with no recognised iteration verb is
-                // a paragraph call with stray text (or invalid syntax). Reject so we do
-                // not mark it as a structured PERFORM.
+                // normally a paragraph call with stray text (or invalid syntax). However,
+                // when `END-PERFORM` follows on the same line (before any `.` that would
+                // terminate the statement), the whole line is an inline structured PERFORM
+                // whose body is a non-blockOpen verb statement (`PERFORM MOVE A TO B
+                // END-PERFORM`). Accept the PERFORM as structured in that case so the
+                // END-PERFORM gets paired with it instead of being left orphan.
                 const isBlockOpenerVerb = this.keywords.blockOpen.some((kw) => kw === word);
-                if (!isBlockOpenerVerb) {
+                if (!isBlockOpenerVerb && !this.hasInlineEndPerformOnSameLine(source, pos + match[0].length)) {
                   continue;
                 }
                 openerPositions.push(pos);
@@ -777,7 +828,7 @@ export class CobolBlockParser extends BaseBlockParser {
         return true;
       }
       if (token.type === 'block_open' || token.type === 'block_close') {
-        if (this.isPrecedingWordDataNameVerbSameLine(source, token.startOffset)) return false;
+        if (this.isPrecedingWordDataNameVerbSameLine(source, token.startOffset, token.value)) return false;
         // Drop a reserved-word opener / closer used as the paragraph reference of
         // a paragraph-call PERFORM (`PERFORM IF.`, `PERFORM END-IF.`). The period
         // terminates the statement, so the keyword is an operand, not a block
@@ -798,8 +849,11 @@ export class CobolBlockParser extends BaseBlockParser {
 
   // Same-line variant for block_open / block_close tokens. See
   // isPrecedingWordDataNameVerbSameLine in cobolFixedFormat.ts for the rationale.
-  private isPrecedingWordDataNameVerbSameLine(source: string, position: number): boolean {
-    return isPrecedingWordDataNameVerbSameLine(source, position, this.helperCallbacks);
+  // `keyword` is the matched keyword text (e.g. `END-IF`); for a closer it lets
+  // the walk stop at the matching opener (`IF`) on the same line so a one-line
+  // block (`IF Y DISPLAY 1 END-IF`) keeps its END-* terminator.
+  private isPrecedingWordDataNameVerbSameLine(source: string, position: number, keyword?: string): boolean {
+    return isPrecedingWordDataNameVerbSameLine(source, position, this.helperCallbacks, keyword);
   }
 
   // Returns true when the reserved-word opener at `position` is used as the
