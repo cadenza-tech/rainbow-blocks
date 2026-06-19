@@ -6667,6 +6667,32 @@ end function`;
     });
   });
 
+  suite('Regression: named block construct with construct name `data` pairs with end block data', () => {
+    test('should pair `data: block` opener with `end block data` close when no block data program unit is on the stack', () => {
+      // F2008 allows naming a `block` construct: `name: block ... end block name`.
+      // When the construct name is `data`, the close becomes `end block data`, which
+      // would otherwise greedy-match a `block data` program unit close. Since no
+      // `block data` opener is on the stack, the close must fall back to a `block`
+      // construct close (treating `data` as the construct name).
+      const source = 'data: block\n  integer :: x\nend block data';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'block');
+      assert.strictEqual(pairs[0].closeKeyword?.value.toLowerCase(), 'end block data');
+    });
+
+    test('should still pair `block data init` opener with `end block data` close when the program unit opener is on the stack', () => {
+      // Regression guard: when a real `block data` program unit IS on the stack, the
+      // close must still pair with it (not fall back to `block`). Verifies the fallback
+      // only kicks in when no `block data` opener is available.
+      const source = 'block data init\n  integer :: x = 1\nend block data';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 1);
+      assert.strictEqual(pairs[0].openKeyword.value.toLowerCase(), 'block data');
+      assert.strictEqual(pairs[0].closeKeyword?.value.toLowerCase(), 'end block data');
+    });
+  });
+
   suite('Regression: bare procedure NAME inside type::contains is not a block opener', () => {
     test('should reject bare procedure NAME as block_open inside derived-type contains, so end type pairs', () => {
       // Inside `type :: t ... contains ... procedure NAME ... end type`, the bare
