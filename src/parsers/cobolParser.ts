@@ -592,6 +592,19 @@ export class CobolBlockParser extends BaseBlockParser {
                 const isBlockOpenerVerb = this.keywords.blockOpen.some((kw) => kw === word);
                 // Strip inline COBOL comments (*>) before checking trailing content
                 const afterNextWordNoCommentLocal = afterNextWord.replace(/\*>.*|>>.*/, '');
+                // Reject a malformed numeric literal as the first operand: when the
+                // first word is purely digits and the numeric-tail skip leaves an
+                // identifier-like character immediately attached (no separating
+                // whitespace), the literal is incomplete — e.g. `PERFORM 5.5E
+                // TIMES`: the integer head `5` + decimal `.5` is valid, but the
+                // trailing `E` lacks the required digit(s), so `5.5E` is not a
+                // valid scientific literal. Accepting the PERFORM here would let
+                // the leftover `E` slide past the secondWord lookahead (which
+                // requires `\s+` before the next token) and pair the PERFORM with
+                // a later END-PERFORM as a phantom structured block.
+                if (/^[0-9]+$/.test(word) && /^[a-zA-Z0-9_-]/.test(afterNextWordNoCommentLocal)) {
+                  continue;
+                }
                 // Even when the next word looks like a reserved-word block opener
                 // (IF/EVALUATE/READ/...), a `.` immediately after it makes the
                 // PERFORM a paragraph-call with that reserved word used as the
