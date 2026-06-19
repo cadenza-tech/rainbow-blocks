@@ -301,6 +301,67 @@ end`;
       assertSingleBlock(pairs, 'receive', 'end');
       assertIntermediates(pairs[0], ['after']);
     });
+
+    test('should attach rescue to def implicit try', () => {
+      const source = `def divide(x, y) do
+  x / y
+rescue
+  e -> {:error, e}
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], ['rescue']);
+    });
+
+    test('should attach catch to defp implicit try', () => {
+      const source = `defp risky() do
+  throwing_function()
+catch
+  :throw, value -> value
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defp', 'end');
+      assertIntermediates(pairs[0], ['catch']);
+    });
+
+    test('should attach after to defmacro implicit try', () => {
+      const source = `defmacro safe_action() do
+  action()
+after
+  cleanup()
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmacro', 'end');
+      assertIntermediates(pairs[0], ['after']);
+    });
+
+    test('should attach else to defmacrop implicit try', () => {
+      const source = `defmacrop try_op() do
+  risky()
+else
+  :ok -> :success
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'defmacrop', 'end');
+      assertIntermediates(pairs[0], ['else']);
+    });
+
+    test('should attach all clauses (rescue/catch/after/else) to def implicit try', () => {
+      const source = `def complete(x) do
+  do_it(x)
+rescue
+  e -> {:error, e}
+catch
+  :throw, v -> v
+after
+  cleanup()
+else
+  :ok -> :done
+end`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assertIntermediates(pairs[0], ['rescue', 'catch', 'after', 'else']);
+    });
   });
 
   suite('Nested blocks', () => {
