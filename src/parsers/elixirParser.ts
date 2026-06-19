@@ -23,8 +23,10 @@ const DEFINITION_KEYWORDS = new Set(['def', 'defp', 'defmodule', 'defmacro', 'de
 // catch/after) is immediately followed (after whitespace) by one of these, it is an operand
 // in an expression (e.g. `after <> y`, `else != x`), not a try/if/receive branch. `=` is
 // handled separately (assignment vs `==`/`=>`/`=~`); `.` is handled separately (field access
-// vs `..` range).
-const EXPRESSION_OPERATOR_LEAD_CHARS = new Set(['+', '-', '*', '/', '<', '>', '|', '^', '&', '~']);
+// vs `..` range). `!` covers the unary NOT operator (`x = !end`, `x = !else`); the `!=`
+// (not-equal) operator does not interact because the check fires on the char immediately
+// before the keyword, and for `!= keyword` that char is `=`, handled by the `=` branch.
+const EXPRESSION_OPERATOR_LEAD_CHARS = new Set(['+', '-', '*', '/', '<', '>', '|', '^', '&', '~', '!']);
 
 // Word-based operators that require an expression on their right-hand side. When `end` or
 // a middle keyword (else/rescue/catch/after) directly follows one of these (separated by
