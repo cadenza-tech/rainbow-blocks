@@ -783,6 +783,37 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('Bug: same-line END-IF should pair with same-line IF even when a data-name verb is between', () => {
+      // `IF Y DISPLAY 1 END-IF` is a one-line IF block: the IF on the same line
+      // is the opener of the END-IF, and DISPLAY's operands stop at the END-IF
+      // keyword. The same-line data-name-verb filter must not eat the END-IF
+      // when the matching IF appears earlier on that same line.
+      const source = 'IF Y DISPLAY 1 END-IF';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'IF', 'END-IF');
+    });
+
+    test('Bug: same-line END-EVALUATE should pair with same-line EVALUATE', () => {
+      const source = 'EVALUATE X DISPLAY 1 END-EVALUATE';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'EVALUATE', 'END-EVALUATE');
+    });
+
+    test('Bug: same-line END-PERFORM should pair with same-line PERFORM', () => {
+      const source = 'PERFORM MOVE A TO B END-PERFORM';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
+    });
+
+    test('Bug: same-line END-IF must still drop when used as MOVE operand (no matching IF)', () => {
+      // Guard against over-fix: an END-IF used as a data-name operand of a MOVE
+      // (with NO matching same-line IF) should still be suppressed by the
+      // data-name-verb filter.
+      const source = 'MOVE END-IF TO Y';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Performance', () => {
