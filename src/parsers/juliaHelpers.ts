@@ -120,12 +120,25 @@ export function skipNestedJuliaString(source: string, pos: number, blockKeywords
 // `reservedWords` is the full Julia reserved-word set (see JULIA_RESERVED_WORDS in
 // juliaParser.ts). The parameter is named generically because the helper itself only
 // needs to do `reservedWords.has(prefix)`.
-export function isPrecededByCommandMacroPrefix(source: string, pos: number, reservedWords: ReadonlySet<string>): boolean {
+// `excludedRegions` lists already-detected excluded regions (symbols, comments,
+// strings) earlier in the source. The backward scan stops when it would cross into
+// any such region — e.g. `:sym\`cmd\`` must NOT treat `sym` as a macro prefix
+// because the characters are inside the `:sym` symbol literal.
+export function isPrecededByCommandMacroPrefix(
+  source: string,
+  pos: number,
+  reservedWords: ReadonlySet<string>,
+  excludedRegions: ExcludedRegion[] = []
+): boolean {
   if (pos <= 0) return false;
   // Walk backward collecting identifier-continuation chars.
   let prefixStart = pos;
   while (prefixStart > 0) {
     const prevPos = prefixStart - 1;
+    // Stop the backward scan at the boundary of an already-detected excluded
+    // region (e.g. a preceding `:sym` symbol literal). Characters inside such
+    // regions are not identifier characters in the source program.
+    if (isInExcludedRegion(prevPos, excludedRegions)) break;
     const c = source[prevPos];
     // BMP-outside char: low surrogate at prevPos, high surrogate at prevPos - 1.
     if (c >= '\uDC00' && c <= '\uDFFF' && prevPos >= 1) {

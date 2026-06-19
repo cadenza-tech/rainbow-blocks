@@ -93,6 +93,11 @@ export class JuliaBlockParser extends BaseBlockParser {
   // the surrounding block's real `end`. Rebuilt every tokenize pass; never read across
   // parses (single-threaded), so no source-identity key is needed.
   private tentativeCloseOffsets = new Set<number>();
+  // Excluded regions discovered so far during the current findExcludedRegions pass.
+  // Used by tryMatchExcludedRegion to let backtick command-macro prefix detection know
+  // about prior excluded regions (e.g. `:sym` symbol literals) so the backward scan
+  // can stop at their boundary. Reset on every findExcludedRegions call.
+  private inProgressExcludedRegions: ExcludedRegion[] = [];
   protected readonly keywords: LanguageKeywords = {
     blockOpen: [
       'if',
@@ -592,6 +597,29 @@ export class JuliaBlockParser extends BaseBlockParser {
     return isInsideCurlyBraces(position, this.getBracketIndex(source, excludedRegions));
   }
 
+  // Overrides the default scan to expose the in-progress region list to
+  // tryMatchExcludedRegion via `inProgressExcludedRegions`. The default implementation
+  // would pass an empty list, which prevents backtick command-macro prefix detection
+  // from honoring earlier excluded regions like `:sym` symbol literals.
+  protected findExcludedRegions(source: string): ExcludedRegion[] {
+    const regions: ExcludedRegion[] = [];
+    this.inProgressExcludedRegions = regions;
+    let i = 0;
+    while (i < source.length) {
+      const result = this.tryMatchExcludedRegion(source, i);
+      if (result) {
+        regions.push(result);
+        i = result.end;
+      } else {
+        i++;
+      }
+    }
+    // Drop the alias once the pass is complete so stale data is never observed
+    // by subsequent operations.
+    this.inProgressExcludedRegions = [];
+    return regions;
+  }
+
   // Tries to match an excluded region at the given position
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
@@ -933,8 +961,9 @@ export class JuliaBlockParser extends BaseBlockParser {
     let i = pos + 3;
     // A backtick command is "prefixed" if preceded by a valid identifier that is not a
     // reserved block keyword. See isPrecededByCommandMacroPrefix for surrogate-pair
-    // handling (BMP-outside chars).
-    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getReservedWordSet());
+    // handling (BMP-outside chars). Pass in the regions discovered so far so the
+    // backward scan stops at boundaries of earlier excluded regions (e.g. `:sym`).
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getReservedWordSet(), this.inProgressExcludedRegions);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
@@ -992,8 +1021,9 @@ export class JuliaBlockParser extends BaseBlockParser {
     let i = pos + 1;
     // A backtick command is "prefixed" if preceded by a valid identifier that is not a
     // reserved block keyword. See isPrecededByCommandMacroPrefix for surrogate-pair
-    // handling (BMP-outside chars).
-    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getReservedWordSet());
+    // handling (BMP-outside chars). Pass in the regions discovered so far so the
+    // backward scan stops at boundaries of earlier excluded regions (e.g. `:sym`).
+    const isPrefixed = isPrecededByCommandMacroPrefix(source, pos, this.getReservedWordSet(), this.inProgressExcludedRegions);
 
     while (i < source.length) {
       if (source[i] === '\\' && i + 1 < source.length) {
