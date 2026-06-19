@@ -4487,5 +4487,28 @@ until done`;
     });
   });
 
+  suite('Regression 2026-06-20: SEMICOLON_BUDGET must not misclassify class as type definition inside begin-end body', () => {
+    test('should not treat `T = class` as a type definition when preceded by 4+ assignment statements inside begin-end', () => {
+      // The cross-`;` scope scan uses SEMICOLON_BUDGET=3 to early-terminate on long
+      // type sections. When `:=` assignments appear inside a `begin..end` body, the
+      // scan must recognise them as a statement-context signal so it does not
+      // misclassify an inner malformed `T = class` as a type definition (which would
+      // push `class` onto the stack and let `end` close it instead of the `begin`).
+      // Without this guard the inner `class` is paired with `end`, leaving the
+      // surrounding `begin` orphan.
+      const source = `begin
+  a := 1;
+  b := 2;
+  c := 3;
+  d := 4;
+  T = class
+end;`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
