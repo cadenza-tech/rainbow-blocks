@@ -3433,6 +3433,30 @@ end`;
     });
   });
 
+  suite('Bug: do followed by four-or-more dots is field access (not a block opener)', () => {
+    test('should reject "do....x" as block opener (four-dot field access)', () => {
+      // `do....x` is `do` then a `.` (struct field access intro) chained with `.../.x`
+      // syntax — neither a valid do/until opener nor a `...` line continuation (which
+      // requires EXACTLY three dots followed by content). The previous check only rejected
+      // a single `.` after `do`, so `....` slipped through as a continuation and `do`
+      // wrongly opened a block. The orphan `do` then prevented the outer `end` from
+      // closing `function`, destroying the function/end pair.
+      const source = 'function f\n  do....x\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should still accept "do...\\n body\\nuntil cond" (exactly three dots = continuation)', () => {
+      // Sanity check: exactly three dots after `do` is the legitimate `...` line
+      // continuation, so `do` must still open a real do/until block. Without this,
+      // strengthening the field-access guard could regress the legitimate continuation form.
+      const source = 'do ...\n  body\nuntil cond';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'do', 'until');
+    });
+  });
+
   suite('Bug: BOM (U+FEFF) at line start must not block typed-close statement-leading detection', () => {
     test('should accept endif when preceded only by a leading BOM after the newline', () => {
       // A BOM (U+FEFF) appearing at the start of a physical line (e.g. introduced by
