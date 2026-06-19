@@ -1325,6 +1325,22 @@ export class CrystalBlockParser extends BaseBlockParser {
 
   // Checks if % at position is a modulo operator (not a percent literal)
   private isModuloOperator(source: string, pos: number): boolean {
+    const nextChar = source[pos + 1];
+    // `%%` is always treated as modulo, regardless of position. Crystal cannot use `%`
+    // as both the literal-introducer and the delimiter, so a `%%` at column 0 (or
+    // anywhere else) is two `%` operators / a double modulo, not the opener of a
+    // `%`-delimited literal. Treating both `%` characters as modulo operators avoids
+    // unterminated literals that swallow the rest of the source (e.g. `%%foo`,
+    // `%% 5\nif true\nend`).
+    if (nextChar === '%') {
+      return true;
+    }
+    // `%=` is always compound assignment (modulo-and-assign), never a percent literal,
+    // regardless of position. Without this rule, `%= 5\nif true\nend` at column 0 would
+    // open an unterminated `%=...=` literal that swallows the rest of the source.
+    if (nextChar === '=') {
+      return true;
+    }
     if (pos === 0) return false;
     let i = pos - 1;
     while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) {
@@ -1343,15 +1359,10 @@ export class CrystalBlockParser extends BaseBlockParser {
     if (next < source.length && '({[<'.includes(source[next])) {
       return false;
     }
-    // %= is always compound assignment, not a percent literal
-    if (next < source.length && source[next] === '=') {
-      return true;
-    }
     // Non-paired delimiter without specifier is also a percent literal
     // e.g. puts %|text|, %~text~
-    // Exclude %% (double percent) — treat the first % as modulo to avoid
-    // consuming the rest of the source as an unterminated percent literal.
-    if (next < source.length && source[next] !== '%' && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
+    // (`%%` and `%=` are already handled at the top of this function as modulo.)
+    if (next < source.length && /[^a-zA-Z0-9_ \t\r\n]/.test(source[next])) {
       return false;
     }
     return true;
