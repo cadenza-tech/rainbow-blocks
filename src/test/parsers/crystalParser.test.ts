@@ -5480,5 +5480,26 @@ end`;
     });
   });
 
+  suite('Regression: %= and %% at line start should be modulo, not percent literal', () => {
+    test('should pair if/end when source begins with %= (compound assignment) literal-looking token', () => {
+      // `%=` at the very start of a line is a compound assignment operator, not a
+      // percent literal opener. A pre-fix bug had the `%` consume the rest of the
+      // source as an unterminated percent literal, hiding every later block. The
+      // `if/end` pair on the following lines must therefore be detected.
+      const source = '%= 5\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+
+    test('should pair if/end when source begins with %% literal-looking token', () => {
+      // `%%` at the very start of a line is two consecutive `%` operators / a
+      // double modulo, not a percent literal opener. A pre-fix bug had the first
+      // `%` consume the rest of the source as an unterminated percent literal.
+      const source = '%% 5\nif true\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   generateCommonTests(config);
 });
