@@ -3433,5 +3433,26 @@ end`;
     });
   });
 
+  suite('Bug: arguments dropped outside function context must phantom-skip its stray end', () => {
+    test('should pair if with its outer end when arguments block is dropped inside if', () => {
+      // A bare `arguments` keyword outside any function/methods/classdef context is dropped
+      // by matchBlocks (an arguments block is only valid inside those contexts). The user
+      // likely wrote a stray `end` to close it; without phantom-skipping that inner `end`,
+      // it consumes the enclosing if's only `end` and leaves the real outer `end` orphan,
+      // destroying the if/end pair.
+      const source = 'if x > 0\n  arguments\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should pair while with its outer end when arguments block is dropped inside while', () => {
+      const source = 'while cond\n  arguments\n    y = 1;\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'while', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
