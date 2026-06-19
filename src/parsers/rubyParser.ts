@@ -584,7 +584,32 @@ export class RubyBlockParser extends BaseBlockParser {
         }
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (ch === ' ' || ch === '\t') {
+        i--;
+        continue;
+      }
+      // Newline: always skip (`..` causes implicit line continuation). Also recognise
+      // backslash line continuation -- an odd-count backslash run immediately preceding
+      // the newline -- and skip past those backslashes so `1..\<NL>end` reads as `1..end`.
+      if (ch === '\n' || ch === '\r') {
+        let nlStart = i;
+        if (ch === '\n' && i > 0 && source[i - 1] === '\r') {
+          nlStart = i - 1;
+        }
+        let bs = nlStart - 1;
+        let count = 0;
+        while (bs >= 0 && source[bs] === '\\') {
+          count++;
+          bs--;
+        }
+        // Odd backslash count = real line continuation. The trailing backslash sits at
+        // index `nlStart - 1`; if it lies inside an excluded region (e.g. a `# 1..\`
+        // comment), treat the apparent continuation as plain text and skip just the
+        // newline. `$\` (output record separator global) is also not a continuation.
+        if (count % 2 === 1 && !(count === 1 && bs >= 0 && source[bs] === '$') && !this.isInExcludedRegion(nlStart - 1, excludedRegions)) {
+          i = bs;
+          continue;
+        }
         i--;
         continue;
       }
@@ -616,6 +641,22 @@ export class RubyBlockParser extends BaseBlockParser {
       if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
         i++;
         continue;
+      }
+      // Backslash line continuation: an odd-count backslash run immediately followed by
+      // a newline joins the next physical line to this one. Skip past the backslashes and
+      // the newline so `end\<NL>..1` reads as `end..1`. A backslash sitting inside an
+      // excluded region (e.g., a `# end \` comment) is just text and never a continuation.
+      if (ch === '\\' && !this.isInExcludedRegion(i, excludedRegions)) {
+        let bs = i;
+        let count = 0;
+        while (bs < source.length && source[bs] === '\\') {
+          count++;
+          bs++;
+        }
+        if (count % 2 === 1 && bs < source.length && (source[bs] === '\n' || source[bs] === '\r')) {
+          i = bs;
+          continue;
+        }
       }
       break;
     }
