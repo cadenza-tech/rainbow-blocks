@@ -7181,6 +7181,31 @@ fi`;
     });
   });
 
+  suite('Regression: brace open followed by line continuation', () => {
+    // Real bash accepts `{\<newline> body; \n}` as a command-group open: the
+    // backslash-newline collapses during lexing, leaving `{ body; }`. The
+    // tokenizer must accept `\` followed by `\n`/`\r`/`\r\n` as a valid char
+    // after `{` (alongside the existing whitespace/`(` separators), otherwise
+    // the `{` is skipped and the `}` is left orphan.
+    test('should pair { with } when { is followed by line continuation (LF)', () => {
+      const source = '{\\\n  echo;\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should pair { with } when { is followed by line continuation (CRLF)', () => {
+      const source = '{\\\r\n  echo;\r\n}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+
+    test('should pair { with } when { is followed by line continuation (CR only)', () => {
+      const source = '{\\\r  echo;\r}';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, '{', '}');
+    });
+  });
+
   suite('Regression: case pattern close paren must not pop subshell paren stack', () => {
     // The case pattern `a)` is not a subshell close; popping the enclosing-paren
     // stack at that `)` confuses the scope barrier so the case-esac pair is
