@@ -332,24 +332,29 @@ export function matchExecBlock(source: string, pos: number, callbacks: CobolHelp
       }
       continue;
     }
-    // Check for END-EXECUTE keyword (11 chars, must check before END-EXEC)
+    // Check for END-EXECUTE keyword (11 chars, must check before END-EXEC).
+    // The boundary check rejects ASCII identifier neighbours (e.g. END-EXECUTE1)
+    // and also non-ASCII Unicode identifier chars so `αEND-EXECUTE` /
+    // `END-EXECUTEα` are read as a single identifier rather than a bare
+    // END-EXECUTE keyword terminating the EXEC block.
     if ((ch === 'E' || ch === 'e') && i + 10 < source.length) {
       const candidate11 = source.slice(i, i + 11).toUpperCase();
       if (candidate11 === 'END-EXECUTE') {
-        const beforeOk = i === 0 || !/[a-zA-Z0-9_-]/.test(source[i - 1]);
-        const afterOk = i + 11 >= source.length || !/[a-zA-Z0-9_-]/.test(source[i + 11]);
+        const beforeOk = i === 0 || (!/[a-zA-Z0-9_-]/.test(source[i - 1]) && !isUnicodeIdentifierChar(source[i - 1]));
+        const afterOk = i + 11 >= source.length || (!/[a-zA-Z0-9_-]/.test(source[i + 11]) && !isUnicodeIdentifierChar(source[i + 11]));
         if (beforeOk && afterOk) {
           return { start: pos, end: i + 11 };
         }
       }
     }
-    // Check for END-EXEC keyword (8 chars)
+    // Check for END-EXEC keyword (8 chars). Same Unicode-boundary policy as
+    // END-EXECUTE above so `αEND-EXEC` / `END-EXECα` are not mistaken for the
+    // bare keyword.
     if ((ch === 'E' || ch === 'e') && i + 7 < source.length) {
       const candidate = source.slice(i, i + 8).toUpperCase();
       if (candidate === 'END-EXEC') {
-        // Check word boundaries
-        const beforeOk = i === 0 || !/[a-zA-Z0-9_-]/.test(source[i - 1]);
-        const afterOk = i + 8 >= source.length || !/[a-zA-Z0-9_-]/.test(source[i + 8]);
+        const beforeOk = i === 0 || (!/[a-zA-Z0-9_-]/.test(source[i - 1]) && !isUnicodeIdentifierChar(source[i - 1]));
+        const afterOk = i + 8 >= source.length || (!/[a-zA-Z0-9_-]/.test(source[i + 8]) && !isUnicodeIdentifierChar(source[i + 8]));
         if (beforeOk && afterOk) {
           return { start: pos, end: i + 8 };
         }
