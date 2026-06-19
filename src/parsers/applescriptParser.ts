@@ -1143,9 +1143,21 @@ export class ApplescriptBlockParser extends BaseBlockParser {
           // preserved even when an inner block (e.g. 'repeat') is still open. When no
           // ancestor 'if' exists the keyword is dropped (syntax error, e.g. inside a
           // 'try' with no enclosing 'if').
+          //
+          // AppleScript's `if` syntax allows at most one bare `else` per block, and
+          // it must be the final intermediate (no `else if` may follow). Drop any
+          // further `else` / `else if` that arrives after a bare `else` has already
+          // been attached, so the anchor-set is preserved as one canonical
+          // (open, intermediates, close) tuple instead of carrying syntactically
+          // invalid duplicates that would mis-color subsequent lines.
           if (token.value === 'else' || token.value === 'else if') {
             for (let i = stack.length - 1; i >= 0; i--) {
               if (stack[i].token.value === 'if') {
+                const existing = stack[i].intermediates;
+                const last = existing[existing.length - 1];
+                if (last && last.value === 'else') {
+                  break;
+                }
                 stack[i].intermediates.push(token);
                 break;
               }
