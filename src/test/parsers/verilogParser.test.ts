@@ -1880,19 +1880,35 @@ endmodule`;
   });
 
   suite('Coverage: matchDefineDirective backslash-newline inside string literal', () => {
-    test('should end define at backslash-newline inside string literal', () => {
-      // Lines 130-134: backslash before newline inside string in define body
-      // The string is unterminated; define ends at the backslash position
+    test('should continue define past backslash-newline inside string literal (line continuation)', () => {
+      // Per IEEE 1800-2017 §5.9 `\<LF>` inside a string literal is a line
+      // continuation: the string continues onto the next physical line. The
+      // `define body therefore also continues, so any block keywords on the
+      // continuation line still sit inside the unterminated string and must
+      // not be tokenized. The string is then terminated by the next bare
+      // newline (a newline with no preceding backslash), which also ends the
+      // `define line. The trailing `endmodule` falls outside the define and
+      // is orphaned (no matching `module`).
       const source = '`define MSG "hello\\\nmodule test;\nendmodule';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'module', 'endmodule');
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      const defineRegion = regions.find((r) => r.start === 0);
+      assert.ok(defineRegion, '`define should be an excluded region');
+      // The unterminated string is broken by the bare LF on the
+      // `module test;\n` line, which ends the `define directive there.
+      assert.strictEqual(defineRegion.end, source.indexOf('\nendmodule'));
     });
 
-    test('should end define at backslash-CR inside string literal', () => {
-      // Lines 129-133: backslash before \r inside string in define body
+    test('should continue define past backslash-CR inside string literal (line continuation)', () => {
+      // Same as above for CR-only line endings.
       const source = '`define MSG "hello\\\rmodule test;\nendmodule';
       const pairs = parser.parse(source);
-      assertSingleBlock(pairs, 'module', 'endmodule');
+      assertNoBlocks(pairs);
+      const regions = parser.getExcludedRegions(source);
+      const defineRegion = regions.find((r) => r.start === 0);
+      assert.ok(defineRegion, '`define should be an excluded region');
+      assert.strictEqual(defineRegion.end, source.indexOf('\nendmodule'));
     });
   });
 
@@ -3819,6 +3835,71 @@ endmodule`;
       assert.ok(defineRegion, '`define should be an excluded region');
       // The define ends at the LF of the CRLF pair (CR included, LF excluded).
       assert.strictEqual(defineRegion.end, source.indexOf('\n'));
+    });
+  });
+
+  suite('Bug fix: matchDefineDirective string respects IEEE 1800-2017 §5.9 line continuation', () => {
+    // Per IEEE 1800-2017 §5.9, a backslash immediately followed by a newline
+    // (`\<LF>`, `\<CR>`, `\<CRLF>`) inside a string literal is a line
+    // continuation: the backslash and the line break are consumed and the
+    // string continues on the next line. The previous matchDefineDirective
+    // string-handling branch treated `\<LF>` as a string terminator (and
+    // ended the entire `define), causing block keywords on the continuation
+    // lines (e.g., `begin`, `end` inside the literal text) to leak out of
+    // the define region and be falsely tokenized.
+    test('should treat backslash-LF inside string as line continuation in `define body (LF)', () => {
+      const source = '`define MSG "Hello \\\nbegin xxx \\\nend"\nmodule test;\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const defineRegion = regions.find((r) => r.start === 0);
+      assert.ok(defineRegion, '`define should be an excluded region');
+      // The closing `"` of the string is at offset = source.lastIndexOf('"').
+      // matchDefineDirective should consume the entire string and continue past
+      // the line continuations, ending at the LF that terminates the `define
+      // line proper (the LF after the closing `"`).
+      assert.strictEqual(defineRegion.end, source.indexOf('\nmodule'));
+      // `begin` and `end` inside the string literal must not be tokenized.
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should treat backslash-CRLF inside string as line continuation in `define body', () => {
+      const source = '`define MSG "Hello \\\r\nbegin xxx \\\r\nend"\nmodule test;\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should treat backslash-CR inside string as line continuation in `define body (CR-only)', () => {
+      const source = '`define MSG "Hello \\\rbegin xxx \\\rend"\nmodule test;\nendmodule';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['module', 'endmodule']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+    });
+
+    test('should still end define at bare newline (no backslash) inside unterminated string', () => {
+      // Sanity: when the backslash is NOT directly before the newline, the
+      // string is unterminated and the define ends at the bare newline.
+      const source = '`define MSG "Hello world\nmodule test;\nendmodule';
+      const regions = parser.getExcludedRegions(source);
+      const defineRegion = regions.find((r) => r.start === 0);
+      assert.ok(defineRegion, '`define should be an excluded region');
+      // The bare LF ends the `define after the unterminated string.
+      assert.strictEqual(defineRegion.end, source.indexOf('\nmodule'));
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
     });
   });
 
