@@ -590,19 +590,22 @@ export class VerilogBlockParser extends BaseBlockParser {
   }
 
   // Returns true when `function` appears in covergroup `with function sample(...)` syntax.
-  // The `function` keyword is preceded by the word `with` on the same line, and is
-  // followed by `sample` (after whitespace).
+  // The `function` keyword is preceded by the word `with` and followed by
+  // `sample`, with arbitrary horizontal or vertical whitespace (spaces, tabs,
+  // LF, CR) on either side. Per IEEE 1800-2017 §19.2.1.2 the `with function
+  // sample` clause is a single syntactic construct, so the line breaks the
+  // user puts between its words must not change classification.
   private isCovergroupWithFunctionSample(source: string, position: number, _excludedRegions: ExcludedRegion[]): boolean {
     // Check preceding word is `with`
     let i = position - 1;
-    while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+    while (i >= 0 && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) i--;
     if (i < 3) return false;
     if (!(source.slice(i - 3, i + 1).toLowerCase() === 'with' && (i - 4 < 0 || !/[a-zA-Z0-9_$]/.test(source[i - 4])))) {
       return false;
     }
     // Check following word is `sample`
     let j = position + 'function'.length;
-    while (j < source.length && (source[j] === ' ' || source[j] === '\t')) j++;
+    while (j < source.length && (source[j] === ' ' || source[j] === '\t' || source[j] === '\n' || source[j] === '\r')) j++;
     if (j + 6 > source.length) return false;
     if (source.slice(j, j + 6).toLowerCase() !== 'sample') return false;
     if (j + 6 < source.length && /[a-zA-Z0-9_$]/.test(source[j + 6])) return false;
