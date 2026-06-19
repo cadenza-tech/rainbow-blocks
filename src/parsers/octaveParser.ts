@@ -973,9 +973,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
     }
     // Pattern 2: inner does not look like attribute keywords. Recognised attribute
     // forms are `Input` / `Output` / `Repeating` (case-insensitive), optionally
-    // followed by `,` and another attribute. Empty parens are also treated as
-    // attribute form (block opener) for backwards compatibility.
-    if (inner.length === 0) return false;
+    // followed by `,` and another attribute. Empty parens `arguments()` are the
+    // no-argument function-call form (e.g. a reflection stub), not an attribute
+    // list — treating them as a block opener wrongly pairs `arguments` with the
+    // enclosing `function`'s `end` and orphans the real outer `end`. MATLAB's
+    // detector already rejects empty parens, so Octave matches for parity.
+    if (inner.length === 0) return true;
     const attrPattern = /^(?:input|output|repeating)(?:\s*,\s*(?:input|output|repeating))*$/i;
     if (!attrPattern.test(inner)) {
       return true;
