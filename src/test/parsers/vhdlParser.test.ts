@@ -5687,5 +5687,30 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-20: stray is after orphan identifier line not absorbed by enclosing block', () => {
+    // When a same-line subtype/type/alias declaration completes with `;` on a previous line,
+    // a subsequent `is integer;` on its own (preceded only by an orphan identifier) is an
+    // invalid statement. Without rejecting this `is` it leaks as an intermediate of the
+    // enclosing architecture, polluting its structure (extra `is` appears between the real
+    // `is` and the real `begin`).
+    test('should not absorb stray is when previous declaration line ends with semicolon', () => {
+      const source = `architecture a of e is
+  subtype S is integer;
+  my_signal
+  is integer;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(
+        intermediateValues,
+        ['is', 'begin'],
+        `architecture intermediates should be [is, begin]; got [${intermediateValues.join(', ')}]`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
