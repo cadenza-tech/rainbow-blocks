@@ -3579,6 +3579,80 @@ end`;
     });
   });
 
+  suite('Regression 2026-06-20: case/otherwise + end separated by Unicode horizontal whitespace', () => {
+    test('should not treat end as block close when separated from case by NBSP (U+00A0)', () => {
+      // `case<NBSP>end` is a case arm whose value is the identifier `end` — invalid MATLAB,
+      // but treating that `end` as a block close consumes the outer switch's end. Without
+      // the fix, the backward-scan loop in isPrecededByCaseOrOtherwiseOnLogicalLine only
+      // recognised ASCII space/tab/CR/LF as whitespace, so the NBSP between `case` and
+      // `end` stopped the scan and the function returned false, leaving `end` tokenised
+      // as a real block close.
+      const NBSP = ' ';
+      const source = `switch x\n  case${NBSP}end\n    y = 1;\n  case 2\n    y = 2;\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5, 'switch should pair with the outer end on line 5');
+    });
+
+    test('should not treat end as block close when separated from case by em space (U+2003)', () => {
+      // Same root cause with em space (U+2003). The Unicode horizontal whitespace set
+      // covers em space, so the fix must accept it the same as NBSP.
+      const source = 'switch x\n  case end\n    y = 1;\n  case 2\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5);
+    });
+
+    test('should not treat end as block close when separated from case by ideographic space (U+3000)', () => {
+      // U+3000 (ideographic space) is full-width whitespace common in Japanese text.
+      const source = 'switch x\n  case　end\n    y = 1;\n  case 2\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5);
+    });
+
+    test('should not treat end as block close when separated from case by vertical tab (\\v)', () => {
+      // Vertical tab is ASCII but not in the original space/tab/CR/LF whitelist either.
+      const VT = '\v';
+      const source = `switch x\n  case${VT}end\n    y = 1;\n  case 2\n    y = 2;\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5);
+    });
+
+    test('should not treat end as block close when separated from otherwise by NBSP', () => {
+      // `otherwise<NBSP>end` follows the same pattern — `otherwise` arm value is `end`,
+      // an identifier; treating it as block close consumes the outer switch's end.
+      const NBSP = ' ';
+      const source = `switch x\n  case 1\n    y = 1;\n  otherwise${NBSP}end\n    y = 2;\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5);
+    });
+
+    test('should not treat end as block close when case is indented by NBSP only', () => {
+      // The leading-whitespace branch of isPrecededByCaseOrOtherwiseOnLogicalLine also
+      // needs Unicode whitespace recognition. `<NBSP>case end` puts `case` at logical-line
+      // start with only NBSP before it; without the fix the leading-whitespace check
+      // sees the NBSP as non-whitespace and returns false, so `end` is wrongly classified
+      // as a block close.
+      const NBSP = ' ';
+      const source = `switch x\n${NBSP}case end\n    y = 1;\n  case 2\n    y = 2;\nend`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5);
+    });
+
+    test('should still treat case end with ASCII space as case-arm value (sanity check)', () => {
+      // ASCII space between `case` and `end` already worked. Sanity-check that the
+      // existing behaviour is preserved.
+      const source = 'switch x\n  case end\n    y = 1;\n  case 2\n    y = 2;\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'switch', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 5);
+    });
+  });
+
   suite('Regression: case/otherwise with empty header is not intermediate', () => {
     test('should not register case as intermediate when header is empty (case<NL>)', () => {
       // `case` requires a value expression. An empty header (`case\n  y = 1`) is invalid
