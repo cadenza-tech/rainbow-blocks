@@ -644,7 +644,10 @@ export function isPrecededByOperator(source: string, position: number): boolean 
     }
   }
   // Closing paren: I/O format spec or function result context (e.g., write(*,*) end)
-  if (char === ')') return true;
+  // Closing bracket: Fortran 2003+ array constructor `[...]` or coarray image selector
+  // `x[...]`; an `end` continuing after `]` (across `&`) is a variable in an expression,
+  // not a real block_close. `]` mirrors `)` semantically in this context.
+  if (char === ')' || char === ']') return true;
   // Assignment operator (x = end) or comparison operators (<=, >=, ==, /=)
   // All indicate expression context where keyword is used as a variable
   if (char === '=') {
