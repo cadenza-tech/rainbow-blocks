@@ -163,6 +163,15 @@ const RHS_INVALID_BLOCK_OPENERS: ReadonlySet<string> = new Set([
   'generate'
 ]);
 
+// Control-flow reserved words. These have dedicated block_open validators
+// (isValidForOpen/isValidWhileOpen) or open a block unconditionally (`if`/`case`), so
+// they are NOT in RHS_INVALID_BLOCK_OPENERS. But they are also reserved words, so they
+// cannot legally appear as an identifier in entity_designator / entity_reference /
+// attribute_designator positions. Editor-in-progress code can place them there; without
+// rejecting them their block_open promotion absorbs the surrounding block's
+// `is`/`begin`/`end` intermediates and silently breaks structure.
+const CONTROL_FLOW_KEYWORDS: ReadonlySet<string> = new Set(['if', 'case', 'while', 'for']);
+
 export class VhdlBlockParser extends BaseBlockParser {
   // Override parse to post-adjust nestLevel for blocks inside generate constructs.
   // The base recalculateNestLevels counts every pair whose offset range encloses a body
@@ -425,8 +434,14 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `architecture <id> of <reserved> is ...` / `configuration <id> of <reserved> is ...`.
     // The reserved word here is (illegally) being used as the entity reference; without
     // this guard it absorbs the surrounding architecture/configuration's `is` and `begin`
-    // into its (orphan) intermediates.
-    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isInArchitectureOrConfigEntityRef(source, position, excludedRegions)) {
+    // into its (orphan) intermediates. Control-flow keywords (`if`/`case`/`while`/`for`)
+    // are reserved too and must also be rejected here; without it `architecture rtl of
+    // case is` promotes `case` to a fresh block_open and absorbs the architecture's
+    // `is`/`begin` intermediates.
+    if (
+      (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) || CONTROL_FLOW_KEYWORDS.has(lowerKeyword)) &&
+      this.isInArchitectureOrConfigEntityRef(source, position, excludedRegions)
+    ) {
       return false;
     }
 
