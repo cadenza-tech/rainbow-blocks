@@ -5393,5 +5393,76 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-20: reserved words after => in case branch RHS are not block openers', () => {
+    // A case branch body whose RHS is a bare reserved-word statement (e.g.
+    // `when 0 => view;`) is invalid VHDL, but editor-in-progress code often types
+    // such tokens. Without rejecting the reserved word here it is promoted to a
+    // fresh `block_open` and absorbs the case's subsequent `when` intermediates,
+    // visibly breaking the case block's structure (the second `when` is lost).
+    test('should not treat view as block opener when used as bare RHS in case branch', () => {
+      const source = `case x is
+  when 0 => view;
+  when others => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.closeKeyword?.value, 'end case');
+      const intermediateValues = caseBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(
+        intermediateValues,
+        ['is', 'when', 'when'],
+        `case block intermediates should be [is, when, when]; got [${intermediateValues.join(', ')}]`
+      );
+    });
+
+    test('should not treat loop as block opener when used as bare RHS in case branch', () => {
+      const source = `case x is
+  when 0 => loop;
+  when others => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.closeKeyword?.value, 'end case');
+      const intermediateValues = caseBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(
+        intermediateValues,
+        ['is', 'when', 'when'],
+        `case block intermediates should be [is, when, when]; got [${intermediateValues.join(', ')}]`
+      );
+    });
+
+    test('should not treat block as block opener when used as bare RHS in case branch', () => {
+      const source = `case x is
+  when 0 => block;
+  when others => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.closeKeyword?.value, 'end case');
+      const intermediateValues = caseBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(
+        intermediateValues,
+        ['is', 'when', 'when'],
+        `case block intermediates should be [is, when, when]; got [${intermediateValues.join(', ')}]`
+      );
+    });
+
+    test('should not treat process as block opener when used as bare RHS in case branch', () => {
+      const source = `case x is
+  when 0 => process;
+  when others => null;
+end case;`;
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      assert.strictEqual(caseBlock.closeKeyword?.value, 'end case');
+      const intermediateValues = caseBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.deepStrictEqual(
+        intermediateValues,
+        ['is', 'when', 'when'],
+        `case block intermediates should be [is, when, when]; got [${intermediateValues.join(', ')}]`
+      );
+    });
+  });
+
   generateCommonTests(config);
 });
