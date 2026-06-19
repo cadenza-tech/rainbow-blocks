@@ -379,6 +379,10 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `protected`, `context`, `loop` are also reserved words that can appear in the
     // entity_class slot of malformed / editor-in-progress code; without rejecting them,
     // they would absorb the enclosing architecture's `begin` into their (orphan) intermediates.
+    // Control-flow reserved words (`if`/`case`/`while`/`for`) are also illegal in the
+    // entity_class slot but appear in hand-written / editor-in-progress code; without
+    // rejecting them their block_open promotion absorbs the surrounding architecture's
+    // `begin` intermediate and silently breaks structure.
     const entityClassKeywords = new Set([
       'package',
       'architecture',
@@ -395,7 +399,11 @@ export class VhdlBlockParser extends BaseBlockParser {
       'record',
       'protected',
       'context',
-      'loop'
+      'loop',
+      'if',
+      'case',
+      'while',
+      'for'
     ]);
     if (entityClassKeywords.has(lowerKeyword) && this.isInAttributeSpecification(source, position, excludedRegions)) {
       return false;
