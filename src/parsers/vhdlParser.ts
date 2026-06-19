@@ -1769,14 +1769,20 @@ export class VhdlBlockParser extends BaseBlockParser {
               // enclosing block's intermediates. A block-opener line WITHOUT its own `is`
               // (e.g. `entity counter` then `is`) is the real owner of this `is`, so we
               // do not skip in that case.
+              // Strip an optional `<label>:` prefix so a labeled block opener like
+              // `control: process (...)` is recognized as a block-opener line. Without
+              // stripping, the labeled form would be classified as a bare-identifier
+              // content line, causing the scan to walk past the process header and find
+              // the enclosing block's own `is` (incorrectly dropping the process `is`).
+              const prevLineNoLabel = prevLine.replace(/^\w+\s*:\s*/, '');
               if (
-                /^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units|view)\b/.test(
-                  prevLine
+                /^(entity|architecture|package|configuration|context|component|block|generate|case|function|procedure|protected|units|view|process)\b/.test(
+                  prevLineNoLabel
                 )
               ) {
                 if (this.lineContainsStandaloneIs(source, prevLineStart, scanPos, excludedRegions)) {
                   skipThisIs = true;
-                } else if (/^(function|procedure)\b/.test(prevLine)) {
+                } else if (/^(function|procedure)\b/.test(prevLineNoLabel)) {
                   // Multi-line function/procedure header without its own `is`. The
                   // `is null/is new/is (expr)` filter below still applies to detect
                   // null procedures, expression functions, and subprogram instantiations.
