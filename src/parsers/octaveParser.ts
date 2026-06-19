@@ -294,6 +294,25 @@ export class OctaveBlockParser extends MatlabBlockParser {
       if (this.isDoInConditionContext(source, position, excludedRegions)) {
         return false;
       }
+      // Reject `do....x` (four or more dots immediately after `do`) BEFORE entering
+      // the whitespace/continuation skip loop below. The line-continuation regex
+      // `^\.\.\.[^\r\n]*\n` greedily consumes any number of dots as a `...` continuation
+      // followed by trailing comment text, so `do....x\n` would otherwise slip past the
+      // loop and be treated as a real do/until opener. In reality four-or-more dots is
+      // chained field access (`do.<INVALID>....x` — `.` is field-access intro and the
+      // remaining dots are subsequent field-access tokens), so `do` is a variable name,
+      // not a block opener. Exactly three dots (with the fourth char being non-dot) IS a
+      // legitimate line continuation and must be allowed — checked via `source[start+3]`.
+      const afterDo = position + keyword.length;
+      if (
+        afterDo < source.length &&
+        source[afterDo] === '.' &&
+        source[afterDo + 1] === '.' &&
+        source[afterDo + 2] === '.' &&
+        source[afterDo + 3] === '.'
+      ) {
+        return false;
+      }
       // Skip horizontal whitespace (ASCII space/tab/VT/FF plus Unicode spaces such
       // as NBSP / U+2000-200A / Ideographic Space) and line continuations (... or \)
       // after `do`, then inspect the first significant character. `do (args)`,
@@ -352,7 +371,9 @@ export class OctaveBlockParser extends MatlabBlockParser {
       // leaves a spurious `do` on the stack and breaks the enclosing block
       // pairing. Exclude only `...` (three dots), which represents a line
       // continuation that was not consumed above (e.g. at EOF without a
-      // trailing newline) and must not be mistaken for field access.
+      // trailing newline) and must not be mistaken for field access. (The
+      // four-dot `do....x` case is rejected upstream by the early-exit check
+      // before the continuation-skip loop runs.)
       if (j < source.length && source[j] === '.' && !(source[j + 1] === '.' && source[j + 2] === '.')) {
         return false;
       }
