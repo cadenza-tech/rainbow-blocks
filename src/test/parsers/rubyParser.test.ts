@@ -4903,6 +4903,19 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
       assertTokenPosition(pairs[0].closeKeyword, 2, 0);
     });
+
+    test('should drop end on next line after ternary question mark via implicit continuation', () => {
+      // Multi-line variant of the ternary then-value position: a trailing `?` at the end of
+      // a physical line makes Ruby continue the expression onto the next line, so the `end`
+      // below `cond ?` is still in the ternary then-value slot. endsWithContinuationOperator
+      // omitted `?` from the trailing-operator set, so the continuation was not detected,
+      // and the inner `end` mis-paired with the outer def. After the fix, the inner end is
+      // filtered and def pairs with the outer end on line 3.
+      const source = 'def m\n  cond ?\n    end : 0\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 3, 'def should pair with the outer end on line 3');
+    });
   });
 
   suite('Regression: endless method definition with backslash continuation', () => {
