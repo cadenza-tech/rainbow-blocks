@@ -5524,5 +5524,62 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-20: control-flow keywords in architecture/configuration entity ref position', () => {
+    // `architecture <id> of <entity_name> is ... end architecture;` and
+    // `configuration <id> of <entity_name> is ... end configuration;`. The <entity_name>
+    // slot is intended for a user-defined entity identifier; editor-in-progress code can
+    // place a reserved word there. The isInArchitectureOrConfigEntityRef guard already
+    // handles non-control-flow reserved words (RHS_INVALID_BLOCK_OPENERS); this regression
+    // pins that control-flow keywords (`if`/`case`/`while`/`for`) are likewise rejected so
+    // they do not absorb the surrounding architecture's `is`/`begin` intermediates.
+    test('should not treat case as block opener in architecture entity ref position', () => {
+      const source = `architecture rtl of case is
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `architecture intermediates should include is; got [${intermediateValues.join(', ')}]`);
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat if as block opener in architecture entity ref position', () => {
+      const source = `architecture rtl of if is
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `architecture intermediates should include is; got [${intermediateValues.join(', ')}]`);
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat while as block opener in architecture entity ref position', () => {
+      const source = `architecture rtl of while is
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `architecture intermediates should include is; got [${intermediateValues.join(', ')}]`);
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat for as block opener in architecture entity ref position', () => {
+      const source = `architecture rtl of for is
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `architecture intermediates should include is; got [${intermediateValues.join(', ')}]`);
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+  });
+
   generateCommonTests(config);
 });
