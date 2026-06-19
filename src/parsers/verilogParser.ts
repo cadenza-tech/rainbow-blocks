@@ -1402,7 +1402,28 @@ export class VerilogBlockParser extends BaseBlockParser {
     let i = this.skipForwardTrivia(source, position + keywordLength, excludedRegions);
     if (i >= source.length) return false;
     if (!/[a-zA-Z_]/.test(source[i])) return false;
+    const wordStart = i;
     while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+    // Reject if the trailing identifier itself touches `$` (it is then a system
+    // task name like `$display`, not a plain instance name).
+    const word = source.slice(wordStart, i);
+    if (word.includes('$')) return false;
+    // Reject if the trailing word is a reserved SystemVerilog keyword. Mirrors
+    // the reserved-word exclusions in `isInInstanceNamePosition` (line
+    // 1480-1491). Without this carve-out, a close keyword followed by
+    // `<reserved_word> (` (e.g., `end\n  for (i=0; ...)`,
+    // `end\n  case (sel)`) was wrongly classified as an instance-type position
+    // and the close keyword was suppressed, breaking the surrounding
+    // BlockPair set.
+    if (DATA_TYPE_KEYWORDS.has(word)) return false;
+    if (METHOD_QUALIFIER_KEYWORDS.has(word)) return false;
+    if (ENTITY_NAME_INTRODUCERS.has(word)) return false;
+    if (DECLARATION_KEYWORDS.has(word)) return false;
+    if (CASE_KEYWORDS.has(word)) return false;
+    if (CONTROL_KEYWORDS.includes(word)) return false;
+    if (this.keywords.blockOpen.includes(word)) return false;
+    if (this.keywords.blockClose.includes(word)) return false;
+    if (this.keywords.blockMiddle.includes(word)) return false;
     // Step 2: next non-trivia char after the identifier must be `(`. A `(*`
     // attribute opener is not an instance port list, so it is excluded.
     const afterId = this.skipForwardTrivia(source, i, excludedRegions);
