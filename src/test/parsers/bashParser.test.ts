@@ -7181,5 +7181,29 @@ fi`;
     });
   });
 
+  suite('Regression: case pattern close paren must not pop subshell paren stack', () => {
+    // The case pattern `a)` is not a subshell close; popping the enclosing-paren
+    // stack at that `)` confuses the scope barrier so the case-esac pair is
+    // suppressed inside a nested `( ( ... ) )` subshell. Real bash accepts
+    // `( ( case x in a) echo;; esac ) )` as a single case-esac pair.
+    test('should pair case-esac inside doubly nested subshell with case pattern parens', () => {
+      const source = '( ( case x in a) echo;; esac ) )';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should pair case-esac inside triple nested subshell with case pattern parens', () => {
+      const source = '( ( ( case x in a) echo;; esac ) ) )';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should pair case-esac inside subshell with pipe-separated case patterns', () => {
+      const source = '( ( case x in a|b) echo;; c) echo;; esac ) )';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
   generateCommonTests(config);
 });
