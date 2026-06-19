@@ -451,7 +451,13 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `is` intermediate into its (orphan) intermediates, silently breaking the enclosing
     // entity declaration's structure. The symmetric case for `architecture/configuration
     // <id> of <reserved>` is handled above by isInArchitectureOrConfigEntityRef.
-    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isPrecededByEntityKeyword(source, position, excludedRegions)) {
+    // Control-flow keywords (`if`/`case`/`while`/`for`) are reserved too and must also be
+    // rejected here; without it `entity case is` promotes `case` to a fresh block_open
+    // and absorbs the entity's `is` intermediate.
+    if (
+      (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) || CONTROL_FLOW_KEYWORDS.has(lowerKeyword)) &&
+      this.isPrecededByEntityKeyword(source, position, excludedRegions)
+    ) {
       return false;
     }
 
