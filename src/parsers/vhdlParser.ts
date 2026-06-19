@@ -418,6 +418,18 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject reserved-word block openers in the attribute_designator slot:
+    //   `attribute <designator> of <name> : <entity_class> is <expr>;`
+    // The designator immediately follows the `attribute` keyword and is intended for a
+    // user-defined identifier. Editor-in-progress code can place a reserved word there;
+    // without rejecting it the block_open promotion absorbs the surrounding architecture's
+    // `begin` intermediate. Mirrors the entity_class guard above (which targets the slot
+    // after `:`). Use the same `entityClassKeywords` set since the same reserved words
+    // that are invalid in entity_class are also invalid as a designator identifier.
+    if (entityClassKeywords.has(lowerKeyword) && this.isInAttributeDesignatorPosition(source, position, excludedRegions)) {
+      return false;
+    }
+
     // Reject reserved-word block openers that appear as a type mark in any type-indication
     // context (LRM 6.4.2). Covers signal/variable/constant/file declarations
     // (`signal x : view;`), record field declarations (`fld : view;` inside `record`),
@@ -1138,6 +1150,39 @@ export class VhdlBlockParser extends BaseBlockParser {
     // keyword to a block opener would silently corrupt the surrounding block's
     // intermediates (e.g., absorb its `begin`).
     return foundAttribute || scanLimitExhausted;
+  }
+
+  // Detects whether the keyword at `position` is in the attribute_designator slot:
+  //   `attribute <designator> of <name> : <entity_class> is <expr>;` (LRM 7.2)
+  //   `attribute <designator> : <type>;` (attribute declaration, LRM 6.7)
+  // Both forms place the designator immediately after the `attribute` keyword. The
+  // designator slot is intended for a user-defined identifier, but editor-in-progress
+  // code can place a reserved word there. Scans backward past whitespace/comments
+  // expecting the `attribute` keyword. Symmetric to isInAttributeSpecification (which
+  // targets the entity_class slot, after `:`).
+  private isInAttributeDesignatorPosition(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 8) return false;
+    if (!/[a-zA-Z0-9_]/.test(source[i])) return false;
+    const wordEnd = i + 1;
+    while (i >= 0 && /[a-zA-Z0-9_]/.test(source[i])) i--;
+    const word = source.slice(i + 1, wordEnd).toLowerCase();
+    return word === 'attribute';
   }
 
   // Rejects VHDL-2008 package instantiations: `package X is new Y generic map(...);`
