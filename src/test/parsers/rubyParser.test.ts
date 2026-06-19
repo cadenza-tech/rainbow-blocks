@@ -4690,6 +4690,30 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
       assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
     });
+
+    test('should not pair def with stray end after range operator with backslash line continuation (1..\\\\\\n end)', () => {
+      // Bug: isPrecededByRangeOperator's whitespace scan stops at a backslash directly
+      // preceding the newline, so `1..\<NL>end` looks like `end` is preceded by `\`,
+      // not by `..`, and the filter never fires. Ruby treats `..\<NL>` as line
+      // continuation (`1..end` on a single logical line), and that `end` is invalid
+      // Ruby (reserved word as range RHS). Skip an odd-count backslash run preceding
+      // the newline so the scan reaches the actual `..`.
+      const source = 'def m\n  1..\\\n  end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair def with stray end before range operator with backslash line continuation (end\\\\\\n ..1)', () => {
+      // Symmetric to the previous case: isFollowedByRangeOperator's forward whitespace
+      // scan stops at a backslash directly after the newline, so `end\<NL>..1` looks
+      // like `end` is not followed by `..`. Ruby treats `\<NL>` as line continuation
+      // and the `end` is invalid Ruby (reserved word as range LHS).
+      const source = 'def m\n  end\\\n  ..1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   suite('Regression: class <<Foo singleton class should not be parsed as heredoc', () => {
