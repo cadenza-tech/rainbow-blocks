@@ -800,6 +800,15 @@ export class CrystalBlockParser extends BaseBlockParser {
     ) {
       return true;
     }
+    // Single colon directly before `end`: hash literal value (`{label: end}`) or type
+    // annotation (`x : end`). `end` is a reserved word and cannot be a value or a type,
+    // so it is in a value slot. Scope resolution `::end` is already filtered earlier in
+    // tokenize; the ternary `:` (`cond ? a : end`) is handled by
+    // isEndInTernaryValuePosition. A guard against an adjacent `:` on either side is
+    // kept as a defensive backstop in case those filters are ever bypassed.
+    if (ch === ':' && source[i - 1] !== ':' && source[i + 1] !== ':') {
+      return true;
+    }
     // A preceding word: an identifier or keyword. Walk back over the word and decide by
     // whether it is a block keyword that may precede a same-line closing `end`.
     if (/[A-Za-z0-9_]/.test(ch)) {
