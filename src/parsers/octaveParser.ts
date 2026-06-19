@@ -1166,7 +1166,12 @@ export class OctaveBlockParser extends MatlabBlockParser {
   // (comment / string) is not a real continuation — it is just text — so it is ignored.
   private isAtStatementLeadingPosition(source: string, position: number, excludedRegions?: ExcludedRegion[]): boolean {
     let i = position - 1;
-    while (i >= 0 && isHorizontalWhitespace(source[i])) i--;
+    // Also skip a leading UTF-8/UTF-16 BOM (U+FEFF) so a typed close written at the
+    // start of a BOM-prefixed line (e.g. `<BOM>endif` on the second line of a file
+    // saved with a per-line BOM) is still recognised as statement-leading. The same
+    // BOM-tolerance is applied by the parent's command-syntax detector at line 869 and
+    // by matlabHelpers' isAtStatementStart.
+    while (i >= 0 && (isHorizontalWhitespace(source[i]) || source[i] === '\u{FEFF}')) i--;
     if (i < 0) return true;
     const ch = source[i];
     if (ch === ';' || ch === ',') return true;
@@ -1176,7 +1181,7 @@ export class OctaveBlockParser extends MatlabBlockParser {
       let nlEnd = i;
       if (ch === '\n' && i > 0 && source[i - 1] === '\r') nlEnd = i - 1;
       let scan = nlEnd - 1;
-      while (scan >= 0 && isHorizontalWhitespace(source[scan])) scan--;
+      while (scan >= 0 && (isHorizontalWhitespace(source[scan]) || source[scan] === '\u{FEFF}')) scan--;
       if (scan >= 2 && source[scan] === '.' && source[scan - 1] === '.' && source[scan - 2] === '.') {
         // `...` is recorded as an excluded region whose `start` is the first `.` of the
         // continuation. If we find a region containing `scan - 2` whose start is *before*
