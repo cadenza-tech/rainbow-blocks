@@ -35,19 +35,28 @@ const RHS_EXPECTING_WORD_OPERATORS: ReadonlySet<string> = new Set(['and', 'or', 
 
 // Which middle keywords each opener accepts. A middle keyword (else/rescue/catch/after)
 // belongs to the enclosing opener only if that opener actually has that branch:
-//   if/unless -> else
-//   try       -> rescue/catch/after/else
-//   receive   -> after
-//   with      -> else
-// All other openers (case/cond/fn/quote/for and the def-family/defmodule definition
-// keywords) accept no middle keyword. When the opener on the stack top does not accept a
-// middle keyword, that keyword is a stray identifier and is left orphaned (not attached as
-// an intermediate), matching the best-effort "prefer unhighlighted over mis-highlighted"
-// principle. Openers absent from this map accept nothing.
+//   if/unless                       -> else
+//   try                             -> rescue/catch/after/else
+//   def/defp/defmacro/defmacrop     -> rescue/catch/after/else (implicit try, see
+//                                      https://hexdocs.pm/elixir/Kernel.SpecialForms.html#try/1)
+//   receive                         -> after
+//   with                            -> else
+// All other openers (case/cond/fn/quote/for and the other def-family openers
+// defguard/defguardp/defmodule/defprotocol/defimpl) accept no middle keyword.
+// defguard/defguardp wrap a single guard expression that cannot contain rescue/catch/after/else;
+// defmodule/defprotocol/defimpl wrap module body and do not have implicit try semantics.
+// When the opener on the stack top does not accept a middle keyword, that keyword is a stray
+// identifier and is left orphaned (not attached as an intermediate), matching the best-effort
+// "prefer unhighlighted over mis-highlighted" principle. Openers absent from this map accept
+// nothing.
 const MIDDLE_KEYWORDS_BY_OPENER: Readonly<Record<string, ReadonlySet<string>>> = {
   if: new Set(['else']),
   unless: new Set(['else']),
   try: new Set(['rescue', 'catch', 'after', 'else']),
+  def: new Set(['rescue', 'catch', 'after', 'else']),
+  defp: new Set(['rescue', 'catch', 'after', 'else']),
+  defmacro: new Set(['rescue', 'catch', 'after', 'else']),
+  defmacrop: new Set(['rescue', 'catch', 'after', 'else']),
   receive: new Set(['after']),
   with: new Set(['else'])
 };
