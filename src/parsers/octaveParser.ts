@@ -9,21 +9,25 @@ import { findLastOpenerByType } from './parserUtils';
 const LINE_CONTINUATION_PATTERN = /^\.\.\.(?:[^\r\n]*)(?:\r\n|\r|\n)/;
 // Backslash line continuation: `\` + optional horizontal whitespace + newline. Horizontal
 // whitespace covers the same set recognized by isHorizontalWhitespace below: ASCII
-// space/tab/VT/FF plus Unicode horizontal spaces (U+0085, U+00A0, U+1680, U+2000-U+200A,
+// space/tab/VT/FF plus Unicode horizontal spaces (U+0085, U+00A0, U+1680, U+2000-U+200B,
 // U+2028, U+2029, U+202F, U+205F, U+3000). Keeping the two definitions in lock-step means
 // `\<VT>\n`, `\<NBSP>\n`, `\<U+3000>\n` etc. all behave as legitimate continuations,
 // just like `\ \n` and `\\t\n`. Unicode escapes are used instead of literal characters
 // because U+2028 / U+2029 are line terminators in JS source text.
-const BACKSLASH_CONTINUATION_PATTERN = /^\\[ \t\v\f\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*(?:\r\n|\r|\n)/;
+const BACKSLASH_CONTINUATION_PATTERN = /^\\[ \t\v\f\u0085\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]*(?:\r\n|\r|\n)/;
 
 // Unicode whitespace characters that should be treated like ASCII space/tab when
 // scanning between `do` and `(` (or other adjacency checks). Mirrors the set used
-// by adaParser.ts and applescriptParser.ts. Includes U+0085 (NEL), U+00A0 (NBSP),
-// U+1680 (Ogham Space Mark), U+2000-U+200A (En Quad..Hair Space), U+2028 (Line
-// Separator), U+2029 (Paragraph Separator), U+202F (Narrow No-Break Space),
-// U+205F (Medium Math Space), U+3000 (Ideographic Space). Excludes `\r` / `\n`
-// which terminate the logical line.
-const HORIZONTAL_WHITESPACE_PATTERN = /[\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/;
+// by applescriptParser.ts (which extends through U+200B). Includes U+0085 (NEL),
+// U+00A0 (NBSP), U+1680 (Ogham Space Mark), U+2000-U+200B (En Quad..Zero Width
+// Space), U+2028 (Line Separator), U+2029 (Paragraph Separator), U+202F (Narrow
+// No-Break Space), U+205F (Medium Math Space), U+3000 (Ideographic Space).
+// U+200B (ZWSP) is included because it is invisible and users may paste it into
+// source by accident \u2014 without it, `do<ZWSP>(x)` slips past the function-call
+// check and the spurious `do` opener consumes the enclosing block's `end`,
+// destroying outer block pairing. Excludes `\r` / `\n` which terminate the
+// logical line.
+const HORIZONTAL_WHITESPACE_PATTERN = /[\u0085\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]/;
 
 function isHorizontalWhitespace(ch: string | undefined): boolean {
   if (ch === undefined) return false;
