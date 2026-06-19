@@ -929,6 +929,24 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'PERFORM', 'END-PERFORM');
     });
+
+    test('should not treat END-EXEC preceded by Unicode letter as block terminator', () => {
+      // `αEND-EXEC` is a single identifier (Unicode letter prefix), not the bare
+      // END-EXEC keyword. The EXEC block must continue past it and only end at
+      // the real END-EXEC on the last line; otherwise the inner IF/END-IF leaks
+      // out and pairs at the top level.
+      const source = 'EXEC SQL\nαEND-EXEC\nIF Y\nEND-IF\nEND-EXEC';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+
+    test('should not treat END-EXEC followed by Unicode letter as block terminator', () => {
+      // `END-EXECα` is a single identifier (Unicode letter suffix), not the bare
+      // END-EXEC keyword. The EXEC block must continue past it.
+      const source = 'EXEC SQL\nEND-EXECα\nIF Y\nEND-IF\nEND-EXEC';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Excluded regions - Pseudo-text delimiters', () => {
