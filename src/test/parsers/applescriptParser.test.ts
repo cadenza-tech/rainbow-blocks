@@ -4207,6 +4207,25 @@ end if`;
       assertSingleBlock(pairs, 'if', 'end if');
       assertIntermediates(pairs[0], ['else if']);
     });
+
+    // `else if (x)` with an ASCII space between `if` and `(` is also a function-call
+    // form of `if`, not a real `else if` block_middle. The compound `else if` matcher
+    // rejects it because the trailing `(...)` lacks a `then`, but the fallback path
+    // through the bare `else` matcher was only rejecting the tight `else if(` shape
+    // (Unicode whitespace), letting `else if<ASCII space>(` slip through and tokenize
+    // the inner `if` as a real block_open. The inner `if` then paired with the outer
+    // `end if` via a geometrically crossing match, leaving the outer `if` orphaned.
+    // The expected result is one pair anchored at the OUTER `if` (line 0, column 0)
+    // with no intermediates, so the spurious inner `if` is dropped.
+    test('should not pair inner if when else if SPACE ( is a function-call form', () => {
+      const source = 'if x then\n  beep\nelse if (x)\n  beep\nend if';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      assertIntermediates(pairs[0], []);
+      // Anchor the pair to the outer `if` at line 0, column 0.
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+      assert.strictEqual(pairs[0].openKeyword.column, 0);
+    });
   });
 
   generateCommonTests(config);
