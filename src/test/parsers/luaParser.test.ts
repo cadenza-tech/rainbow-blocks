@@ -1262,6 +1262,35 @@ end`;
     });
   });
 
+  suite('Regression: first-line # comment is not limited to #!', () => {
+    // Lua 5.1/5.3/5.4 §7 "Lua Standalone": if the first line of the chunk
+    // starts with `#`, the standalone interpreter skips it. This is NOT
+    // limited to shebang (`#!`); any leading `#` character causes the first
+    // line to be ignored.
+    test('should skip first line starting with # even without ! (バグ1)', () => {
+      const source = '# if then end\nif true then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should skip first line starting with # followed by BOM', () => {
+      const source = '﻿# if then end\nif true then\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+    test('should still treat #! shebang as excluded region', () => {
+      // The existing shebang behaviour must continue to work.
+      const pairs = parser.parse('#!/path/to/do/lua\nend');
+      assertNoBlocks(pairs);
+    });
+    test('should not skip # appearing on non-first lines', () => {
+      // Only the very first line is affected by the `#` rule. A `#` that
+      // appears later in the source must NOT be treated as a comment.
+      const source = 'if true then\n# this is not a comment\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+    });
+  });
+
   suite('Regression: goto detection is case-sensitive', () => {
     test('should NOT treat keyword after Goto identifier as goto label', () => {
       // Lua is case-sensitive; `Goto` is a regular identifier, not the goto keyword.
