@@ -5,6 +5,56 @@ All notable changes to the "Rainbow Blocks" extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.66] - 2026-06-20
+
+### Fixed
+
+- AppleScript: Consume inner `if` in `else if (...)` function-call form to avoid spurious `else` intermediate
+- AppleScript: Drop duplicate `else` intermediate after the first `else` in an if-block
+- AppleScript: Raise record-key backward-scan cap to cover large record literals
+- AppleScript: Recognize close keyword after a lone `¬` continuation line
+- Bash: Accept line continuation after command-group `{`
+- Bash: Reject `case` without `in` header
+- Bash: Skip `parenStack` pop for case pattern close in nested subshells
+- COBOL: Detect same-line block opener to keep `END-IF`/`END-EVALUATE`/`END-PERFORM`
+- COBOL: Reject `END-EXEC` adjacent to a Unicode letter in EXEC block
+- COBOL: Reject `PERFORM` with incomplete scientific literal as count
+- Crystal: Pair `end` after one-line `then`/`when` body
+- Crystal: Reject `end` after a single colon (hash value, type annotation)
+- Crystal: Treat `%=` and `%%` at line start as modulo
+- Elixir: Attach `rescue`/`catch`/`after`/`else` to `def`-family implicit try
+- Elixir: Reject `end` after unary NOT (`!`) in expression RHS
+- Elixir: Skip `end` in expression RHS inside `hasDoKeyword`
+- Erlang: Skip bare reserved words (`end`, `begin`, `case`, etc.) inside tuple/list/binary brackets
+- Erlang: Skip record-field dot in bracket scope backward scan
+- Fortran: Fall back from `end block data` to `block` opener for named block construct
+- Fortran: Reject bare `procedure NAME` inside `type::contains`
+- Fortran: Treat `]` as expression-context predecessor
+- Julia: Stop command macro prefix detection at excluded region boundaries
+- Lua: Recognize first-line `#` comment (not only `#!`)
+- MATLAB: Skip Unicode horizontal whitespace between `case`/`otherwise` and `end`
+- Octave: Phantom-skip stray `end` when an `arguments` block is dropped outside function
+- Octave: Reject `do` followed by four or more dots as field access
+- Octave: Skip leading BOM in typed-close statement-leading detection
+- Octave: Treat U+200B (ZWSP) as horizontal whitespace
+- Octave: Treat empty `arguments()` parens as function call
+- Pascal: Detect `:=` assignment in cross-semicolon scope scan
+- Pascal: Reject `until`/`end` after case-label colon as block close
+- Ruby: Recognize ASCII keyword suffix of Unicode identifier as value before `end`
+- Ruby: Recognize trailing ternary `?` as line continuation operator
+- Ruby: Skip backslash line continuation in range operator detection
+- Ruby: Treat ASCII keyword suffix of Unicode identifier as division preceder
+- Verilog: Skip newlines in `covergroup with function sample` whitespace check
+- Verilog: Skip reserved-word trailing identifier in instance-type-position check
+- Verilog: Treat backslash-newline inside string as line continuation in `define` directive
+- VHDL: Reject bare reserved word after case branch arrow
+- VHDL: Reject control-flow keywords in architecture entity reference
+- VHDL: Reject control-flow keywords in `attribute_specification` entity_class
+- VHDL: Reject control-flow keywords in entity designator
+- VHDL: Reject reserved words in attribute_designator position
+- VHDL: Retain `is` intermediate for multi-line process headers
+- VHDL: Skip stray `is` after a completed declaration line
+
 ## [1.1.65] - 2026-06-14
 
 ### Fixed
@@ -2607,6 +2657,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Customizable color palette via `rainbowBlocks.colors` setting
 - Configurable debounce delay via `rainbowBlocks.debounceMs` setting
 
+[1.1.66]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.65...v1.1.66
 [1.1.65]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.64...v1.1.65
 [1.1.64]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.63...v1.1.64
 [1.1.63]: https://github.com/cadenza-tech/rainbow-blocks/compare/v1.1.62...v1.1.63
