@@ -357,6 +357,18 @@ export class VhdlBlockParser extends BaseBlockParser {
       return false;
     }
 
+    // Reject reserved-word block openers used as a bare statement on the RHS of a case
+    // branch association (`when X => <reserved>;`). The `=>` arrow normally introduces a
+    // fresh statement where a reserved-word block opener IS legitimate (e.g.,
+    // `when X => process(clk) ... end process;`). But when the reserved word is followed
+    // immediately by `;`, the statement is empty / invalid VHDL — the keyword does not
+    // open any block. Without rejecting it here it is tokenized as a fresh block_open and
+    // absorbs the case's subsequent `when` intermediates, visibly breaking the case's
+    // structure (the second `when` is lost).
+    if (RHS_INVALID_BLOCK_OPENERS.has(lowerKeyword) && this.isBareReservedWordAfterCaseArrow(source, position, keyword.length, excludedRegions)) {
+      return false;
+    }
+
     // Reject entity_class keywords inside attribute_specification (LRM 7.2):
     //   `attribute X of Y : <entity_class> is <expr>;`
     // The keyword is the entity_class, not a block opener. LRM 7.2 lists every entity_class
@@ -553,6 +565,54 @@ export class VhdlBlockParser extends BaseBlockParser {
     // `/=` (inequality) ends with `=` and is caught above; bare `/` here is division.
     if (prev === ',' || prev === '+' || prev === '-' || prev === '*' || prev === '/' || prev === '&') return true;
     return false;
+  }
+
+  // Detects `when X => <reserved>;` — a reserved-word block opener used as a bare,
+  // single-token statement immediately following a case branch association arrow.
+  // Returns true when BOTH of these hold:
+  //   (a) The previous non-whitespace, non-excluded token is `=>` (case branch arrow).
+  //   (b) The next non-whitespace, non-excluded token after the keyword is `;`.
+  // The combination rules out the legitimate `when X => process(clk) ... end process;`
+  // form (where `process` is followed by `(` or a sensitivity list, not `;`).
+  private isBareReservedWordAfterCaseArrow(source: string, position: number, keywordLength: number, excludedRegions: ExcludedRegion[]): boolean {
+    // Step (a): walk backward past whitespace/excluded regions, expect `=>`.
+    let i = position - 1;
+    while (i >= 0) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        const region = this.findExcludedRegionAt(i, excludedRegions);
+        if (region) {
+          i = region.start - 1;
+          continue;
+        }
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      break;
+    }
+    if (i < 1) return false;
+    if (source[i] !== '>' || source[i - 1] !== '=') return false;
+    // Step (b): walk forward past whitespace/excluded regions, expect `;`.
+    let j = position + keywordLength;
+    while (j < source.length) {
+      if (this.isInExcludedRegion(j, excludedRegions)) {
+        const region = this.findExcludedRegionAt(j, excludedRegions);
+        if (region) {
+          j = region.end;
+          continue;
+        }
+      }
+      const ch = source[j];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        j++;
+        continue;
+      }
+      break;
+    }
+    if (j >= source.length) return false;
+    return source[j] === ';';
   }
 
   // Detects whether the keyword at `position` is the entity_designator name in
