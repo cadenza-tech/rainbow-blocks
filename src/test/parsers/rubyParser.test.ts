@@ -5186,6 +5186,20 @@ end`;
       assertSingleBlock(pairs, 'def', 'end');
       assert.strictEqual(pairs[0].closeKeyword.line, 2, 'def should pair with the outer end on line 2');
     });
+
+    test('should treat ASCII keyword suffix of Unicode identifier as value before end', () => {
+      // Bug: isEndInExpressionPosition's identifier-word standalone check uses /[a-zA-Z0-9_]/
+      // on the character preceding the ASCII word run. With `αif end`, the ASCII run is `if`,
+      // but the char before it (`α`) is non-ASCII, so the check incorrectly treats `if` as a
+      // standalone keyword, breaks scanning, and never marks the line as having a preceding
+      // value -- the inner `end` is not filtered out and mis-pairs with def. ASCII `xif end`
+      // already works (the leading `x` keeps the standalone check false). Expected: 1 pair
+      // (def at line 0 / outer end at line 2), matching the ASCII version's behavior.
+      const source = 'def m\n  αif end\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword.line, 2, 'def should pair with the outer end on line 2');
+    });
   });
 
   suite('Regression: end on LHS of range operator should not pair', () => {
