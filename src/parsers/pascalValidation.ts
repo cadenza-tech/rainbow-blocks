@@ -173,6 +173,13 @@ export function isPrecededByComparisonEquals(
           return false;
         }
       }
+      // `:=` assignment at depth 0 proves statement context: only statements (not
+      // declarations) use the assignment operator. Mirrors the matching check in
+      // pascalParser.isValidBlockOpen so the record-context map and the keyword
+      // validator agree on the enclosing scope of the `=` preceding the keyword.
+      if (ch === '=' && si > 0 && source[si - 1] === ':' && closeDepth === 0) {
+        return true;
+      }
       if (/[a-zA-Z_]/.test(ch)) {
         const wordEnd = si;
         while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;

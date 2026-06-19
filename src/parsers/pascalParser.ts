@@ -541,6 +541,15 @@ export class PascalBlockParser extends BaseBlockParser {
             break;
           }
         }
+        // `:=` assignment at depth 0 proves statement context: only statements (not
+        // declarations) use the assignment operator. Without this guard a `begin..end`
+        // body with several `x := y;` statements followed by a malformed `T = class`
+        // exhausts the SEMICOLON_BUDGET before reaching `begin`, and the `class` is
+        // pushed as a spurious block opener that the surrounding `end` closes instead
+        // of the real `begin`.
+        if (ch === '=' && si > 0 && source[si - 1] === ':' && closeDepth === 0) {
+          return false;
+        }
         if (/[a-zA-Z_]/.test(ch)) {
           const wordEnd = si;
           while (si > 0 && /[a-zA-Z0-9_]/.test(source[si - 1])) si--;
