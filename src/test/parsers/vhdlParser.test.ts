@@ -5364,5 +5364,34 @@ end package;`;
     });
   });
 
+  suite('Regression 2026-06-20: multi-line process header is intermediate retained', () => {
+    // VHDL LRM 11.3 process_statement: a labeled process with its sensitivity list
+    // spanning multiple lines and the optional `is` on its own line below the header.
+    // The upward is-filter scan must recognize the `<label>: process (...)` line as the
+    // owner of this `is`. Without `process` in the block-opener line pattern (and label
+    // prefix stripping), the scan walks past the process header up to the enclosing
+    // `architecture ... is` whose own standalone `is` makes the scan drop this process
+    // `is` as a stray intermediate.
+    test('should retain is intermediate for labeled process header when is is on a separate line', () => {
+      const source = `architecture rtl of cpu is
+begin
+  control: process (clk, rst, en, ld, data_in)
+  is
+  begin
+    null;
+  end process;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const processBlock = findBlock(pairs, 'process');
+      assert.strictEqual(processBlock.closeKeyword?.value, 'end process');
+      const intermediateValues = processBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(
+        intermediateValues.includes('is'),
+        `process block should retain its multi-line is intermediate; got [${intermediateValues.join(', ')}]`
+      );
+      assert.ok(intermediateValues.includes('begin'), `process block should retain its begin intermediate; got [${intermediateValues.join(', ')}]`);
+    });
+  });
+
   generateCommonTests(config);
 });
