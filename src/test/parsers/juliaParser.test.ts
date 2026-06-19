@@ -1713,6 +1713,21 @@ end`;
       assert.ok(cmdRegion, 'expected a backtick command region');
       assert.strictEqual(source.slice(cmdRegion.start, cmdRegion.end), '`cmd`');
     });
+
+    test('should not detect command macro prefix across symbol literal boundary', () => {
+      // :sym is a symbol literal (excluded region). The backtick that follows must NOT
+      // pick up `sym` as a macro prefix by scanning backward across the symbol boundary,
+      // because the `sym` characters live inside an excluded region.
+      // Expected: `cmd` is an unprefixed Cmd literal, so the trailing `end` closes the
+      // inner `begin`, and the outer `end` is orphan.
+      const source = 'begin\n  :sym`cmd`end\nend\n';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The matched `end` must be the one immediately after `cmd``, not the outer one.
+      const pair = pairs[0];
+      assert.ok(pair.closeKeyword, 'expected a matching close keyword');
+      assert.strictEqual(pair.closeKeyword.startOffset, 17, 'inner end (offset 17) should close begin');
+    });
   });
 
   suite('Coverage: multi-line comment edge', () => {
