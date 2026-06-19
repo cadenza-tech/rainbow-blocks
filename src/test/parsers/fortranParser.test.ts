@@ -6667,5 +6667,17 @@ end function`;
     });
   });
 
+  suite('Regression: bracket close ] recognized as operator predecessor for expression-context end', () => {
+    test('should treat ] (Fortran 2003 array constructor close) as expression context so end is not a phantom block_close', () => {
+      // `[1, 2]` is a Fortran 2003 array constructor. When a `&` continues the line after `]`,
+      // the next-line `end` is a variable token of an I/O list (`print *, [1, 2] &\n end`),
+      // not a real block_close. The closing `]` must therefore be treated the same as `)`
+      // by isPrecededByOperator so the phantom `end` does not consume the subroutine opener.
+      const source = 'subroutine s\n  integer :: end = 5\n  print *, [1, 2] &\n           end\nend subroutine';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'subroutine', 'end subroutine');
+    });
+  });
+
   generateCommonTests(config);
 });
