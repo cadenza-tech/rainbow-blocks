@@ -1396,6 +1396,16 @@ export class OctaveBlockParser extends MatlabBlockParser {
   protected matchBlocks(tokens: Token[]): BlockPair[] {
     const pairs: BlockPair[] = [];
     const stack: OpenBlock[] = [];
+    // Track stack depths at which a block opener was rejected inside matchBlocks (not
+    // at tokenize), so the corresponding stray `end` (which appears at the same depth)
+    // can be skipped without consuming a legitimate inner block's close. Mirrors
+    // MatlabBlockParser.matchBlocks' `pendingSkipDepths` mechanism. Used for the
+    // `arguments` block dropped outside function/methods/classdef context: the user
+    // typically wrote `arguments ... end` to wrap argument validation, and without the
+    // skip the inner `end` consumes the enclosing block's only `end` (destroying outer
+    // pairing). The remainingCloses guard below ensures the skip never starves real
+    // openers of their matching closes.
+    const pendingSkipDepths: number[] = [];
     // Snapshot phantom section positions and process them in order. Each phantom
     // represents a section keyword that was rejected at tokenize but where the user
     // probably wrote a stray `end` to close it. We skip one `end` per phantom — but
@@ -1430,11 +1440,14 @@ export class OctaveBlockParser extends MatlabBlockParser {
             });
             if (!hasFunctionOrClass) {
               // Drop the token: an `arguments` block outside of any function/methods/
-              // classdef context is almost certainly a function call (`arguments(obj)`)
-              // rather than a real block. Recording a phantom-end skip here would
-              // consume a legitimate `end` from an enclosing block (e.g. an `if`
-              // wrapping a single `end`), destroying outer block pairing. Mirrors
-              // MatlabBlockParser.matchBlocks lines 525-532.
+              // classdef context cannot be a real arguments block. The function-call
+              // form (`arguments(obj)`) is already filtered out by isArgumentsFunctionCall
+              // at tokenize, so any `arguments` token reaching here is the bare or VALID
+              // attribute form (`arguments(Input)` etc.). In both cases the user likely
+              // wrote a stray `end` expecting a real arguments block: record the current
+              // stack depth so the next `end` at that depth is phantom-skipped instead
+              // of consuming an outer block's close (mirrors MatlabBlockParser line 1173).
+              pendingSkipDepths.push(stack.length);
               break;
             }
           } else if (
@@ -1495,6 +1508,24 @@ export class OctaveBlockParser extends MatlabBlockParser {
           break;
 
         case 'block_close': {
+          // Pending-skip-depth skip (mirror of MatlabBlockParser.matchBlocks logic): when
+          // an `arguments` token was dropped above because no function/methods/classdef
+          // was enclosing it, the stack depth at the drop site was pushed onto
+          // pendingSkipDepths. The matching stray `end` appears at the same depth, so we
+          // skip it here without pairing — this preserves the enclosing block's pairing
+          // even when the user wrote `arguments ... end` outside a function context. The
+          // remainingCloses guard ensures the skip never leaves a real opener orphan.
+          // Only applies to bare `end` (typed Octave closes like `endif`/`endfor` have a
+          // definite opener type and stay orphan when their opener is missing).
+          if (
+            token.value.toLowerCase() === 'end' &&
+            pendingSkipDepths.length > 0 &&
+            pendingSkipDepths[pendingSkipDepths.length - 1] === stack.length &&
+            remainingCloses[idx + 1] >= stack.length
+          ) {
+            pendingSkipDepths.pop();
+            break;
+          }
           // Phantom section keyword skip (mirror of MatlabBlockParser.matchBlocks logic):
           // when `properties = 5` (or `properties + 1`) was rejected at tokenize, the user
           // likely wrote a stray `end`. If there's a phantom position between the most recent
