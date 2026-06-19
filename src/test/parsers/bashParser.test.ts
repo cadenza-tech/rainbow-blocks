@@ -7181,6 +7181,38 @@ fi`;
     });
   });
 
+  suite('Regression: case keyword without in header must not pair', () => {
+    // Real bash requires `case WORD in` before any patterns/esac. A `case`
+    // followed directly by an arm separator (`;`) or `esac` without an `in`
+    // header is a syntax error. The forward scan from `case` mirrors the
+    // backward `isCaseHeaderIn` already applied at `esac`.
+    test('should not pair case with esac when in is missing (case ; esac)', () => {
+      const pairs = parser.parse('case ; esac');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair case with esac when in is missing and no subject (case ;esac)', () => {
+      const pairs = parser.parse('case ;esac');
+      assertNoBlocks(pairs);
+    });
+
+    test('should not pair case with esac when subject is present but in is missing (case x; esac)', () => {
+      const pairs = parser.parse('case x; esac');
+      assertNoBlocks(pairs);
+    });
+
+    // Regression guard: valid case-in-esac still pairs.
+    test('should still pair case with esac when in header is present', () => {
+      const pairs = parser.parse('case x in esac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+
+    test('should still pair case with esac when in header has arms', () => {
+      const pairs = parser.parse('case x in a) echo ;; esac');
+      assertSingleBlock(pairs, 'case', 'esac');
+    });
+  });
+
   suite('Regression: brace open followed by line continuation', () => {
     // Real bash accepts `{\<newline> body; \n}` as a command-group open: the
     // backslash-newline collapses during lexing, leaving `{ body; }`. The
