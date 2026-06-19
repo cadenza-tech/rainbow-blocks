@@ -5434,6 +5434,50 @@ end`;
       const pairs = parser.parse(source);
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should still pair case/end when when-then-VALUE-end appears on one line', () => {
+      // `case x\nwhen 1 then 2 end` is a one-line case branch body where `2` is the
+      // body value and `end` closes the surrounding `case`. The same-line `then`
+      // keyword signals that `end` is closing an inline block, so the value before
+      // `end` (`2`) must not cause the filter to drop the `end` token.
+      const source = 'case x\nwhen 1 then 2 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'case', 'end');
+      assertIntermediates(pairs[0], ['when', 'then']);
+    });
+
+    test('should still pair if/end when if-then-VALUE-end appears on one line', () => {
+      // `if cond then 1 end` is a valid one-line conditional whose body is `1` and
+      // whose `end` closes the `if`. The same-line `then` keyword signals that the
+      // `end` is closing an inline block, so the value before `end` (`1`) must not
+      // cause the filter to drop the `end` token.
+      const source = 'if cond then 1 end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should still pair if/end when if-then-METHOD-end appears on one line', () => {
+      // `if c then obj.foo end` has a method-call body. Walking back from `end` lands
+      // on `foo` (preceded by `.`), which would normally mark `end` as a value position.
+      // The same-line `then` must override and keep `end` as block_close.
+      const source = 'if c then obj.foo end';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end');
+      assertIntermediates(pairs[0], ['then']);
+    });
+
+    test('should still pair case/end when when-then-VALUE-end is nested inside def', () => {
+      // The inner `case x\n  when 1 then 2 end` is the body of an outer `def`. The
+      // inline `end` must close the `case`, leaving the trailing `end` for the `def`.
+      const source = 'def f\n  case x\n  when 1 then 2 end\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const casePair = findBlock(pairs, 'case');
+      const defPair = findBlock(pairs, 'def');
+      assert.strictEqual(casePair.closeKeyword?.startOffset, source.indexOf('end'));
+      assert.strictEqual(defPair.closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
   });
 
   generateCommonTests(config);
