@@ -814,6 +814,19 @@ END-PERFORM`;
       const pairs = parser.parse(source);
       assertNoBlocks(pairs);
     });
+
+    test('Bug: PERFORM 5.5E TIMES should be rejected as invalid numeric literal', () => {
+      // `5.5E` is an invalid COBOL numeric literal (incomplete scientific notation,
+      // no digits after E). The current numeric-tail skip eats `.5` but leaves
+      // `E` behind, then `TIMES` is mis-read as the second word and the PERFORM
+      // is wrongly classified as structured. The token before TIMES must be a
+      // valid integer / decimal / scientific literal for the structured form;
+      // a trailing `E` invalidates the literal so the PERFORM is paragraph-call
+      // with stray text, not structured. Result: no PERFORM/END-PERFORM pair.
+      const source = 'PERFORM 5.5E TIMES\n  DISPLAY 1\nEND-PERFORM';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
   });
 
   suite('Performance', () => {
