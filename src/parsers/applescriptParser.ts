@@ -945,7 +945,26 @@ export class ApplescriptBlockParser extends BaseBlockParser {
       }
       break;
     }
-    return prevEnd >= 0 && source[prevEnd] === '¬' && !this.isInExcludedRegion(prevEnd, excludedRegions);
+    if (prevEnd < 0 || source[prevEnd] !== '¬' || this.isInExcludedRegion(prevEnd, excludedRegions)) {
+      return false;
+    }
+    // A `¬` whose own physical line carries no real content (only leading
+    // whitespace before the `¬`) is a stray continuation marker rather than a
+    // genuine mid-statement continuation: there is no expression on this line
+    // to continue. Treat the following close keyword as a normal block_close
+    // instead of suppressing it. Scan backward from `¬` to the start of its
+    // own physical line and check that only whitespace precedes it.
+    let lineHead = prevEnd;
+    while (lineHead > 0 && source[lineHead - 1] !== '\n' && source[lineHead - 1] !== '\r') {
+      lineHead--;
+    }
+    for (let i = lineHead; i < prevEnd; i++) {
+      const ch = source[i];
+      if (ch !== ' ' && ch !== '\t' && !isUnicodeWhitespace(ch)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Checks if a keyword is at the start of a physical line (only whitespace
