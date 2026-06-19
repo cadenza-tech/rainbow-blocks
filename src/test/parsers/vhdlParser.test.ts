@@ -5464,5 +5464,65 @@ end case;`;
     });
   });
 
+  suite('Regression 2026-06-20: control-flow keywords in attribute_specification entity_class position', () => {
+    // attribute_specification (LRM 7.2): `attribute <designator> of <entity_specification>
+    // : <entity_class> is <expr>;`. The entity_class slot is intended for declaration kinds
+    // (signal/variable/type/etc.), but editor-in-progress code can place a control-flow
+    // reserved word there (`if`/`case`/`while`/`for`). Without rejecting them, the keyword
+    // is tokenized as a fresh block_open and absorbs the surrounding architecture's `begin`
+    // intermediate into its (orphan) intermediates.
+    test('should not treat if as block opener in attribute_specification entity_class position', () => {
+      const source = `architecture a of e is
+  attribute keep of foo : if is true;
+begin
+  null;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat case as block opener in attribute_specification entity_class position', () => {
+      const source = `architecture a of e is
+  attribute keep of foo : case is true;
+begin
+  null;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat while as block opener in attribute_specification entity_class position', () => {
+      const source = `architecture a of e is
+  attribute keep of foo : while is true;
+begin
+  null;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat for as block opener in attribute_specification entity_class position', () => {
+      const source = `architecture a of e is
+  attribute keep of foo : for is true;
+begin
+  null;
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+  });
+
   generateCommonTests(config);
 });
