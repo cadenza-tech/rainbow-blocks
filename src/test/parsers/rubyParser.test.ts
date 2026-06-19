@@ -669,6 +669,16 @@ end`;
       const pairs = parser.parse('if true\n  x = /[/]end/\nend');
       assertSingleBlock(pairs, 'if', 'end');
     });
+
+    test('should treat slash as division after Unicode identifier ending in keyword suffix', () => {
+      // `αif` is a single Ruby identifier, not the keyword `if`. The trailing `/` is
+      // therefore division, not the start of a regex literal. Treating it as regex would
+      // swallow the rest of the method body (`/ 2\nend/`) into an excluded region and
+      // leave `def`/outer `end` mis-paired.
+      const source = 'def m\n  αif / 2\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+    });
   });
 
   suite('Excluded regions - Percent literals', () => {
