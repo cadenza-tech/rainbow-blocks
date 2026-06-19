@@ -174,6 +174,11 @@ export class MatlabBlockParser extends BaseBlockParser {
   // sits at the very start of the logical line (allowing only leading whitespace).
   // The leading-whitespace check ensures forms like `x = case` (no real case at line
   // start) are NOT rejected — though those are caught by the operand-context check above.
+  // Both whitespace skips use `isHorizontalWhitespace` so VT/FF and Unicode horizontal
+  // whitespace (NBSP, em space, ideographic space, etc.) between `case`/`otherwise`
+  // and the trailing `end`, or as the leading indent of the logical line, are tolerated
+  // identically to ASCII space/tab — keeping parity with the operator/header-keyword
+  // checks above that already use the same whitespace helper.
   private isPrecededByCaseOrOtherwiseOnLogicalLine(source: string, position: number, excludedRegions: ExcludedRegion[]): boolean {
     if (this.statementStartAtPos === null) {
       return false;
@@ -189,7 +194,7 @@ export class MatlabBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[i];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (isHorizontalWhitespace(ch) || ch === '\n' || ch === '\r') {
         i--;
         continue;
       }
@@ -223,7 +228,7 @@ export class MatlabBlockParser extends BaseBlockParser {
         continue;
       }
       const ch = source[j];
-      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (isHorizontalWhitespace(ch) || ch === '\n' || ch === '\r') {
         j--;
         continue;
       }
