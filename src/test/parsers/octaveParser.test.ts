@@ -3433,6 +3433,26 @@ end`;
     });
   });
 
+  suite('Bug: BOM (U+FEFF) at line start must not block typed-close statement-leading detection', () => {
+    test('should accept endif when preceded only by a leading BOM after the newline', () => {
+      // A BOM (U+FEFF) appearing at the start of a physical line (e.g. introduced by
+      // text editors saving with UTF-8 BOM on every line, or by paste from a BOM-prefixed
+      // file) must be transparent for the typed-close statement-leading check. Without
+      // BOM-skipping in isAtStatementLeadingPosition, `<BOM>endif` is treated as mid-
+      // expression position and the typed close is rejected — leaving both `if` and
+      // `endif` orphan and destroying the if/endif pair.
+      const source = 'if x\n﻿endif';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'endif');
+    });
+
+    test('should accept endfor when preceded only by a leading BOM after the newline', () => {
+      const source = 'for i = 1:3\n﻿endfor';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'for', 'endfor');
+    });
+  });
+
   suite('Bug: do<ZWSP>(args) (U+200B) must be treated as a function call', () => {
     test('should not treat do<U+200B>(x) as a block opener', () => {
       // U+200B (ZERO WIDTH SPACE) between `do` and `(` is an invisible character that
