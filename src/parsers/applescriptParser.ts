@@ -50,10 +50,14 @@ const COMPOUND_KEYWORDS = [
 // Upper bound on the backward scan in isAtRecordKeyPosition. The scan walks back
 // looking for the record literal's opening '{'. An unclosed '{' followed by many
 // colon-suffixed close keywords would otherwise make each scan O(N), degrading
-// tokenize to O(N^2). A generous 2048-character cap never rejects a real record
-// literal (which fits well within that span) while keeping the call O(1) per use,
-// mirroring the MAX_PAREN_SCAN_CHARS bound in adaValidation.
-const MAX_RECORD_KEY_SCAN_CHARS = 2048;
+// tokenize to O(N^2). The cap is sized generously enough to cover realistic
+// multi-line record literals (hundreds of entries spanning thousands of lines)
+// while still bounding the worst-case work per call, mirroring the
+// MAX_PAREN_SCAN_CHARS bound in adaValidation. The previous 2048-byte cap was
+// too tight for real-world record literals and aborted the scan before the
+// enclosing `{` was reached, mis-classifying inner record keys (e.g.
+// `end if: 1`) as block_close tokens that then crossed with the outer pair.
+const MAX_RECORD_KEY_SCAN_CHARS = 65536;
 
 // Whitespace characters allowed as line-leading indentation. Includes ASCII space/tab
 // and common Unicode whitespace (NBSP U+00A0, ZWSP U+200B, EN/EM/HAIR spaces U+2000-U+200A,
