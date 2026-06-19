@@ -601,6 +601,20 @@ export class PascalBlockParser extends BaseBlockParser {
     if ((keyword === 'until' || keyword === 'end') && this.isUsedAsCaseLabel(keyword, source, position, excludedRegions)) {
       return false;
     }
+    // Case label statement position: `case X of 1: until X;` / `case X of 1: end X;`
+    // — the close keyword sits at the statement position right after a case-label colon.
+    // Neither `until` nor `end` is a valid Pascal statement starter, so this is malformed
+    // code; per the project's "prefer uncolored over wrong coloring" policy, the keyword
+    // must not be treated as a block-close. Without this guard the inner `until` pops the
+    // surrounding `repeat`, leaving the outer `until` orphan; the inner `end` closes the
+    // enclosing `case` prematurely. Mirrors the matching branch in `isValidBlockOpen`
+    // (line ~204) where `1: asm` is accepted as a block opener.
+    if (keyword === 'until' || keyword === 'end') {
+      const bp = this.skipBackwardWhitespace(source, position - 1, excludedRegions);
+      if (bp >= 0 && source[bp] === ':' && this.isCaseLabelColon(source, bp, excludedRegions)) {
+        return false;
+      }
+    }
     // Field declaration: `end: Integer;` inside a record uses `end` as a field name,
     // not the block-close keyword. Detect `end:` (followed by ':' that is not ':=')
     // and reject the close. The case-label check above only matches when the backward
