@@ -1692,6 +1692,22 @@ export class FortranBlockParser extends BaseBlockParser {
               }
             }
 
+            // Fallback for `end block data` (F2008 named block construct with construct
+            // name `data`): when no `block data` program unit opener is on the stack,
+            // treat the close as `end block <name>` and look for a plain `block` opener.
+            // Without this, a `name: block ... end block <name>` with `<name>` happening
+            // to be `data` would never pair (the close greedy-matches the `block data`
+            // program unit form). Run the same cross-pair check on the fallback target.
+            if (matchIndex < 0 && endType === 'block data') {
+              for (let si = stack.length - 1; si >= 0; si--) {
+                const openerValue = normalizeFortranEndType(stack[si].token.value);
+                if (openerValue === 'block') {
+                  matchIndex = si;
+                  break;
+                }
+              }
+            }
+
             // Reject the match when pairing with this opener would create a
             // crossed pair: an intervening opener between matchIndex and the
             // top of the stack has its own compound-end candidate still pending
