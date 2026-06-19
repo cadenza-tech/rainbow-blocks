@@ -1111,7 +1111,14 @@ export class ElixirBlockParser extends BaseBlockParser {
             beforeEnd !== '@' &&
             !(beforeEnd === '&' && (i < 2 || source[i - 2] !== '&')) &&
             (afterEnd === undefined || !/[a-zA-Z0-9_:?!]/.test(afterEnd)) &&
-            !this.isAdjacentToUnicodeLetter(source, i, 3)
+            !this.isAdjacentToUnicodeLetter(source, i, 3) &&
+            // Skip `end` used in expression position (RHS of assignment / binary operator,
+            // function call form `end(args)`, `..end`). Mirrors isValidBlockClose's RHS
+            // check: in these positions `end` is an identifier, not a block close, and must
+            // not abort the do-search or decrement inner-block depth. Without this guard
+            // `if a != end do ... end` had the outer search return false early and orphaned
+            // the inner if-do block.
+            !this.isEndInExpressionRhs(source, i)
           ) {
             if (fnDepth > 0) {
               fnDepth--;
@@ -1125,6 +1132,41 @@ export class ElixirBlockParser extends BaseBlockParser {
       }
 
       i++;
+    }
+    return false;
+  }
+
+  // Returns true when `end` at `position` is in expression position (the right-hand side
+  // of an assignment / binary operator, a function-call form `end(args)`, or `..end`). In
+  // these positions `end` is an identifier, not a block close, and must not abort the
+  // do-search or decrement inner-block depth inside hasDoKeyword. The checks mirror
+  // isValidBlockClose's RHS guards so the behavior of `hasDoKeyword`'s inner-block tracker
+  // stays consistent with the actual block_close validation.
+  private isEndInExpressionRhs(source: string, position: number): boolean {
+    // `end(` — function call form
+    if (source[position + 3] === '(') return true;
+    // `..end` — range operator
+    if (position >= 2 && source[position - 1] === '.' && source[position - 2] === '.') return true;
+    // Skip leading whitespace to find the previous non-space char
+    let q = position - 1;
+    while (q >= 0 && (source[q] === ' ' || source[q] === '\t')) q--;
+    if (q < 0) return false;
+    const before = source[q];
+    // `=` (assignment / compound `==`/`!=`/`<=`/`>=`/`=~`/`=>`) or any expression-operator
+    // lead char (`+ - * / < > | ^ & ~`) puts `end` in RHS position. `>` ambiguity (bitstring
+    // close `>>`, arrow `->`, char-literal `?>`) is not relevant inside hasDoKeyword: we are
+    // scanning forward to find the opener's `do`, and any `end` that follows one of those
+    // composite tokens is still an expression operand inside the opener's condition or value,
+    // not a block close of an enclosing block we know about.
+    if (before === '=' || EXPRESSION_OPERATOR_LEAD_CHARS.has(before)) return true;
+    // Word-based RHS operators: `and`/`or`/`not`/`in`/`when`
+    if (/[a-z]/.test(before)) {
+      let wordStart = q;
+      while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = source.slice(wordStart, q + 1);
+      if (RHS_EXPECTING_WORD_OPERATORS.has(word)) return true;
     }
     return false;
   }
