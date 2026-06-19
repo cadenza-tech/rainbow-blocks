@@ -5822,6 +5822,65 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: isCovergroupWithFunctionSample treats newline as whitespace', () => {
+    // Per IEEE 1800-2017 §19.2.1.2, the covergroup `with function sample (...)`
+    // syntax declares a sample method, so the `function` keyword in this
+    // position is not a block opener and must not be tokenized. The original
+    // `isCovergroupWithFunctionSample` whitespace skip only matched space and
+    // tab (` `, `\t`); when the source split `covergroup cg with` from
+    // `function sample(...)` across a newline, the `with`/`function`/`sample`
+    // adjacency check failed and the `function` keyword was wrongly tokenized
+    // as a block opener.
+    test('should suppress `function` after `with` separated by newline before `function`', () => {
+      const source = `covergroup cg with
+  function sample(int x);
+endgroup`;
+      const tokens = parser.getTokens(source);
+      // Only the covergroup/endgroup pair is tokenized; `function` is part of
+      // `with function sample (...)` and must not be tokenized.
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['covergroup', 'endgroup']
+      );
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'covergroup', 'endgroup');
+    });
+
+    test('should suppress `function` after `with` separated by newline before `sample`', () => {
+      const source = `covergroup cg with function
+  sample(int x);
+endgroup`;
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['covergroup', 'endgroup']
+      );
+    });
+
+    test('should suppress `function` after `with` separated by CRLF newline', () => {
+      const source = 'covergroup cg with\r\n  function sample(int x);\r\nendgroup';
+      const tokens = parser.getTokens(source);
+      assert.deepStrictEqual(
+        tokens.map((t) => t.value),
+        ['covergroup', 'endgroup']
+      );
+    });
+
+    test('should still tokenize `function` outside of covergroup `with function sample` (sanity)', () => {
+      // No `with` precedes the function on a separate construct, so the
+      // function must remain tokenized as a block opener.
+      const source = `module top;
+  function int f(int x);
+    return x;
+  endfunction
+endmodule`;
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const fnPair = findBlock(pairs, 'function');
+      assert.strictEqual(fnPair.closeKeyword.value, 'endfunction');
+    });
+  });
+
   suite('Bug fix: instance-type-position suppression must not fire when trailing identifier is a reserved word', () => {
     // `isInInstanceTypePosition` originally suppressed any close keyword
     // followed by `<identifier> (`. The check did not verify that the trailing
