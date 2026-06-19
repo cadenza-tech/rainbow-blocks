@@ -665,6 +665,16 @@ export class ErlangBlockParser extends BaseBlockParser {
           return false;
         }
       }
+      // Reject bare block_open / block_close keywords used as reserved-word tokens inside a
+      // tuple/list/binary scope: `{begin = 1}`, `{a, end}`, `<<begin>>`, etc. Such occurrences
+      // are not real block delimiters and must not pair with outer keywords. A real nested
+      // block inside the same scope (e.g. `{tag, begin ok end}`) is preserved because the
+      // block_open and block_close inside the bracket scope balance each other.
+      if (token.type === 'block_open' || token.type === 'block_close') {
+        if (this.isBareKeywordInBrackets(source, token, excludedRegions)) {
+          return false;
+        }
+      }
       return true;
     });
 
@@ -915,6 +925,332 @@ export class ErlangBlockParser extends BaseBlockParser {
 
   private hasTopLevelCommaBetween(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): boolean {
     return hasTopLevelCommaBetween(source, start, end, excludedRegions);
+  }
+
+  // Returns true if `token` is a block_open / block_close keyword that sits inside an
+  // unclosed `{`/`[`/`<<` scope and is used as a bare reserved-word token rather than as
+  // a real block delimiter. Such occurrences (record field names, tuple/list/binary
+  // elements) must not pair with outer keywords across the bracket boundary.
+  //
+  // A real nested block inside the same scope (e.g. `{tag, begin ok end}` or
+  // `{begin a, b end}`) is preserved because the keyword is adjacent to expression content
+  // rather than to a list separator. The bare-reserved-word pattern is detected by checking
+  // the immediate neighbour of the keyword inside the scope:
+  //   - block_open: the next non-space char is `,`, `=`, or the scope-closing bracket
+  //     (e.g. `{begin = 1}`, `{begin,`, `[begin]`)
+  //   - block_close: the previous non-space char is `,`, `=`, or the scope-opening bracket
+  //     (e.g. `{a, end}`, `{end`, `[end`)
+  // When the neighbour is part of an expression (identifier, literal, operator other than
+  // `=`/`,`) the keyword is treated as a real block delimiter.
+  private isBareKeywordInBrackets(source: string, token: Token, excludedRegions: ExcludedRegion[]): boolean {
+    const scope = this.findEnclosingBracketScope(source, token.startOffset, excludedRegions);
+    if (!scope) {
+      return false;
+    }
+    // Skip `#{...}` map scopes: map-key handling is already covered by the existing token
+    // filter (which calls hasUnclosedOpenerInMapScope to keep real `end` block-closes
+    // inside maps from being filtered as map keys). Applying the bare-token heuristic here
+    // would conflict with that logic.
+    if (this.isMapScope(source, scope.scopeStart)) {
+      return false;
+    }
+    if (BLOCK_OPENER_KEYWORDS.has(token.value)) {
+      return this.isBareOpenInScope(source, token, scope, excludedRegions);
+    }
+    if (token.value === 'end') {
+      return this.isBareCloseInScope(source, token, scope, excludedRegions);
+    }
+    return false;
+  }
+
+  // Returns true when the brace whose inner-start is at `scopeStart` is `#{` (Erlang map)
+  // rather than `{` (tuple). The opening `{` immediately precedes scopeStart (scopeStart
+  // is scopeOpen + 1 for braces in findEnclosingBracketScope).
+  private isMapScope(source: string, scopeStart: number): boolean {
+    // scopeStart points at the first char inside the brace; the brace itself is at
+    // scopeStart - 1. A `#{` is denoted by `#` at scopeStart - 2.
+    if (scopeStart < 2) {
+      return false;
+    }
+    if (source[scopeStart - 1] !== '{') {
+      // List `[`, binary `<<` etc.: no map.
+      return false;
+    }
+    return source[scopeStart - 2] === '#';
+  }
+
+  // Returns true when the block_open `token` is adjacent (after skipping space and trailing
+  // line comments) to a `,`, `=`, or the scope-closing bracket -- the patterns that mark
+  // bare reserved-word usage rather than a real opener of an expression block.
+  private isBareOpenInScope(
+    source: string,
+    token: Token,
+    scope: { scopeStart: number; scopeEnd: number },
+    excludedRegions: ExcludedRegion[]
+  ): boolean {
+    const next = this.nextSignificantOffsetInScope(source, token.endOffset, scope.scopeEnd, excludedRegions);
+    if (next < 0) {
+      // Reached end of scope without any expression content: bare
+      return true;
+    }
+    const ch = source[next];
+    if (ch === ',' || ch === '=' || next === scope.scopeEnd) {
+      // `=` can be the assignment operator or the start of `==`, `=:=`, `=/=`, `=<`. Only
+      // the bare assignment `=` (not the comparison or match operators) follows a bare
+      // reserved-word map key. The latter forms still appear in expressions that genuinely
+      // open a block (`X == begin ok end`), but those are preceded by `=`/`==` on the
+      // *left* of `begin`, not followed by it, so this branch is unaffected.
+      return true;
+    }
+    return false;
+  }
+
+  // Returns true when the block_close `end` is adjacent (after skipping space and leading
+  // line comments) to a `,`, `=`, or the scope-opening bracket -- the patterns that mark
+  // bare reserved-word usage rather than a real closer of an expression block.
+  private isBareCloseInScope(
+    source: string,
+    token: Token,
+    scope: { scopeStart: number; scopeEnd: number },
+    excludedRegions: ExcludedRegion[]
+  ): boolean {
+    const prev = this.prevSignificantOffsetInScope(source, token.startOffset, scope.scopeStart, excludedRegions);
+    if (prev < scope.scopeStart) {
+      // Reached scope start without any expression content: bare
+      return true;
+    }
+    const ch = source[prev];
+    if (ch === ',' || ch === '=') {
+      return true;
+    }
+    return false;
+  }
+
+  // Returns the offset of the next significant (non-whitespace, non-comment) character
+  // strictly after `start` and strictly before `end`. Returns `end` when only whitespace
+  // and comments remain in the slice. Returns -1 when `start >= end`.
+  private nextSignificantOffsetInScope(source: string, start: number, end: number, excludedRegions: ExcludedRegion[]): number {
+    if (start >= end) {
+      return -1;
+    }
+    let i = start;
+    while (i < end) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.end;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i++;
+        continue;
+      }
+      return i;
+    }
+    return end;
+  }
+
+  // Returns the offset of the previous significant character strictly before `position`
+  // and at or after `start`. Returns `start - 1` when only whitespace and comments precede.
+  private prevSignificantOffsetInScope(source: string, position: number, start: number, excludedRegions: ExcludedRegion[]): number {
+    let i = position - 1;
+    while (i >= start) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start - 1;
+        continue;
+      }
+      const ch = source[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        i--;
+        continue;
+      }
+      return i;
+    }
+    return start - 1;
+  }
+
+  // Finds the enclosing unclosed `{`/`[`/`<<` scope for `position` by backward scanning,
+  // then forward-scans for the matching close. Returns the source offsets of the opening
+  // and the matching closing bracket (exclusive end if no match found).
+  // Returns null when position is not inside any `{`/`[`/`<<` scope (e.g. inside (), or
+  // at the file top level).
+  private findEnclosingBracketScope(
+    source: string,
+    position: number,
+    excludedRegions: ExcludedRegion[]
+  ): { scopeStart: number; scopeEnd: number } | null {
+    // Backward scan: track depths of (), [], {}, <<>>. Stop at the first unmatched
+    // `{`/`[`/`<<` reached at depth 0. Early-terminate at depth-0 enclosing block opener
+    // or declaration-ending period so per-token cost stays linear in the local context size
+    // rather than scanning to source start.
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let listDepth = 0;
+    let binaryDepth = 0;
+    let scopeStart = -1;
+    let scopeType: '{' | '[' | '<<' | null = null;
+    for (let i = position - 1; i >= 0; i--) {
+      const region = this.findExcludedRegionAt(i, excludedRegions);
+      if (region) {
+        i = region.start;
+        continue;
+      }
+      const ch = source[i];
+      // `>>` (backward direction: increases binary depth)
+      if (ch === '>' && i > 0 && source[i - 1] === '>') {
+        binaryDepth++;
+        i--;
+        continue;
+      }
+      // `<<` (backward direction: decreases binary depth or marks unmatched)
+      if (ch === '<' && i > 0 && source[i - 1] === '<') {
+        if (binaryDepth > 0) {
+          binaryDepth--;
+        } else if (parenDepth === 0 && braceDepth === 0 && listDepth === 0) {
+          scopeStart = i - 1;
+          scopeType = '<<';
+          break;
+        }
+        i--;
+        continue;
+      }
+      if (ch === ')') {
+        parenDepth++;
+        continue;
+      }
+      if (ch === ']') {
+        listDepth++;
+        continue;
+      }
+      if (ch === '}') {
+        braceDepth++;
+        continue;
+      }
+      if (ch === '(') {
+        if (parenDepth > 0) {
+          parenDepth--;
+        }
+        continue;
+      }
+      if (ch === '[') {
+        if (listDepth > 0) {
+          listDepth--;
+        } else if (parenDepth === 0 && braceDepth === 0 && binaryDepth === 0) {
+          scopeStart = i;
+          scopeType = '[';
+          break;
+        }
+        continue;
+      }
+      if (ch === '{') {
+        if (braceDepth > 0) {
+          braceDepth--;
+        } else if (parenDepth === 0 && listDepth === 0 && binaryDepth === 0) {
+          scopeStart = i;
+          scopeType = '{';
+          break;
+        }
+        continue;
+      }
+      // Declaration-ending period at depth 0: not inside any bracket scope.
+      // Skip '..' range operator, decimal points, and record-field access dots (which
+      // are not real terminators).
+      if (ch === '.' && parenDepth === 0 && braceDepth === 0 && listDepth === 0 && binaryDepth === 0) {
+        const prev = i > 0 ? source[i - 1] : '';
+        const next = i + 1 < source.length ? source[i + 1] : '';
+        const isRecordFieldDot = /[a-zA-Z0-9_]/.test(prev) && /[a-zA-Z_]/.test(next);
+        if (prev !== '.' && next !== '.' && !(/[0-9]/.test(prev) && /[0-9]/.test(next)) && !isRecordFieldDot) {
+          return null;
+        }
+        continue;
+      }
+      // Walk back through identifier words at depth 0 in bulk so the per-token cost stays
+      // proportional to the local context rather than scanning to source start. Identifier
+      // characters by themselves never demarcate scope; jumping over the word saves the
+      // outer loop one iteration per character.
+      if (parenDepth === 0 && braceDepth === 0 && listDepth === 0 && binaryDepth === 0 && /[a-z]/i.test(ch)) {
+        let wordStart = i;
+        while (wordStart > 0 && /[a-zA-Z0-9_]/.test(source[wordStart - 1])) {
+          wordStart--;
+        }
+        i = wordStart;
+      }
+    }
+    if (scopeStart < 0 || scopeType === null) {
+      return null;
+    }
+    // Forward scan: find matching closing bracket from just after scopeStart
+    const innerStart = scopeType === '<<' ? scopeStart + 2 : scopeStart + 1;
+    const scopeEnd = this.findMatchingBracketClose(source, innerStart, scopeType, excludedRegions);
+    return { scopeStart: innerStart, scopeEnd };
+  }
+
+  // Forward-scans from `start` to find the offset of the matching closing bracket for
+  // the given open type. Tracks nested brackets of all four kinds. Returns source.length
+  // when no match is found (unterminated bracket).
+  private findMatchingBracketClose(source: string, start: number, openType: '{' | '[' | '<<', excludedRegions: ExcludedRegion[]): number {
+    let parenDepth = 0;
+    let braceDepth = 0;
+    let listDepth = 0;
+    let binaryDepth = 0;
+    for (let i = start; i < source.length; i++) {
+      if (this.isInExcludedRegion(i, excludedRegions)) {
+        continue;
+      }
+      const ch = source[i];
+      if (ch === '<' && i + 1 < source.length && source[i + 1] === '<') {
+        binaryDepth++;
+        i++;
+        continue;
+      }
+      if (ch === '>' && i + 1 < source.length && source[i + 1] === '>') {
+        if (openType === '<<' && binaryDepth === 0 && parenDepth === 0 && braceDepth === 0 && listDepth === 0) {
+          return i;
+        }
+        if (binaryDepth > 0) {
+          binaryDepth--;
+        }
+        i++;
+        continue;
+      }
+      if (ch === '(') {
+        parenDepth++;
+        continue;
+      }
+      if (ch === '[') {
+        listDepth++;
+        continue;
+      }
+      if (ch === '{') {
+        braceDepth++;
+        continue;
+      }
+      if (ch === ')') {
+        if (parenDepth > 0) {
+          parenDepth--;
+        }
+        continue;
+      }
+      if (ch === ']') {
+        if (openType === '[' && listDepth === 0 && parenDepth === 0 && braceDepth === 0 && binaryDepth === 0) {
+          return i;
+        }
+        if (listDepth > 0) {
+          listDepth--;
+        }
+        continue;
+      }
+      if (ch === '}') {
+        if (openType === '{' && braceDepth === 0 && parenDepth === 0 && listDepth === 0 && binaryDepth === 0) {
+          return i;
+        }
+        if (braceDepth > 0) {
+          braceDepth--;
+        }
+      }
+    }
+    return source.length;
   }
 
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
