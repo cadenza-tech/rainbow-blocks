@@ -5741,5 +5741,95 @@ endmodule`;
     });
   });
 
+  suite('Bug fix: instance-type-position suppression must not fire when trailing identifier is a reserved word', () => {
+    // `isInInstanceTypePosition` originally suppressed any close keyword
+    // followed by `<identifier> (`. The check did not verify that the trailing
+    // identifier was a user-defined name. When the trailing word was itself a
+    // reserved word with a following `(` (e.g., a control keyword like
+    // `for (i=0; i<10; i=i+1)` or a case keyword like `case (sel)`), the close
+    // keyword was incorrectly suppressed. This broke the BlockPair set: the
+    // suppressed `end` was lost and the surrounding `begin`/`end` failed to
+    // pair, leaving the outer `module` to absorb an unrelated `end`.
+    //
+    // The symmetric inverse check `isInInstanceNamePosition` (line 1480-1491)
+    // already excludes reserved words from the preceding-identifier slot. The
+    // type-position check must apply the same reserved-word exclusion to the
+    // following identifier slot.
+    test('should not suppress `end` followed by `for (` reserved-word control keyword', () => {
+      const source = `module top;
+  always @(*) begin
+    a = 1;
+  end
+  for (i=0; i<10; i=i+1) begin
+    b[i] = c;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      // Expected pairs:
+      //   - module ... endmodule
+      //   - always ... end (control + begin merge)
+      //   - begin ... end (always body)
+      //   - for ... end (control + begin merge)
+      //   - begin ... end (for body)
+      assertBlockCount(pairs, 5);
+      const modulePair = findBlock(pairs, 'module');
+      assert.strictEqual(modulePair.closeKeyword.value, 'endmodule');
+    });
+
+    test('should not suppress `end` followed by `case (` reserved-word case keyword', () => {
+      const source = `module top;
+  always @(*) begin
+    a = 1;
+  end
+  case (sel)
+    1'b0: b = 0;
+    1'b1: b = 1;
+  endcase
+endmodule`;
+      const pairs = parser.parse(source);
+      // Expected pairs:
+      //   - module ... endmodule
+      //   - always ... end (control + begin merge)
+      //   - begin ... end (always body)
+      //   - case ... endcase
+      assertBlockCount(pairs, 4);
+      const modulePair = findBlock(pairs, 'module');
+      assert.strictEqual(modulePair.closeKeyword.value, 'endmodule');
+    });
+
+    test('should not suppress `end` followed by `if (` reserved-word control keyword', () => {
+      const source = `module top;
+  always @(*) begin
+    a = 1;
+  end
+  if (cond) begin
+    b = 1;
+  end
+endmodule`;
+      const pairs = parser.parse(source);
+      // Expected pairs:
+      //   - module ... endmodule
+      //   - always ... end (control + begin merge)
+      //   - begin ... end (always body)
+      //   - if ... end (control + begin merge)
+      //   - begin ... end (if body)
+      assertBlockCount(pairs, 5);
+      const modulePair = findBlock(pairs, 'module');
+      assert.strictEqual(modulePair.closeKeyword.value, 'endmodule');
+    });
+
+    test('should still suppress `endmodule` followed by user-defined identifier and `(` (sanity)', () => {
+      // The original instance-type-position scenario must remain suppressed:
+      // when the trailing identifier is a plain user-defined name, the close
+      // keyword is being misused as a module type identifier.
+      const source = 'module top;\n  endmodule sub_inst();\nendmodule';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'module', 'endmodule');
+      const modPair = findBlock(pairs, 'module');
+      const trailingOffset = source.lastIndexOf('endmodule');
+      assert.strictEqual(modPair.closeKeyword?.startOffset, trailingOffset);
+    });
+  });
+
   generateCommonTests(config);
 });
