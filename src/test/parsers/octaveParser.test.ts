@@ -3419,5 +3419,19 @@ end`;
     });
   });
 
+  suite('Bug: arguments() with empty parens is a function call (not a block opener)', () => {
+    test('should treat arguments() inside function as a function call (matches MATLAB behaviour)', () => {
+      // `arguments()` with empty parens is the no-argument function-call form (reflection
+      // helper such as the test stub `arguments() % no-op`), not an arguments block.
+      // Treating it as a block opener pairs `arguments` with the function's `end`, leaving
+      // the real outer `end` orphan and destroying the function/end pair. MATLAB already
+      // rejects empty-parens `arguments()`, so Octave must match for parity.
+      const source = 'function f\n  arguments()\n  body\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'function', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
