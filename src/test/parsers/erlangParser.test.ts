@@ -3768,6 +3768,78 @@ foo() ->
     });
   });
 
+  suite('Regression: bare block_open/block_close inside tuple/list/binary brackets must not pair across boundary', () => {
+    // Bugs 1 & 2: A reserved word used as a bare token inside an unclosed `{`/`[`/`<<`
+    // scope (e.g. `{a, end}`, `{begin = 1}`, `<<begin>>`) was previously passed through
+    // the tokenize filter. The outer enclosing block would then either pair with the
+    // bare inner end (leaving the real outer end orphan) or with a later end (leaving
+    // the bare inner begin orphan). Per Rainbow Blocks' best-effort parsing principle,
+    // these bare reserved-word tokens must not generate block pairs across bracket
+    // boundaries. Real nested blocks balanced inside the same scope (e.g.
+    // `{tag, begin ok end}`) are preserved because their internal open/close balance.
+    test('should not pair outer begin with end used as bare token inside tuple', () => {
+      const source = 'begin\n  X = {a, end},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      // The pair must use the outer begin (offset 0) and the outer end (last 'end').
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair outer end with begin used as bare token inside tuple', () => {
+      const source = 'begin\n  X = {begin = 1}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair outer begin with end used as bare token inside list', () => {
+      const source = 'begin\n  X = [a, end],\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair outer begin with end used as bare token inside binary', () => {
+      const source = 'begin\n  X = <<a, end>>,\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should not pair outer end with begin used as bare token inside list', () => {
+      const source = 'begin\n  X = [begin = 1]\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'begin', 'end');
+      assert.strictEqual(pairs[0].openKeyword.startOffset, 0);
+      assert.strictEqual(pairs[0].closeKeyword.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should preserve real nested block inside bracket scope when balanced', () => {
+      // Real nested block: scope-internal begin/end balance, so it remains a real pair.
+      const source = 'begin\n  X = {tag, begin ok end},\n  ok\nend';
+      const pairs = parser.parse(source);
+      assertBlockCount(pairs, 2);
+      const innerBegin = findBlock(pairs, 'begin');
+      // The inner begin (offset of 'begin ok end') pairs with its matching end inside the
+      // brace scope; the outer begin pairs with the outer end.
+      const innerBeginOffset = source.indexOf('begin ok');
+      const outerBeginOffset = 0;
+      const beginOffsets = pairs.map((p) => p.openKeyword.startOffset).sort((a, b) => a - b);
+      assert.deepStrictEqual(beginOffsets, [outerBeginOffset, innerBeginOffset]);
+      assert.ok(innerBegin); // sanity
+    });
+
+    test('should not produce any pair from {begin, end} bare reserved words alone', () => {
+      const source = '{begin, end}';
+      const pairs = parser.parse(source);
+      assertNoBlocks(pairs);
+    });
+  });
+
   suite('Regression: isIntermediateInsideBrackets must skip record-field dot', () => {
     // Bug 3: The backward scan in isIntermediateInsideBrackets treats every top-level '.' as a
     // declaration terminator, returning false. A record-field access dot (e.g. `Rec#state.f`)
