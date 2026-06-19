@@ -1881,18 +1881,17 @@ export class VhdlBlockParser extends BaseBlockParser {
             }
             if (prevLine.length > 0) {
               if (/^(type|subtype|alias|attribute|file|group)\b/.test(prevLine)) {
-                // Check no semicolon between declaration and this 'is'
-                let hasSemicolon = false;
-                for (let si = prevLineStart; si < startOffset; si++) {
-                  if (this.isInExcludedRegion(si, excludedRegions)) continue;
-                  if (source[si] === ';') {
-                    hasSemicolon = true;
-                    break;
-                  }
-                }
-                if (!hasSemicolon) {
-                  skipThisIs = true;
-                }
+                // The upward scan found a declaration line above this `is`. Either:
+                //   (a) the declaration continues onto the current `is` line (no semicolon
+                //       between them, e.g. `subtype S\n  is integer;`), or
+                //   (b) the declaration has already completed with `;` and the intervening
+                //       content lines (orphan identifiers like `my_signal`) form an invalid
+                //       `<identifier> is ...` statement.
+                // Both forms are invalid as block intermediates: (a) is part of the
+                // declaration itself, (b) is an orphan statement. Leaving the `is` as an
+                // intermediate pollutes the enclosing block (e.g. architecture intermediates
+                // gain a stray `is`). Skip in both cases.
+                skipThisIs = true;
                 break;
               }
               // A block-opener header line that already carries its own `is` keyword
