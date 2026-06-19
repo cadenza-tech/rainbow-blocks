@@ -385,9 +385,13 @@ export class LuaBlockParser extends BaseBlockParser {
   protected tryMatchExcludedRegion(source: string, pos: number): ExcludedRegion | null {
     const char = source[pos];
 
-    // Shebang line (at file start or directly after a UTF-8/UTF-16 BOM, e.g.,
-    // `#!/usr/bin/env lua`). Lua 5.3+ accepts a leading BOM (U+FEFF) before the shebang.
-    if (char === '#' && pos + 1 < source.length && source[pos + 1] === '!') {
+    // First-line `#` comment. Per Lua 5.1/5.3/5.4 §7 "Lua Standalone", if the
+    // first line of the chunk starts with `#`, the standalone interpreter
+    // skips it. This is NOT limited to `#!` shebangs; any leading `#` causes
+    // the first line to be ignored (commonly used to make Lua scripts
+    // executable). Lua 5.3+ also accepts a leading BOM (U+FEFF) before the
+    // `#` character.
+    if (char === '#') {
       const isFileStart = pos === 0 || (pos === 1 && source[0] === '﻿');
       if (isFileStart) {
         let end = pos;
