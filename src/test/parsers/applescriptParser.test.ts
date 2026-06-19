@@ -4291,5 +4291,37 @@ end if`;
     });
   });
 
+  suite('Bug AS-LOW: long multi-line record literal must still suppress block_close', () => {
+    // The isAtRecordKeyPosition backward scan is bounded to 2048 characters as
+    // an O(1)-per-call safeguard against unclosed braces. With a generous
+    // record literal whose body alone exceeds that bound, the scan used to
+    // abort before reaching the enclosing `{`, mis-classifying a record key
+    // such as `end if:` as a real block_close and pairing it with the outer
+    // `if`/`end if`. The cap must accommodate realistic multi-line records so
+    // that legitimately enclosed colon-suffixed keywords stay treated as
+    // record keys.
+    test('should not treat end if: as block_close inside a large record literal', () => {
+      // Build a record literal with ~500 entries so the body spans well past
+      // the historical 2048-char cap. The inner `end if:` sits past the cap
+      // and must still be recognized as a record-key, not a real block_close.
+      const entries: string[] = [];
+      for (let i = 0; i < 500; i++) {
+        entries.push(`  k${i}: ${i}`);
+      }
+      const recordBody = entries.join(',\n');
+      const source = `if x then\n  set r to {\n${recordBody},\n  end if: 1\n  }\nend if`;
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'if', 'end if');
+      // Anchor the pair to the OUTER `if` (line 0) and the trailing `end if`
+      // (the very last line). If the inner `end if:` were tokenized as a
+      // block_close, the outer pair would either be missing or pin against
+      // a colon-suffixed close instead of the real one.
+      assert.strictEqual(pairs[0].openKeyword.line, 0);
+      // The trailing `end if` is on the line right after the closing brace.
+      const lines = source.split('\n');
+      assert.strictEqual(pairs[0].closeKeyword.line, lines.length - 1);
+    });
+  });
+
   generateCommonTests(config);
 });
