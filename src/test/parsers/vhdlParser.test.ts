@@ -5581,5 +5581,53 @@ end architecture;`;
     });
   });
 
+  suite('Regression 2026-06-20: control-flow keywords in entity designator position', () => {
+    // `entity <name> is ... end entity;`. The <name> slot is intended for a user-defined
+    // entity identifier; editor-in-progress code can place a reserved word there. The
+    // isPrecededByEntityKeyword guard already handles non-control-flow reserved words
+    // (RHS_INVALID_BLOCK_OPENERS); this regression pins that control-flow keywords
+    // (`if`/`case`/`while`/`for`) are likewise rejected so they do not absorb the
+    // surrounding entity's `is` intermediate.
+    test('should not treat case as block opener in entity designator position', () => {
+      const source = `entity case is
+end entity;`;
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      assert.strictEqual(entityBlock.closeKeyword?.value, 'end entity');
+      const intermediateValues = entityBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `entity intermediates should include is; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat if as block opener in entity designator position', () => {
+      const source = `entity if is
+end entity;`;
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      assert.strictEqual(entityBlock.closeKeyword?.value, 'end entity');
+      const intermediateValues = entityBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `entity intermediates should include is; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat while as block opener in entity designator position', () => {
+      const source = `entity while is
+end entity;`;
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      assert.strictEqual(entityBlock.closeKeyword?.value, 'end entity');
+      const intermediateValues = entityBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `entity intermediates should include is; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat for as block opener in entity designator position', () => {
+      const source = `entity for is
+end entity;`;
+      const pairs = parser.parse(source);
+      const entityBlock = findBlock(pairs, 'entity');
+      assert.strictEqual(entityBlock.closeKeyword?.value, 'end entity');
+      const intermediateValues = entityBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('is'), `entity intermediates should include is; got [${intermediateValues.join(', ')}]`);
+    });
+  });
+
   generateCommonTests(config);
 });
