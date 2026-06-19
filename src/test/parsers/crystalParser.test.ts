@@ -5501,5 +5501,27 @@ end`;
     });
   });
 
+  suite('Regression: end after colon (hash value / type annotation) should not be tokenized as block_close', () => {
+    test('should pair def/end only when end appears as a hash literal value (label: end)', () => {
+      // `{label: end, b: 1}` puts a bare `end` in the value slot of a hash literal.
+      // `end` is a reserved word and cannot be a value, so the inner `end` must not
+      // be tokenized as block_close. The trailing `end` keeps the outer `def`.
+      const source = 'def f\n  h = {label: end, b: 1}\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+
+    test('should pair def/end only when end appears after a type-annotation colon (x : end)', () => {
+      // `x : end` has `end` in the type-annotation slot. `end` is a reserved word
+      // and cannot be a type, so the inner `end` must not be tokenized as
+      // block_close. The trailing `end` keeps the outer `def`.
+      const source = 'def f\n  x : end\n  1\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'def', 'end');
+      assert.strictEqual(pairs[0].closeKeyword?.startOffset, source.lastIndexOf('end'));
+    });
+  });
+
   generateCommonTests(config);
 });
