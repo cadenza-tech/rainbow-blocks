@@ -3768,5 +3768,41 @@ foo() ->
     });
   });
 
+  suite('Regression: isIntermediateInsideBrackets must skip record-field dot', () => {
+    // Bug 3: The backward scan in isIntermediateInsideBrackets treats every top-level '.' as a
+    // declaration terminator, returning false. A record-field access dot (e.g. `Rec#state.f`)
+    // has identifier characters on both sides and is NOT a declaration-ending period. When the
+    // scan stops at such a dot it concludes the keyword is a top-level intermediate, so a bare
+    // reserved word inside an unclosed `{}` after a record-field access (e.g. `{Rec#state.f,
+    // after}`) is wrongly registered as a real after-clause intermediate of the enclosing
+    // receive block.
+    test('should not register after as intermediate when used as bare token after record-field dot', () => {
+      const source = 'receive\n  {Rec#state.f, after} -> ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'receive', 'end');
+      // The bare 'after' inside {Rec#state.f, after} is not a real after-clause; the receive
+      // block has no after-clause. Intermediates must be empty.
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not register else as intermediate when used as bare token after record-field dot', () => {
+      const source = 'maybe\n  {Rec#state.f, else} -> ok\nend';
+      const pairs = parser.parse(source);
+      assertSingleBlock(pairs, 'maybe', 'end');
+      assertIntermediates(pairs[0], []);
+    });
+
+    test('should not register of as intermediate when used as bare token after record-field dot', () => {
+      // Sanity: same defence covers 'of' bare-token usage after a record-field dot.
+      const source = 'case X of\n  Y when Y =:= a -> {Rec#state.f, of};\n  _ -> b\nend';
+      const pairs = parser.parse(source);
+      const caseBlock = findBlock(pairs, 'case');
+      // Only the real `of` (after `case X`) should be the intermediate, not the bare token
+      // inside the tuple.
+      assertIntermediates(caseBlock, ['of']);
+      assert.strictEqual(caseBlock.intermediates[0].startOffset, source.indexOf('of'));
+    });
+  });
+
   generateCommonTests(config);
 });
