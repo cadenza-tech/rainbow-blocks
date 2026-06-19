@@ -802,9 +802,21 @@ export class BashBlockParser extends BaseBlockParser {
 
       // Command grouping '{' must be followed by whitespace, newline, or '(' (subshell starter)
       // Bash accepts `{(echo);}` without whitespace because the lexer can disambiguate.
+      // A `\<newline>` line continuation after `{` (e.g. `{\<nl>echo;\n}`) is also accepted:
+      // bash collapses the backslash-newline during lexing, so the effective next character
+      // is whatever follows the continuation.
       if (char === '{') {
         const nextChar = source[i + 1];
-        if (nextChar !== undefined && nextChar !== ' ' && nextChar !== '\t' && nextChar !== '\n' && nextChar !== '\r' && nextChar !== '(') {
+        const followedByLineContinuation = nextChar === '\\' && i + 2 < source.length && (source[i + 2] === '\n' || source[i + 2] === '\r');
+        if (
+          nextChar !== undefined &&
+          nextChar !== ' ' &&
+          nextChar !== '\t' &&
+          nextChar !== '\n' &&
+          nextChar !== '\r' &&
+          nextChar !== '(' &&
+          !followedByLineContinuation
+        ) {
           continue;
         }
         // The command-group `{` is a reserved word only at the start of a command,
