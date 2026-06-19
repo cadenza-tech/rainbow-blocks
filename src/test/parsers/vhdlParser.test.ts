@@ -5629,5 +5629,63 @@ end entity;`;
     });
   });
 
+  suite('Regression 2026-06-20: reserved words in attribute_designator position', () => {
+    // attribute_specification (LRM 7.2): `attribute <designator> of <name> :
+    // <entity_class> is <expr>;`. The <designator> slot (immediately after the
+    // `attribute` keyword) is intended for a user-defined attribute identifier;
+    // editor-in-progress code can place a reserved word there. The existing
+    // isInAttributeSpecification guard only handles the entity_class slot (after `:`);
+    // this regression pins that reserved words in the designator slot (before `:`) are
+    // also rejected so they do not absorb the surrounding architecture's `begin`
+    // intermediate.
+    test('should not treat view as block opener in attribute designator position', () => {
+      const source = `architecture a of e is
+  attribute view of foo : signal is true;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat process as block opener in attribute designator position', () => {
+      const source = `architecture a of e is
+  attribute process of foo : signal is true;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat block as block opener in attribute designator position', () => {
+      const source = `architecture a of e is
+  attribute block of foo : signal is true;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+
+    test('should not treat if as block opener in attribute designator position', () => {
+      const source = `architecture a of e is
+  attribute if of foo : signal is true;
+begin
+end architecture;`;
+      const pairs = parser.parse(source);
+      const archBlock = findBlock(pairs, 'architecture');
+      assert.strictEqual(archBlock.closeKeyword?.value, 'end architecture');
+      const intermediateValues = archBlock.intermediates.map((t) => t.value.toLowerCase());
+      assert.ok(intermediateValues.includes('begin'), `architecture intermediates should include begin; got [${intermediateValues.join(', ')}]`);
+    });
+  });
+
   generateCommonTests(config);
 });
