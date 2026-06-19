@@ -908,9 +908,10 @@ export class RubyBlockParser extends BaseBlockParser {
         if (word) {
           // The word must be a standalone identifier (not part of a longer one that
           // happens to end here). The char before the word must not be an identifier
-          // continuation char.
+          // continuation char (Unicode-aware: Ruby permits non-ASCII identifier chars,
+          // so `αif` is one identifier, not the keyword `if` after `α`).
           const beforeWord = i - word.length;
-          const standalone = beforeWord < 0 || !/[a-zA-Z0-9_]/.test(source[beforeWord]);
+          const standalone = beforeWord < 0 || !endsWithIdentifierChar(source, beforeWord);
           if (standalone && (BLOCK_STRUCTURE_KEYWORDS.has(word) || RHS_EXPECTING_KEYWORD_OPERATORS.has(word))) {
             // Keyword: stop scanning and let the post-loop check decide.
             break;
@@ -921,8 +922,18 @@ export class RubyBlockParser extends BaseBlockParser {
             i = beforeWord;
             continue;
           }
-          // Not standalone (e.g. trailing chars of a longer identifier); fall through
-          // to break and let the post-loop logic look at the trailing char.
+          // Not standalone: the ASCII run we just consumed is the trailing tail of a
+          // longer non-ASCII identifier (e.g. `αif`). The whole identifier is a regular
+          // value, not a keyword. Scan back past the leading Unicode identifier chars so
+          // the next iteration sees what precedes the identifier and treat the line as
+          // having crossed a value.
+          let identStart = beforeWord;
+          while (identStart >= 0 && endsWithIdentifierChar(source, identStart)) {
+            identStart--;
+          }
+          crossedValueOnLine = true;
+          i = identStart;
+          continue;
         }
       }
       // Implicit line continuation: if we hit a newline and the previous physical line
@@ -1049,9 +1060,11 @@ export class RubyBlockParser extends BaseBlockParser {
     if (/[a-zA-Z?]/.test(ch)) {
       const word = this.readBackwardWord(source, i);
       if (word && RHS_EXPECTING_KEYWORD_OPERATORS.has(word)) {
-        // Must be a standalone keyword (not part of a longer identifier like `terminate`)
+        // Must be a standalone keyword (not part of a longer identifier like `terminate`).
+        // Use Unicode-aware identifier check so non-ASCII suffixes (`αreturn`) are not
+        // mistaken for the standalone RHS-expecting keyword (`return`).
         const beforeWord = i - word.length;
-        if (beforeWord < 0 || !/[a-zA-Z0-9_]/.test(source[beforeWord])) {
+        if (beforeWord < 0 || !endsWithIdentifierChar(source, beforeWord)) {
           return true;
         }
       }
